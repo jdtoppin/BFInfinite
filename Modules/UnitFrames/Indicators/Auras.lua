@@ -4,6 +4,7 @@ local UF = BFI.modules.UnitFrames
 local A = BFI.modules.Auras
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
+local UnitCanAttack = UnitCanAttack
 
 local Auras_UpdateSize
 
@@ -27,10 +28,12 @@ end
 
 local function Auras_Update(self)
     self:SetUnit(self.root.effectiveUnit)
+    self:RegisterUnitEvent("UNIT_FACTION", self.root.effectiveUnit)
 end
 
 local function Auras_Enable(self)
     self:SetUnit(self.root.effectiveUnit)
+    self:RegisterUnitEvent("UNIT_FACTION", self.root.effectiveUnit)
     self:Show()
 end
 
@@ -39,14 +42,15 @@ local function Auras_Disable(self)
     self:Hide()
 end
 
-local function Auras_OnAurasUpdated(self, count)
-    self.mainShown = count
-    self.subShown = 0
-    if self.subFrame then
-        for _, aura in ipairs(self.subFrame.slots) do
-            aura:ClearAura()
-        end
-    end
+local function Auras_OnBeforeAurasRefresh(self)
+    -- Retail 12.0.7 documents UnitCanAttack's result as an ordinary boolean.
+    -- Preserve the original behavior by partitioning only hostile targets.
+    self:SetPartitionEnabled(self.subFrameEnabled and UnitCanAttack("player", self.unit))
+end
+
+local function Auras_OnAurasUpdated(self, count, mainCount, subCount)
+    self.mainShown = mainCount or count
+    self.subShown = subCount or 0
     UpdateSize(self)
 end
 
@@ -212,7 +216,7 @@ local function Auras_SetNumSlots(self, numSlots)
     end
 end
 
-local function Auras_SetupAuras(self, config)
+local function Auras_SetupAuras(self, config, desaturated)
     for i = 1, self.numSlots do
         local aura = self.slots[i]
         aura.root = self.root
@@ -222,7 +226,7 @@ local function Auras_SetupAuras(self, config)
             and config.auraTypeColor
             and config.auraTypeColor.debuffType
         )
-        -- aura:SetDesaturated(config.desaturated)
+        aura:SetDesaturated(desaturated)
         aura:SetCooldownStyle(config.cooldownStyle)
         aura:SetupDurationText(config.durationText)
         aura:SetupStackText(config.stackText)
@@ -312,16 +316,38 @@ local function Auras_LoadConfig(self, config)
     Auras_SetSize(self, config.width, config.height)
     Auras_SetNumPerLine(self, config.numPerLine)
     Auras_SetOrientation(self, config.orientation)
-    Auras_SetupAuras(self, config)
+    Auras_SetupAuras(self, config, false)
     Auras_UpdateSize(self, 0)
 
     self:SetMatchFilters(A.GetSecretSafeMatchFilters(self.auraFilter, config.filters))
 
-    -- Arbitrary spell/source/priority classification remains unavailable for
-    -- restricted auras. The optional not-cast-by-me subframe therefore stays
-    -- disabled; supported categories use Blizzard's C-side filters above.
     self.subFrameEnabled = false
-    if self.subFrame then
+    if self.subFrame and config.subFrame then
+        self.subFrameEnabled = config.subFrame.enabled and config.subFrame.filter == "notCastByMe"
+
+        if self.subFrameEnabled then
+            self.subFrame:Show()
+            self.subFrame.anchor = config.position[1]
+            self.subFrame.spacingX = config.spacingX
+            self.subFrame.spacingY = config.spacingY
+
+            Auras_SetNumSlots(self.subFrame, config.numTotal)
+            Auras_SetSize(self.subFrame, config.subFrame.width, config.subFrame.height)
+            Auras_SetNumPerLine(self.subFrame, config.numPerLine)
+            Auras_SetOrientation(self.subFrame, config.orientation)
+            Auras_SetupAuras(self.subFrame, config, config.subFrame.desaturated)
+            Auras_UpdateSize(self.subFrame, 0)
+            Auras_UpdateSubFramePosition(self, config.orientation)
+
+            -- PLAYER is evaluated by C_UnitAuras. IDs filtered out by this
+            -- predicate are exactly the complementary not-cast-by-me list.
+            self:SetPartitionFilter(self.auraFilter .. "|PLAYER", self.subFrame)
+        else
+            self:SetPartitionFilter()
+            self.subFrame:Hide()
+        end
+    elseif self.subFrame then
+        self:SetPartitionFilter()
         self.subFrame:Hide()
     end
 end
@@ -396,6 +422,11 @@ local function Auras_DisableConfigMode(self)
         for i = 1, self.numSlots do
             self.slots[i]:EnableMouse(true)
         end
+        if self.subFrameEnabled then
+            for i = 1, self.numSlots do
+                self.subFrame.slots[i]:EnableMouse(true)
+            end
+        end
     end
 end
 
@@ -410,9 +441,9 @@ function UF.CreateAuras(parent, name, auraFilter, hasSubFrame)
 
     -- subFrame
     if hasSubFrame then
-        frame.subFrame = CreateFrame("Frame", nil, frame)
+        frame.subFrame = AF.CreateSecretAuraList(frame, nil, auraFilter)
         frame.subFrame.root = parent
-        frame.subFrame.slots = {}
+        frame.subFrame.auraFilter = auraFilter
     end
 
     frame.mainShown = 0
@@ -428,6 +459,7 @@ function UF.CreateAuras(parent, name, auraFilter, hasSubFrame)
     frame.EnableConfigMode = Auras_EnableConfigMode
     frame.DisableConfigMode = Auras_DisableConfigMode
     frame.LoadConfig = Auras_LoadConfig
+    frame.OnBeforeAurasRefresh = Auras_OnBeforeAurasRefresh
     frame.OnAurasUpdated = Auras_OnAurasUpdated
 
     -- pixel perfect
