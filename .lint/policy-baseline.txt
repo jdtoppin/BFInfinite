@@ -1,16 +1,1 @@
-./Modules/Chat/Chat.lua:        if not issecretvalue(text) then
-./Modules/Chat/Chat.lua:local issecretvalue = issecretvalue or AF.noop_false
-./Modules/Misc/PlayerData.lua:        if not issecretvalue(name) and name then
-./Modules/Misc/PlayerData.lua:        if not issecretvalue(shortName) and shortName then
-./Modules/Misc/PlayerData.lua:local issecretvalue = issecretvalue or AF.noop_false
-./Modules/Nameplates/Common.lua:    local success = pcall(LoadPosition, self, position, anchorTo)
-./Modules/UnitFrames/Common.lua:    local success, result = pcall(LoadPosition, self, position, anchorTo)
-./Modules/UnitFrames/Indicators/StatusTimer.lua:    if guid and not issecretvalue(guid) then
-./Modules/UnitFrames/Indicators/StatusTimer.lua:    if not guid or issecretvalue(guid) then return end
-./Modules/UnitFrames/Indicators/TargetCounter.lua:        if not issecretvalue(matched) and matched then
-./Modules/UnitFrames/Indicators/TargetCounter.lua:local issecretvalue = issecretvalue
-./Modules/UnitFrames/Indicators/TargetHighlight.lua:    if self.enabled and not issecretvalue(matched) and matched then
-./Modules/UnitFrames/UnitButton.lua:            if not issecretvalue(guid) and UnitIsPlayer(self.unit) and not self._skipDataCache then
-./Modules/UnitFrames/UnitButton.lua:    -- local success, result = pcall(UnitButton_UpdateAll, self, true)
-./Modules/UnitFrames/UnitButton.lua:local issecretvalue = issecretvalue
-./Utils.lua:    pcall(frame.Hide, frame)
+# No legacy first-party violations.

@@ -42,6 +42,7 @@ AF.RegisterAddon(BFI.name, "BFI")
 ---------------------------------------------------------------------
 BFI.vars = {} -- vars
 BFI.funcs = {} -- functions
+BFI.funcs.isValueNonSecret = AF.funcs.isValueNonSecret
 BFI.modules = {}
 BFI.libs = {}
 

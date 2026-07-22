@@ -7,8 +7,10 @@ not be edited merely to make it conform.
 
 - The combat-capable secret-safe path is the only implementation path. Do not
   divide behavior into secret and non-secret branches.
-- Never use `pcall` or `xpcall` in first-party code. An API failure is not a
-  secret-value test and must not be used as control flow.
+- Never use `pcall` or `xpcall` to probe secret values, bypass an API contract,
+  or create a separate combat path. They may remain for necessary non-secret
+  error isolation when removing them would change established behavior; new
+  uses require a documented reason and must not receive secret values.
 - Pass secret values only to Blizzard C-level APIs whose exact Retail contract
   explicitly accepts secret values. Never pass them to Lua operations or APIs
   without that contract.

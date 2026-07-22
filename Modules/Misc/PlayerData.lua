@@ -1,11 +1,11 @@
 ---@type BFI
 local BFI = select(2, ...)
+local F = BFI.funcs
 ---@class Misc
 local M = BFI.modules.Misc
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local issecretvalue = issecretvalue or AF.noop_false
 local UnitClassBase = AF.UnitClassBase
 local UnitLevel = UnitLevel
 local GetNumGuildMembers = GetNumGuildMembers
@@ -91,6 +91,7 @@ M:RegisterEvent("UNIT_PET", CachePet)
 -- all
 ---------------------------------------------------------------------
 local CacheAll, CacheGroup, CacheGuild, CacheFriends
+-- luacheck: ignore CacheGuild CacheFriends
 
 function CacheAll(_, event)
     M:UnregisterEvent("PLAYER_ENTERING_WORLD", CacheAll)
@@ -119,7 +120,7 @@ function CacheGroup(_, event)
 
     for unit in AF.IterateGroupPlayers() do
         local name = AF.UnitFullName(unit)
-        if not issecretvalue(name) and name then
+        if name and F.isValueNonSecret(name) then
             local class = UnitClassBase(unit)
             nameToClass[name] = class
 
@@ -131,7 +132,7 @@ function CacheGroup(_, event)
         end
 
         local shortName = UnitName(unit)
-        if not issecretvalue(shortName) and shortName then
+        if shortName and F.isValueNonSecret(shortName) then
             nameToClass[shortName] = UnitClassBase(unit)
         end
     end

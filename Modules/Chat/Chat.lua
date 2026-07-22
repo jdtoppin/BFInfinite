@@ -27,7 +27,6 @@ local ChatTypeInfo = _G.ChatTypeInfo
 local TAB_NORMAL_ALPHA = CHAT_FRAME_TAB_NORMAL_MOUSEOVER_ALPHA or 0.6
 local TAB_SELECTED_ALPHA = CHAT_FRAME_TAB_SELECTED_MOUSEOVER_ALPHA or 1.0
 
-local issecretvalue = issecretvalue or AF.noop_false
 local GetCVar = GetCVar
 local SetCVar = SetCVar
 
@@ -136,22 +135,22 @@ local function CreateChatCopyFrame()
     end)
 end
 
-local function ShowChatCopyFrame(b)
-    local frame = b:GetParent()
+local function ShowChatCopyFrame(button)
+    local frame = button:GetParent()
     chatCopyFrame:SetAllPoints(frame)
 
     wipe(lines)
     -- wipe(debug)
     for i = 1, frame:GetNumMessages() do
-        local text, r, g, b, chatTypeID, messageAccessID, lineID = frame:GetMessageInfo(i)
-        r, g, b = r or 1, g or 1, b or 1
+        local text, r, g, blue = frame:GetMessageInfo(i)
+        r, g, blue = r or 1, g or 1, blue or 1
 
-        if not issecretvalue(text) then
+        if F.isValueNonSecret(text) then
             text = FixBNWhisper(text)
             text = RemoveIcons(text)
             text = FixColorES(text)
 
-            tinsert(lines, AF.WrapTextInColorRGB(text, r, g, b))
+            tinsert(lines, AF.WrapTextInColorRGB(text, r, g, blue))
             -- tinsert(debug, text)
         end
     end
