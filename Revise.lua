@@ -6,6 +6,25 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
+local commonModuleClasses = {
+    "Enhancements",
+    "Colors",
+    "Auras",
+}
+
+local function HydrateCommonConfig(config)
+    for _, moduleClassName in next, commonModuleClasses do
+        local moduleKey = F.GetModuleKey(moduleClassName)
+        config[moduleKey] = F.MergeMissingDefaults(config[moduleKey], F.GetModuleDefaults(moduleClassName))
+    end
+end
+
+local function HydrateProfile(profile)
+    for _, moduleClassName in next, F.GetProfileModuleClassNames() do
+        F.FixModule(profile, F.GetModuleKey(moduleClassName))
+    end
+end
+
 ---------------------------------------------------------------------
 -- common revisions
 ---------------------------------------------------------------------
@@ -19,21 +38,23 @@ local commonRevisions = {
     {
         ver = 4,
         fn = function(config)
-            config.enhancements.mythicPlus = BFI.modules.Enhancements.GetDefaults().mythicPlus
+            config.enhancements = F.MergeMissingDefaults(config.enhancements, BFI.modules.Enhancements.GetDefaults())
         end,
     }
 }
 
 function F.ReviseCommon()
-    if BFIConfig.revision and BFIConfig.revision < BFI.versionNum then
+    local revision = tonumber(BFIConfig.revision) or 0
+
+    if revision < BFI.versionNum then
         for _, revise in ipairs(commonRevisions) do
-            if BFIConfig.revision < revise.ver then
+            if revision < revise.ver then
                 revise.fn(BFIConfig)
             end
         end
     end
 
-    if BFIConfig.revision and BFIConfig.revision ~= BFI.versionNum then
+    if revision > 0 and revision ~= BFI.versionNum then
         AF.ShowNotificationPopup(
             L["BFI has been updated to version %s\nClick here to view the changelog"]:format(AF.WrapTextInColor(BFI.version, "BFI")),
             27,
@@ -43,6 +64,7 @@ function F.ReviseCommon()
         )
     end
 
+    HydrateCommonConfig(BFIConfig)
     BFIConfig.revision = BFI.versionNum
 end
 
@@ -59,25 +81,28 @@ local profileRevisions = {
     {
         ver = 3,
         fn = function(profile)
-            profile.chat = BFI.modules.Chat.GetDefaults()
+            profile.chat = F.MergeMissingDefaults(profile.chat, BFI.modules.Chat.GetDefaults())
         end,
     },
     {
         ver = 4,
         fn = function(profile)
-            profile.maps.worldMap = BFI.modules.Maps.GetDefaults().worldMap
+            profile.maps = F.MergeMissingDefaults(profile.maps, BFI.modules.Maps.GetDefaults())
         end,
     }
 }
 
 function F.ReviseProfile(profile, force)
-    if (profile.revision and profile.revision < BFI.versionNum) or force then
+    local revision = tonumber(profile.revision) or 0
+
+    if revision < BFI.versionNum or force then
         for _, revise in ipairs(profileRevisions) do
-            if profile.revision < revise.ver then
+            if revision < revise.ver then
                 revise.fn(profile)
             end
         end
     end
 
+    HydrateProfile(profile)
     profile.revision = BFI.versionNum
 end
