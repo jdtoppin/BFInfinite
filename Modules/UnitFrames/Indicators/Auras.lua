@@ -290,13 +290,13 @@ local function Auras_UpdateSubFramePosition(self, orientation)
 end
 
 local function Auras_OnHide(self)
-    for i = 1, self.numSlots do
-        self.slots[i]:Hide()
+    for _, slot in ipairs(self.slots) do
+        slot:Hide()
     end
 
     if self.subFrameEnabled then
-        for i = 1, self.numSlots do
-            self.subFrame.slots[i]:Hide()
+        for _, slot in ipairs(self.subFrame.slots) do
+            slot:Hide()
         end
     end
 end
