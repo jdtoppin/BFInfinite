@@ -5,304 +5,23 @@ local A = BFI.modules.Auras
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local GetAuraDataBySlot = C_UnitAuras.GetAuraDataBySlot
-local GetAuraSlots = C_UnitAuras.GetAuraSlots
-local GetAuraDataByAuraInstanceID = C_UnitAuras.GetAuraDataByAuraInstanceID
-local UnitIsUnit = UnitIsUnit
-local UnitIsOwnerOrControllerOfUnit = UnitIsOwnerOrControllerOfUnit
-local UnitIsFriend = UnitIsFriend
-local UnitCanAttack = UnitCanAttack
-
 local Auras_UpdateSize, Auras_UpdateSiblings
-
----------------------------------------------------------------------
--- sort
----------------------------------------------------------------------
-local function SortAuras(a, b)
-    if a.priority ~= b.priority then
-        return a.priority < b.priority
-    end
-
-    if a.isBossAura ~= b.isBossAura then
-        return a.isBossAura
-    end
-
-    if a.noDuration ~= b.noDuration then
-        return b.noDuration
-    end
-
-    return a.auraInstanceID < b.auraInstanceID
-end
-
----------------------------------------------------------------------
--- UpdateExtraData
----------------------------------------------------------------------
-local function IsCastByMe(source)
-    return source and (UnitIsUnit("player", source) or UnitIsOwnerOrControllerOfUnit("player", source))
-end
-
-local function IsCastByUnit(source, unit)
-    return source and not UnitIsUnit(source, "player") and (UnitIsUnit(source, unit) or UnitIsOwnerOrControllerOfUnit(unit, source))
-end
-
--- I can dispel
-local function IsDispellable(self, auraData)
-    if auraData.isHelpful then
-        return auraData.isStealable
-    end
-
-    if auraData.isHarmful and UnitIsFriend("player", self.root.unit) and not UnitCanAttack("player", self.root.unit) then
-        return AF.CanDispel(auraData.debuffType)
-    end
-end
-
--- can be dispelled by me/others
-local function CanBeDispelled(self, auraData)
-    if auraData.isHelpful and UnitCanAttack("player", self.root.unit) then
-        return auraData.dispelName == "" or auraData.dispelName == "Magic"
-    end
-
-    if auraData.isHarmful and UnitIsFriend("player", self.root.unit) and not UnitCanAttack("player", self.root.unit) then
-        return auraData.debuffType ~= nil and auraData.debuffType ~= "None"
-    end
-end
-
-local function UpdateExtraData(self, auraData)
-    auraData.start = auraData.expirationTime - auraData.duration
-    auraData.debuffType = AF.GetDebuffType(auraData)
-    auraData.noDuration = auraData.duration == 0
-
-    auraData.castByMe = IsCastByMe(auraData.sourceUnit)
-    -- auraData.notCastByMe = not auraData.castByMe
-    auraData.castByOthers = auraData.isFromPlayerOrPlayerPet and not auraData.castByMe
-    auraData.castByUnit = IsCastByUnit(auraData.sourceUnit, self.root.unit)
-    auraData.castByNPC = not auraData.isFromPlayerOrPlayerPet
-
-    auraData.dispellable = IsDispellable(self, auraData)
-    auraData.canBeDispelled = CanBeDispelled(self, auraData)
-    auraData.crowdControlType = AF.GetCrowdControlType(auraData)
-
-    auraData.priority = A.GetAuraPriority(auraData.spellId)
-end
-
----------------------------------------------------------------------
--- filters
----------------------------------------------------------------------
-local function CheckAuraFilter(self, auraData)
-    if self.auraFilter == "HARMFUL" then
-        return auraData.isHarmful
-    elseif self.auraFilter == "HELPFUL" then
-        return auraData.isHelpful
-    end
-end
-
-local function CheckFilters(self, auraData)
-    if A.IsBlacklisted(auraData.spellId) then
-        return false
-    end
-
-    -- blacklist
-    if self.blacklist and self.blacklist[auraData.spellId] then
-        return false
-    end
-
-    -- blockers
-    if self.blockers then
-        for f in next, self.blockers do
-            if auraData[f] then
-                return false
-            end
-        end
-    end
-
-    -- filter
-    if self.filters then
-        for f in next, self.filters do
-            if auraData[f] then
-                return true
-            end
-        end
-    end
-
-    -- crowdControlTypes
-    if self.crowdControlTypes then
-        return self.crowdControlTypes[auraData.crowdControlType]
-    end
-end
-
----------------------------------------------------------------------
--- UpdateAuraType
----------------------------------------------------------------------
-local auraColorOrder = {"castByMe", "dispellable", "debuffType"}
-local function GetAuraType(self, auraData)
-    for _, type in next, self.colorTypes do
-        if auraData[type] then
-            if type == "debuffType" then
-                return auraData.debuffType
-            else
-                return type
-            end
-        end
-    end
-end
-
----------------------------------------------------------------------
--- ShowAura
----------------------------------------------------------------------
-local function ShowAura(self, auraData, index)
-    local aura = self.slots[index]
-    aura:SetCooldown(auraData.start, auraData.duration, auraData.applications, auraData.icon, GetAuraType(self, auraData),
-        nil, self.glowDispellableByMe and auraData.dispellable)
-end
-
----------------------------------------------------------------------
--- HandleUpdateInfo
----------------------------------------------------------------------
-local function HandleUpdateInfo(self, updateInfo)
-    local changed
-
-    if updateInfo.addedAuras then
-        for _, auraData in next, updateInfo.addedAuras do
-            if CheckAuraFilter(self, auraData) then
-                self.auras[auraData.auraInstanceID] = true
-                changed = true
-            end
-        end
-    end
-
-    if updateInfo.updatedAuraInstanceIDs then
-        for _, auraInstanceID in next, updateInfo.updatedAuraInstanceIDs do
-            if self.auras[auraInstanceID] then
-                changed = true
-                break
-            end
-        end
-    end
-
-    if updateInfo.removedAuraInstanceIDs then
-        for _, auraInstanceID in next, updateInfo.removedAuraInstanceIDs do
-            if self.auras[auraInstanceID] then
-                self.auras[auraInstanceID] = nil
-                changed = true
-            end
-        end
-    end
-
-    if changed then
-        -- reset
-        wipe(self.sortedAuras)
-
-        -- sort
-        for auraInstanceID in next, self.auras do
-            local auraData = GetAuraDataByAuraInstanceID(self.root.unit, auraInstanceID)
-            if auraData then
-                UpdateExtraData(self, auraData)
-                if CheckFilters(self, auraData) then
-                    tinsert(self.sortedAuras, auraData)
-                end
-            end
-        end
-        sort(self.sortedAuras, SortAuras)
-
-        -- show
-        self.numAuras = 0
-        for i, auraData in next, self.sortedAuras do
-            self.numAuras = self.numAuras + 1
-            ShowAura(self, auraData, i)
-            if self.numAuras == self.numSlots then break end
-        end
-
-        -- resize
-        Auras_UpdateSize(self, self.numAuras)
-    else
-        Auras_UpdateSiblings(self)
-    end
-end
-
----------------------------------------------------------------------
--- ForEachAura
----------------------------------------------------------------------
-local function ForEachAura(self, continuationToken, ...)
-    -- continuationToken is the first return value of GetAuraSlots()
-    local n = select("#", ...)
-    for i = 1, n do
-        local slot = select(i, ...)
-        local auraData = GetAuraDataBySlot(self.root.unit, slot)
-        if auraData then
-            UpdateExtraData(self, auraData)
-            if CheckFilters(self, auraData) then
-                self.auras[auraData.auraInstanceID] = true
-                tinsert(self.sortedAuras, auraData)
-            end
-        end
-    end
-end
-
-local function HandleAllAuras(self)
-    -- reset
-    wipe(self.auras)
-    wipe(self.sortedAuras)
-    self.numAuras = 0
-
-    -- iterate
-    ForEachAura(self, GetAuraSlots(self.root.unit, self.auraFilter))
-
-    -- sort
-    sort(self.sortedAuras, SortAuras)
-
-    -- show
-    for i, auraData in next, self.sortedAuras do
-        self.numAuras = self.numAuras + 1
-        ShowAura(self, auraData, i)
-        if self.numAuras == self.numSlots then break end
-    end
-
-    -- resize
-    Auras_UpdateSize(self, self.numAuras)
-end
-
----------------------------------------------------------------------
--- UNIT_AURA
----------------------------------------------------------------------
-local function UpdateAuras(self, event, unitId, updateInfo)
-    local unit = self.root.unit
-    if unitId and unitId ~= unit then return end
-
-    local isFullUpdate = not updateInfo or updateInfo.isFullUpdate
-
-    if isFullUpdate then
-        HandleAllAuras(self)
-    else
-        HandleUpdateInfo(self, updateInfo)
-    end
-end
-
----------------------------------------------------------------------
--- update
----------------------------------------------------------------------
 local function Auras_Update(self)
-    UpdateAuras(self)
+    self:SetUnit(self.root.unit)
 end
 
----------------------------------------------------------------------
--- enable
----------------------------------------------------------------------
 local function Auras_Enable(self)
-    self:RegisterUnitEvent("UNIT_AURA", self.root.unit, UpdateAuras)
-
+    self:SetUnit(self.root.unit)
     self:Show()
-    self:Update()
 end
 
----------------------------------------------------------------------
--- disable
----------------------------------------------------------------------
 local function Auras_Disable(self)
-    self:UnregisterAllEvents()
+    self:ClearUnit()
     self:Hide()
-    wipe(self.auras)
-    wipe(self.sortedAuras)
-    self.numAuras = 0
+end
+
+local function Auras_OnAurasUpdated(self, count)
+    Auras_UpdateSize(self, count)
     Auras_UpdateSiblings(self)
 end
 
@@ -489,6 +208,7 @@ end
 
 local function Auras_SetNumSlots(self, numSlots)
     self.numSlots = numSlots
+    self:SetMaxCount(numSlots)
 
     for i = 1, numSlots do
         if not self.slots[i] then
@@ -506,6 +226,11 @@ local function Auras_SetupAuras(self, config)
     for i = 1, self.numSlots do
         local aura = self.slots[i]
         aura.root = self.root
+        aura:EnableDispelColor(
+            self.auraFilter == "HARMFUL"
+            and config.auraTypeColor
+            and config.auraTypeColor.debuffType
+        )
         -- aura:SetDesaturated(config.desaturated)
         aura:SetCooldownStyle(config.cooldownStyle)
         aura:SetupDurationText(config.durationText)
@@ -527,8 +252,6 @@ local function Auras_LoadConfig(self, config)
     self.anchor = config.position[1]
     self.spacingX = config.spacingX
     self.spacingY = config.spacingY
-    self.glowDispellableByMe = config.glowDispellableByMe
-
     Auras_SetNumSlots(self, config.numTotal)
     Auras_SetSize(self, config.width, config.height)
     Auras_SetNumPerLine(self, config.numPerLine)
@@ -536,52 +259,14 @@ local function Auras_LoadConfig(self, config)
     Auras_SetupAuras(self, config)
     Auras_UpdateSize(self, 0)
 
-    -- blacklist
-    if config.blacklist then
-        self.blacklist = AF.TransposeSpellTable(config.blacklist)
+    if self.auraFilter == "HARMFUL|CROWD_CONTROL" then
+        self:SetMatchFilters(nil)
+    else
+        self:SetMatchFilters(A.GetSecretSafeMatchFilters(self.auraFilter, config.filters))
     end
 
-    -- blockers
-    if config.blockers then
-        self.blockers = wipe(self.blockers or {})
-        for f, v in next, config.blockers do
-            if v then
-                self.blockers[f] = true
-            end
-        end
-    end
-
-    -- filters
-    if config.filters then
-        self.filters = wipe(self.filters or {})
-        if self.overallFilter then
-            -- always add overall filter
-            self.filters[self.overallFilter] = true
-        end
-        for f, v in next, config.filters do
-            if v then
-                self.filters[f] = true
-            end
-        end
-    end
-
-    -- crowdControlTypes
-    if config.crowdControlTypes then
-        self.crowdControlTypes = wipe(self.crowdControlTypes or {})
-        for k, v in next, config.crowdControlTypes do
-            if v then
-                self.crowdControlTypes[k] = true
-            end
-        end
-    end
-
-    -- auraTypeColor
-    wipe(self.colorTypes)
-    for _, type in pairs(auraColorOrder) do
-        if config.auraTypeColor[type] then
-            tinsert(self.colorTypes, type)
-        end
-    end
+    -- Arbitrary spell blacklists and priorities remain unavailable for
+    -- restricted auras. Supported categories use Blizzard's C-side filters.
 end
 
 local function Auras_UpdatePixels(self)
@@ -596,24 +281,11 @@ end
 -- create
 ---------------------------------------------------------------------
 local function CreateAuras(parent, name, auraFilter)
-    local frame = CreateFrame("Frame", name, parent)
+    local frame = AF.CreateSecretAuraList(parent, name, auraFilter)
 
     frame.root = parent
     frame.auraFilter = auraFilter
-    -- frame.overallFilter = sourceFilter
     frame.canHaveSibling = true
-
-    -- events
-    AF.AddEventHandler(frame)
-
-    -- slots
-    frame.slots = {}
-
-    -- data
-    frame.auras = {}
-    frame.sortedAuras = {}
-    frame.numAuras = 0
-    frame.colorTypes = {}
 
     -- scripts
     frame:SetScript("OnHide", Auras_OnHide)
@@ -626,6 +298,7 @@ local function CreateAuras(parent, name, auraFilter)
     frame.AddSibling = Auras_AddSibling
     frame.RemoveSibling = Auras_RemoveSibling
     frame.UpdateSiblings = Auras_UpdateSiblings
+    frame.OnAurasUpdated = Auras_OnAurasUpdated
 
     -- pixel perfect
     AF.AddToPixelUpdater_Auto(frame, Auras_UpdatePixels)
@@ -642,5 +315,5 @@ function NP.CreateBuffs(parent, name)
 end
 
 function NP.CreateCrowdControls(parent, name)
-    return CreateAuras(parent, name, "HARMFUL")
+    return CreateAuras(parent, name, "HARMFUL|CROWD_CONTROL")
 end

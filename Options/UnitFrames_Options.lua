@@ -3125,12 +3125,23 @@ builder["auraBaseFilters"] = function(parent)
 
     function pane.Load(t)
         pane.t = t
+
+        if AF.isRetail then
+            tip:SetText(L["Retail uses Blizzard's C-side aura classifications"])
+            castByOthers:SetText(t.id == "buffs" and L["Defensive"] or L["Cast By Others"])
+            castByBoss:SetText(L["Raid In Combat"])
+        end
+
         castByMe:SetChecked(t.cfg.filters.castByMe)
         castByOthers:SetChecked(t.cfg.filters.castByOthers)
         castByUnit:SetChecked(t.cfg.filters.castByUnit)
         castByNPC:SetChecked(t.cfg.filters.castByNPC)
         castByBoss:SetChecked(t.cfg.filters.isBossAura)
         dispellable:SetChecked(t.cfg.filters.dispellable)
+
+        castByOthers:SetEnabled(not AF.isRetail or t.id == "buffs")
+        castByUnit:SetEnabled(not AF.isRetail)
+        castByNPC:SetEnabled(not AF.isRetail)
 
         if t.id == "buffs" and (t.owner == "player" or t.owner == "pet" or t.owner == "party" or t.owner == "raid") then
             dispellable:SetEnabled(false)
@@ -3262,7 +3273,14 @@ builder["auraBlackListWhitelist"] = function(parent)
 
     function pane.Load(t)
         pane.t = t
+        if AF.isRetail then
+            HideEditBox()
+            tip:SetText(L["Spell-ID aura lists are unavailable for restricted Retail auras"])
+        end
+
         mode:SetSelectedValue(t.cfg.mode)
+        mode:SetEnabled(not AF.isRetail)
+        addButton:SetEnabled(not AF.isRetail)
 
         pane.list = t.cfg.mode == "blacklist" and t.cfg.blacklist or t.cfg.whitelist
 
@@ -3287,6 +3305,7 @@ builder["auraBlackListWhitelist"] = function(parent)
             end
 
             buttons[i] = b
+            b:SetEnabled(not AF.isRetail)
             b:Show()
 
             if i == 1 then
@@ -3345,14 +3364,20 @@ builder["auraTypeColor"] = function(parent)
 
     function pane.Load(t)
         pane.t = t
+        if AF.isRetail then
+            tip:SetText(AF.GetGradientText(L["Border Color"], "BFI", "white") .. "\n" .. L["Retail supports debuff type coloring"])
+        end
+
         castByMe:SetChecked(t.cfg.auraTypeColor.castByMe)
         dispellable:SetChecked(t.cfg.auraTypeColor.dispellable)
         debuffType:SetChecked(t.cfg.auraTypeColor.debuffType)
 
+        castByMe:SetEnabled(not AF.isRetail)
+
         if t.id == "buffs" and (t.owner == "player" or t.owner == "pet" or t.owner == "party" or t.owner == "raid") then
             dispellable:SetEnabled(false)
         else
-            dispellable:SetEnabled(true)
+            dispellable:SetEnabled(not AF.isRetail)
         end
 
         debuffType:SetEnabled(t.id == "debuffs")
