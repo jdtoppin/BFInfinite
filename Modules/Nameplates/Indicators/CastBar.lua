@@ -2,482 +2,120 @@
 local BFI = select(2, ...)
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
+---@class Nameplates
 local NP = BFI.modules.Nameplates
-local M = BFI.modules.Misc
 
-local strfind = string.find
-local UnitCastingInfo = UnitCastingInfo
-local UnitChannelInfo = UnitChannelInfo
-local GetUnitEmpowerHoldAtMaxTime = GetUnitEmpowerHoldAtMaxTime
-local GetUnitEmpowerStageDuration = GetUnitEmpowerStageDuration
-local UnitCanAttack = UnitCanAttack
-
----------------------------------------------------------------------
--- reset
----------------------------------------------------------------------
-local function Reset(self)
-    self.castType = nil
-    self.castGUID = nil
-    self.castSpellID = nil
-    self.notInterruptible = nil
-    self.resetDelay = nil
-    self.numStages = nil
-    self.curStage = nil
-    wipe(self.stageBounds)
+local function SetBorderColor(self, r, g, b, a)
+    self:SetBackdropBorderColor(r, g, b, a)
+    self.iconBG:SetVertexColor(r, g, b, a)
 end
 
----------------------------------------------------------------------
--- empower pips
----------------------------------------------------------------------
-local PIP_START_ALPHA = 0.3
-local PIP_HIT_ALPHA = 1
-local PIP_FADED_ALPHA = 0.7
-local PIP_FADE_TIME = 0.4
-
-local map = {
-    "empowerstage1",
-    "empowerstage2",
-    "empowerstage3",
-    "empowerstage4",
-}
-
-local function FlashPip(self, stage)
-    -- print("flash", stage)
-    -- print(stage, self.pips[stage]:GetAlpha())
-    self.pips[stage].texture:SetAlpha(PIP_HIT_ALPHA)
-    AF.FrameFadeOut(self.pips[stage].texture, PIP_FADE_TIME, PIP_HIT_ALPHA, PIP_FADED_ALPHA)
+local function SetNormalStyle(self)
+    self.bar:SetStatusBarColor(AF.GetColorRGB("cast_normal"))
+    self.uninterruptible:Hide()
+    SetBorderColor(self, AF.UnpackColor(self.borderColor))
 end
 
-local function CreatePip(self, stage)
-    local pip = CreateFrame("Frame", nil, self.bar)
-    AF.SetFrameLevel(pip, 0, self.bar)
+local function SetInterruptibleStyle(self)
+    local r, g, b, a = AF.GetColorRGB("cast_interruptible")
+    self.bar:SetStatusBarColor(r, g, b, a)
+    self.uninterruptible:Hide()
 
-    pip.texture = pip:CreateTexture(nil, "ARTWORK", nil, -2)
-    pip.texture:SetAllPoints()
-    pip.texture:SetTexture(self.texture)
-    pip.texture:SetVertexColor(AF.GetColorRGB(map[stage], PIP_START_ALPHA))
-
-    pip.bound = pip:CreateTexture(nil, "ARTWORK", nil, 1)
-    pip.bound:SetColorTexture(AF.UnpackColor(self.borderColor))
-    pip.bound:SetPoint("LEFT", pip)
-    pip.bound:SetPoint("TOP", pip)
-    pip.bound:SetPoint("BOTTOM", pip)
-    AF.SetWidth(pip.bound, 1)
-
-    self.pips[stage] = pip
-
-    return pip
-end
-
-local function ResetPips(self)
-    for _, pip in next, self.pips do
-        --! NOTE: IMPORTANT, or alpha can be weird!
-        pip.texture:SetAlpha(PIP_START_ALPHA)
-        pip:Hide()
+    if self.interruptibleColorBorder then
+        SetBorderColor(self, r, g, b, a)
+    else
+        SetBorderColor(self, AF.UnpackColor(self.borderColor))
     end
 end
 
-local function UpdateEmpowerPips(self, numStages)
-    if not numStages then return end
+local function SetUninterruptibleStyle(self)
+    local r, g, b, a = AF.GetColorRGB("cast_uninterruptible")
+    self.bar:SetStatusBarColor(r, g, b, a)
 
-    local width = self.bar:GetWidth()
-    local totalDuration = 0
-    self.numStages = numStages
-    self.curStage = 0
-
-    for stage = 1, numStages do
-        local duration = GetUnitEmpowerStageDuration(self.root.unit, stage - 1)
-        totalDuration = totalDuration + duration
-        self.stageBounds[stage] = totalDuration
-
-        local pip = self.pips[stage] or CreatePip(self, stage)
-        pip:ClearAllPoints()
-        pip:SetPoint("BOTTOM")
-        pip:SetPoint("TOP")
-
-        local offset = totalDuration / self.duration * width
-        pip:SetPoint("LEFT", offset, 0)
-
-        if stage == numStages then
-            pip:SetPoint("RIGHT")
-        else
-            local nextDuration = GetUnitEmpowerStageDuration(self.root.unit, stage)
-            pip:SetWidth(nextDuration / self.duration * width)
-        end
-
-        pip:Show()
-    end
-
-    for i = numStages + 1, #self.pips do
-        self.pips[i]:Hide()
-    end
-end
-
----------------------------------------------------------------------
--- interrupt source
----------------------------------------------------------------------
-local exclamation = AF.GetIconString("Exclamation_Rhombic")
-
-local function UpdateInterrupt(self, _, subEvent, ...)
-    local _, sourceGUID, sourceName, _, _, destGUID = ...
-
-    if destGUID == self.root.guid then
-        sourceName = M.GetPetOwner(sourceGUID) or sourceName
-
-        local class = M.GetPlayerClass(sourceName)
-        self.nameText:SetTextColor(AF.GetColorRGB(class))
-
-        local shortName = AF.ToShortName(sourceName)
-        AF.SetText(self.nameText, shortName, self.nameTextLength, exclamation)
-    end
-end
-
----------------------------------------------------------------------
--- interruptible
----------------------------------------------------------------------
-local function CastInterruptible(self, event, unit)
-    if unit and unit ~= self.root.unit then return end
-
-    if event then
-        self.notInterruptible = event == "UNIT_SPELLCAST_NOT_INTERRUPTIBLE"
-    end
-
-    local borderR, borderG, borderB, borderA = AF.UnpackColor(self.borderColor)
-
-    if self.notInterruptible then
-        self.bar:SetColor(AF.GetColorRGB("cast_uninterruptible"))
-        if self.showUninterruptibleTexture then
-            self.uninterruptible:Show()
-            if self.interruptibleColorBorder then
-                borderR, borderG, borderB, borderA = AF.GetColorRGB("cast_uninterruptible_texture", 1)
-            end
-        else
-            self.uninterruptible:Hide()
-            if self.interruptibleColorBorder then
-                borderR, borderG, borderB, borderA = AF.GetColorRGB("cast_uninterruptible", 1)
-            end
-        end
-    elseif self.doInterruptibleCheck and (not self.requireInterruptUsable or AF.InterruptUsable()) then -- interruptible
-        self.bar:SetColor(AF.GetColorRGB("cast_interruptible"))
-        self.uninterruptible:Hide()
+    if self.showUninterruptibleTexture then
+        self.uninterruptible:Show()
         if self.interruptibleColorBorder then
-            borderR, borderG, borderB, borderA = AF.GetColorRGB("cast_interruptible", 1)
+            r, g, b, a = AF.GetColorRGB("cast_uninterruptible_texture", 1)
         end
-    else -- interrupt cd
-        self.bar:SetColor(AF.GetColorRGB("cast_normal"))
+    else
         self.uninterruptible:Hide()
     end
 
-    self:SetBackdropBorderColor(borderR, borderG, borderB, borderA)
-    self.iconBG:SetVertexColor(borderR, borderG, borderB, borderA)
-end
-
----------------------------------------------------------------------
--- stop & fail
----------------------------------------------------------------------
-local function ShowOverlay(self, failed)
-    if failed then
-        self.status:SetVertexColor(AF.GetColorRGB("cast_failed"))
+    if self.interruptibleColorBorder then
+        SetBorderColor(self, r, g, b, a)
     else
-        self.status:SetVertexColor(AF.GetColorRGB("cast_succeeded"))
-    end
-    self.bar:Hide()
-    self.status:Show()
-end
-
-local function CastFail(self, event, unit, castGUID, castSpellID)
-    if unit and unit ~= self.root.unit then return end
-
-    if self.castGUID ~= castGUID or self.castSpellID ~= castSpellID then return end
-
-    Reset(self)
-    ShowOverlay(self, true)
-    self.durationText:Hide()
-    self:FadeOut()
-end
-
-local function CastStop(self, event, unit, castGUID, castSpellID, empowerComplete)
-    if unit and unit ~= self.root.unit then return end
-
-    if event then
-        if event == "UNIT_SPELLCAST_CHANNEL_STOP" then
-            if self.castSpellID ~= castSpellID then return end
-            Reset(self)
-            self.bar:Hide()
-        elseif event == "UNIT_SPELLCAST_EMPOWER_STOP" then
-            if self.castSpellID ~= castSpellID then return end
-            Reset(self)
-            ResetPips(self)
-            ShowOverlay(self, not empowerComplete)
-        else
-            if self.castGUID ~= castGUID or self.castSpellID ~= castSpellID then return end
-            -- NOTE:
-            -- normally, CAST_INTERRUPTED fires before CAST_STOP
-            -- but if ESC a spell, CAST_INTERRUPTED fires AFTER CAST_STOP
-            self.resetDelay = 0.3
-            ShowOverlay(self)
-        end
-
-    else
-        if self.castType == "channel" then
-            self.bar:Hide()
-        else
-            ShowOverlay(self)
-        end
-        Reset(self)
-    end
-
-    self.durationText:Hide()
-    self:FadeOut()
-end
-
----------------------------------------------------------------------
--- update
----------------------------------------------------------------------
-local function CastUpdate(self, event, unitId, castGUID, castSpellID)
-    local unit = self.root.unit
-    if unitId and unit ~= unitId then return end
-
-    local name, startTime, endTime, _
-    if event == "UNIT_SPELLCAST_DELAYED" then
-        name, _, _, startTime, endTime = UnitCastingInfo(unit)
-    else
-        name, _, _, startTime, endTime = UnitChannelInfo(unit)
-    end
-
-    if not name then return end
-
-    if self.castType == "empower" then
-        endTime = endTime + GetUnitEmpowerHoldAtMaxTime(unit)
-    end
-
-    self.startTime = startTime / 1000
-    self.endTime = endTime / 1000
-    self.duration = self.endTime - self.startTime
-
-    if self.castType == "channel" then
-        self.current = self.endTime - GetTime()
-    else
-        self.current = GetTime() - self.startTime
-    end
-
-    self.bar:SetBarMinMaxValues(0, self.duration)
-    self.bar:SetBarValue(self.current)
-end
-
----------------------------------------------------------------------
--- start / onupdate
----------------------------------------------------------------------
-local function OnUpdate(self, elapsed)
-    if self.castType then
-        if self.resetDelay then
-            self.resetDelay = self.resetDelay - elapsed
-            if self.resetDelay <= 0 then
-                Reset(self)
-                return
-            end
-        end
-
-        local isCasting = self.castType == "cast" or self.castType == "empower"
-        if isCasting then
-            self.current = self.current + elapsed
-            if self.current >= self.duration then
-                CastStop(self)
-                return
-            end
-            self.durationText:SetFormattedText(self.durationFormat, self.duration - self.current)
-        else
-            self.current = self.current - elapsed
-            if self.current <= 0 then
-                CastStop(self)
-                return
-            end
-            self.durationText:SetFormattedText(self.durationFormat, self.current)
-        end
-
-        self.bar:SetBarValue(self.current)
-
-        if self.castType == "empower" then
-            for i = self.curStage + 1, self.numStages do
-                if self.stageBounds[i] then
-                    if self.current > self.stageBounds[i] then
-                        self.curStage = i
-                        FlashPip(self, self.curStage)
-                    else
-                        break
-                    end
-                end
-            end
-        end
-
-        if self.interruptibleCheckEnabled and self.doInterruptibleCheck and self.requireInterruptUsable and not self.notInterruptible then
-            self.elapsed = (self.elapsed or 0) + elapsed
-            if self.elapsed >= 0.25 then
-                CastInterruptible(self)
-            end
-        end
+        SetBorderColor(self, AF.UnpackColor(self.borderColor))
     end
 end
 
-local function CastStart(self, event, unitId, castGUID, castSpellID)
-    local unit = self.root.unit
-    if unitId and unit ~= unitId then return end
-
-    local name, text, texture, startTime, endTime, isTradeSkill, castID, notInterruptible, spellID, isEmpowered, numEmpowerStages = UnitCastingInfo(unit)
-    self.castType = "cast"
-
-    if not name then
-        name, text, texture, startTime, endTime, isTradeskill, notInterruptible, spellID, isEmpowered, numEmpowerStages = UnitChannelInfo(unit)
-        if numEmpowerStages and numEmpowerStages > 0 then
-            self.castType = "empower"
-            endTime = endTime + GetUnitEmpowerHoldAtMaxTime(unit)
-        else
-            self.castType = "channel"
-        end
-    end
-
-    if not name then
-        Reset(self)
-        self:HideNow()
-        return
-    end
-
-    self.resetDelay = nil
-    self.castGUID = castGUID or castID
-    self.castSpellID = castSpellID or spellID
-    self.startTime = startTime / 1000
-    self.endTime = endTime / 1000
-
-    -- curent progress
-    if self.castType == "channel" then
-        self.current = self.endTime - GetTime()
+local function UpdateInterruptibilityStyle(self)
+    if not self.interruptibleCheckEnabled or self.interruptible == nil then
+        SetNormalStyle(self)
+    elseif self.interruptible then
+        SetInterruptibleStyle(self)
     else
-        self.current = GetTime() - self.startTime
+        SetUninterruptibleStyle(self)
     end
-    self.duration = self.endTime - self.startTime
+end
 
-    -- interruptible
-    if self.interruptibleCheckEnabled and not isTradeSkill then
-        if UnitCanAttack("player", unit) then
-            self.doInterruptibleCheck = true
-        else
-            self.doInterruptibleCheck = nil
-        end
-        self.notInterruptible = notInterruptible
-        CastInterruptible(self)
-    else
-        self.doInterruptibleCheck = nil
-        self.notInterruptible = nil
-        -- restore to normal
-        self.bar:SetColor(AF.GetColorRGB("cast_normal"))
-        self.uninterruptible:Hide()
-        self:SetBackdropBorderColor(AF.UnpackColor(self.borderColor))
-        self.gap:SetColorTexture(AF.UnpackColor(self.borderColor))
-    end
-
-    -- empower
-    UpdateEmpowerPips(self, numEmpowerStages)
-
-    if self.showDuration then
-        self.durationText:Show()
-    end
-    if self.showName then
-        self.nameText:SetTextColor(AF.UnpackColor(self.nameTextColor))
-        AF.SetText(self.nameText, name, self.nameTextLength)
+local function CastBar_OnCastStart(self, _, _, isNewCast)
+    if isNewCast then
+        self.interruptible = nil
     end
     self.status:Hide()
-    self.icon:SetTexture(texture or 134400)
-    self.bar:SetBarMinMaxValues(0, self.duration)
-    self.bar:SetBarValue(self.current)
     self.bar:Show()
-    self:ShowNow()
+    UpdateInterruptibilityStyle(self)
 end
 
----------------------------------------------------------------------
--- update
----------------------------------------------------------------------
+local function CastBar_OnCastStop(self)
+    self.interruptible = nil
+    self.bar:Hide()
+    self.status:Hide()
+end
+
+local function CastBar_OnInterruptibilityChanged(self, interruptible)
+    -- The shared widget derives this from the two non-secret-conditional
+    -- interruptibility event names, never from restricted cast return values.
+    self.interruptible = interruptible
+    UpdateInterruptibilityStyle(self)
+end
+
 local function CastBar_Update(self)
-    CastStart(self)
+    self:UpdateCurrentCast()
 end
 
----------------------------------------------------------------------
--- enable
----------------------------------------------------------------------
 local function CastBar_Enable(self)
-    -- start
-    self:RegisterUnitEvent("UNIT_SPELLCAST_START", self.root.unit, CastStart)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", self.root.unit, CastStart)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_START", self.root.unit, CastStart)
-
-    -- update
-    self:RegisterUnitEvent("UNIT_SPELLCAST_DELAYED", self.root.unit, CastUpdate)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_UPDATE", self.root.unit, CastUpdate)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_UPDATE", self.root.unit, CastUpdate)
-
-    -- stop (succeeded)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_STOP", self.root.unit, CastStop)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", self.root.unit, CastStop)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_STOP", self.root.unit, CastStop)
-
-    -- interrupted
-    self:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", self.root.unit, CastFail)
-
-    -- interruptible
-    if self.interruptibleCheckEnabled then
-        self:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTIBLE", self.root.unit, CastInterruptible)
-        self:RegisterUnitEvent("UNIT_SPELLCAST_NOT_INTERRUPTIBLE", self.root.unit, CastInterruptible)
-        self:RegisterUnitEvent("UNIT_FACTION", self.root.unit, CastInterruptible)
-    end
-
-    -- interrupt source
-    if self.showName and self.showInterruptSource then
-        self:RegisterCLEU("SPELL_INTERRUPT", UpdateInterrupt)
-    else
-        self:UnregisterCLEU("SPELL_INTERRUPT")
-    end
-
-    self:Update()
+    self:SetUnit(self.root.unit)
 end
 
----------------------------------------------------------------------
--- disable
----------------------------------------------------------------------
 local function CastBar_Disable(self)
-    Reset(self)
-    self:UnregisterAllEvents()
-    self:UnregisterCLEU("SPELL_INTERRUPT")
-    self:Hide()
+    self:ClearUnit()
 end
 
----------------------------------------------------------------------
--- base
----------------------------------------------------------------------
 local function CastBar_SetTexture(self, texture)
     texture = AF.LSM_GetBarTexture(texture)
     self.texture = texture
-    self.bar.fill:SetTexture(texture)
+    self.bar:SetStatusBarTexture(texture)
     self.status:SetTexture(texture)
-    for _, pip in pairs(self.pips) do
-        pip.texture:SetTexture(texture)
-    end
 end
 
 local function CastBar_SetupNameText(self, config)
     self.nameText:SetShown(config.enabled)
     AF.SetFont(self.nameText, config.font)
     AF.LoadTextPosition(self.nameText, config.position)
-    self.nameText:SetTextColor(unpack(config.color))
-    self.nameTextLength = config.length
+    self.nameText:SetTextColor(AF.UnpackColor(config.color))
+
+    -- Secret cast names are forwarded directly to FontString:SetText by the
+    -- shared widget. Lua truncation and interrupt-source replacement are not
+    -- performed.
     self.showName = config.enabled
-    self.showInterruptSource = config.showInterruptSource
 end
 
 local function CastBar_SetupDurationText(self, config)
     self.durationText:SetShown(config.enabled)
     AF.SetFont(self.durationText, config.font)
     AF.LoadTextPosition(self.durationText, config.position)
-    self.durationText:SetTextColor(unpack(config.color))
-    self.durationFormat = config.format
+    self.durationText:SetTextColor(AF.UnpackColor(config.color))
     self.showDuration = config.enabled
 end
 
@@ -499,24 +137,21 @@ local function CastBar_SetupIcon(self, config)
 end
 
 local function CastBar_SetupSpark(self, config)
-    if not config.enabled then
-        self.spark:Hide()
-        return
-    end
-
-    self.spark:Show()
+    self.spark:SetShown(config.enabled)
+    if not config.enabled then return end
 
     self.spark:ClearAllPoints()
+    local fill = self.bar:GetStatusBarTexture()
     if config.height == 0 then
         if config.width == 1 then
-            self.spark:SetPoint("TOPRIGHT", self.bar.fill.mask)
-            self.spark:SetPoint("BOTTOMRIGHT", self.bar.fill.mask)
+            self.spark:SetPoint("TOPRIGHT", fill)
+            self.spark:SetPoint("BOTTOMRIGHT", fill)
         else
-            self.spark:SetPoint("TOP", self.bar.fill.mask, "TOPRIGHT")
-            self.spark:SetPoint("BOTTOM", self.bar.fill.mask, "BOTTOMRIGHT")
+            self.spark:SetPoint("TOP", fill, "TOPRIGHT")
+            self.spark:SetPoint("BOTTOM", fill, "BOTTOMRIGHT")
         end
     else
-        self.spark:SetPoint("CENTER", self.bar.fill.mask, "RIGHT")
+        self.spark:SetPoint("CENTER", fill, "RIGHT")
         AF.SetHeight(self.spark, config.height)
     end
 
@@ -524,7 +159,7 @@ local function CastBar_SetupSpark(self, config)
     if config.texture == "plain" then
         self.spark:SetTexture(AF.GetPlainTexture())
     else
-        -- TODO:
+        self.spark:SetTexture(AF.LSM_GetBarTexture(config.texture))
     end
     self.spark:SetVertexColor(AF.GetColorRGB("cast_spark"))
 end
@@ -532,7 +167,7 @@ end
 local function CastBar_UpdatePixels(self)
     AF.DefaultUpdatePixels(self)
     AF.ReSize(self.spark)
-    self.bar:DefaultUpdatePixels()
+    AF.RePoint(self.bar)
     AF.RePoint(self.status)
     AF.RePoint(self.icon)
     AF.RePoint(self.iconBG)
@@ -540,14 +175,9 @@ local function CastBar_UpdatePixels(self)
     AF.RePoint(self.durationText)
 end
 
----------------------------------------------------------------------
--- load
----------------------------------------------------------------------
 local function CastBar_LoadConfig(self, config)
     self.borderColor = config.borderColor
-    self.nameTextColor = config.nameText.color
     self.interruptibleCheckEnabled = config.interruptibleCheck.enabled
-    self.requireInterruptUsable = config.interruptibleCheck.requireUsable
     self.showUninterruptibleTexture = config.interruptibleCheck.showTexture
     self.interruptibleColorBorder = config.interruptibleCheck.colorBorder
 
@@ -559,123 +189,58 @@ local function CastBar_LoadConfig(self, config)
 
     self:SetBackdropColor(AF.UnpackColor(config.bgColor))
     self:SetBackdropBorderColor(AF.UnpackColor(config.borderColor))
-
-    self.bar:SetColor(AF.GetColorRGB("cast_normal"))
     self.uninterruptible:SetVertexColor(AF.GetColorRGB("cast_uninterruptible_texture"))
-
-    AF.SetFadeInOutAnimationDuration(self, config.fadeDuration)
 
     CastBar_SetupNameText(self, config.nameText)
     CastBar_SetupDurationText(self, config.durationText)
     CastBar_SetupIcon(self, config.icon)
     CastBar_SetupSpark(self, config.spark)
+
+    UpdateInterruptibilityStyle(self)
 end
 
----------------------------------------------------------------------
--- BFI_UpdateConfig
----------------------------------------------------------------------
-AF.RegisterCallback("BFI_UpdateConfig", function(_, module, group, which)
+AF.RegisterCallback("BFI_UpdateConfig", function(_, module, group)
     if module ~= "colors" then return end
     if not NP.config.enabled then return end
+    if group and group ~= "casts" then return end
 
-    if not group or group == "casts" then
-        if not which or which == "spark" then
-            for _, frame in next, NP.created do
-                local castBar = NP.GetIndicator(frame, "castBar")
-                if castBar then
-                    castBar.spark:SetVertexColor(AF.GetColorRGB("cast_spark"))
-                end
-            end
-        end
-
-        if not which or which == "uninterruptible_texture" then
-            for _, frame in next, NP.created do
-                local castBar = NP.GetIndicator(frame, "castBar")
-                if castBar then
-                    castBar.uninterruptible:SetVertexColor(AF.GetColorRGB("cast_uninterruptible_texture"))
-                end
-            end
-        end
-
-        for _, frame in next, NP.created do
-            local castBar = NP.GetIndicator(frame, "castBar")
-            if castBar and castBar:IsVisible() then
-                CastBar_Update(castBar)
-            end
-        end
-    end
-
-    if not group or group == "empowerStages" then
-        for _, frame in next, NP.created do
-            local castBar = NP.GetIndicator(frame, "castBar")
-            if castBar then
-                for i, pip in pairs(castBar.pips) do
-                    pip.texture:SetVertexColor(AF.GetColorRGB(map[i], PIP_START_ALPHA))
-                end
-            end
+    for _, frame in next, NP.created do
+        local castBar = NP.GetIndicator(frame, "castBar")
+        if castBar then
+            castBar.spark:SetVertexColor(AF.GetColorRGB("cast_spark"))
+            castBar.uninterruptible:SetVertexColor(AF.GetColorRGB("cast_uninterruptible_texture"))
+            UpdateInterruptibilityStyle(castBar)
         end
     end
 end)
 
----------------------------------------------------------------------
--- create
----------------------------------------------------------------------
--- bar layers
--- pipTexture: -2
--- latency: -1, 1
--- bar: 0
--- pipBound: 1
--- spark: 3
--- uninterruptible: 4
-
 function NP.CreateCastBar(parent, name)
-    -- frame
-    local frame = CreateFrame("Frame", name, parent, "BackdropTemplate")
+    local frame = AF.CreateSecretCastBar(parent, name)
     AF.ApplyDefaultBackdrop(frame)
-    frame:Hide()
-
     frame.root = parent
 
-    frame:SetScript("OnUpdate", OnUpdate)
-
-    -- events
-    AF.AddEventHandler(frame)
-
-    -- fade out
-    AF.CreateFadeInOutAnimation(frame, 0.5)
-    frame.fadeOut.alpha:SetSmoothing("IN")
-
-    -- cast status texture
     local status = frame:CreateTexture(nil, "OVERLAY")
     frame.status = status
     AF.SetOnePixelInside(status, frame)
     status:Hide()
 
-    -- iconBG
     local iconBG = frame:CreateTexture(nil, "BORDER")
     frame.iconBG = iconBG
     iconBG:SetTexture(AF.GetPlainTexture())
 
-    -- icon
     local icon = frame:CreateTexture(nil, "ARTWORK")
     frame.icon = icon
     AF.SetPoint(icon, "TOPLEFT", iconBG, 1, -1)
     AF.SetPoint(icon, "BOTTOMRIGHT", iconBG, -1, 1)
 
-    -- bar
-    local bar = AF.CreateSimpleStatusBar(frame, nil, true)
+    local bar = CreateFrame("StatusBar", nil, frame)
     frame.bar = bar
     AF.SetOnePixelInside(bar, frame)
-    bar.fill:SetDrawLayer("ARTWORK", 0)
     AF.SetFrameLevel(bar, 1, frame)
-    AF.RemoveFromPixelUpdater(bar)
 
-    -- spark
     local spark = bar:CreateTexture(nil, "ARTWORK", nil, 3)
     frame.spark = spark
-    -- spark:SetBlendMode("ADD")
 
-    -- uninterruptible texture
     local uninterruptible = bar:CreateTexture(nil, "ARTWORK", nil, 4)
     frame.uninterruptible = uninterruptible
     uninterruptible:SetAllPoints()
@@ -684,31 +249,30 @@ function NP.CreateCastBar(parent, name)
     uninterruptible:SetVertTile(true)
     uninterruptible:Hide()
 
-    -- empower
-    frame.pips = {}
-    frame.stageBounds = {}
-
-    -- overlay
     local overlay = CreateFrame("Frame", nil, frame)
     frame.overlay = overlay
     overlay:SetAllPoints()
     AF.SetFrameLevel(overlay, 2, frame)
 
-    -- name
     local nameText = overlay:CreateFontString(nil, "OVERLAY", "AF_FONT_NORMAL")
     frame.nameText = nameText
 
-    -- duration
     local durationText = overlay:CreateFontString(nil, "OVERLAY", "AF_FONT_NORMAL")
     frame.durationText = durationText
 
-    -- functions
+    frame:SetStatusBar(bar)
+    frame:SetNameText(nameText)
+    frame:SetIcon(icon)
+    frame:SetDurationText(durationText)
+
+    frame.OnCastStart = CastBar_OnCastStart
+    frame.OnCastStop = CastBar_OnCastStop
+    frame.OnInterruptibilityChanged = CastBar_OnInterruptibilityChanged
     frame.Update = CastBar_Update
     frame.Enable = CastBar_Enable
     frame.Disable = CastBar_Disable
     frame.LoadConfig = CastBar_LoadConfig
 
-    -- pixel perfect
     AF.AddToPixelUpdater_Auto(frame, CastBar_UpdatePixels)
 
     return frame
