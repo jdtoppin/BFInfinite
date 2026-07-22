@@ -20,11 +20,16 @@ local function NameText_Enable(self)
     self:Update()
 end
 
+local function NameText_Disable(self)
+    self:ClearUnit()
+    self:Hide()
+end
+
 ---------------------------------------------------------------------
 -- load
 ---------------------------------------------------------------------
 local function NameText_LoadConfig(self, config)
-    self:SetFont(config.font)
+    AF.SetFont(self, config.font)
     UF.LoadIndicatorPosition(self, config.position, config.anchorTo, config.parent)
     self:SetLength(config.length)
     self.color = config.color
@@ -38,6 +43,7 @@ local function NameText_EnableConfigMode(self)
     self.Enable = NameText_EnableConfigMode
     self.Update = AF.noop
 
+    self:SetUnit(self.root.effectiveUnit)
     self:UpdateName()
 
     self:SetShown(self.enabled)
@@ -60,6 +66,7 @@ function UF.CreateNameText(parent, name)
 
     -- functions
     text.Enable = NameText_Enable
+    text.Disable = NameText_Disable
     text.Update = NameText_Update
     text.EnableConfigMode = NameText_EnableConfigMode
     text.DisableConfigMode = NameText_DisableConfigMode

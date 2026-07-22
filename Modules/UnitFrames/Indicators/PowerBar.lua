@@ -23,7 +23,7 @@ end
 ---------------------------------------------------------------------
 -- disable
 ---------------------------------------------------------------------
-local function HealthBar_Disable(self)
+local function PowerBar_Disable(self)
     self:ClearUnit()
     self:Hide()
 end
@@ -58,6 +58,7 @@ local function PowerBar_EnableConfigMode(self)
     UnitPowerMax = UF.CFG_UnitPowerMax
     -- UnitHasVehicleUI = UF.CFG_UnitHasVehicleUI
 
+    self:SetUnit(self.root.effectiveUnit)
     PowerBar_Update(self)
 
     self:SetShown(self.enabled)
@@ -87,6 +88,7 @@ function UF.CreatePowerBar(parent, name)
     -- functions
     bar.Update = PowerBar_Update
     bar.Enable = PowerBar_Enable
+    bar.Disable = PowerBar_Disable
     bar.EnableConfigMode = PowerBar_EnableConfigMode
     bar.DisableConfigMode = PowerBar_DisableConfigMode
     bar.LoadConfig = PowerBar_LoadConfig
