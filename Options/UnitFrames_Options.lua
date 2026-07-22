@@ -829,11 +829,11 @@ builder["position,anchorTo,parent"] = function(parent)
         LoadIndicatorPosition(pane.t)
     end)
 
-    local parent = AF.CreateDropdown(pane, 150)
-    parent:SetLabel(L["Parent"])
-    AF.SetPoint(parent, "TOPLEFT", relativeTo, 185, 0)
-    parent:SetItems(GetParentItems())
-    parent:SetOnSelect(function(value)
+    local parentDropdown = AF.CreateDropdown(pane, 150)
+    parentDropdown:SetLabel(L["Parent"])
+    AF.SetPoint(parentDropdown, "TOPLEFT", relativeTo, 185, 0)
+    parentDropdown:SetItems(GetParentItems())
+    parentDropdown:SetOnSelect(function(value)
         pane.t.cfg.parent = value
         LoadIndicatorPosition(pane.t)
     end)
@@ -877,7 +877,7 @@ builder["position,anchorTo,parent"] = function(parent)
         relativeTo.reloadRequired = true
 
         relativeTo:SetSelectedValue(t.cfg.anchorTo)
-        parent:SetSelectedValue(t.cfg.parent)
+        parentDropdown:SetSelectedValue(t.cfg.parent)
         anchorPoint:SetSelectedValue(t.cfg.position[1])
         relativePoint:SetSelectedValue(t.cfg.position[2])
         x:SetValue(t.cfg.position[3])
@@ -1816,7 +1816,8 @@ builder["interruptibleCheck"] = function(parent)
 
     enableInterruptibleCheck:SetOnCheck(function(checked)
         pane.t.cfg.interruptibleCheck.enabled = checked
-        AF.SetEnabled(checked, requireInterruptUsable, showUninterruptibleTexture, changeBorderColor)
+        AF.SetEnabled(checked, showUninterruptibleTexture, changeBorderColor)
+        requireInterruptUsable:SetEnabled(checked and not AF.isRetail)
         LoadIndicatorConfig(pane.t)
     end)
 
@@ -1826,7 +1827,11 @@ builder["interruptibleCheck"] = function(parent)
         requireInterruptUsable:SetChecked(t.cfg.interruptibleCheck.requireUsable)
         showUninterruptibleTexture:SetChecked(t.cfg.interruptibleCheck.showTexture)
         changeBorderColor:SetChecked(t.cfg.interruptibleCheck.colorBorder)
-        AF.SetEnabled(pane.t.cfg.interruptibleCheck.enabled, requireInterruptUsable, showUninterruptibleTexture, changeBorderColor)
+        AF.SetEnabled(pane.t.cfg.interruptibleCheck.enabled, showUninterruptibleTexture, changeBorderColor)
+        requireInterruptUsable:SetEnabled(pane.t.cfg.interruptibleCheck.enabled and not AF.isRetail)
+        if AF.isRetail then
+            requireInterruptUsable:SetText(L["Require Interrupt Usable"] .. " (" .. L["Unavailable on Retail"] .. ")")
+        end
     end
 
     return pane
@@ -1879,6 +1884,10 @@ builder["showLatency"] = function(parent)
     function pane.Load(t)
         pane.t = t
         showLatencyCheckButton:SetChecked(t.cfg.showLatency)
+        showLatencyCheckButton:SetEnabled(not AF.isRetail)
+        if AF.isRetail then
+            showLatencyCheckButton:SetText(L["Show Latency"] .. " (" .. L["Unavailable on Retail"] .. ")")
+        end
     end
 
     return pane
@@ -1903,6 +1912,10 @@ builder["fadeDuration"] = function(parent)
     function pane.Load(t)
         pane.t = t
         fadeDurationSlider:SetValue(t.cfg.fadeDuration)
+        fadeDurationSlider:SetEnabled(not AF.isRetail)
+        if AF.isRetail then
+            fadeDurationSlider:SetLabel(L["Fade Duration"] .. " (" .. L["Unavailable on Retail"] .. ")")
+        end
     end
 
     return pane
@@ -1984,7 +1997,11 @@ builder["ticks"] = function(parent)
         pane.t = t
         ticksCheckButton:SetChecked(t.cfg.ticks.enabled)
         ticksWidthSlider:SetValue(t.cfg.ticks.width)
-        ticksWidthSlider:SetEnabled(t.cfg.ticks.enabled)
+        ticksCheckButton:SetEnabled(not AF.isRetail)
+        ticksWidthSlider:SetEnabled(t.cfg.ticks.enabled and not AF.isRetail)
+        if AF.isRetail then
+            ticksCheckButton:SetText(L["Ticks"] .. " (" .. L["Unavailable on Retail"] .. ")")
+        end
     end
 
     return pane
@@ -2089,9 +2106,9 @@ builder["castBarNameText"] = function(parent)
 
     local function UpdateWidgets()
         AF.HideColorPicker()
-        AF.SetEnabled(pane.t.cfg.nameText.enabled, colorPicker, lengthSlider, showInterruptSourceCheckButton,
-            fontDropdown, fontOutlineDropdown, fontSizeSlider, shadowCheckButton,
+        AF.SetEnabled(pane.t.cfg.nameText.enabled, colorPicker, fontDropdown, fontOutlineDropdown, fontSizeSlider, shadowCheckButton,
             anchorPoint, relativePoint, xOffset, yOffset)
+        AF.SetEnabled(pane.t.cfg.nameText.enabled and not AF.isRetail, lengthSlider, showInterruptSourceCheckButton)
     end
 
     enabledCheckButton:SetOnCheck(function(checked)
@@ -2103,6 +2120,10 @@ builder["castBarNameText"] = function(parent)
     function pane.Load(t)
         pane.t = t
         UpdateWidgets()
+        if AF.isRetail then
+            showInterruptSourceCheckButton:SetText(L["Show Interrupt Source"] .. " (" .. L["Unavailable on Retail"] .. ")")
+            lengthSlider:SetLabel(L["Length"] .. " (" .. L["Unavailable on Retail"] .. ")")
+        end
         enabledCheckButton:SetChecked(t.cfg.nameText.enabled)
         colorPicker:SetColor(pane.t.cfg.nameText.color)
         showInterruptSourceCheckButton:SetChecked(pane.t.cfg.nameText.showInterruptSource)
@@ -2225,9 +2246,9 @@ builder["castBarDurationText"] = function(parent)
 
     local function UpdateWidgets()
         AF.HideColorPicker()
-        AF.SetEnabled(pane.t.cfg.durationText.enabled, colorPicker, formatDropdown, showDelayCheckButton,
-            fontDropdown, fontOutlineDropdown, fontSizeSlider, shadowCheckButton,
+        AF.SetEnabled(pane.t.cfg.durationText.enabled, colorPicker, fontDropdown, fontOutlineDropdown, fontSizeSlider, shadowCheckButton,
             anchorPoint, relativePoint, xOffset, yOffset)
+        AF.SetEnabled(pane.t.cfg.durationText.enabled and not AF.isRetail, formatDropdown, showDelayCheckButton)
     end
 
     enabledCheckButton:SetOnCheck(function(checked)
@@ -2239,6 +2260,10 @@ builder["castBarDurationText"] = function(parent)
     function pane.Load(t)
         pane.t = t
         UpdateWidgets()
+        if AF.isRetail then
+            showDelayCheckButton:SetText(L["Show Delay"] .. " (" .. L["Unavailable on Retail"] .. ")")
+            formatDropdown:SetLabel(L["Format"] .. " (" .. L["Native 7.1 on Retail"] .. ")")
+        end
         enabledCheckButton:SetChecked(t.cfg.durationText.enabled)
         colorPicker:SetColor(pane.t.cfg.durationText.color)
         showDelayCheckButton:SetChecked(pane.t.cfg.durationText.showDelay)
@@ -3100,12 +3125,23 @@ builder["auraBaseFilters"] = function(parent)
 
     function pane.Load(t)
         pane.t = t
+
+        if AF.isRetail then
+            tip:SetText(L["Retail uses Blizzard's C-side aura classifications"])
+            castByOthers:SetText(t.id == "buffs" and L["Defensive"] or L["Cast By Others"])
+            castByBoss:SetText(L["Raid In Combat"])
+        end
+
         castByMe:SetChecked(t.cfg.filters.castByMe)
         castByOthers:SetChecked(t.cfg.filters.castByOthers)
         castByUnit:SetChecked(t.cfg.filters.castByUnit)
         castByNPC:SetChecked(t.cfg.filters.castByNPC)
         castByBoss:SetChecked(t.cfg.filters.isBossAura)
         dispellable:SetChecked(t.cfg.filters.dispellable)
+
+        castByOthers:SetEnabled(not AF.isRetail or t.id == "buffs")
+        castByUnit:SetEnabled(not AF.isRetail)
+        castByNPC:SetEnabled(not AF.isRetail)
 
         if t.id == "buffs" and (t.owner == "player" or t.owner == "pet" or t.owner == "party" or t.owner == "raid") then
             dispellable:SetEnabled(false)
@@ -3237,7 +3273,14 @@ builder["auraBlackListWhitelist"] = function(parent)
 
     function pane.Load(t)
         pane.t = t
+        if AF.isRetail then
+            HideEditBox()
+            tip:SetText(L["Spell-ID aura lists are unavailable for restricted Retail auras"])
+        end
+
         mode:SetSelectedValue(t.cfg.mode)
+        mode:SetEnabled(not AF.isRetail)
+        addButton:SetEnabled(not AF.isRetail)
 
         pane.list = t.cfg.mode == "blacklist" and t.cfg.blacklist or t.cfg.whitelist
 
@@ -3262,6 +3305,7 @@ builder["auraBlackListWhitelist"] = function(parent)
             end
 
             buttons[i] = b
+            b:SetEnabled(not AF.isRetail)
             b:Show()
 
             if i == 1 then
@@ -3320,14 +3364,20 @@ builder["auraTypeColor"] = function(parent)
 
     function pane.Load(t)
         pane.t = t
+        if AF.isRetail then
+            tip:SetText(AF.GetGradientText(L["Border Color"], "BFI", "white") .. "\n" .. L["Retail supports debuff type coloring"])
+        end
+
         castByMe:SetChecked(t.cfg.auraTypeColor.castByMe)
         dispellable:SetChecked(t.cfg.auraTypeColor.dispellable)
         debuffType:SetChecked(t.cfg.auraTypeColor.debuffType)
 
+        castByMe:SetEnabled(not AF.isRetail)
+
         if t.id == "buffs" and (t.owner == "player" or t.owner == "pet" or t.owner == "party" or t.owner == "raid") then
             dispellable:SetEnabled(false)
         else
-            dispellable:SetEnabled(true)
+            dispellable:SetEnabled(not AF.isRetail)
         end
 
         debuffType:SetEnabled(t.id == "debuffs")
