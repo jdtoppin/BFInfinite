@@ -1,0 +1,34 @@
+name: Lua checks
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install luacheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes lua-check ripgrep
+
+      - name: Check Lua and policy
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            mapfile -d '' changed < <(git diff --name-only -z --diff-filter=ACMR "$BASE_SHA...HEAD" -- '*.lua')
+            ./scripts/lint.sh "${changed[@]}"
+          else
+            ./scripts/lint.sh
+          fi
