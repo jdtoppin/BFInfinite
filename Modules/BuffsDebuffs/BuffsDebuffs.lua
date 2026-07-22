@@ -6,10 +6,7 @@ local BD = BFI.modules.BuffsDebuffs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local GameTooltip = GameTooltip
-local GameTooltip_Hide = GameTooltip_Hide
--- local UnpackAuraData = AuraUtil.UnpackAuraData
-local GetAuraDataByIndex = C_UnitAuras.GetAuraDataByIndex
+local GetUnitAuraInstanceIDs = C_UnitAuras.GetUnitAuraInstanceIDs
 
 ---------------------------------------------------------------------
 -- header
@@ -56,21 +53,27 @@ end
 -- create aura button
 ---------------------------------------------------------------------
 local function UpdateAura(button, index)
-    local auraData = GetAuraDataByIndex("player", index, button.filter)
-    if not auraData then return end
+    if not index then
+        button:ClearAura()
+        return
+    end
 
-    AF.SetAuraCooldown(button, auraData.expirationTime - auraData.duration, auraData.duration, auraData.applications, auraData.icon, AF.GetDebuffType(auraData))
-end
-
-local function Button_OnEnter(button)
-    -- GameTooltip:SetOwner(button, "ANCHOR_BOTTOMLEFT", 0, -5)
-    GameTooltip_SetDefaultAnchor(GameTooltip, button)
-    -- button.elapsed = 1
-
-    if button:GetAttribute("index") then -- normal aura
-        GameTooltip:SetUnitAura(button.header:GetAttribute("unit"), button:GetID(), button.filter)
-    elseif button:GetAttribute("target-slot") then -- temp weapon enchant
-        GameTooltip:SetInventoryItem("player", button:GetID())
+    local unit = button.header:GetAttribute("unit")
+    -- SecureAuraHeader sorts a private list but assigns each child its original
+    -- unsorted aura index. Resolve that index against the matching C-side list;
+    -- applying the configured sort a second time would select a different aura.
+    local auraInstanceIDs = GetUnitAuraInstanceIDs(
+        unit,
+        button.filter,
+        index,
+        Enum.UnitAuraSortRule.Unsorted,
+        Enum.UnitAuraSortDirection.Normal
+    )
+    local auraInstanceID = auraInstanceIDs[index]
+    if auraInstanceID then
+        button:SetAura(unit, auraInstanceID)
+    else
+        button:ClearAura()
     end
 end
 
@@ -89,8 +92,8 @@ local function Button_LoadConfig(button)
     local config = button.header.config
     if not config then return end
 
-    AF.SetupAuraStackText(button, config.stack)
-    AF.SetupAuraDurationText(button, config.duration)
+    button:SetupStackText(config.stack)
+    button:SetupDurationText(config.duration)
 end
 
 local function Button_UpdatePixels(button)
@@ -102,24 +105,12 @@ function BD.InitAuraButton(button)
     button.header = button:GetParent()
     button.filter = button.header.filter
 
+    AF.InitAura(button)
+    AF.SetOnePixelInside(button.icon, button)
+    button:SetFallbackIcon(button.filter == "HELPFUL" and 135953 or 136071)
+
     button.LoadConfig = Button_LoadConfig
     AF.AddToPixelUpdater_Auto(button, Button_UpdatePixels)
-
-    --
-    button.SetDesaturated = AF.SetAuraDesaturated
-
-    -- icon
-    button.icon = button:CreateTexture(nil, "ARTWORK")
-    AF.SetOnePixelInside(button.icon, button)
-
-    -- stack
-    button.stack = button:CreateFontString(nil, "OVERLAY", "AF_FONT_SMALL")
-
-    -- duration
-    button.duration = button:CreateFontString(nil, "OVERLAY", "AF_FONT_SMALL")
-
-    -- style
-    AF.ApplyDefaultBackdrop(button)
     AF.ApplyDefaultBackdropColors(button)
 
     -- click
@@ -127,15 +118,12 @@ function BD.InitAuraButton(button)
     -- moved to BFIAuraButtonTemplate.xml
     -- button:RegisterForClicks("RightButtonUp", "RightButtonDown")
 
-    -- tooltip
-    button.tooltip = {
+    button:EnableTooltip({
         enabled = true,
         anchorTo = "self_adaptive",
-    }
+    })
 
     -- event
-    button:SetScript("OnEnter", Button_OnEnter)
-    button:SetScript("OnLeave", GameTooltip_Hide)
     button:SetScript("OnAttributeChanged", Button_OnAttributeChanged)
     -- button:SetScript("OnUpdate", Button_OnUpdate)
     button:SetScript("OnSizeChanged", AF.ReCalcTexCoordForAura)
