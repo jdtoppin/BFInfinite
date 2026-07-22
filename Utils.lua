@@ -80,17 +80,27 @@ function F.GetModuleDefaults(moduleClassName)
     end
 end
 
+function F.MergeMissingDefaults(config, defaults)
+    if type(config) ~= "table" then
+        config = {}
+    end
+
+    for key, defaultValue in next, defaults do
+        if type(defaultValue) == "table" then
+            config[key] = F.MergeMissingDefaults(config[key], defaultValue)
+        elseif config[key] == nil then
+            config[key] = defaultValue
+        end
+    end
+
+    return config
+end
+
 function F.FixModule(profileTbl, moduleKey)
     assert(not AF.IsBlank(moduleKey), "Fix: module is required")
     local M = BFI.modules[F.GetModuleClassName(moduleKey)]
     assert(M, "Fix: module not found: " .. moduleKey)
-    for k, v in next, M.GetDefaults() do
-        if not profileTbl[moduleKey][k] then
-            profileTbl[moduleKey][k] = v
-        else
-            AF.MergeMissingKeys(profileTbl[moduleKey][k], v)
-        end
-    end
+    profileTbl[moduleKey] = F.MergeMissingDefaults(profileTbl[moduleKey], M.GetDefaults())
 end
 
 ---------------------------------------------------------------------
