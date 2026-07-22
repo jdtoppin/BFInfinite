@@ -108,6 +108,7 @@ function BD.InitAuraButton(button)
     AF.InitAura(button)
     AF.SetOnePixelInside(button.icon, button)
     button:SetFallbackIcon(button.filter == "HELPFUL" and 135953 or 136071)
+    button:EnableDispelColor(button.filter == "HARMFUL")
 
     button.LoadConfig = Button_LoadConfig
     AF.AddToPixelUpdater_Auto(button, Button_UpdatePixels)

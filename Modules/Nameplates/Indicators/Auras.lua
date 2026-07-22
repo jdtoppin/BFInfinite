@@ -1,6 +1,7 @@
 ---@type BFI
 local BFI = select(2, ...)
 local NP = BFI.modules.Nameplates
+local A = BFI.modules.Auras
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
@@ -225,6 +226,11 @@ local function Auras_SetupAuras(self, config)
     for i = 1, self.numSlots do
         local aura = self.slots[i]
         aura.root = self.root
+        aura:EnableDispelColor(
+            self.auraFilter == "HARMFUL"
+            and config.auraTypeColor
+            and config.auraTypeColor.debuffType
+        )
         -- aura:SetDesaturated(config.desaturated)
         aura:SetCooldownStyle(config.cooldownStyle)
         aura:SetupDurationText(config.durationText)
@@ -253,9 +259,14 @@ local function Auras_LoadConfig(self, config)
     Auras_SetupAuras(self, config)
     Auras_UpdateSize(self, 0)
 
-    -- Blacklists, source classification, custom priorities, dispel glows, and
-    -- crowd-control type checks require restricted AuraData fields. The shared
-    -- widget applies only its non-secret filter string and C-side sorting.
+    if self.auraFilter == "HARMFUL|CROWD_CONTROL" then
+        self:SetMatchFilters(nil)
+    else
+        self:SetMatchFilters(A.GetSecretSafeMatchFilters(self.auraFilter, config.filters))
+    end
+
+    -- Arbitrary spell blacklists and priorities remain unavailable for
+    -- restricted auras. Supported categories use Blizzard's C-side filters.
 end
 
 local function Auras_UpdatePixels(self)
@@ -304,5 +315,5 @@ function NP.CreateBuffs(parent, name)
 end
 
 function NP.CreateCrowdControls(parent, name)
-    return CreateAuras(parent, name, "HARMFUL|INCLUDE_NAME_PLATE_ONLY")
+    return CreateAuras(parent, name, "HARMFUL|CROWD_CONTROL")
 end

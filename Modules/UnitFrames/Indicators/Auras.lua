@@ -1,6 +1,7 @@
 ---@type BFI
 local BFI = select(2, ...)
 local UF = BFI.modules.UnitFrames
+local A = BFI.modules.Auras
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
@@ -216,6 +217,11 @@ local function Auras_SetupAuras(self, config)
         local aura = self.slots[i]
         aura.root = self.root
         aura:EnableTooltip(config.tooltip)
+        aura:EnableDispelColor(
+            self.auraFilter == "HARMFUL"
+            and config.auraTypeColor
+            and config.auraTypeColor.debuffType
+        )
         -- aura:SetDesaturated(config.desaturated)
         aura:SetCooldownStyle(config.cooldownStyle)
         aura:SetupDurationText(config.durationText)
@@ -309,10 +315,11 @@ local function Auras_LoadConfig(self, config)
     Auras_SetupAuras(self, config)
     Auras_UpdateSize(self, 0)
 
-    -- Spell/source/priority classification requires inspecting restricted
-    -- AuraData. The shared list uses only the configured HELPFUL/HARMFUL filter
-    -- and Blizzard's C-side default sorting, so the optional classified
-    -- subframe is intentionally disabled.
+    self:SetMatchFilters(A.GetSecretSafeMatchFilters(self.auraFilter, config.filters))
+
+    -- Arbitrary spell/source/priority classification remains unavailable for
+    -- restricted auras. The optional not-cast-by-me subframe therefore stays
+    -- disabled; supported categories use Blizzard's C-side filters above.
     self.subFrameEnabled = false
     if self.subFrame then
         self.subFrame:Hide()
