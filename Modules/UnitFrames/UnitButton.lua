@@ -1,50 +1,17 @@
 ---@class BFI
 local BFI = select(2, ...)
+local F = BFI.funcs
 local UF = BFI.modules.UnitFrames
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local issecretvalue = issecretvalue
 local UnitGUID = UnitGUID
-local UnitName = UnitName
 local GetUnitName = GetUnitName
-local UnitHealth = UnitHealth
-local UnitHealthMax = UnitHealthMax
-local UnitGetIncomingHeals = UnitGetIncomingHeals
-local UnitGetTotalAbsorbs = UnitGetTotalAbsorbs
-local UnitGetTotalHealAbsorbs = UnitGetTotalHealAbsorbs
 local UnitIsUnit = UnitIsUnit
 local UnitIsPlayer = UnitIsPlayer
-local UnitIsConnected = UnitIsConnected
-local UnitIsAFK = UnitIsAFK
-local UnitIsFeignDeath = UnitIsFeignDeath
-local UnitIsDeadOrGhost = UnitIsDeadOrGhost
-local UnitIsGhost = UnitIsGhost
-local UnitPowerType = UnitPowerType
-local UnitPowerMax = UnitPowerMax
--- local UnitInRange = UnitInRange
--- local UnitIsVisible = UnitIsVisible
-local SetRaidTargetIconTexture = SetRaidTargetIconTexture
 local GetTime = GetTime
-local GetRaidTargetIndex = GetRaidTargetIndex
-local GetReadyCheckStatus = GetReadyCheckStatus
 local UnitHasVehicleUI = UnitHasVehicleUI
--- local UnitInVehicle = UnitInVehicle
--- local UnitUsingVehicle = UnitUsingVehicle
-local UnitIsCharmed = UnitIsCharmed
-local UnitIsPlayer = UnitIsPlayer
-local UnitInPartyIsAI = UnitInPartyIsAI
-local UnitGroupRolesAssigned = UnitGroupRolesAssigned
-local UnitThreatSituation = UnitThreatSituation
-local GetThreatStatusColor = GetThreatStatusColor
 local UnitExists = UnitExists
-local UnitIsGroupLeader = UnitIsGroupLeader
-local UnitIsGroupAssistant = UnitIsGroupAssistant
-local InCombatLockdown = InCombatLockdown
-local UnitPhaseReason = UnitPhaseReason
-local GetAuraDataByAuraInstanceID = C_UnitAuras.GetAuraDataByAuraInstanceID
-local IsInRaid = IsInRaid
-local UnitDetailedThreatSituation = UnitDetailedThreatSituation
 local UnitClassBase = AF.UnitClassBase
 
 ---------------------------------------------------------------------
@@ -85,25 +52,8 @@ end
 ---------------------------------------------------------------------
 -- range
 ---------------------------------------------------------------------
-local function UnitButton_UpdateInRange(self, ir)
-    if true then return end -- FIXME: disable for now
-
-    if not self.oorAlpha then return end
-
-    local unit = self.effectiveUnit
-    if not unit then return end
-
-    local inRange = AF.IsInRange(unit)
-
-    self.states.inRange = inRange
-    if self.states.inRange ~= self.states.wasInRange then
-        if inRange then
-            AF.FrameFadeIn(self, 0.25, self:GetAlpha(), 1)
-        else
-            AF.FrameFadeOut(self, 0.25, self:GetAlpha(), self.oorAlpha)
-        end
-    end
-    self.states.wasInRange = inRange
+local function UnitButton_UpdateInRange()
+    -- FIXME: disabled until the range path is made secret-safe.
 end
 
 ---------------------------------------------------------------------
@@ -187,8 +137,6 @@ end
 -- BFI.vars.names = {} -- name to unitid
 BFI.vars.units = {} -- unitid to button
 
-local UNKNOWN = _G.UNKNOWN
-local UNKNOWNOBJECT = _G.UNKNOWNOBJECT
 local function UnitButton_OnTick(self)
     self.__tickCount = (self.__tickCount or 0) + 1
     if self.__tickCount >= 2 then -- every 0.5 second
@@ -200,7 +148,7 @@ local function UnitButton_OnTick(self)
             local guid = UnitGUID(self.unit)
 
             -- NOTE: player GUID is non-secret, but be careful with "(enemy)target" units
-            if not issecretvalue(guid) and UnitIsPlayer(self.unit) and not self._skipDataCache then
+            if F.isValueNonSecret(guid) and UnitIsPlayer(self.unit) and not self._skipDataCache then
                 if guid and guid ~= self.__unitGuid then
                     -- NOTE: unit entity changed
                     self.__unitGuid = guid
@@ -262,10 +210,6 @@ local function UnitButton_OnShow(self)
     UnitButton_UpdateStates(self)
     UnitButton_UpdateInRange(self)
     UF.OnButtonShow(self)
-    -- local success, result = pcall(UnitButton_UpdateAll, self, true)
-    -- if not success then
-    --     AF.Debug("|cffabababUpdateAll FAILED|r", self:GetName(), result)
-    -- end
 end
 
 local function UnitButton_OnHide(self)

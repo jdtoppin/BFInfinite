@@ -1,5 +1,6 @@
 ---@type BFI
 local BFI = select(2, ...)
+local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 local UF = BFI.modules.UnitFrames
@@ -18,7 +19,7 @@ local function UpdateTarget(self)
 
     local matched = UnitIsUnit(unit, "target")
 
-    if self.enabled and not issecretvalue(matched) and matched then
+    if self.enabled and F.isValueNonSecret(matched) and matched then
         self:Show()
     else
         self:Hide()

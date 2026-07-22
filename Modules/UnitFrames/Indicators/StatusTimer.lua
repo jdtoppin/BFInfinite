@@ -1,5 +1,6 @@
 ---@type BFI
 local BFI = select(2, ...)
+local F = BFI.funcs
 local L = BFI.L
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
@@ -43,7 +44,7 @@ end
 local timers = {}
 local function ShowTimer(self)
     local guid = UnitGUID(self.root.unit)
-    if not guid or issecretvalue(guid) then return end
+    if not guid or not F.isValueNonSecret(guid) then return end
 
     if not timers[guid] then
         timers[guid] = {status = self.status, start = GetTime()}
@@ -59,7 +60,7 @@ end
 
 local function HideTimer(self)
     local guid = UnitGUID(self.root.unit)
-    if guid and not issecretvalue(guid) then
+    if guid and F.isValueNonSecret(guid) then
         timers[guid] = nil
     end
     self.updater:Hide()
