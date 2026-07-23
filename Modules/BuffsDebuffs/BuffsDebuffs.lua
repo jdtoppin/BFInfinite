@@ -18,8 +18,6 @@ local function CreateHeader(name, moverName, filter)
     header:SetAttribute("filter", filter)
     header.filter = filter
 
-    header:UnregisterEvent("UNIT_AURA")
-    -- header:RegisterUnitEvent("UNIT_AURA", "player", "vehicle")
     header:SetAttribute("unit", "player")
     RegisterAttributeDriver(header, "unit", "[vehicleui] vehicle;player")
 
@@ -114,11 +112,6 @@ function BD.InitAuraButton(button)
     AF.AddToPixelUpdater_Auto(button, Button_UpdatePixels)
     AF.ApplyDefaultBackdropColors(button)
 
-    -- click
-    -- NOTE: RegisterForClicks is protected for secure frames since 11.1.7
-    -- moved to BFIAuraButtonTemplate.xml
-    -- button:RegisterForClicks("RightButtonUp", "RightButtonDown")
-
     button:EnableTooltip({
         enabled = true,
         anchorTo = "self_adaptive",
@@ -203,8 +196,6 @@ local function GetAttributes(config)
 end
 
 local function SetupHeader(header, config)
-    header:RegisterUnitEvent("UNIT_AURA", "player", "vehicle")
-
     header.config = config
 
     header:SetAttribute("separateOwn", config.separateOwn)
@@ -251,7 +242,6 @@ local function UpdateBuffsDebuffs(_, module, which)
         elseif buffFrame then
             buffFrame.enabled = false
             buffFrame:Hide()
-            buffFrame:UnregisterEvent("UNIT_AURA")
         end
     end
 
@@ -267,7 +257,6 @@ local function UpdateBuffsDebuffs(_, module, which)
         elseif debuffFrame then
             debuffFrame.enabled = false
             debuffFrame:Hide()
-            debuffFrame:UnregisterEvent("UNIT_AURA")
         end
     end
 end
