@@ -28,6 +28,32 @@ local function HydrateProfile(profile)
     end
 end
 
+local retiredHealthTextNumericFormats = {
+    current_absorbs_sum = "current",
+    current_absorbs_short_sum = "current_short",
+}
+
+local retiredHealthTextPercentFormats = {
+    current_absorbs = "current",
+    current_absorbs_decimal = "current_decimal",
+    current_absorbs_sum = "current",
+    current_absorbs_sum_decimal = "current_decimal",
+}
+
+local function MigrateRetiredHealthTextFormats(profile)
+    if type(profile.unitFrames) ~= "table" then return end
+
+    for _, frameConfig in next, profile.unitFrames do
+        local indicators = type(frameConfig) == "table" and frameConfig.indicators
+        local healthText = type(indicators) == "table" and indicators.healthText
+        local format = type(healthText) == "table" and healthText.format
+        if type(format) == "table" then
+            format.numeric = retiredHealthTextNumericFormats[format.numeric] or format.numeric
+            format.percent = retiredHealthTextPercentFormats[format.percent] or format.percent
+        end
+    end
+end
+
 ---------------------------------------------------------------------
 -- common revisions
 ---------------------------------------------------------------------
@@ -107,5 +133,6 @@ function F.ReviseProfile(profile, force)
     end
 
     HydrateProfile(profile)
+    MigrateRetiredHealthTextFormats(profile)
     profile.revision = BFI.versionNum
 end
