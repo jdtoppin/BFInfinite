@@ -20,7 +20,7 @@ local list = {
     "SEPARATOR",
     "enhancements",
     "colors",
-    "auras",
+    "-auras", -- global spell-ID lists are not consumed by the secret-safe aura widgets
     -- "social",
     "SEPARATOR",
     "unitFrames",
