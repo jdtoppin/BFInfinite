@@ -1,76 +1,82 @@
 ---@type BFI
 local BFI = select(2, ...)
 local L = BFI.L
-local F = BFI.funcs
 local AB = BFI.modules.ActionBars
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local CanExitVehicle = CanExitVehicle
-
 local vehicleExitHolder
+local vehicleExitButton
+local original
 
 ---------------------------------------------------------------------
 -- create
 ---------------------------------------------------------------------
+local function AttachButton()
+    vehicleExitButton:SetScript("OnShow", nil)
+    vehicleExitButton:SetScript("OnHide", nil)
+    vehicleExitButton:SetParent(vehicleExitHolder)
+    AF.SetOnePixelInside(vehicleExitButton, vehicleExitHolder)
+    vehicleExitButton:GetNormalTexture():SetTexCoord(0.2, 0.8, 0.2, 0.8)
+    vehicleExitButton:GetPushedTexture():SetTexCoord(0.2, 0.8, 0.2, 0.8)
+end
+
+local function RestoreButton()
+    vehicleExitButton:SetScript("OnShow", original.onShow)
+    vehicleExitButton:SetScript("OnHide", original.onHide)
+    vehicleExitButton:SetParent(original.parent)
+    vehicleExitButton:ClearAllPoints()
+    for _, point in ipairs(original.points) do
+        vehicleExitButton:SetPoint(unpack(point))
+    end
+    AF.SetSize(vehicleExitButton, original.width, original.height)
+    vehicleExitButton:SetFrameStrata(original.frameStrata)
+    vehicleExitButton:SetFrameLevel(original.frameLevel)
+    vehicleExitButton:GetNormalTexture():SetTexCoord(unpack(original.normalTexCoords))
+    vehicleExitButton:GetPushedTexture():SetTexCoord(unpack(original.pushedTexCoords))
+    vehicleExitButton:Update()
+end
+
 local function CreateButton()
     vehicleExitHolder = AF.CreateBorderedFrame(AF.UIParent, "BFI_VehicleExitHolder", 20, 20)
     vehicleExitHolder:Hide()
+    vehicleExitHolder.enabled = false
     AF.AddToPixelUpdater_Auto(vehicleExitHolder, function()
         AF.DefaultUpdatePixels(vehicleExitHolder)
-        AF.SetOnePixelInside(vehicleExitHolder.button, vehicleExitHolder)
+        if vehicleExitHolder.enabled then
+            AF.SetOnePixelInside(vehicleExitButton, vehicleExitHolder)
+        end
     end, true)
 
-    vehicleExitHolder.button = _G.MainMenuBarVehicleLeaveButton
-    vehicleExitHolder.button:SetParent(vehicleExitHolder)
-    AF.SetOnePixelInside(vehicleExitHolder.button, vehicleExitHolder)
+    vehicleExitButton = _G.MainMenuBarVehicleLeaveButton
+    vehicleExitHolder.button = vehicleExitButton
 
-    vehicleExitHolder.button:GetNormalTexture():SetTexCoord(0.2, 0.8, 0.2, 0.8)
-    vehicleExitHolder.button:GetPushedTexture():SetTexCoord(0.2, 0.8, 0.2, 0.8)
+    original = {
+        parent = vehicleExitButton:GetParent(),
+        points = {},
+        width = vehicleExitButton:GetWidth(),
+        height = vehicleExitButton:GetHeight(),
+        frameStrata = vehicleExitButton:GetFrameStrata(),
+        frameLevel = vehicleExitButton:GetFrameLevel(),
+        normalTexCoords = {vehicleExitButton:GetNormalTexture():GetTexCoord()},
+        pushedTexCoords = {vehicleExitButton:GetPushedTexture():GetTexCoord()},
+        onShow = vehicleExitButton:GetScript("OnShow"),
+        onHide = vehicleExitButton:GetScript("OnHide"),
+    }
+    for i = 1, vehicleExitButton:GetNumPoints() do
+        original.points[i] = {vehicleExitButton:GetPoint(i)}
+    end
 
-
-    -- FIXME: Blizzard LockHighlight seems bugged in 11.0.5
-    vehicleExitHolder.button:GetHighlightTexture():SetAlpha(0)
-    local highlight = vehicleExitHolder.button:CreateTexture(nil, "HIGHLIGHT")
-    highlight:SetAllPoints()
-    highlight:SetBlendMode("ADD")
-    highlight:SetColorTexture(AF.GetColorRGB("white", 0.25))
-
-    F.DisableEditMode(vehicleExitHolder.button)
-    vehicleExitHolder.button:SetScript("OnShow", nil)
-    vehicleExitHolder.button:SetScript("OnHide", nil)
-
-    hooksecurefunc(vehicleExitHolder.button, "Update", function()
-        if CanExitVehicle() then
-            vehicleExitHolder:Show()
-        else
-            vehicleExitHolder:Hide()
+    hooksecurefunc(vehicleExitButton, "Update", function()
+        if vehicleExitHolder.enabled then
+            vehicleExitHolder:SetShown(vehicleExitButton:CanExitVehicle())
         end
     end)
 
-    hooksecurefunc(vehicleExitHolder.button, "SetPoint", function(_, _, anchorTo)
-        if anchorTo ~= vehicleExitHolder then
-            vehicleExitHolder.button:SetParent(vehicleExitHolder)
-            AF.SetOnePixelInside(vehicleExitHolder.button, vehicleExitHolder)
+    hooksecurefunc(vehicleExitButton, "SetPoint", function(_, _, anchorTo)
+        if vehicleExitHolder.enabled and anchorTo ~= vehicleExitHolder then
+            AttachButton()
         end
-    end)
-
-    -- hooksecurefunc(vehicleExitHolder.button, "SetHighlightTexture", function(self, texture)
-    --     if texture ~= highlight then
-    --         vehicleExitHolder.button:SetHighlightTexture(highlight, "ADD")
-    --     end
-    -- end)
-
-    hooksecurefunc(vehicleExitHolder.button, "LockHighlight", function()
-        -- vehicleExitHolder.button:SetHighlightTexture(highlight, "ADD")
-        highlight:SetDrawLayer("OVERLAY")
-        highlight:SetColorTexture(AF.GetColorRGB("yellow", 0.25))
-    end)
-
-    hooksecurefunc(vehicleExitHolder.button, "UnlockHighlight", function()
-        -- vehicleExitHolder.button:SetHighlightTexture(highlight, "ADD")
-        highlight:SetDrawLayer("HIGHLIGHT")
-        highlight:SetColorTexture(AF.GetColorRGB("white", 0.25))
     end)
 
     AF.CreateMover(vehicleExitHolder, "BFI: " .. L["Action Bars"], _G.HUD_EDIT_MODE_VEHICLE_LEAVE_BUTTON_LABEL)
@@ -86,19 +92,21 @@ local function UpdateButton(_, module, which)
     local enabled = AB.config.general.enabled
     local config = AB.config.vehicleExitButton
 
-    if not (enabled and config.enabled) then
-        if vehicleExitHolder then
-            vehicleExitHolder:Hide()
-            vehicleExitHolder.enabled = false
-        end
-        return
-    end
-
     if not vehicleExitHolder then
         CreateButton()
     end
 
+    if not (enabled and config.enabled) then
+        vehicleExitHolder:Hide()
+        if vehicleExitHolder.enabled then
+            vehicleExitHolder.enabled = false
+            RestoreButton()
+        end
+        return
+    end
+
     vehicleExitHolder.enabled = true
+    AttachButton()
 
     -- mover
     AF.UpdateMoverSave(vehicleExitHolder, config.position)
@@ -108,5 +116,8 @@ local function UpdateButton(_, module, which)
     AF.SetSize(vehicleExitHolder, config.size, config.size)
     vehicleExitHolder:SetFrameStrata(AB.config.general.frameStrata)
     vehicleExitHolder:SetFrameLevel(AB.config.general.frameLevel)
+    vehicleExitButton:SetFrameStrata(AB.config.general.frameStrata)
+    vehicleExitButton:SetFrameLevel(AB.config.general.frameLevel + 1)
+    vehicleExitButton:Update()
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateButton)

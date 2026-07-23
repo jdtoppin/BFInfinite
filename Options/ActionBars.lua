@@ -64,6 +64,7 @@ local function CreateContentPane()
         {text = L["Class Bar %d"]:format(4), value = "classbar4", page = 10},
         {text = L["Stance Bar"], value = "stancebar"},
         {text = L["Pet Bar"], value = "petbar"},
+        {text = _G.HUD_EDIT_MODE_VEHICLE_LEAVE_BUTTON_LABEL, value = "vehicle"},
     }
 
     local widgets = {}
@@ -83,6 +84,9 @@ local function CreateContentPane()
         elseif item.value == "assistant" then
             button.setting = "assistant"
             button.cfg = AB.config.assistant
+        elseif item.value == "vehicle" then
+            button.setting = "vehicle"
+            button.cfg = AB.config.vehicleExitButton
         else
             button.setting = "bar"
             button.target = AB.bars[item.value]
