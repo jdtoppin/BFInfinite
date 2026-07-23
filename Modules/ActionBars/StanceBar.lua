@@ -37,8 +37,9 @@ local function AssignBindings()
     for i, b in ipairs(stanceBar.buttons) do
         b.HotKey:SetText("")
         local command = ("SHAPESHIFTBUTTON%d"):format(i)
-        for _, key in next, {GetBindingKey(command)} do
-            b.HotKey:SetText(AB.GetHotkey(key))
+        local key1, key2 = GetBindingKey(command)
+        b.HotKey:SetText(AB.GetHotkey(key1))
+        for _, key in next, {key1, key2} do
             if key and key ~= "" then
                 SetOverrideBindingClick(stanceBar, false, key, b:GetName())
             end
@@ -55,15 +56,14 @@ end
 -- update cooldown
 ---------------------------------------------------------------------
 local function UPDATE_SHAPESHIFT_COOLDOWN()
-    for i = 1, GetNumShapeshiftForms() do
-        local cooldown = stanceBar.buttons[i].cooldown
-        local start, duration, active = GetShapeshiftFormCooldown(i)
-        if (active and active ~= 0) and start > 0 and duration > 0 then
-            cooldown:SetCooldown(start, duration)
-            -- cooldown:SetDrawBling(false)
-        else
-            cooldown:Clear()
-        end
+    local numForms = min(GetNumShapeshiftForms(), stanceBar.maxButtons)
+    for i = 1, numForms do
+        local button = stanceBar.buttons[i]
+        local texture = GetShapeshiftFormInfo(i)
+        button.cooldown:SetShown(texture ~= nil)
+
+        local start, duration, enable = GetShapeshiftFormCooldown(i)
+        CooldownFrame_Set(button.cooldown, start, duration, enable)
     end
 end
 
@@ -71,25 +71,16 @@ end
 -- update buttons
 ---------------------------------------------------------------------
 local function UpdateStanceButtonStatus()
-    local num = GetNumShapeshiftForms()
+    local num = min(GetNumShapeshiftForms(), stanceBar.maxButtons)
     for i, b in next, stanceBar.buttons do
         if i <= num then
-            local icon, active, castable, spellID = GetShapeshiftFormInfo(i)
+            local icon, isActive, isCastable, spellID = GetShapeshiftFormInfo(i)
+            b.spellID = spellID
             b.icon:SetTexture(icon)
-            b.icon:SetVertexColor(AF.GetColorRGB(castable and "white" or "disabled"))
-
-            -- ElvUI
-            -- b.icon:SetTexture(C_Spell.GetSpellTexture(spellID))
-            -- b:SetChecked(GetShapeshiftForm() ~= 0) -- not checked if no stance
-            -- if active then
-            --     if num == 1 then
-            --         b.checkedTexture:SetColorTexture(AF.GetColorRGB("white", 0.25))
-            --     else
-            --         b.checkedTexture:SetColorTexture(AF.GetColorRGB("black", 0))
-            --     end
-            -- else
-            --     b.checkedTexture:SetColorTexture(AF.GetColorRGB("black", 0.6))
-            -- end
+            b.icon:SetVertexColor(AF.GetColorRGB(isCastable and "white" or "disabled"))
+            b:SetChecked(isActive)
+        else
+            b:SetChecked(false)
         end
     end
 end
@@ -101,13 +92,15 @@ local function UpdateStanceButtons()
     end
     AB:UnregisterEvent("PLAYER_REGEN_ENABLED", UpdateStanceButtons)
 
-    local num = GetNumShapeshiftForms()
+    local num = min(GetNumShapeshiftForms(), stanceBar.maxButtons)
 
     for i, b in next, stanceBar.buttons do
         if i <= num then
-            stanceBar.buttons[i]:Show()
+            b:SetAttribute("statehidden", nil)
+            b:Show()
         else
-            stanceBar.buttons[i]:Hide()
+            b:SetAttribute("statehidden", true)
+            b:Hide()
         end
     end
 
@@ -132,6 +125,10 @@ local function UpdateStanceBar(_, module, which)
     local enabled = AB.config.general.enabled
     local config = AB.config.barConfig.stancebar
 
+    if not stanceBar then
+        CreateStanceBar()
+    end
+
     if not (enabled and config.enabled) then
         AB:UnregisterEvent("UPDATE_SHAPESHIFT_FORMS")
         AB:UnregisterEvent("UPDATE_SHAPESHIFT_FORM")
@@ -144,20 +141,17 @@ local function UpdateStanceBar(_, module, which)
             AB:UnregisterEvent("PET_BATTLE_OPENING_DONE", RemoveBindings)
         end
 
-        if stanceBar then
-            stanceBar.enabled = false
-            ClearOverrideBindings(stanceBar)
-            UnregisterStateDriver(stanceBar, "visibility")
-            stanceBar:Hide()
-        end
+        stanceBar.enabled = false
+        ClearOverrideBindings(stanceBar)
+        UnregisterStateDriver(stanceBar, "visibility")
+        stanceBar:Hide()
         return
     end
 
-    if not stanceBar then
-        CreateStanceBar()
-    end
-
     stanceBar.enabled = true
+    config.num = AF.Clamp(config.num, 1, 10)
+    config.buttonsPerLine = AF.Clamp(config.buttonsPerLine, 1, config.num)
+    stanceBar.maxButtons = config.num
 
     -- mover
     AF.UpdateMoverSave(stanceBar, config.position)
@@ -193,9 +187,6 @@ local function UpdateStanceBar(_, module, which)
         -- tooltip
         b.tooltip = AB.config.general.tooltip
     end
-
-    config.num = AF.Clamp(config.num, 1, 10)
-    config.buttonsPerLine = AF.Clamp(config.buttonsPerLine, 1, config.num)
 
     -- load config
     AB.ReArrange(stanceBar, config.width, config.height, config.spacingX, config.spacingY, config.buttonsPerLine, config.num, config.orientation)

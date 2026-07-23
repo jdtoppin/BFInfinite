@@ -5,6 +5,9 @@ local AB = BFI.modules.ActionBars
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
+local LEGACY_STANCE_VISIBILITY = "[vehicleui][petbattle][overridebar] hide; show"
+local STANCE_VISIBILITY = "[vehicleui][petbattle][overridebar][possessbar] hide; show"
+
 local defaults = {
     general = {
         enabled = true,
@@ -145,6 +148,8 @@ do
             t.visibility = "[petbattle] hide; show"
         elseif bar == "petbar" then
             t.visibility = "[petbattle] hide; [novehicleui,pet,nooverridebar,nopossessbar] show; hide"
+        elseif bar == "stancebar" then
+            t.visibility = STANCE_VISIBILITY
         else
             t.visibility = "[vehicleui][petbattle][overridebar] hide; show"
         end
@@ -220,6 +225,11 @@ AF.RegisterCallback("BFI_UpdateProfile", function(_, t)
         t["actionBars"] = AF.Copy(defaults)
     end
     AB.config = t["actionBars"]
+
+    local stanceBarConfig = AB.config.barConfig.stancebar
+    if stanceBarConfig.visibility == LEGACY_STANCE_VISIBILITY then
+        stanceBarConfig.visibility = STANCE_VISIBILITY
+    end
 end)
 
 function AB.GetDefaults()
