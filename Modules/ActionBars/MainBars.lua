@@ -349,9 +349,33 @@ local function UpdateBar(bar, general, specific)
 end
 
 local init
-local function UpdateMainBars(_, module, which)
+local updatePending
+local pendingWhich
+local UpdateMainBars
+
+local function RetryMainBarsUpdate()
+    AB:UnregisterEvent("PLAYER_REGEN_ENABLED", RetryMainBarsUpdate)
+
+    local which = pendingWhich
+    updatePending = nil
+    pendingWhich = nil
+    UpdateMainBars(nil, "actionBars", which)
+end
+
+UpdateMainBars = function(_, module, which)
     if module and module ~= "actionBars" then return end
     if which and not (which == "main" or which:find("^bar") or which:find("^classbar")) then return end
+
+    if InCombatLockdown() then
+        if not updatePending then
+            pendingWhich = which
+        elseif pendingWhich ~= which then
+            pendingWhich = nil
+        end
+        updatePending = true
+        AB:RegisterEvent("PLAYER_REGEN_ENABLED", RetryMainBarsUpdate)
+        return
+    end
 
     if not AB.config.general.enabled then
         LAB.UnregisterCallback(AB, "OnFlyoutSpells")
