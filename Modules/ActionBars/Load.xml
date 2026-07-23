@@ -4,8 +4,8 @@
     <Script file="Common.lua"/>
     <Script file="MainBars.lua"/>
     <Script file="StanceBar.lua"/>
-    <!-- Load the remaining components in their own compatibility tranches.
     <Script file="PetBar.lua"/>
+    <!-- Load the remaining components in their own compatibility tranches.
     <Script file="VehicleExitButton.lua"/>
     <Script file="ExtraAbilityButtons.lua"/>
     <Script file="KeybindMode.lua"/>
