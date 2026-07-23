@@ -9,7 +9,6 @@ local GameTooltip = _G.GameTooltip
 local MinimapCluster = _G.MinimapCluster
 local Minimap = _G.Minimap
 local ExpansionButton = _G.ExpansionLandingPageMinimapButton
-local GameTimeFrame = _G.GameTimeFrame
 local minimapContainer
 
 local GameTime_GetTime = GameTime_GetTime
@@ -41,7 +40,7 @@ local UnitClassBase = AF.UnitClassBase
 ---------------------------------------------------------------------
 -- expansion button
 ---------------------------------------------------------------------
-local function UpdateExpansionButton(_, forceUpdateButton)
+local function ApplyExpansionButtonConfig()
     local config = M.config.minimap.expansionButton
     if not config.enabled then
         ExpansionButton:Hide()
@@ -49,13 +48,19 @@ local function UpdateExpansionButton(_, forceUpdateButton)
     end
 
     ExpansionButton:SetParent(Minimap)
-    if forceUpdateButton then
-        ExpansionButton:RefreshButton(true)
-    end
 
     AF.ClearPoints(ExpansionButton)
     AF.LoadWidgetPosition(ExpansionButton, config.position, minimapContainer)
-    AF.SetSize(ExpansionButton, config.size, config.size)
+
+    local width = ExpansionButton:GetWidth()
+    if width > 0 then
+        ExpansionButton:SetScale(config.size / width)
+    end
+end
+
+local function UpdateExpansionButton()
+    ExpansionButton:RefreshButton(true)
+    ApplyExpansionButtonConfig()
 end
 
 ---------------------------------------------------------------------
@@ -585,7 +590,7 @@ local function CreateInstanceDifficulty()
 
             if self.isGuildGroup then
                 local guildName = GetGuildInfo("player")
-                local _, numGuildPresent, numGuildRequired, xpMultiplier = InGuildParty()
+                local _, _, numGuildRequired, xpMultiplier = InGuildParty()
 
                 GameTooltip_AddBlankLineToTooltip(GameTooltip)
                 GameTooltip_AddColoredLine(GameTooltip, GUILD_GROUP, GREEN_FONT_COLOR)
@@ -911,7 +916,8 @@ local function InitMinimap()
     end
 
     -- expansion minimap button
-    hooksecurefunc(ExpansionButton, "UpdateIcon", UpdateExpansionButton)
+    hooksecurefunc(ExpansionButton, "UpdateIcon", ApplyExpansionButtonConfig)
+    ExpansionButton:HookScript("OnShow", ApplyExpansionButtonConfig)
 
     -- Minimap:SetArchBlobRingAlpha(0)
     -- Minimap:SetArchBlobRingScalar(0)
@@ -957,7 +963,7 @@ local function UpdateMinimap(_, module, which)
     Minimap:SetZoom(0)
 
     -- expansion button
-    UpdateExpansionButton(nil, true)
+    UpdateExpansionButton()
 
     -- tracking button
     UpdateMinimapWidgets(MinimapCluster.Tracking, config.trackingButton, true)
