@@ -25,7 +25,7 @@ local list = {
     "SEPARATOR",
     "unitFrames",
     "-nameplates",
-    "-actionBars",
+    "actionBars",
     "-buffsDebuffs",
     "-tooltip",
     "uiWidgets",
