@@ -61,8 +61,9 @@ local function CreateOverlay(button, commandName)
     overlay:RegisterForClicks("AnyUp")
     overlay:EnableMouse(true)
 
-    -- Keep the click-blocking native overlay without Blizzard's rounded action-button art.
+    -- Replace Blizzard's rounded action-button art with a BFI binding target.
     overlay.QuickKeybindHighlightTexture:Hide()
+    AF.ApplyDefaultBackdropWithColors(overlay, AF.GetColorTable("background", 0.65), "border")
 
     overlay.bindingText = AF.CreateFontString(overlay, nil, "white")
     overlay.bindingText:SetPoint("CENTER")
@@ -71,6 +72,12 @@ local function CreateOverlay(button, commandName)
     overlay:HookScript("OnShow", function()
         HideButtonText(overlay)
         UpdateBindingText(overlay)
+    end)
+    overlay:HookScript("OnEnter", function()
+        overlay:SetBackdropBorderColor(AF.GetColorRGB("BFI"))
+    end)
+    overlay:HookScript("OnLeave", function()
+        overlay:SetBackdropBorderColor(AF.GetColorRGB("border"))
     end)
     overlay:HookScript("OnHide", function()
         RestoreButtonText(overlay)
@@ -161,6 +168,19 @@ local function SkinQuickKeybind(frame)
     S.StyleCheckButton(frame.UseCharacterBindingsButton, 15)
 end
 
+local function HideExtraActionHighlight(button)
+    button.QuickKeybindHighlightTexture:Hide()
+end
+
+local function SuppressExtraActionHighlight()
+    local button = _G.ExtraActionButton1
+    if not button or button._BFIQuickKeybindHooked then return end
+
+    button._BFIQuickKeybindHooked = true
+    HideExtraActionHighlight(button)
+    hooksecurefunc(button, "DoModeChange", HideExtraActionHighlight)
+end
+
 local function EnsureQuickKeybind()
     if not _G.QuickKeybindFrame then
         C_AddOns.LoadAddOn(QUICK_KEYBIND_ADDON)
@@ -174,6 +194,7 @@ local function EnsureQuickKeybind()
     if not quickKeybindHooked then
         quickKeybindHooked = true
         SkinQuickKeybind(frame)
+        SuppressExtraActionHighlight()
         frame:HookScript("OnShow", OnQuickKeybindShow)
         frame:HookScript("OnHide", OnQuickKeybindHide)
     end
