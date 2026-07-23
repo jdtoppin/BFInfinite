@@ -374,8 +374,8 @@ function AB.CreateStanceButton(parent, id)
     local b = CreateFrame("CheckButton", "BFI_StanceBarButton" .. id, parent, "StanceButtonTemplate")
 
     b:SetID(id)
+    b.index = id
     AB.StylizeButton(b)
-    AB.CreateKeybindOverlay(b, "SHAPESHIFTBUTTON" .. id)
 
     b.header = parent
     b:HookScript("OnEnter", AB.ActionBar_OnEnter)

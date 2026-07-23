@@ -3,8 +3,8 @@
     <Script file="Defaults.lua"/>
     <Script file="Common.lua"/>
     <Script file="MainBars.lua"/>
-    <!-- Load the remaining components in their own compatibility tranches.
     <Script file="StanceBar.lua"/>
+    <!-- Load the remaining components in their own compatibility tranches.
     <Script file="PetBar.lua"/>
     <Script file="VehicleExitButton.lua"/>
     <Script file="ExtraAbilityButtons.lua"/>
