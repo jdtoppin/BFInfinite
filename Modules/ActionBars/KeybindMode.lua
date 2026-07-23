@@ -8,6 +8,7 @@ local S = BFI.modules.Style
 local AF = _G.AbstractFramework
 
 local QUICK_KEYBIND_ADDON = "Blizzard_QuickKeybind"
+local GetBindingKey = GetBindingKey
 
 local registeredButtons = {}
 local overlays = {}
@@ -22,10 +23,32 @@ keybindOverlayParent:Hide()
 ---------------------------------------------------------------------
 -- overlays
 ---------------------------------------------------------------------
+local function UpdateBindingText(overlay)
+    local key1, key2 = GetBindingKey(overlay.commandName)
+    overlay.bindingText:SetFormattedText("%s\n%s", AB.GetHotkey(key1), AB.GetHotkey(key2))
+end
+
+local function HideButtonText(overlay)
+    for _, region in pairs({overlay.button.HotKey, overlay.button.Count, overlay.button.Name}) do
+        if region then
+            overlay.regionAlphas[region] = region:GetAlpha()
+            region:SetAlpha(0)
+        end
+    end
+end
+
+local function RestoreButtonText(overlay)
+    for region, alpha in pairs(overlay.regionAlphas) do
+        region:SetAlpha(alpha)
+    end
+    wipe(overlay.regionAlphas)
+end
+
 local function UpdateOverlay(overlay)
     local button = overlay.button
     local shown = keybindModeActive and button:IsShown() and not button:GetAttribute("statehidden")
 
+    UpdateBindingText(overlay)
     overlay:SetShown(shown)
 end
 
@@ -33,12 +56,25 @@ local function CreateOverlay(button, commandName)
     local overlay = CreateFrame("Button", nil, keybindOverlayParent, "QuickKeybindButtonTemplate")
     overlay.button = button
     overlay.commandName = commandName
+    overlay.regionAlphas = {}
     overlay:SetAllPoints(button)
     overlay:RegisterForClicks("AnyUp")
     overlay:EnableMouse(true)
 
     -- Keep the click-blocking native overlay without Blizzard's rounded action-button art.
     overlay.QuickKeybindHighlightTexture:Hide()
+
+    overlay.bindingText = AF.CreateFontString(overlay, nil, "white")
+    overlay.bindingText:SetPoint("CENTER")
+    overlay.bindingText:SetJustifyH("CENTER")
+
+    overlay:HookScript("OnShow", function()
+        HideButtonText(overlay)
+        UpdateBindingText(overlay)
+    end)
+    overlay:HookScript("OnHide", function()
+        RestoreButtonText(overlay)
+    end)
 
     button:HookScript("OnShow", function()
         UpdateOverlay(overlay)
@@ -68,12 +104,19 @@ function AB.CreateKeybindOverlay(button, commandName)
     local overlay = overlays[button]
     if overlay then
         overlay.commandName = commandName
+        UpdateBindingText(overlay)
     end
 end
 
 ---------------------------------------------------------------------
 -- Blizzard Quick Keybind integration
 ---------------------------------------------------------------------
+local function UPDATE_BINDINGS()
+    for _, overlay in pairs(overlays) do
+        UpdateBindingText(overlay)
+    end
+end
+
 local function OnQuickKeybindShow()
     keybindModeActive = true
     CreateOverlays()
@@ -82,10 +125,13 @@ local function OnQuickKeybindShow()
     for _, overlay in pairs(overlays) do
         UpdateOverlay(overlay)
     end
+
+    AB:RegisterEvent("UPDATE_BINDINGS", UPDATE_BINDINGS)
 end
 
 local function OnQuickKeybindHide()
     keybindModeActive = false
+    AB:UnregisterEvent("UPDATE_BINDINGS", UPDATE_BINDINGS)
     keybindOverlayParent:Hide()
 end
 
