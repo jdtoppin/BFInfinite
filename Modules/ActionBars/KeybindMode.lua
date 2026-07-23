@@ -1,7 +1,9 @@
 ---@type BFI
 local BFI = select(2, ...)
+local L = BFI.L
 ---@class ActionBars
 local AB = BFI.modules.ActionBars
+local S = BFI.modules.Style
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
@@ -25,9 +27,6 @@ local function UpdateOverlay(overlay)
     local shown = keybindModeActive and button:IsShown() and not button:GetAttribute("statehidden")
 
     overlay:SetShown(shown)
-    if shown then
-        overlay:DoModeChange(true)
-    end
 end
 
 local function CreateOverlay(button, commandName)
@@ -38,8 +37,8 @@ local function CreateOverlay(button, commandName)
     overlay:RegisterForClicks("AnyUp")
     overlay:EnableMouse(true)
 
-    overlay.QuickKeybindHighlightTexture:ClearAllPoints()
-    overlay.QuickKeybindHighlightTexture:SetAllPoints(overlay)
+    -- Keep the click-blocking native overlay without Blizzard's rounded action-button art.
+    overlay.QuickKeybindHighlightTexture:Hide()
 
     button:HookScript("OnShow", function()
         UpdateOverlay(overlay)
@@ -87,12 +86,33 @@ end
 
 local function OnQuickKeybindHide()
     keybindModeActive = false
-
-    for _, overlay in pairs(overlays) do
-        overlay:DoModeChange(false)
-    end
-
     keybindOverlayParent:Hide()
+end
+
+local function SkinQuickKeybind(frame)
+    if frame._BFIKeybindStyled then return end
+    frame._BFIKeybindStyled = true
+
+    S.RemoveTextures(frame.BG, true)
+    S.RemoveTextures(frame.Header, true)
+
+    S.CreateBackdrop(frame)
+    AF.ShowNormalGlow(frame, "shadow", 2)
+
+    S.CreateBackdrop(frame.Header)
+    AF.ClearPoints(frame.Header.BFIBackdrop)
+    AF.SetPoint(frame.Header.BFIBackdrop, "BOTTOMLEFT", frame, "TOPLEFT", 0, -1)
+    AF.SetPoint(frame.Header.BFIBackdrop, "BOTTOMRIGHT", frame, "TOPRIGHT", 0, -1)
+    AF.SetHeight(frame.Header.BFIBackdrop, 20)
+    frame.Header.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("header"))
+
+    frame.Header.Text:SetText("BFI " .. L["Keybind Mode"])
+    frame.Header.Text:SetTextColor(AF.GetColorRGB("BFI"))
+
+    S.StyleButton(frame.OkayButton, "BFI")
+    S.StyleButton(frame.CancelButton)
+    S.StyleButton(frame.DefaultsButton)
+    S.StyleCheckButton(frame.UseCharacterBindingsButton, 15)
 end
 
 local function EnsureQuickKeybind()
@@ -107,6 +127,7 @@ local function EnsureQuickKeybind()
 
     if not quickKeybindHooked then
         quickKeybindHooked = true
+        SkinQuickKeybind(frame)
         frame:HookScript("OnShow", OnQuickKeybindShow)
         frame:HookScript("OnHide", OnQuickKeybindHide)
     end
