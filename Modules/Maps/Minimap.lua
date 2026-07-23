@@ -9,7 +9,6 @@ local GameTooltip = _G.GameTooltip
 local MinimapCluster = _G.MinimapCluster
 local Minimap = _G.Minimap
 local ExpansionButton = _G.ExpansionLandingPageMinimapButton
-local GameTimeFrame = _G.GameTimeFrame
 local minimapContainer
 
 local GameTime_GetTime = GameTime_GetTime
@@ -591,7 +590,7 @@ local function CreateInstanceDifficulty()
 
             if self.isGuildGroup then
                 local guildName = GetGuildInfo("player")
-                local _, numGuildPresent, numGuildRequired, xpMultiplier = InGuildParty()
+                local _, _, numGuildRequired, xpMultiplier = InGuildParty()
 
                 GameTooltip_AddBlankLineToTooltip(GameTooltip)
                 GameTooltip_AddColoredLine(GameTooltip, GUILD_GROUP, GREEN_FONT_COLOR)
