@@ -264,6 +264,7 @@ local function UpdateButton(bar, config)
         -- bind
         bar.buttonConfig.keyBoundTarget = format(BINDING_MAPPINGS[bar.name], i)
         b.keyBoundTarget = bar.buttonConfig.keyBoundTarget
+        AB.CreateKeybindOverlay(b, b.keyBoundTarget)
 
         -- lock
         b:SetAttribute("buttonlock", shared.lock)

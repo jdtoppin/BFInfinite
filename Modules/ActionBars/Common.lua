@@ -384,6 +384,7 @@ function AB.CreateStanceButton(parent, id)
     b.checkedTexture:SetBlendMode("BLEND")
     b.HotKey = AF.CreateFontString(b)
     b.GetHotKeys = StanceButton_GetHotKeys
+    AB.CreateKeybindOverlay(b, ("SHAPESHIFTBUTTON%d"):format(id))
 
     AF.AddToPixelUpdater_Auto(b, nil, true)
 
@@ -412,6 +413,7 @@ function AB.CreatePetButton(parent, id)
 
     -- b.HotKey = AF.CreateFontString(b)
     b.GetHotKeys = PetButton_GetHotKeys
+    AB.CreateKeybindOverlay(b, ("BONUSACTIONBUTTON%d"):format(id))
 
     AF.AddToPixelUpdater_Auto(b, nil, true)
 
