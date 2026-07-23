@@ -288,62 +288,48 @@ local function CreateGeneralOptionsPane()
     AF.SetPoint(presetsGrid, "TOPLEFT", 0, -50)
     AF.SetPoint(presetsGrid, "BOTTOMRIGHT")
 
+    local previewMaxValue = 100
+    local previewAbsorbValue = 27
+
     local setters = {
         healthBar = function(self)
-            local healthMax = UnitHealthMax("player")
-            self:SetBarMinMaxValues(0, healthMax)
-            self:SetBarValue(healthMax)
+            self:SetBarMinMaxValues(0, previewMaxValue)
 
-            self.shield:Show()
-            self.shield:SetWidth(0.27 * self:GetBarWidth())
-            self.shield:ClearAllPoints()
-            if self.shieldReverseFill then
-                self.shield:SetPoint("TOPRIGHT", self.bg)
-                self.shield:SetPoint("BOTTOMRIGHT", self.bg)
+            if self.damageAbsorbEnabled then
+                self:SetBarValue(previewMaxValue - previewAbsorbValue)
+                self.damageAbsorb:SetMinMaxValues(0, previewAbsorbValue)
+                self.damageAbsorb:SetValue(previewAbsorbValue)
+                self.damageAbsorb:Show()
             else
-                self.shield:SetPoint("TOPLEFT", self.fill.mask, "TOPRIGHT")
-                self.shield:SetPoint("BOTTOMLEFT", self.fill.mask, "BOTTOMRIGHT")
+                self:SetBarValue(previewMaxValue)
+                self.damageAbsorb:Hide()
             end
 
-            self.overshieldGlow:Hide()
-            self.overshieldGlowR:Hide()
-            if self.overshieldGlowEnabled then
-                if self.shieldReverseFill then
-                    self.overshieldGlowR:Show()
-                else
-                    self.overshieldGlow:Show()
-                end
-            end
-            self.fullOvershieldGlowR:Hide()
-
+            self.damageAbsorbExcessGlow:Hide()
             self.healAbsorb:Hide()
-            self.overabsorbGlow:Hide()
+            self.healAbsorbExcessGlow:Hide()
             self.healPrediction:Hide()
             self.dispelHighlight:Hide()
         end,
 
         healthText = function(self)
-            local healthMax = UnitHealthMax("player")
-            local totalAbsorbs = healthMax * 0.27
             self:SetFormattedText("%s%s%s",
-                self.GetNumeric(healthMax, totalAbsorbs),
+                self.GetNumeric(previewMaxValue, previewAbsorbValue),
                 self.delimiter,
-                self.GetPercent(healthMax, healthMax, totalAbsorbs)
+                self.GetPercent(previewMaxValue, previewMaxValue, previewAbsorbValue)
             )
         end,
 
         powerBar = function(self)
-            local powerMax = UnitPowerMax("player")
-            self:SetBarMinMaxValues(0, powerMax)
-            self:SetBarValue(powerMax)
+            self:SetBarMinMaxValues(0, previewMaxValue)
+            self:SetBarValue(previewMaxValue)
         end,
 
         powerText = function(self)
-            local powerMax = UnitPowerMax("player")
             self:SetFormattedText("%s%s%s",
-                self.GetNumeric(powerMax),
+                self.GetNumeric(previewMaxValue),
                 self.delimiter,
-                self.GetPercent(powerMax, powerMax)
+                self.GetPercent(previewMaxValue, previewMaxValue)
             )
         end,
 
