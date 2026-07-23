@@ -109,6 +109,48 @@ function F.FixModule(profileTbl, moduleKey)
 end
 
 ---------------------------------------------------------------------
+-- aura filters
+---------------------------------------------------------------------
+local function AddAuraMatchFilter(filters, seen, baseFilter, suffix)
+    local filter = baseFilter .. "|" .. suffix
+    if not seen[filter] then
+        seen[filter] = true
+        filters[#filters + 1] = filter
+    end
+end
+
+function F.GetSecretSafeAuraMatchFilters(baseFilter, config)
+    if not config then return nil end
+
+    local filters = {}
+    local seen = {}
+
+    if config.castByMe then
+        AddAuraMatchFilter(filters, seen, baseFilter, "PLAYER")
+    end
+
+    -- RAID_IN_COMBAT is Blizzard's curated replacement for encounter auras
+    -- whose spell IDs or boss-aura flags cannot be inspected in Lua.
+    if config.isBossAura or config.castByNPC then
+        AddAuraMatchFilter(filters, seen, baseFilter, "RAID_IN_COMBAT")
+    end
+
+    if config.dispellable or config.canBeDispelled then
+        AddAuraMatchFilter(filters, seen, baseFilter, "RAID_PLAYER_DISPELLABLE")
+    end
+
+    -- External/source-specific spell matching is unavailable for restricted
+    -- auras. Blizzard's curated defensive filters retain the combat-useful
+    -- subset without reading spell or source fields.
+    if baseFilter == "HELPFUL" and (config.castByOthers or config.castByUnit or config.castByNPC) then
+        AddAuraMatchFilter(filters, seen, baseFilter, "BIG_DEFENSIVE")
+        AddAuraMatchFilter(filters, seen, baseFilter, "EXTERNAL_DEFENSIVE")
+    end
+
+    return filters
+end
+
+---------------------------------------------------------------------
 -- hide frame
 ---------------------------------------------------------------------
 function F.Hide(region)

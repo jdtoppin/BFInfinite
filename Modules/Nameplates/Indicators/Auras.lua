@@ -1,7 +1,7 @@
 ---@type BFI
 local BFI = select(2, ...)
 local NP = BFI.modules.Nameplates
-local A = BFI.modules.Auras
+local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
@@ -262,7 +262,7 @@ local function Auras_LoadConfig(self, config)
     if self.auraFilter == "HARMFUL|CROWD_CONTROL" then
         self:SetMatchFilters(nil)
     else
-        self:SetMatchFilters(A.GetSecretSafeMatchFilters(self.auraFilter, config.filters))
+        self:SetMatchFilters(F.GetSecretSafeAuraMatchFilters(self.auraFilter, config.filters))
     end
 
     -- Arbitrary spell blacklists and priorities remain unavailable for

@@ -1,7 +1,7 @@
 ---@type BFI
 local BFI = select(2, ...)
 local UF = BFI.modules.UnitFrames
-local A = BFI.modules.Auras
+local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 local UnitCanAttack = UnitCanAttack
@@ -319,7 +319,7 @@ local function Auras_LoadConfig(self, config)
     Auras_SetupAuras(self, config, false)
     Auras_UpdateSize(self, 0)
 
-    self:SetMatchFilters(A.GetSecretSafeMatchFilters(self.auraFilter, config.filters))
+    self:SetMatchFilters(F.GetSecretSafeAuraMatchFilters(self.auraFilter, config.filters))
 
     self.subFrameEnabled = false
     if self.subFrame and config.subFrame then
