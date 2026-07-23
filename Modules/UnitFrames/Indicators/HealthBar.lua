@@ -101,9 +101,6 @@ local function HealthBar_EnableConfigMode(self, isRepeatCall)
     self.Enable = HealthBar_EnableConfigMode
     self.Update = AF.noop
 
-    UnitGetTotalAbsorbs = UF.CFG_UnitGetTotalAbsorbs
-    UnitGetTotalHealAbsorbs = UF.CFG_UnitGetTotalHealAbsorbs
-
     self.health = UF.CFG_UnitHealth()
     self.healthMax = UF.CFG_UnitHealthMax()
     self.healthPercent = self.health / self.healthMax
@@ -124,9 +121,6 @@ end
 local function HealthBar_DisableConfigMode(self)
     self.Enable = HealthBar_Enable
     self.Update = HealthBar_Update
-
-    UnitGetTotalAbsorbs = UF.UnitGetTotalAbsorbs
-    UnitGetTotalHealAbsorbs = UF.UnitGetTotalHealAbsorbs
 end
 
 ---------------------------------------------------------------------

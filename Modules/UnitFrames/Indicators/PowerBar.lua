@@ -54,10 +54,6 @@ local function PowerBar_EnableConfigMode(self)
     self.Enable = PowerBar_EnableConfigMode
     self.Update = AF.noop
 
-    UnitPower = UF.CFG_UnitPower
-    UnitPowerMax = UF.CFG_UnitPowerMax
-    -- UnitHasVehicleUI = UF.CFG_UnitHasVehicleUI
-
     self:SetUnit(self.root.effectiveUnit)
     PowerBar_Update(self)
 
@@ -67,10 +63,6 @@ end
 local function PowerBar_DisableConfigMode(self)
     self.Enable = PowerBar_Enable
     self.Update = PowerBar_Update
-
-    UnitPower = UF.UnitPower
-    UnitPowerMax = UF.UnitPowerMax
-    -- UnitHasVehicleUI = UF.UnitHasVehicleUI
 end
 
 ---------------------------------------------------------------------
