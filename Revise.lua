@@ -14,8 +14,11 @@ local commonModuleClasses = {
 
 local function HydrateCommonConfig(config)
     for _, moduleClassName in next, commonModuleClasses do
-        local moduleKey = F.GetModuleKey(moduleClassName)
-        config[moduleKey] = F.MergeMissingDefaults(config[moduleKey], F.GetModuleDefaults(moduleClassName))
+        local defaults = F.GetModuleDefaults(moduleClassName)
+        if defaults then
+            local moduleKey = F.GetModuleKey(moduleClassName)
+            config[moduleKey] = F.MergeMissingDefaults(config[moduleKey], defaults)
+        end
     end
 end
 

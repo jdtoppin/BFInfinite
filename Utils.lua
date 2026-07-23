@@ -81,6 +81,8 @@ function F.GetModuleDefaults(moduleClassName)
 end
 
 function F.MergeMissingDefaults(config, defaults)
+    assert(type(defaults) == "table", "MergeMissingDefaults: defaults must be a table")
+
     if type(config) ~= "table" then
         config = {}
     end
@@ -100,7 +102,10 @@ function F.FixModule(profileTbl, moduleKey)
     assert(not AF.IsBlank(moduleKey), "Fix: module is required")
     local M = BFI.modules[F.GetModuleClassName(moduleKey)]
     assert(M, "Fix: module not found: " .. moduleKey)
+    if not M.GetDefaults then return false end
+
     profileTbl[moduleKey] = F.MergeMissingDefaults(profileTbl[moduleKey], M.GetDefaults())
+    return true
 end
 
 ---------------------------------------------------------------------
