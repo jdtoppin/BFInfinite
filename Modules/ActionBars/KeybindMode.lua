@@ -159,6 +159,8 @@ local function SkinQuickKeybind(frame)
     AF.SetHeight(frame.Header.BFIBackdrop, 20)
     frame.Header.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("header"))
 
+    AF.ClearPoints(frame.Header.Text)
+    AF.SetPoint(frame.Header.Text, "CENTER", frame.Header.BFIBackdrop)
     frame.Header.Text:SetText("BFI " .. L["Keybind Mode"])
     frame.Header.Text:SetTextColor(AF.GetColorRGB("BFI"))
 
