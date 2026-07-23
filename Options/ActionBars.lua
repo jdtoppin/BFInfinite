@@ -49,7 +49,6 @@ local function CreateContentPane()
     local items = {
         {text = L["General"], value = "general"},
         {text = _G.ASSISTED_COMBAT_LABEL, value = "assistant", enabled = true},
-        {text = L["Cooldowns"], value = "cooldowns"},
         {text = L["Action Bar %d"]:format(1), value = "bar1", page = 1},
         {text = L["Action Bar %d"]:format(2), value = "bar2", page = 6},
         {text = L["Action Bar %d"]:format(3), value = "bar3", page = 5},
@@ -63,10 +62,6 @@ local function CreateContentPane()
         {text = L["Class Bar %d"]:format(2), value = "classbar2", page = 8},
         {text = L["Class Bar %d"]:format(3), value = "classbar3", page = 9},
         {text = L["Class Bar %d"]:format(4), value = "classbar4", page = 10},
-        {text = L["Pet Bar"], value = "petbar"},
-        {text = L["Stance Bar"], value = "stancebar"},
-        {text = _G.HUD_EDIT_MODE_VEHICLE_LEAVE_BUTTON_LABEL, value = "vehicle"},
-        {text = L["Extra Ability Buttons"], value = "extra"},
     }
 
     local widgets = {}
@@ -83,20 +78,9 @@ local function CreateContentPane()
             button.setting = "general"
             button.cfg = AB.config.general
             button.sharedCfg = AB.config.sharedButtonConfig
-        elseif item.value == "cooldowns" then
-            -- TODO:
-            button.setting = "cooldowns"
-            button.cfg = {}
-            button:SetEnabled(false)
         elseif item.value == "assistant" then
             button.setting = "assistant"
             button.cfg = AB.config.assistant
-        elseif item.value == "vehicle" then
-            button.setting = "vehicle"
-            button.cfg = AB.config.vehicleExitButton
-        elseif item.value == "extra" then
-            button.setting = "extra"
-            button.cfg = AB.config.extraAbilityButtons
         else
             button.setting = "bar"
             button.target = AB.bars[item.value]
