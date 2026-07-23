@@ -238,6 +238,11 @@ function AB.ResetBar(bar)
     AF.Merge(AB.config.barConfig[bar], defaults.barConfig[bar])
 end
 
+function AB.ResetAssistant()
+    wipe(AB.config.assistant)
+    AF.Merge(AB.config.assistant, defaults.assistant)
+end
+
 function AB.ResetVehicle()
     wipe(AB.config.vehicleExitButton)
     AF.Merge(AB.config.vehicleExitButton, defaults.vehicleExitButton)
@@ -258,6 +263,7 @@ end
 
 function AB.ResetToDefaults()
     AB.ResetGeneralAndShared()
+    AB.ResetAssistant()
     AB.ResetVehicle()
     AB.ResetExtra()
 
