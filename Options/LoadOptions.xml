@@ -6,7 +6,9 @@
     <Script file="Enhancements_Options.lua"/>
     <Script file="Enhancements.lua"/>
     <Script file="Colors.lua"/>
-    <Script file="Auras.lua"/>
+    <!-- Global spell-ID aura lists are disabled until they have a verified
+         secret-safe runtime consumer. -->
+    <!-- <Script file="Auras.lua"/> -->
     <Script file="UnitFrames_Options.lua"/>
     <Script file="UnitFrames.lua"/>
     <Script file="ActionBars_Options.lua"/>
