@@ -12,9 +12,9 @@ local UnregisterStateDriver = UnregisterStateDriver
 local SetModifiedClick = SetModifiedClick
 local SetOverrideBindingClick = SetOverrideBindingClick
 local ClearOverrideBindings = ClearOverrideBindings
-local GetVehicleBarIndex = GetVehicleBarIndex
-local GetTempShapeshiftBarIndex = GetTempShapeshiftBarIndex
-local GetOverrideBarIndex = GetOverrideBarIndex
+local GetVehicleBarIndex = C_ActionBar.GetVehicleBarIndex
+local GetTempShapeshiftBarIndex = C_ActionBar.GetTempShapeshiftBarIndex
+local GetOverrideBarIndex = C_ActionBar.GetOverrideBarIndex
 local UnitExists = UnitExists
 local VehicleExit = VehicleExit
 local PetDismiss = PetDismiss
@@ -117,6 +117,8 @@ local function CreateBar(name, id)
     AB.CreatePreviewRect(bar)
 
     -- page ------------------------------------------------------------------ --
+    -- Restricted snippets intentionally use the compatibility names exported
+    -- by Blizzard_RestrictedAddOnEnvironment; insecure code uses C_ActionBar.
     bar:SetAttribute("_onstate-page", [[
         if newstate == "possess" or newstate == "11" then
             if HasVehicleActionBar() then
