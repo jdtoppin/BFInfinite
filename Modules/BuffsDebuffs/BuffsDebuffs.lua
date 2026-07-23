@@ -8,8 +8,22 @@ local AF = _G.AbstractFramework
 
 local GetUnitAuraInstanceIDs = C_UnitAuras.GetUnitAuraInstanceIDs
 local GetWeaponEnchantInfo = GetWeaponEnchantInfo
+local InCombatLockdown = InCombatLockdown
 local mainHandSlot = GetInventorySlotInfo("MainHandSlot")
 local secondaryHandSlot = GetInventorySlotInfo("SecondaryHandSlot")
+
+-- Retail 12.0.7 loads the implementation and template together from
+-- Blizzard_RestrictedAddOnEnvironment/SecureGroupHeaders. Retail 12.1 only
+-- loads the replacement SecureAuraHeader files for Classic clients.
+local hasSecureAuraHeaderBackend = AF.isRetail
+    and type(_G.SecureAuraHeader_Update) == "function"
+    and type(_G.SecureAuraHeader_UpdateEventRegistrations) == "function"
+    and type(GetUnitAuraInstanceIDs) == "function"
+    and type(GetWeaponEnchantInfo) == "function"
+
+function BD.HasSecureAuraHeaderBackend()
+    return hasSecureAuraHeaderBackend
+end
 
 ---------------------------------------------------------------------
 -- header
@@ -35,7 +49,6 @@ local function CreateHeader(name, moverName, filter)
     ]])
 
     AF.CreateMover(header, "BFI: " .. L["UI Widgets"], moverName)
-    header:Show()
 
     return header
 end
@@ -258,6 +271,9 @@ local function GetAttributes(config)
 end
 
 local function SetupHeader(header, config)
+    -- Attribute changes update a visible secure header immediately. Configure
+    -- it while hidden so children are rebuilt once, from a complete state.
+    header:Hide()
     header.config = config
 
     header:SetAttribute("separateOwn", config.separateOwn)
@@ -265,6 +281,12 @@ local function SetupHeader(header, config)
     header:SetAttribute("sortDirection", config.sortDirection)
     header:SetAttribute("maxWraps", config.maxWraps)
     header:SetAttribute("wrapAfter", config.wrapAfter)
+    -- Blizzard applies maxAuraCount before its Lua TIME/NAME sort. Bound the
+    -- INDEX candidate set only; capping other modes would change their result.
+    header:SetAttribute(
+        "maxAuraCount",
+        config.sortMethod == "INDEX" and config.wrapAfter * config.maxWraps or nil
+    )
 
     local point, x, y, wrapX, wrapY, minWidth, minHeight = GetAttributes(config)
     header:SetAttribute("point", point)
@@ -289,8 +311,34 @@ end
 ---------------------------------------------------------------------
 -- update
 ---------------------------------------------------------------------
-local function UpdateBuffsDebuffs(_, module, which)
+local updatePending
+local pendingWhich
+local UpdateBuffsDebuffs
+
+local function RetryBuffsDebuffsUpdate()
+    BD:UnregisterEvent("PLAYER_REGEN_ENABLED", RetryBuffsDebuffsUpdate)
+
+    local which = pendingWhich
+    updatePending = nil
+    pendingWhich = nil
+    UpdateBuffsDebuffs(nil, "buffsDebuffs", which)
+end
+
+UpdateBuffsDebuffs = function(_, module, which)
     if module and module ~= "buffsDebuffs" then return end
+    if which and which ~= "buffs" and which ~= "debuffs" then return end
+    if not hasSecureAuraHeaderBackend then return end
+
+    if InCombatLockdown() then
+        if not updatePending then
+            pendingWhich = which
+        elseif pendingWhich ~= which then
+            pendingWhich = nil
+        end
+        updatePending = true
+        BD:RegisterEvent("PLAYER_REGEN_ENABLED", RetryBuffsDebuffsUpdate)
+        return
+    end
 
     -- buffs
     local config = BD.config.buffs
