@@ -33,11 +33,13 @@ local function AssignBindings()
     if InCombatLockdown() then return end
     ClearOverrideBindings(petBar)
 
-    for i, b in next, petBar.buttons do
+    for i = 1, petBar.maxButtons do
+        local b = petBar.buttons[i]
         b.HotKey:SetText("")
-        for _, key in next, {GetBindingKey("BONUSACTIONBUTTON"..i)} do
-            b.HotKey:SetText(AB.GetHotkey(key))
-            if key ~= "" then
+        local key1, key2 = GetBindingKey("BONUSACTIONBUTTON" .. i)
+        b.HotKey:SetText(AB.GetHotkey(key1))
+        for _, key in next, {key1, key2} do
+            if key and key ~= "" then
                 SetOverrideBindingClick(petBar, false, key, b:GetName())
             end
         end
@@ -53,35 +55,13 @@ local function RemoveBindings()
     ClearOverrideBindings(petBar)
 end
 
----------------------------------------------------------------------
--- update cooldown
----------------------------------------------------------------------
-local function SetTooltip(self)
-    GameTooltip:SetPetAction(self:GetID())
-end
-
-local function OnEnter(self)
-    SetTooltip(self)
-    self.UpdateTooltip = SetTooltip
-end
-
-local function OnLeave(self)
-    self.UpdateTooltip = nil
-end
-
--- local function OnCooldownDone(self)
---     self:GetParent().icon:SetDesaturated(false)
--- end
-
 local function UpdatePetCooldowns()
     for i, b in next, petBar.buttons do
-        local start, duration = GetPetActionCooldown(i)
-        b.cooldown:SetCooldown(start, duration)
-        -- b.icon:SetDesaturated(duration and duration > 1.5)
+        local start, duration, enable = GetPetActionCooldown(i)
+        CooldownFrame_Set(b.cooldown, start, duration, enable)
 
         if not GameTooltip:IsForbidden() and GameTooltip:GetOwner() == b then
-            -- GameTooltip:SetPetAction(b:GetID())
-            b:OnEnter()
+            b:OnEnter(b)
         end
     end
 end
@@ -89,8 +69,11 @@ end
 ---------------------------------------------------------------------
 -- update buttons
 ---------------------------------------------------------------------
-local function UpdatePetButtons(event, unit)
-    if (event == "UNIT_FLAGS" and unit ~= "pet") or (event == "UNIT_PET" and unit ~= "player") then return end
+local function UpdatePetButtons(_, event, unit)
+    if ((event == "UNIT_FLAGS" or event == "UNIT_AURA") and unit ~= "pet")
+        or (event == "UNIT_PET" and unit ~= "player") then
+        return
+    end
 
     local showGrid = AB.config.barConfig.petbar.buttonConfig.showGrid
 
@@ -145,14 +128,15 @@ local function UpdatePetButtons(event, unit)
             end
         end
 
-        if not PetHasActionBar() and texture and name ~= "PET_ACTION_FOLLOW" then
-            if b.StartFlash then b:StopFlash() end
-            b.icon:SetVertexColor(0.4, 0.4, 0.4)
-            b:SetChecked(false)
-        elseif GetPetActionSlotUsable(i) then
-            b.icon:SetVertexColor(1, 1, 1)
+        if texture then
+            if GetPetActionSlotUsable(i) then
+                b.icon:SetVertexColor(1, 1, 1)
+            else
+                b.icon:SetVertexColor(0.4, 0.4, 0.4)
+            end
+            b.icon:Show()
         else
-            b.icon:SetVertexColor(0.4, 0.4, 0.4)
+            b.icon:Hide()
         end
 
         if not name and not showGrid then
@@ -175,37 +159,42 @@ local function UpdatePetBar(_, module, which)
     local enabled = AB.config.general.enabled
     local config = AB.config.barConfig.petbar
 
+    if not petBar then
+        CreatePetBar()
+    end
+
     if not (enabled and config.enabled) then
-        AB:UnregisterEvent("UNIT_PET")
-        AB:UnregisterEvent("UNIT_FLAGS")
-        AB:UnregisterEvent("PLAYER_CONTROL_GAINED")
-        AB:UnregisterEvent("PLAYER_CONTROL_LOST")
-        AB:UnregisterEvent("PLAYER_ENTERING_WORLD")
-        AB:UnregisterEvent("PLAYER_FARSIGHT_FOCUS_CHANGED")
-        AB:UnregisterEvent("SPELLS_CHANGED")
-        AB:UnregisterEvent("PET_BAR_UPDATE")
-        AB:UnregisterEvent("PET_BAR_UPDATE_COOLDOWN")
-        -- AB:UnregisterEvent("UPDATE_BINDINGS", AssignBindings)
+        AB:UnregisterEvent("UNIT_PET", UpdatePetButtons)
+        AB:UnregisterEvent("UNIT_FLAGS", UpdatePetButtons)
+        AB:UnregisterEvent("UNIT_AURA", UpdatePetButtons)
+        AB:UnregisterEvent("PLAYER_CONTROL_GAINED", UpdatePetButtons)
+        AB:UnregisterEvent("PLAYER_CONTROL_LOST", UpdatePetButtons)
+        AB:UnregisterEvent("PLAYER_FARSIGHT_FOCUS_CHANGED", UpdatePetButtons)
+        AB:UnregisterEvent("PET_BAR_UPDATE", UpdatePetButtons)
+        AB:UnregisterEvent("PET_BAR_UPDATE_USABLE", UpdatePetButtons)
+        AB:UnregisterEvent("PET_UI_UPDATE", UpdatePetButtons)
+        AB:UnregisterEvent("PLAYER_TARGET_CHANGED", UpdatePetButtons)
+        AB:UnregisterEvent("UPDATE_VEHICLE_ACTIONBAR", UpdatePetButtons)
+        AB:UnregisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED", UpdatePetButtons)
+        AB:UnregisterEvent("PET_BAR_UPDATE_COOLDOWN", UpdatePetCooldowns)
+        AB:UnregisterEvent("UPDATE_BINDINGS", AssignBindings)
 
         if AF.isRetail then
             AB:UnregisterEvent("PET_BATTLE_CLOSE", AssignBindings)
             AB:UnregisterEvent("PET_BATTLE_OPENING_DONE", RemoveBindings)
         end
 
-        if petBar then
-            petBar.enabled = false
-            ClearOverrideBindings(petBar)
-            UnregisterStateDriver(petBar, "visibility")
-            petBar:Hide()
-        end
+        petBar.enabled = false
+        ClearOverrideBindings(petBar)
+        UnregisterStateDriver(petBar, "visibility")
+        petBar:Hide()
         return
     end
 
-    if not petBar then
-        CreatePetBar()
-    end
-
     petBar.enabled = true
+    config.num = AF.Clamp(config.num, 1, 10)
+    config.buttonsPerLine = AF.Clamp(config.buttonsPerLine, 1, config.num)
+    petBar.maxButtons = config.num
 
     -- mover
     AF.UpdateMoverSave(petBar, config.position)
@@ -215,20 +204,21 @@ local function UpdatePetBar(_, module, which)
     AB:RegisterEvent("UNIT_FLAGS", UpdatePetButtons)
     AB:RegisterEvent("PLAYER_CONTROL_GAINED", UpdatePetButtons)
     AB:RegisterEvent("PLAYER_CONTROL_LOST", UpdatePetButtons)
-    AB:RegisterEvent("PLAYER_ENTERING_WORLD", UpdatePetButtons)
     AB:RegisterEvent("PLAYER_FARSIGHT_FOCUS_CHANGED", UpdatePetButtons)
-    AB:RegisterEvent("SPELLS_CHANGED", UpdatePetButtons)
     AB:RegisterEvent("PET_BAR_UPDATE", UpdatePetButtons)
+    AB:RegisterEvent("PET_BAR_UPDATE_USABLE", UpdatePetButtons)
+    AB:RegisterEvent("PET_UI_UPDATE", UpdatePetButtons)
+    AB:RegisterEvent("PLAYER_TARGET_CHANGED", UpdatePetButtons)
+    AB:RegisterEvent("UPDATE_VEHICLE_ACTIONBAR", UpdatePetButtons)
+    AB:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED", UpdatePetButtons)
     AB:RegisterUnitEvent("UNIT_AURA", "pet", UpdatePetButtons)
     AB:RegisterEvent("PET_BAR_UPDATE_COOLDOWN", UpdatePetCooldowns)
-    -- AB:RegisterEvent("UPDATE_BINDINGS", AssignBindings)
+    AB:RegisterEvent("UPDATE_BINDINGS", AssignBindings)
 
     if AF.isRetail then
         AB:RegisterEvent("PET_BATTLE_CLOSE", AssignBindings)
         AB:RegisterEvent("PET_BATTLE_OPENING_DONE", RemoveBindings)
     end
-
-    hooksecurefunc("PetBattleFrame_UpdateAbilityButtonHotKeys", AssignBindings)
 
     for i = 1, 10 do
         local b
@@ -236,9 +226,6 @@ local function UpdatePetBar(_, module, which)
             -- create
             b = AB.CreatePetButton(petBar, i)
             petBar.buttons[i] = b
-            -- b.cooldown:HookScript("OnCooldownDone", OnCooldownDone)
-            hooksecurefunc(b, "OnEnter", OnEnter)
-            hooksecurefunc(b, "OnLeave", OnLeave)
         else
             b = petBar.buttons[i]
         end
@@ -253,9 +240,6 @@ local function UpdatePetBar(_, module, which)
             b.HotKey:Show()
         end
     end
-
-    config.num = AF.Clamp(config.num, 1, 10)
-    config.buttonsPerLine = AF.Clamp(config.buttonsPerLine, 1, config.num)
 
     -- load config
     AB.ReArrange(petBar, config.width, config.height, config.spacingX, config.spacingY, config.buttonsPerLine, config.num, config.orientation)

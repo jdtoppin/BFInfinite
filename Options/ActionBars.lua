@@ -63,6 +63,7 @@ local function CreateContentPane()
         {text = L["Class Bar %d"]:format(3), value = "classbar3", page = 9},
         {text = L["Class Bar %d"]:format(4), value = "classbar4", page = 10},
         {text = L["Stance Bar"], value = "stancebar"},
+        {text = L["Pet Bar"], value = "petbar"},
     }
 
     local widgets = {}
