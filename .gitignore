@@ -9,3 +9,4 @@ Libs/*
 !.release/generate_changelog.sh
 !Libs/LoadLibs.xml
 !Libs/LibActionButton-1.0
+!Libs/LibRangeCheck-3.0
