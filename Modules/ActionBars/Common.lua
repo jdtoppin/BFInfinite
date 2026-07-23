@@ -308,7 +308,6 @@ function AB.CreateButton(parent, id, name)
     local b = LAB:CreateButton(id, name, parent)
 
     AB.StylizeButton(b)
-    AB.CreateKeybindOverlay(b)
 
     b.GetHotKeys = Button_GetHotKeys
 
