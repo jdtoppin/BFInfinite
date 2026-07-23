@@ -3,9 +3,11 @@
     <Script file="Defaults.lua"/>
     <Script file="Common.lua"/>
     <Script file="MainBars.lua"/>
+    <!-- Load the remaining components in their own compatibility tranches.
     <Script file="StanceBar.lua"/>
     <Script file="PetBar.lua"/>
     <Script file="VehicleExitButton.lua"/>
     <Script file="ExtraAbilityButtons.lua"/>
     <Script file="KeybindMode.lua"/>
+    -->
 </Ui>

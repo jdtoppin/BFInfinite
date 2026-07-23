@@ -12,9 +12,9 @@ local UnregisterStateDriver = UnregisterStateDriver
 local SetModifiedClick = SetModifiedClick
 local SetOverrideBindingClick = SetOverrideBindingClick
 local ClearOverrideBindings = ClearOverrideBindings
-local GetVehicleBarIndex = GetVehicleBarIndex
-local GetTempShapeshiftBarIndex = GetTempShapeshiftBarIndex
-local GetOverrideBarIndex = GetOverrideBarIndex
+local GetVehicleBarIndex = C_ActionBar.GetVehicleBarIndex
+local GetTempShapeshiftBarIndex = C_ActionBar.GetTempShapeshiftBarIndex
+local GetOverrideBarIndex = C_ActionBar.GetOverrideBarIndex
 local UnitExists = UnitExists
 local VehicleExit = VehicleExit
 local PetDismiss = PetDismiss
@@ -117,6 +117,8 @@ local function CreateBar(name, id)
     AB.CreatePreviewRect(bar)
 
     -- page ------------------------------------------------------------------ --
+    -- Restricted snippets intentionally use the compatibility names exported
+    -- by Blizzard_RestrictedAddOnEnvironment; insecure code uses C_ActionBar.
     bar:SetAttribute("_onstate-page", [[
         if newstate == "possess" or newstate == "11" then
             if HasVehicleActionBar() then
@@ -347,9 +349,33 @@ local function UpdateBar(bar, general, specific)
 end
 
 local init
-local function UpdateMainBars(_, module, which)
+local updatePending
+local pendingWhich
+local UpdateMainBars
+
+local function RetryMainBarsUpdate()
+    AB:UnregisterEvent("PLAYER_REGEN_ENABLED", RetryMainBarsUpdate)
+
+    local which = pendingWhich
+    updatePending = nil
+    pendingWhich = nil
+    UpdateMainBars(nil, "actionBars", which)
+end
+
+UpdateMainBars = function(_, module, which)
     if module and module ~= "actionBars" then return end
     if which and not (which == "main" or which:find("^bar") or which:find("^classbar")) then return end
+
+    if InCombatLockdown() then
+        if not updatePending then
+            pendingWhich = which
+        elseif pendingWhich ~= which then
+            pendingWhich = nil
+        end
+        updatePending = true
+        AB:RegisterEvent("PLAYER_REGEN_ENABLED", RetryMainBarsUpdate)
+        return
+    end
 
     if not AB.config.general.enabled then
         LAB.UnregisterCallback(AB, "OnFlyoutSpells")

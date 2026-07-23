@@ -34,7 +34,7 @@ Some extra features are forked from ElvUI/Blizzard
 ]]
 
 local MAJOR_VERSION = "LibActionButton-1.0-BFI"
-local MINOR_VERSION = 131 -- BFI fork revision; Retail compatibility reviewed against upstream revision 153
+local MINOR_VERSION = 132 -- BFI fork revision; Retail compatibility reviewed against upstream revision 153
 
 if not LibStub then error(MAJOR_VERSION .. " requires LibStub.") end
 local lib, oldversion = LibStub:NewLibrary(MAJOR_VERSION, MINOR_VERSION)
@@ -62,6 +62,7 @@ local UnitAffectingCombat = UnitAffectingCombat
 local GetSpellName = C_Spell.GetSpellName
 local EnableActionRangeCheck = C_ActionBar.EnableActionRangeCheck
 local IsPressHoldReleaseSpell = C_Spell.IsPressHoldReleaseSpell
+local IsSpellOverlayed = C_SpellActivationOverlay.IsSpellOverlayed
 local noop = function() end
 
 -- Enable custom flyouts for WoW Retail
