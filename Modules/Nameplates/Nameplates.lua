@@ -64,26 +64,10 @@ local function CreateNameplate(nameplate)
     np:SetSize(120, 13)
     np:SetFrameLevel(nameplate:GetFrameLevel() + 100)
 
-    np.hitRegion = CreateFrame("Frame", nil, np)
-    np.hitRegion:SetPoint("CENTER")
-    np.hitRegion:SetSize(120, 40)
-
     np.base = nameplate
     np.indicators = {}
     nameplate.bfi = np
     NP.created[nameplate] = np
-
-    -- Blizzard can recalculate native click geometry after style/CVar changes.
-    -- Treat its anchor table as opaque, retain it for restoration, and redirect
-    -- hit testing again on the same permitted update tick.
-    hooksecurefunc(nameplate, "SetHitTestPoints", function(_, points)
-        if not np.customActive then return end
-
-        np.nativeHitTestPoints = points
-        if nameplate:CanChangeHitTestPoints() then
-            nameplate:SetAllHitTestPoints(np.hitRegion)
-        end
-    end)
 
     NP.CreateIndicators(np)
     return np
@@ -106,28 +90,6 @@ function NP.IterateAllVisibleNameplates(func, configKey)
     end
 end
 
-local function RestoreHitTest(np, discard)
-    if np.nativeHitTestPoints
-        and np.base:CanChangeHitTestPoints()
-    then
-        np.base:SetHitTestPoints(np.nativeHitTestPoints)
-        np.nativeHitTestPoints = nil
-    elseif discard then
-        -- Blizzard replaces these points on the next unit-assignment tick.
-        np.nativeHitTestPoints = nil
-    end
-end
-
-local function UpdateHitTest(np)
-    if not np.base:CanChangeHitTestPoints() then return end
-
-    if not np.nativeHitTestPoints then
-        np.nativeHitTestPoints = np.base:GetHitTestPoints()
-    end
-
-    np.base:SetAllHitTestPoints(np.hitRegion)
-end
-
 local function DetachNameplate(np, clearUnit)
     if np.customActive then
         NP.OnNameplateHide(np)
@@ -141,7 +103,6 @@ local function DetachNameplate(np, clearUnit)
     if np.unitFrame then
         AF.SetNativeNamePlateVisualSuppressed(np.unitFrame, false)
     end
-    RestoreHitTest(np, clearUnit)
 
     if clearUnit then
         if np.unit then
@@ -169,21 +130,12 @@ local function IsNativeOnlyNameplate(np, unit)
         or UnitIsGameObject(unit)
 end
 
-local function ApplyRootGeometry(np, config, configKey)
+local function ApplyRootGeometry(np, config)
     local healthBar = config.healthBar or {}
     AF.SetSize(
         np,
         healthBar.width or 120,
         healthBar.height or 13
-    )
-
-    local faction = configKey:match("^hostile")
-        and "hostile"
-        or "friendly"
-    AF.SetSize(
-        np.hitRegion,
-        appliedConfig[faction .. "ClickableAreaWidth"] or 120,
-        appliedConfig[faction .. "ClickableAreaHeight"] or 40
     )
 end
 
@@ -217,7 +169,7 @@ local function AttachNameplate(np, unit)
 
     np.configKey = configKey
     np:SetFrameLevel(np.base:GetFrameLevel() + 100)
-    ApplyRootGeometry(np, config, configKey)
+    ApplyRootGeometry(np, config)
     NP.SetupIndicators(np, config)
 
     np:Show()
@@ -225,9 +177,8 @@ local function AttachNameplate(np, unit)
     np.customActive = true
 
     -- Keep Blizzard's unit-frame controller alive. AF only suppresses its
-    -- visual presentation and preserves WidgetContainer.
+    -- visual presentation; Blizzard retains click and hit-test ownership.
     AF.SetNativeNamePlateVisualSuppressed(np.unitFrame, true)
-    UpdateHitTest(np)
 end
 
 local function UpdateTargetIndicators()
