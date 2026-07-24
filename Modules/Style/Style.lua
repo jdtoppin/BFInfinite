@@ -501,7 +501,7 @@ function S.StyleSpellItemButton(button)
 
     S.CreateBackdrop(button, true, nil, 1)
 
-    local iconTexture = name and _G[name .. "IconTexture"] or button.IconTexture or button.Icon
+    local iconTexture = name and _G[name .. "IconTexture"] or button.IconTexture or button.Icon or button.icon
     if iconTexture then
         S.StyleIcon(iconTexture)
         -- AF.SetOnePixelInside(iconTexture, button.BFIBackdrop)
@@ -512,7 +512,9 @@ function S.StyleSpellItemButton(button)
         S.StyleIconBorder(iconBorder)
     end
 
-    local normalTexture = name and _G[name .. "NormalTexture"] or button.NormalTexture
+    local normalTexture = name and _G[name .. "NormalTexture"]
+        or button.NormalTexture
+        or (button.GetNormalTexture and button:GetNormalTexture())
     if normalTexture then
         normalTexture:SetAlpha(0)
     end
@@ -880,7 +882,7 @@ local function RestoreFramePosition(frame)
     if frame._BFIMoving or not frame:IsShown() then return end
     if frame:IsProtected() and InCombatLockdown() then return end
     if _G.GetUIPanel and _G.GetUIPanel("fullscreen") == frame then return end
-
+    if frame._BFIMovableCanRestore and not frame._BFIMovableCanRestore(frame) then return end
     local position = GetSavedFramePosition(frame)
     if type(position) ~= "table" or not ArePublicNumbers(position.x, position.y) then return end
 
@@ -902,6 +904,13 @@ local function RestoreFramePosition(frame)
         position.y * parentHeight / scaleRatio
     )
 end
+
+function S.ClearMovableFramePosition(frame)
+    assert(frame, "ClearMovableFramePosition: frame is nil")
+    SetSavedFramePosition(frame, nil)
+end
+
+S.RestoreMovableFramePosition = RestoreFramePosition
 
 local function RestoreShownMovableFrames()
     for frame in next, movableFrames do
@@ -1025,7 +1034,7 @@ function S.StyleTitledFrame(frame, movableTarget)
     end
 
     -- close button
-    local closeButton = frame.CloseButton or (name and _G[name .. "CloseButton"])
+    local closeButton = frame.CloseButton or frame.ClosePanelButton or (name and _G[name .. "CloseButton"])
     S.StyleCloseButton(closeButton)
     closeButton:ClearAllPoints()
     closeButton:SetPoint("TOPRIGHT")
