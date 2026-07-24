@@ -29,6 +29,28 @@ local function SetFlatTexture(texture, color, alpha, blendMode)
     texture:SetBlendMode(blendMode or "BLEND")
 end
 
+local function LayoutVerticalTabs(tabs)
+    local previous
+    for _, tab in ipairs(tabs) do
+        if tab:IsShown() then
+            if previous then
+                AF.ClearPoints(tab)
+                AF.SetPoint(tab, "TOPLEFT", previous, "BOTTOMLEFT")
+            end
+            previous = tab
+        end
+    end
+end
+
+local function LayoutCommunitiesTabs(frame)
+    LayoutVerticalTabs({
+        frame.ChatTab,
+        frame.RosterTab,
+        frame.GuildBenefitsTab,
+        frame.GuildInfoTab,
+    })
+end
+
 ---------------------------------------------------------------------
 -- guild / community rail
 ---------------------------------------------------------------------
@@ -89,6 +111,31 @@ local function StyleMemberList(memberList)
     memberList.ScrollBox:ForEachFrame(StyleMemberListEntry)
 end
 
+local function StyleColumnHeader(header)
+    if not header._BFIStyled then
+        S.StyleButton(header, "widget")
+    end
+end
+
+local function StyleColumnDisplay(display)
+    if not display then return end
+
+    if not display._BFICommunitiesStyled then
+        display._BFICommunitiesStyled = true
+        S.RemoveTextures(display, true)
+
+        hooksecurefunc(display, "LayoutColumns", function(self)
+            for header in self.columnHeaders:EnumerateActive() do
+                StyleColumnHeader(header)
+            end
+        end)
+    end
+
+    for header in display.columnHeaders:EnumerateActive() do
+        StyleColumnHeader(header)
+    end
+end
+
 ---------------------------------------------------------------------
 -- finder
 ---------------------------------------------------------------------
@@ -97,6 +144,10 @@ local function StyleFinderFrame(finder)
 
     S.StyleSideTab(finder.ClubFinderSearchTab, 32, 32)
     S.StyleSideTab(finder.ClubFinderPendingTab, 32, 32)
+    LayoutVerticalTabs({
+        finder.ClubFinderSearchTab,
+        finder.ClubFinderPendingTab,
+    })
     S.RemoveNineSliceAndBackground(finder.InsetFrame)
     S.RemoveNineSliceAndBackground(finder.DisabledFrame)
     S.RemoveTextures(finder.DisabledFrame)
@@ -108,7 +159,7 @@ local function StyleFinderFrame(finder)
     S.StyleCheckButton(options.TankRoleFrame.Checkbox)
     S.StyleCheckButton(options.HealerRoleFrame.Checkbox)
     S.StyleCheckButton(options.DpsRoleFrame.Checkbox)
-    S.StyleEditBox(options.SearchBox, -4)
+    S.StyleEditBox(options.SearchBox, -4, -7, nil, 7)
     StyleButton(options.Search)
 
     for _, cards in next, {
@@ -131,7 +182,7 @@ local function StyleApplicantEntry(button)
 
     SetFlatTexture(button:GetNormalTexture(), "widget_dark", 0.65)
     SetFlatTexture(button:GetHighlightTexture(), "widget_highlight", 0.8)
-    StyleButton(button.InviteButton, "BFI")
+    StyleButton(button.InviteButton)
 
     local cancelButton = button.CancelInvitationButton
     if cancelButton and not cancelButton._BFIStyled then
@@ -161,11 +212,79 @@ local function StyleGuildBenefitEntry(button)
         S.CreateBackdrop(button)
 
         local highlight = button:CreateTexture(nil, "HIGHLIGHT")
-        highlight:SetAllPoints()
-        SetFlatTexture(highlight, "widget_highlight", 0.8)
+        AF.SetOnePixelInside(highlight, button.Icon.BFIBackdrop)
+        SetFlatTexture(highlight, "white", 0.2)
+        button:SetHighlightTexture(highlight)
     end
 
     SetFlatTexture(button.DisabledBG, "disabled", 0.35)
+end
+
+local function StyleGuildFactionBar(bar)
+    if not bar or bar._BFICommunitiesStyled then return end
+    bar._BFICommunitiesStyled = true
+
+    for _, texture in next, {
+        bar.Left,
+        bar.Right,
+        bar.Middle,
+        bar.BG,
+        bar.Shadow,
+    } do
+        S.RemoveTextures(texture, true)
+    end
+
+    S.CreateBackdrop(bar)
+    bar.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget_dark"))
+
+    bar.Progress:SetTexture(BFI.media.bar)
+    bar.Progress:SetTexCoord(0, 1, 0, 1)
+    bar.Progress:SetVertexColor(AF.GetColorRGB("BFI"))
+    AF.ClearPoints(bar.Progress)
+    AF.SetPoint(bar.Progress, "TOPLEFT", 1, -1)
+    AF.SetPoint(bar.Progress, "BOTTOMLEFT", 1, 1)
+end
+
+local function StyleGuildNewsEntry(button)
+    if not button then return end
+
+    SetFlatTexture(button.header, "widget", 0.75)
+    SetFlatTexture(button:GetHighlightTexture(), "white", 0.2)
+end
+
+local function StyleNoteBackground(frame)
+    S.RemoveNineSliceAndBackground(frame)
+    S.CreateBackdrop(frame)
+    frame.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget"))
+end
+
+local function StyleGuildMemberDetail(frame)
+    if not frame or frame._BFICommunitiesStyled then return end
+    frame._BFICommunitiesStyled = true
+
+    frame.Border:SetAlpha(0)
+    S.CreateBackdrop(frame)
+    frame.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("background"))
+
+    S.StyleCloseButton(frame.CloseButton)
+    AF.ClearPoints(frame.CloseButton)
+    AF.SetPoint(frame.CloseButton, "TOPRIGHT")
+
+    StyleButton(frame.RemoveButton)
+    StyleButton(frame.GroupInviteButton)
+    StyleDropdown(frame.RankDropdown)
+    StyleNoteBackground(frame.NoteBackground)
+    StyleNoteBackground(frame.OfficerNoteBackground)
+end
+
+local function StyleGuildNewsFiltersFrame(frame)
+    if not frame or frame._BFICommunitiesNewsFiltersStyled then return end
+    frame._BFICommunitiesNewsFiltersStyled = true
+
+    S.StyleTitledFrame(frame)
+    for _, checkButton in next, frame.GuildNewsFilterButtons do
+        S.StyleCheckButton(checkButton)
+    end
 end
 
 local function StyleGuildPanes(frame)
@@ -177,6 +296,7 @@ local function StyleGuildPanes(frame)
     S.StyleScrollBar(benefits.Rewards.ScrollBar)
     benefits.Perks.ScrollBox:ForEachFrame(StyleGuildBenefitEntry)
     benefits.Rewards.ScrollBox:ForEachFrame(StyleGuildBenefitEntry)
+    StyleGuildFactionBar(benefits.FactionFrame.Bar)
 
     local details = frame.GuildDetailsFrame
     S.RemoveTextures(details)
@@ -185,15 +305,20 @@ local function StyleGuildPanes(frame)
     S.StyleScrollBar(details.Info.MOTDScrollFrame.ScrollBar)
     S.StyleScrollBar(details.Info.DetailsFrame.ScrollBar)
     S.StyleScrollBar(details.News.ScrollBar)
+    details.News.ScrollBox:ForEachFrame(StyleGuildNewsEntry)
 
     local applicants = frame.ApplicantList
     S.RemoveNineSliceAndBackground(applicants.InsetFrame)
     S.StyleScrollBar(applicants.ScrollBar)
     applicants.ScrollBox:ForEachFrame(StyleApplicantEntry)
+    StyleColumnDisplay(applicants.ColumnDisplay)
 
     if not frame.CommunitiesCalendarButton._BFIStyled then
         S.StyleIconButton(frame.CommunitiesCalendarButton, AF.GetIcon("Calendar"), 16, nil, "widget")
     end
+
+    StyleGuildMemberDetail(frame.GuildMemberDetailFrame)
+    StyleGuildNewsFiltersFrame(_G.CommunitiesGuildNewsFiltersFrame)
 end
 
 ---------------------------------------------------------------------
@@ -215,6 +340,7 @@ local function StyleCommunitiesFrame(frame)
     StyleFinderFrame(frame.GuildFinderFrame)
     StyleFinderFrame(frame.CommunityFinderFrame)
     StyleGuildPanes(frame)
+    StyleColumnDisplay(frame.MemberList.ColumnDisplay)
 
     for _, tab in next, {
         frame.ChatTab,
@@ -224,6 +350,7 @@ local function StyleCommunitiesFrame(frame)
     } do
         S.StyleSideTab(tab, 32, 32)
     end
+    LayoutCommunitiesTabs(frame)
 
     StyleDropdown(frame.StreamDropdown)
     StyleDropdown(frame.GuildMemberListDropdown)
@@ -231,7 +358,7 @@ local function StyleCommunitiesFrame(frame)
     StyleDropdown(frame.CommunitiesListDropdown)
     StyleDropdown(frame.AddToChatButton)
 
-    StyleButton(frame.InviteButton, "BFI")
+    StyleButton(frame.InviteButton)
     StyleButton(frame.GuildLogButton)
     StyleButton(_G.JumpToUnreadButton)
 
@@ -242,6 +369,9 @@ local function StyleCommunitiesFrame(frame)
 
     S.RemoveNineSliceAndBackground(frame.Chat.InsetFrame)
     S.StyleScrollBar(frame.Chat.ScrollBar)
+    -- Blizzard's 32px hitbox reaches into the 20px bottom-button row.
+    -- A 20px edit box clears that row under both maximize/minimize layouts.
+    AF.SetHeight(frame.ChatEditBox, 20)
     S.StyleEditBox(frame.ChatEditBox)
     frame.Chat.MessageFrame:SetFont(_G.STANDARD_TEXT_FONT, 13 + BFI.vars.blizzardFontSizeDelta, "")
 
@@ -253,6 +383,8 @@ local function StyleCommunitiesFrame(frame)
         hooksecurefunc(_G.ClubFinderApplicantEntryMixin, "UpdateMemberInfo", StyleApplicantEntry)
         hooksecurefunc(_G.CommunitiesGuildPerksButtonMixin, "Init", StyleGuildBenefitEntry)
         hooksecurefunc(_G.CommunitiesGuildRewardsButtonMixin, "Init", StyleGuildBenefitEntry)
+        hooksecurefunc(_G.CommunitiesGuildNewsButtonMixin, "Init", StyleGuildNewsEntry)
+        hooksecurefunc(_G.CommunitiesFrameMixin, "UpdateCommunitiesTabs", LayoutCommunitiesTabs)
     end
 end
 

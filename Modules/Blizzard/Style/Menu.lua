@@ -12,6 +12,7 @@ local AF = _G.AbstractFramework
 --     print("OpenContextMenu called with:", manager, ownerRegion, menuDescription)
 -- end
 
+local menuHooksInstalled
 local backdrops = {}
 
 local function StyleMenu(menu)
@@ -37,15 +38,46 @@ local function Manager_OpenMenu(manager, ownerRegion, menuDescription)
     menuDescription:AddMenuAcquiredCallback(StyleMenu) -- submenus
 end
 
+local function StyleMenuCheckbox(_, frame)
+    local checkBox = frame.leftTexture1
+    if not checkBox then return end
+
+    -- Modern menu checkboxes are compositor textures rather than
+    -- CheckButtons, so give every one the same 15/13 BFI treatment.
+    local layer, subLevel = checkBox:GetDrawLayer()
+    local border = frame:AttachTexture()
+    border:SetDrawLayer(layer, subLevel - 1)
+    border:SetColorTexture(AF.GetColorRGB("border"))
+    AF.SetSize(border, 15, 15)
+    AF.SetPoint(border, "CENTER", checkBox)
+
+    checkBox:SetAtlas("")
+    checkBox:SetColorTexture(AF.GetColorRGB("widget"))
+    AF.SetSize(checkBox, 13, 13)
+
+    local checked = frame.leftTexture2
+    if checked then
+        checked:SetAtlas("")
+        checked:SetColorTexture(AF.GetColorRGB("BFI", 0.7))
+        AF.ClearPoints(checked)
+        AF.SetPoint(checked, "CENTER", checkBox)
+        AF.SetSize(checked, 13, 13)
+    end
+end
+
 ---------------------------------------------------------------------
 -- init
 ---------------------------------------------------------------------
 local function StyleBlizzard()
+    if menuHooksInstalled then return end
+
     -- Interface\AddOns\Blizzard_Menu\Menu.lua
     local manager = _G.Menu.GetManager()
-    if manager then
-        hooksecurefunc(manager, "OpenMenu", Manager_OpenMenu)
-        hooksecurefunc(manager, "OpenContextMenu", Manager_OpenMenu)
-    end
+    if not manager or not _G.MenuVariants then return end
+
+    menuHooksInstalled = true
+    hooksecurefunc(manager, "OpenMenu", Manager_OpenMenu)
+    hooksecurefunc(manager, "OpenContextMenu", Manager_OpenMenu)
+    hooksecurefunc(_G.MenuVariants, "CreateCheckbox", StyleMenuCheckbox)
 end
 AF.RegisterCallback("BFI_StyleBlizzard", StyleBlizzard)
