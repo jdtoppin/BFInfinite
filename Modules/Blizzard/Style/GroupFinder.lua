@@ -768,10 +768,24 @@ local function StyleDungeonReadyRewards()
 end
 
 local function UpdateDungeonReadyStyle()
+    local popup = _G.LFGDungeonReadyPopup
     local dialog = _G.LFGDungeonReadyDialog
     local status = _G.LFGDungeonReadyStatus
-    SyncConfirmationTitle(dialog, dialog.label)
-    SyncConfirmationTitle(status, _G.LFGDungeonReadyStatusLabel)
+    local active, source
+
+    if dialog:IsShown() then
+        active, source = dialog, dialog.label
+    elseif status:IsShown() then
+        active, source = status, _G.LFGDungeonReadyStatusLabel
+    else
+        popup.BFIHeader.TitleText:SetText("")
+        return
+    end
+
+    SyncConfirmationTitle(active, source)
+    AF.SetFrameLevel(popup.BFIHeader, 1, active)
+    AF.SetFrameLevel(_G.LFGDungeonReadyDialogCloseButton, 1, popup.BFIHeader)
+    AF.SetFrameLevel(_G.LFGDungeonReadyStatusCloseButton, 1, popup.BFIHeader)
 end
 
 local function StyleLFGDungeonReadyPopup()
