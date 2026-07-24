@@ -159,14 +159,17 @@ local function StyleTalentButton(button)
 end
 
 local function UpdateTalentSelectionButtonShape(button)
-    local spellID = button:GetSpellID()
-    local isPassive = not spellID or C_Spell.IsSpellPassive(spellID)
+    local isPassive = button.artSet.iconMask == "talents-node-circle-mask"
 
     button.IconMask:SetShown(isPassive)
     button.DisabledOverlayMask:SetShown(isPassive)
-    button.Icon.BFIBackdrop:SetShown(not isPassive)
-    button.BFICircleBorder:SetShown(isPassive)
-    AF.SetFrameLevel(button.Icon.BFIBackdrop, 1, button)
+    if button.Icon.BFIBackdrop then
+        button.Icon.BFIBackdrop:SetShown(not isPassive)
+        AF.SetFrameLevel(button.Icon.BFIBackdrop, 1, button)
+    end
+    if button.BFICircleBorder then
+        button.BFICircleBorder:SetShown(isPassive)
+    end
 
     if isPassive then
         UpdateCircularTalentSpendText(button)
@@ -179,11 +182,17 @@ local function StyleTalentSelectionButton(button)
     if not button._BFISelectionIconStyled then
         button._BFISelectionIconStyled = true
 
+        local isPassive = button.artSet.iconMask == "talents-node-circle-mask"
         CaptureTalentSpendTextPoint(button)
-        S.StyleIcon(button.Icon, true)
-        AF.ApplyCircularIconMask(button.IconMask, button.Icon)
-        AF.ApplyCircularIconMask(button.DisabledOverlayMask, button.Icon)
-        button.BFICircleBorder = AF.CreateCircularIconBorder(button, button.Icon, "border", "BACKGROUND", 0)
+        if isPassive then
+            S.StyleIcon(button.Icon)
+            AF.ApplyCircularIconMask(button.IconMask, button.Icon)
+            AF.ApplyCircularIconMask(button.DisabledOverlayMask, button.Icon)
+            button.BFICircleBorder = AF.CreateCircularIconBorder(button, button.Icon, "border", "BACKGROUND", 0)
+        else
+            S.StyleSquareIcon(button.Icon, button.IconMask, true)
+            S.StyleSquareIcon(button.DisabledOverlay, button.DisabledOverlayMask)
+        end
 
         HideTalentTexture(button.Shadow)
         HideTalentTexture(button.StateBorder)
@@ -193,11 +202,15 @@ local function StyleTalentSelectionButton(button)
         HideTalentTexture(button.Glow)
         HideTalentTexture(button.Ghost)
 
-        hooksecurefunc(button, "SetAndApplySize", UpdateTalentSelectionButtonShape)
+        if isPassive then
+            hooksecurefunc(button, "SetAndApplySize", UpdateTalentSelectionButtonShape)
+        end
         hooksecurefunc(button, "UpdateStateBorder", UpdateTalentIconBorder)
     end
 
-    UpdateTalentSelectionButtonShape(button)
+    if button.BFICircleBorder then
+        UpdateTalentSelectionButtonShape(button)
+    end
     UpdateTalentIconBorder(button, button:GetVisualState())
 end
 
@@ -270,10 +283,8 @@ local function StyleTalentsFrame()
         StyleTalentButton(button)
     end
 
-    hooksecurefunc(TalentSelectionChoiceFrameMixin, "SetSelectionOptions", function(selectionFrame)
-        if selectionFrame:GetTalentFrame() ~= talentsFrame then return end
-
-        for _, selectionButton in ipairs(selectionFrame.selectionFrameArray) do
+    hooksecurefunc(ClassTalentSelectionChoiceMixin, "SetSelectionInfo", function(selectionButton)
+        if selectionButton:GetTalentFrame() == talentsFrame then
             StyleTalentSelectionButton(selectionButton)
         end
     end)
