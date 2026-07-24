@@ -102,7 +102,7 @@ builder.position = function(parent)
 
     local anchorMode = AF.CreateDropdown(pane, 220)
     AF.SetPoint(anchorMode, "TOPLEFT", pane, 10, -45)
-    anchorMode:SetLabel(L["Anchored To"])
+    anchorMode:SetLabel(L["Default Tooltip Position"])
     anchorMode:SetItems({
         {text = L["Blizzard Default"], value = "default"},
         {text = L["BFI Anchor"], value = "fixed"},
@@ -115,6 +115,13 @@ builder.position = function(parent)
         UpdateGeneralWidgets()
         UpdateModule()
     end)
+
+    local anchorModeTips = AF.CreateTipsButton(pane)
+    AF.SetPoint(anchorModeTips, "LEFT", anchorMode.label, "RIGHT", 5, 0)
+    anchorModeTips:SetTips(
+        L["Default Tooltip Position"],
+        L["Applies to world tooltips, Blizzard tooltips that use the default position, and BFI widgets whose own Relative To setting is Default. Explicit Button, Unit Frame, Icon, or Group positions override it"]
+    )
 
     local anchorPoint = AF.CreateDropdown(pane, 160)
     AF.SetPoint(anchorPoint, "TOPLEFT", anchorMode, "BOTTOMLEFT", 0, -35)

@@ -91,11 +91,17 @@ local function UpdateAnchor(tooltip, parent)
     local config = T.config
     if not config or not config.enabled then return end
 
+    parent = parent or AF.UIParent
+
     local mode = config.anchorMode
     if mode == "default" then
         return
     elseif mode == "fixed" then
         local point = oppositePoints[config.anchorPoint] and config.anchorPoint or "BOTTOMRIGHT"
+        -- Native world-cursor tooltips may arrive with ANCHOR_CURSOR or a
+        -- nameplate position. Reset the owner mode before applying the fixed
+        -- BFI point so the native anchor cannot continue moving the tooltip.
+        tooltip:SetOwner(parent, "ANCHOR_NONE")
         tooltip:ClearAllPoints()
         tooltip:SetPoint(point, tooltipAnchor, oppositePoints[point])
         return
@@ -104,7 +110,6 @@ local function UpdateAnchor(tooltip, parent)
     local anchorType = cursorAnchors[mode]
     if not anchorType then return end
 
-    parent = parent or AF.UIParent
     tooltip:ClearAllPoints()
     if mode == "cursor" then
         -- ANCHOR_CURSOR intentionally ignores offsets.
@@ -177,6 +182,18 @@ local function Initialize()
     AF.CreateMover(tooltipAnchor, "BFI: " .. _G.OTHER, L["Tooltip"])
 
     hooksecurefunc("GameTooltip_SetDefaultAnchor", UpdateAnchor)
+    hooksecurefunc(GameTooltip, "SetWorldCursor", function(tooltip, anchorType, parent)
+        -- SetWorldCursor only delegates its Default mode through
+        -- GameTooltip_SetDefaultAnchor. Cursor and Nameplate are positioned
+        -- directly, so reapply the selected global policy after the native
+        -- method completes. None is a leave-state update and must not move a
+        -- GameTooltip that may already have another owner.
+        if anchorType == Enum.WorldCursorAnchorType.Cursor
+            or anchorType == Enum.WorldCursorAnchorType.Nameplate
+        then
+            UpdateAnchor(tooltip, parent)
+        end
+    end)
     GameTooltip:HookScript("OnShow", OnTooltipShow)
     GameTooltip:HookScript("OnHide", ClearUnitTooltipState)
     GameTooltip:HookScript("OnTooltipCleared", ClearUnitTooltipState)
