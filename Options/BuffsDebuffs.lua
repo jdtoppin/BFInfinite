@@ -23,8 +23,8 @@ local function CreateBuffsDebuffsPanel()
     AF.SetPoint(switch, "TOPLEFT", 15, -15)
     AF.SetPoint(switch, "TOPRIGHT", -15, -15)
     switch:SetLabels({
-        {text = L["Buffs"], value = "buffs"},
-        {text = L["Debuffs"], value = "debuffs"},
+        {text = L["Buffs"], value = "buffs", disabled = not BD.HasAuraBackend("buffs")},
+        {text = L["Debuffs"], value = "debuffs", disabled = not BD.HasAuraBackend("debuffs")},
         {text = L["Private Auras"], value = "privateAuras", disabled = true},
     })
     switch:SetOnSelect(LoadOptions)
@@ -481,7 +481,7 @@ AF.RegisterCallback("BFI_ShowOptionsPanel", function(_, id)
             CreateBuffsDebuffsPanel()
             CreateNormalPane()
             CreatePrivatePane()
-            buffsDebuffsPanel.switch:SetSelectedValue("buffs")
+            buffsDebuffsPanel.switch:SetSelectedValue(BD.HasAuraBackend("buffs") and "buffs" or "debuffs")
         end
         buffsDebuffsPanel:Show()
     elseif buffsDebuffsPanel then

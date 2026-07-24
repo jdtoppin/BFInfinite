@@ -13,6 +13,11 @@ local mainHandSlot = GetInventorySlotInfo("MainHandSlot")
 local secondaryHandSlot = GetInventorySlotInfo("SecondaryHandSlot")
 
 local REQUIRED_AF_VERSION = 21
+local SECURE_AURA_HEADER_BACKEND = "secureAuraHeader"
+local CUSTOM_AURA_CONTAINER_BACKEND = "customAuraContainer"
+
+BD.SECURE_AURA_HEADER_BACKEND = SECURE_AURA_HEADER_BACKEND
+BD.CUSTOM_AURA_CONTAINER_BACKEND = CUSTOM_AURA_CONTAINER_BACKEND
 
 -- Retail 12.0.7 loads the implementation and template together from
 -- Blizzard_RestrictedAddOnEnvironment/SecureGroupHeaders. Retail 12.1 only
@@ -26,6 +31,64 @@ function BD.HasSecureAuraHeaderBackend()
         and type(GetWeaponEnchantInfo) == "function"
         and type(BD.CanSuppressNativePublicAuras) == "function"
         and type(BD.SetNativePublicAurasSuppressed) == "function"
+end
+
+-- Retail 12.1 exposes its replacement through Blizzard_AuraContainer. AF owns
+-- construction and static button styling; BFI backends only configure the
+-- native container and never inspect its restricted aura buttons.
+function BD.HasCustomAuraContainerCapability()
+    return AF.isRetail
+        and (tonumber(AF.versionNum) or 0) >= REQUIRED_AF_VERSION
+        and type(AF.HasCustomAuraContainer) == "function"
+        and AF.HasCustomAuraContainer()
+        and type(AF.CreateCustomAuraContainer) == "function"
+        and type(AF.AddCustomAuraGroup) == "function"
+        and type(AF.AddCustomItemEnchantment) == "function"
+        and type(_G.AnchorUtil) == "table"
+        and type(_G.AnchorUtil.FlowDirection) == "table"
+        and _G.AnchorUtil.FlowDirection.Left ~= nil
+        and _G.AnchorUtil.FlowDirection.Right ~= nil
+        and _G.AnchorUtil.FlowDirection.Up ~= nil
+        and _G.AnchorUtil.FlowDirection.Down ~= nil
+        and type(_G.AuraContainerSortMethod) == "table"
+        and _G.AuraContainerSortMethod.Default ~= nil
+        and _G.AuraContainerSortMethod.ExpirationOnly ~= nil
+        and _G.AuraContainerSortMethod.NameOnly ~= nil
+        and type(_G.AuraContainerSortDirection) == "table"
+        and _G.AuraContainerSortDirection.Normal ~= nil
+        and _G.AuraContainerSortDirection.Reverse ~= nil
+        and type(_G.AuraContainerItemEnchantmentSlot) == "table"
+        and _G.AuraContainerItemEnchantmentSlot.MainHand ~= nil
+        and _G.AuraContainerItemEnchantmentSlot.OffHand ~= nil
+        and type(_G.AuraContainerItemEnchantmentSortMethod) == "table"
+        and _G.AuraContainerItemEnchantmentSortMethod.Slot ~= nil
+        and type(_G.CustomAuraContainerItemEnchantmentPlacement) == "table"
+        and _G.CustomAuraContainerItemEnchantmentPlacement.BeforeAuraGroups ~= nil
+        and type(BD.CanSuppressNativePublicAuras) == "function"
+        and type(BD.SetNativePublicAurasSuppressed) == "function"
+end
+
+function BD.GetAuraBackend(which)
+    if which == nil then
+        return BD.GetAuraBackend("buffs") or BD.GetAuraBackend("debuffs")
+    elseif which ~= "buffs" and which ~= "debuffs" then
+        return
+    end
+
+    if BD.HasCustomAuraContainerCapability()
+        and type(BD.IsCustomAuraContainerAvailable) == "function"
+        and BD.IsCustomAuraContainerAvailable(which)
+        and type(BD.UpdateCustomAuraContainer) == "function"
+        and type(BD.DisableCustomAuraContainer) == "function"
+    then
+        return CUSTOM_AURA_CONTAINER_BACKEND
+    elseif BD.HasSecureAuraHeaderBackend() then
+        return SECURE_AURA_HEADER_BACKEND
+    end
+end
+
+function BD.HasAuraBackend(which)
+    return BD.GetAuraBackend(which) ~= nil
 end
 
 ---------------------------------------------------------------------
@@ -330,11 +393,12 @@ local function RetryBuffsDebuffsUpdate()
 end
 
 local function DisableHeader(which, header)
-    if not BD.SetNativePublicAurasSuppressed(which, false) then return end
+    if not BD.SetNativePublicAurasSuppressed(which, false) then return false end
     if header then
         header.enabled = false
         header:Hide()
     end
+    return true
 end
 
 local function EnableHeader(which, header, createHeader, config)
@@ -365,10 +429,32 @@ local function EnableHeader(which, header, createHeader, config)
     return header
 end
 
+local function UpdatePane(which, config, header, createHeader)
+    local backend = BD.GetAuraBackend(which)
+    if backend == CUSTOM_AURA_CONTAINER_BACKEND then
+        if not DisableHeader(which, header) then return header end
+        BD.UpdateCustomAuraContainer(which, config)
+    elseif backend == SECURE_AURA_HEADER_BACKEND then
+        if type(BD.DisableCustomAuraContainer) == "function" then
+            BD.DisableCustomAuraContainer(which)
+        end
+        if config.enabled then
+            header = EnableHeader(which, header, createHeader, config)
+        else
+            DisableHeader(which, header)
+        end
+    else
+        if type(BD.DisableCustomAuraContainer) == "function" then
+            BD.DisableCustomAuraContainer(which)
+        end
+        DisableHeader(which, header)
+    end
+    return header
+end
+
 UpdateBuffsDebuffs = function(_, module, which)
     if module and module ~= "buffsDebuffs" then return end
     if which and which ~= "buffs" and which ~= "debuffs" then return end
-    if not BD.HasSecureAuraHeaderBackend() then return end
 
     if InCombatLockdown() then
         if not updatePending then
@@ -384,21 +470,13 @@ UpdateBuffsDebuffs = function(_, module, which)
     -- buffs
     local config = BD.config.buffs
     if not which or which == "buffs" then
-        if config.enabled then
-            buffFrame = EnableHeader("buffs", buffFrame, CreateBuffHeader, config)
-        else
-            DisableHeader("buffs", buffFrame)
-        end
+        buffFrame = UpdatePane("buffs", config, buffFrame, CreateBuffHeader)
     end
 
     -- debuffs
     config = BD.config.debuffs
     if not which or which == "debuffs" then
-        if config.enabled then
-            debuffFrame = EnableHeader("debuffs", debuffFrame, CreateDebuffHeader, config)
-        else
-            DisableHeader("debuffs", debuffFrame)
-        end
+        debuffFrame = UpdatePane("debuffs", config, debuffFrame, CreateDebuffHeader)
     end
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateBuffsDebuffs)

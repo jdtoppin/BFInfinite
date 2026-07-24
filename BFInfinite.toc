@@ -1,4 +1,4 @@
-## Interface: 120000,120001,120007
+## Interface: 120000,120001,120007,120100
 ## Title: |cFFFF5F00BFInfinite|r
 ## Version: r5-alpha
 ## Author: enderneko
