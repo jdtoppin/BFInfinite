@@ -12,6 +12,8 @@ local contentPane
 local selectedID = "general"
 local allPanes = {}
 local optionGroups = {}
+local CONTROL_WIDTH = 150
+local COLUMN_OFFSET = 185
 
 local function UpdateModule()
     AF.Fire("BFI_UpdateModule", "cooldownManager")
@@ -34,11 +36,18 @@ local function SetConfigColor(config, r, g, b)
     config[3] = b
 end
 
-local function CreateModulePane(parent)
-    local pane = RegisterPane(AF.CreateTitledPane(parent, L["Cooldown Manager"], nil, 115))
+local function CreateOptionRow(parent, height)
+    return RegisterPane(AF.CreateBorderedFrame(parent, nil, nil, height))
+end
 
-    local enabled = AF.CreateCheckButton(pane, L["Enabled"])
-    AF.SetPoint(enabled, "TOPLEFT", 15, -35)
+local function CreateModulePanes(parent)
+    local panes = {}
+
+    local enabledPane = CreateOptionRow(parent, 30)
+    panes[#panes + 1] = enabledPane
+
+    local enabled = AF.CreateCheckButton(enabledPane, L["Enabled"])
+    AF.SetPoint(enabled, "LEFT", 15, 0)
     enabled:SetOnCheck(function(checked)
         CM.config.enabled = checked
         if checked then
@@ -49,8 +58,15 @@ local function CreateModulePane(parent)
         AF.Fire("BFI_RefreshOptions", "cooldownManager")
     end)
 
-    local skin = AF.CreateCheckButton(pane, L["Skin Cooldown Manager Icons"])
-    AF.SetPoint(skin, "TOPLEFT", enabled, "BOTTOMLEFT", 0, -12)
+    function enabledPane.Load()
+        enabled:SetChecked(CM.config.enabled)
+    end
+
+    local skinPane = CreateOptionRow(parent, 30)
+    panes[#panes + 1] = skinPane
+
+    local skin = AF.CreateCheckButton(skinPane, L["Skin Cooldown Manager Icons"])
+    AF.SetPoint(skin, "LEFT", 15, 0)
     skin:SetOnCheck(function(checked)
         CM.config.skin = checked
         if checked then
@@ -60,34 +76,39 @@ local function CreateModulePane(parent)
         end
     end)
 
-    local tip = AF.CreateFontString(
-        pane,
-        L["BFI changes presentation only. Blizzard still controls tracked abilities, cooldown data, and alerts."],
-        "gray"
-    )
-    AF.SetPoint(tip, "TOPLEFT", enabled, 245, 2)
-    AF.SetPoint(tip, "RIGHT", pane, -15, 0)
-    tip:SetJustifyH("LEFT")
-    tip:SetWordWrap(true)
-
-    function pane.UpdateEnabled()
+    function skinPane.Load()
+        skin:SetChecked(CM.config.skin)
         skin:SetEnabled(CM.config.enabled)
     end
 
-    function pane.Load()
-        enabled:SetChecked(CM.config.enabled)
-        skin:SetChecked(CM.config.skin)
-        pane.UpdateEnabled()
+    local tipPane = CreateOptionRow(parent, 45)
+    panes[#panes + 1] = tipPane
+
+    local tip = AF.CreateFontString(
+        tipPane,
+        L["BFI changes presentation only. Blizzard still controls tracked abilities, cooldown data, and alerts."],
+        "gray"
+    )
+    AF.SetPoint(tip, "TOPLEFT", 15, -8)
+    AF.SetPoint(tip, "BOTTOMRIGHT", -15, 8)
+    tip:SetJustifyH("LEFT")
+    tip:SetJustifyV("MIDDLE")
+    tip:SetWordWrap(true)
+
+    function tipPane.Load()
     end
 
-    return pane
+    return panes
 end
 
 local function CreateFontPane(parent, configKey, label)
-    local pane = RegisterPane(AF.CreateTitledPane(parent, label, nil, 145))
+    local pane = CreateOptionRow(parent, 125)
 
-    local font = AF.CreateDropdown(pane, 170)
-    AF.SetPoint(font, "TOPLEFT", 15, -45)
+    local title = AF.CreateFontString(pane, label, "BFI")
+    AF.SetPoint(title, "TOPLEFT", 15, -10)
+
+    local font = AF.CreateDropdown(pane, CONTROL_WIDTH)
+    AF.SetPoint(font, "TOPLEFT", 15, -40)
     font:SetLabel(L["Font"])
     font:SetItems(AF.LSM_GetFontDropdownItems())
     font:SetOnSelect(function(value)
@@ -95,8 +116,8 @@ local function CreateFontPane(parent, configKey, label)
         UpdateModule()
     end)
 
-    local outline = AF.CreateDropdown(pane, 170)
-    AF.SetPoint(outline, "TOPLEFT", font, 200, 0)
+    local outline = AF.CreateDropdown(pane, CONTROL_WIDTH)
+    AF.SetPoint(outline, "TOPLEFT", font, COLUMN_OFFSET, 0)
     outline:SetLabel(L["Outline"])
     outline:SetItems(AF.LSM_GetFontOutlineDropdownItems())
     outline:SetOnSelect(function(value)
@@ -104,15 +125,15 @@ local function CreateFontPane(parent, configKey, label)
         UpdateModule()
     end)
 
-    local size = AF.CreateSlider(pane, L["Size"], 170, 5, 50, 1, nil, true)
-    AF.SetPoint(size, "TOPLEFT", font, "BOTTOMLEFT", 0, -30)
+    local size = AF.CreateSlider(pane, L["Size"], CONTROL_WIDTH, 5, 50, 1, nil, true)
+    AF.SetPoint(size, "TOPLEFT", font, "BOTTOMLEFT", 0, -25)
     size:SetAfterValueChanged(function(value)
         CM.config[configKey].font[2] = value
         UpdateModule()
     end)
 
     local shadow = AF.CreateCheckButton(pane, L["Shadow"])
-    AF.SetPoint(shadow, "LEFT", size, 200, 0)
+    AF.SetPoint(shadow, "LEFT", size, COLUMN_OFFSET, 0)
     shadow:SetOnCheck(function(checked)
         CM.config[configKey].font[4] = checked
         UpdateModule()
@@ -187,27 +208,45 @@ local viewerInfo = {
     },
 }
 
-local function CreateViewerPane(parent, viewerKey)
+local function CreateViewerPanes(parent, viewerKey)
     local info = viewerInfo[viewerKey]
-    local pane = RegisterPane(AF.CreateTitledPane(parent, info.label, nil, info.hasBarSettings and 455 or 390))
-    local widgets = {}
+    local panes = {}
 
-    local function AddWidget(widget)
-        widgets[#widgets + 1] = widget
-        return widget
+    local function CreateRow(height)
+        local pane = CreateOptionRow(parent, height)
+        panes[#panes + 1] = pane
+        return pane
     end
 
-    local center = AddWidget(AF.CreateCheckButton(pane, L["Center Incomplete Lines"]))
-    AF.SetPoint(center, "TOPLEFT", 15, -35)
+    local function SetRowLifecycle(pane, widgets, load)
+        function pane.UpdateEnabled()
+            AF.SetEnabled(CM.config.enabled, unpack(widgets))
+        end
+
+        function pane.Load()
+            load(CM.config.viewers[viewerKey])
+            pane.UpdateEnabled()
+        end
+    end
+
+    local centerPane = CreateRow(30)
+    local center = AF.CreateCheckButton(centerPane, L["Center Incomplete Lines"])
+    AF.SetPoint(center, "LEFT", 15, 0)
     center:SetOnCheck(function(checked)
         CM.config.viewers[viewerKey].center = checked
         UpdateModule()
     end)
+    SetRowLifecycle(centerPane, {center}, function(config)
+        center:SetChecked(config.center)
+    end)
 
+    local layoutPane = CreateRow(55)
+    local layoutWidgets = {}
     local orientation
     if info.hasOrientation then
-        orientation = AddWidget(AF.CreateDropdown(pane, 180))
-        AF.SetPoint(orientation, "TOPLEFT", center, "BOTTOMLEFT", 0, -35)
+        orientation = AF.CreateDropdown(layoutPane, CONTROL_WIDTH)
+        layoutWidgets[#layoutWidgets + 1] = orientation
+        AF.SetPoint(orientation, "TOPLEFT", 15, -25)
         orientation:SetLabel(L["Orientation"])
         orientation:SetItems(orientationItems)
         orientation:SetOnSelect(function(value)
@@ -216,11 +255,12 @@ local function CreateViewerPane(parent, viewerKey)
         end)
     end
 
-    local direction = AddWidget(AF.CreateDropdown(pane, 180))
+    local direction = AF.CreateDropdown(layoutPane, CONTROL_WIDTH)
+    layoutWidgets[#layoutWidgets + 1] = direction
     if orientation then
-        AF.SetPoint(direction, "TOPLEFT", orientation, 210, 0)
+        AF.SetPoint(direction, "TOPLEFT", orientation, COLUMN_OFFSET, 0)
     else
-        AF.SetPoint(direction, "TOPLEFT", center, "BOTTOMLEFT", 0, -35)
+        AF.SetPoint(direction, "TOPLEFT", 15, -25)
     end
     direction:SetLabel(L["Growth Direction"])
     direction:SetItems(directionItems)
@@ -228,46 +268,66 @@ local function CreateViewerPane(parent, viewerKey)
         CM.config.viewers[viewerKey].direction = value
         UpdateModule()
     end)
+    SetRowLifecycle(layoutPane, layoutWidgets, function(config)
+        if orientation then
+            orientation:SetSelectedValue(config.orientation)
+        end
+        direction:SetSelectedValue(config.direction)
+    end)
 
-    local firstRow = orientation or direction
+    local scalePane = CreateRow(55)
+    local scaleWidgets = {}
     local iconLimit
     if info.hasIconLimit then
-        iconLimit = AddWidget(AF.CreateSlider(pane, L["Icons Per Line"], 180, 1, 20, 1, nil, true))
-        AF.SetPoint(iconLimit, "TOPLEFT", firstRow, "BOTTOMLEFT", 0, -35)
+        iconLimit = AF.CreateSlider(scalePane, L["Icons Per Line"], CONTROL_WIDTH, 1, 20, 1, nil, true)
+        scaleWidgets[#scaleWidgets + 1] = iconLimit
+        AF.SetPoint(iconLimit, "TOPLEFT", 15, -25)
         iconLimit:SetAfterValueChanged(function(value)
             CM.config.viewers[viewerKey].iconLimit = value
             UpdateModule()
         end)
     end
 
-    local scale = AddWidget(AF.CreateSlider(pane, L["Icon Scale"], 180, 0.5, 2, 0.05, true, true))
+    local scale = AF.CreateSlider(scalePane, L["Icon Scale"], CONTROL_WIDTH, 0.5, 2, 0.05, true, true)
+    scaleWidgets[#scaleWidgets + 1] = scale
     if iconLimit then
-        AF.SetPoint(scale, "TOPLEFT", iconLimit, 210, 0)
+        AF.SetPoint(scale, "TOPLEFT", iconLimit, COLUMN_OFFSET, 0)
     else
-        AF.SetPoint(scale, "TOPLEFT", firstRow, "BOTTOMLEFT", 0, -35)
+        AF.SetPoint(scale, "TOPLEFT", 15, -25)
     end
     scale:SetAfterValueChanged(function(value)
         CM.config.viewers[viewerKey].scale = value
         UpdateModule()
     end)
+    SetRowLifecycle(scalePane, scaleWidgets, function(config)
+        if iconLimit then
+            iconLimit:SetValue(config.iconLimit)
+        end
+        scale:SetValue(config.scale)
+    end)
 
-    local secondRow = iconLimit or scale
-    local padding = AddWidget(AF.CreateSlider(pane, L["Spacing"], 180, 0, 14, 1, nil, true))
-    AF.SetPoint(padding, "TOPLEFT", secondRow, "BOTTOMLEFT", 0, -35)
+    local appearancePane = CreateRow(55)
+    local padding = AF.CreateSlider(appearancePane, L["Spacing"], CONTROL_WIDTH, 0, 14, 1, nil, true)
+    AF.SetPoint(padding, "TOPLEFT", 15, -25)
     padding:SetAfterValueChanged(function(value)
         CM.config.viewers[viewerKey].padding = value
         UpdateModule()
     end)
 
-    local opacity = AddWidget(AF.CreateSlider(pane, L["Opacity"], 180, 0.5, 1, 0.05, true, true))
-    AF.SetPoint(opacity, "TOPLEFT", padding, 210, 0)
+    local opacity = AF.CreateSlider(appearancePane, L["Opacity"], CONTROL_WIDTH, 0.5, 1, 0.05, true, true)
+    AF.SetPoint(opacity, "TOPLEFT", padding, COLUMN_OFFSET, 0)
     opacity:SetAfterValueChanged(function(value)
         CM.config.viewers[viewerKey].opacity = value
         UpdateModule()
     end)
+    SetRowLifecycle(appearancePane, {padding, opacity}, function(config)
+        padding:SetValue(config.padding)
+        opacity:SetValue(config.opacity)
+    end)
 
-    local visibility = AddWidget(AF.CreateDropdown(pane, 180))
-    AF.SetPoint(visibility, "TOPLEFT", padding, "BOTTOMLEFT", 0, -35)
+    local visibilityPane = CreateRow(75)
+    local visibility = AF.CreateDropdown(visibilityPane, CONTROL_WIDTH)
+    AF.SetPoint(visibility, "TOPLEFT", 15, -25)
     visibility:SetLabel(L["Visibility"])
     visibility:SetItems(visibilityItems)
     visibility:SetOnSelect(function(value)
@@ -275,37 +335,42 @@ local function CreateViewerPane(parent, viewerKey)
         UpdateModule()
     end)
 
-    local showTimer = AddWidget(AF.CreateCheckButton(pane, L["Show Cooldown Timers"]))
-    AF.SetPoint(showTimer, "TOPLEFT", visibility, 210, 3)
+    local showTimer = AF.CreateCheckButton(visibilityPane, L["Show Cooldown Timers"])
+    AF.SetPoint(showTimer, "TOPLEFT", visibility, COLUMN_OFFSET, 3)
     showTimer:SetOnCheck(function(checked)
         CM.config.viewers[viewerKey].showTimer = checked
         UpdateModule()
     end)
 
-    local showTooltips = AddWidget(AF.CreateCheckButton(pane, L["Show Tooltips"]))
+    local showTooltips = AF.CreateCheckButton(visibilityPane, L["Show Tooltips"])
     AF.SetPoint(showTooltips, "TOPLEFT", showTimer, "BOTTOMLEFT", 0, -12)
     showTooltips:SetOnCheck(function(checked)
         CM.config.viewers[viewerKey].showTooltips = checked
         UpdateModule()
     end)
+    SetRowLifecycle(visibilityPane, {visibility, showTimer, showTooltips}, function(config)
+        visibility:SetSelectedValue(config.visibility)
+        showTimer:SetChecked(config.showTimer)
+        showTooltips:SetChecked(config.showTooltips)
+    end)
 
-    local hideWhenInactive
     if info.hasHideWhenInactive then
-        hideWhenInactive = AddWidget(AF.CreateCheckButton(pane, L["Hide When Inactive"]))
-        AF.SetPoint(hideWhenInactive, "TOPLEFT", visibility, "BOTTOMLEFT", 0, -20)
+        local inactivePane = CreateRow(30)
+        local hideWhenInactive = AF.CreateCheckButton(inactivePane, L["Hide When Inactive"])
+        AF.SetPoint(hideWhenInactive, "LEFT", 15, 0)
         hideWhenInactive:SetOnCheck(function(checked)
             CM.config.viewers[viewerKey].hideWhenInactive = checked
             UpdateModule()
         end)
+        SetRowLifecycle(inactivePane, {hideWhenInactive}, function(config)
+            hideWhenInactive:SetChecked(config.hideWhenInactive)
+        end)
     end
 
-    local barContent
-    local barWidthScale
     if info.hasBarSettings then
-        local anchor = hideWhenInactive or visibility
-
-        barContent = AddWidget(AF.CreateDropdown(pane, 180))
-        AF.SetPoint(barContent, "TOPLEFT", anchor, "BOTTOMLEFT", 0, -35)
+        local barPane = CreateRow(55)
+        local barContent = AF.CreateDropdown(barPane, CONTROL_WIDTH)
+        AF.SetPoint(barContent, "TOPLEFT", 15, -25)
         barContent:SetLabel(L["Bar Content"])
         barContent:SetItems(barContentItems)
         barContent:SetOnSelect(function(value)
@@ -313,59 +378,31 @@ local function CreateViewerPane(parent, viewerKey)
             UpdateModule()
         end)
 
-        barWidthScale = AddWidget(AF.CreateSlider(pane, L["Bar Width Scale"], 180, 0.5, 2, 0.05, true, true))
-        AF.SetPoint(barWidthScale, "TOPLEFT", barContent, 210, 0)
+        local barWidthScale = AF.CreateSlider(barPane, L["Bar Width Scale"], CONTROL_WIDTH, 0.5, 2, 0.05, true, true)
+        AF.SetPoint(barWidthScale, "TOPLEFT", barContent, COLUMN_OFFSET, 0)
         barWidthScale:SetAfterValueChanged(function(value)
             CM.config.viewers[viewerKey].barWidthScale = value
             UpdateModule()
         end)
-    end
-
-    function pane.UpdateEnabled()
-        AF.SetEnabled(CM.config.enabled, unpack(widgets))
-    end
-
-    function pane.Load()
-        local config = CM.config.viewers[viewerKey]
-        center:SetChecked(config.center)
-        if orientation then
-            orientation:SetSelectedValue(config.orientation)
-        end
-        direction:SetSelectedValue(config.direction)
-        if iconLimit then
-            iconLimit:SetValue(config.iconLimit)
-        end
-        scale:SetValue(config.scale)
-        padding:SetValue(config.padding)
-        opacity:SetValue(config.opacity)
-        visibility:SetSelectedValue(config.visibility)
-        showTimer:SetChecked(config.showTimer)
-        showTooltips:SetChecked(config.showTooltips)
-        if hideWhenInactive then
-            hideWhenInactive:SetChecked(config.hideWhenInactive)
-        end
-        if barContent then
+        SetRowLifecycle(barPane, {barContent, barWidthScale}, function(config)
             barContent:SetSelectedValue(config.barContent)
             barWidthScale:SetValue(config.barWidthScale)
-        end
-        pane.UpdateEnabled()
+        end)
     end
 
-    return pane
+    return panes
 end
 
 local function CreateOptionGroups(parent)
     if optionGroups.general then return end
 
-    optionGroups.general = {
-        CreateModulePane(parent),
-        CreateFontPane(parent, "cooldownText", L["Cooldown Text"]),
-        CreateFontPane(parent, "countText", L["Count Text"]),
-        CreateFontPane(parent, "barText", L["Bar Text"]),
-    }
+    optionGroups.general = CreateModulePanes(parent)
+    optionGroups.general[#optionGroups.general + 1] = CreateFontPane(parent, "cooldownText", L["Cooldown Text"])
+    optionGroups.general[#optionGroups.general + 1] = CreateFontPane(parent, "countText", L["Count Text"])
+    optionGroups.general[#optionGroups.general + 1] = CreateFontPane(parent, "barText", L["Bar Text"])
 
     for key in next, viewerInfo do
-        optionGroups[key] = {CreateViewerPane(parent, key)}
+        optionGroups[key] = CreateViewerPanes(parent, key)
     end
 end
 
@@ -405,7 +442,7 @@ LoadOptions = function(button)
         else
             AF.SetPoint(pane, "TOPLEFT", scroll.scrollContent)
         end
-        AF.SetPoint(pane, "RIGHT", scroll.scrollContent, -7, 0)
+        AF.SetPoint(pane, "RIGHT", scroll.scrollContent)
         last = pane
         heights[#heights + 1] = pane._height or tostring(pane:GetHeight())
     end

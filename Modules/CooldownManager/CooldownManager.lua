@@ -190,13 +190,13 @@ local function CenterVisibleItems(viewer, definition, config, items)
     local capacity = definition.hasIconLimit and config.iconLimit or #items
     capacity = max(1, math.min(capacity, #items))
 
-    local scale = config.scale
+    -- Blizzard applies iconScale with SetScale after calculating its grid in
+    -- unscaled item coordinates. Keep custom anchors in those same units.
     local width = definition.itemWidth
     if definition.isBar then
         width = width * config.barWidthScale
     end
-    width = width * scale
-    local height = definition.itemHeight * scale
+    local height = definition.itemHeight
     local padding = config.padding
     local primarySize = isHorizontal and width or height
     local stepX = width + padding
