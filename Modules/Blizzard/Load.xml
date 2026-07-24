@@ -14,6 +14,7 @@
     <Script file="Style\AchievementFrame.lua"/>
     <Script file="Style\CharacterFrame.lua"/>
     <Script file="Style\CommunitiesFrame.lua"/>
+    <Script file="Style\FriendsFrame.lua"/>
     <Script file="Style\GameMenu.lua"/>
     <Script file="Style\Menu.lua"/>
     <Script file="Style\Misc.lua"/>
