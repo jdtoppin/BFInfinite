@@ -707,18 +707,9 @@ UpdateEmptyRepresentativeForCursor = function(button)
     RenderViewport()
 end
 
-local function LayoutItemsInternal(force)
-    local changed, footerHeight, screenWidth, screenHeight = CaptureLayoutSnapshot(force)
-    if not changed then return end
-
-    local columns = B.config.columns
-    local spacing = B.config.spacing
-    local top = B.config.showBagSlots and BAG_TOP_WITH_SLOTS or BAG_TOP_WITHOUT_SLOTS
-    local emptyRepresentative
-    local emptyRepresentativePriority = math.huge
-    local emptyCount = 0
-    local normalBagLimit = inventoryConstants.NumBagSlots
-
+-- WoW's Lua runtime limits each function to 60 captured upvalues, so keep the
+-- layout pipeline split into focused phases instead of merging these helpers.
+local function ResetLayoutModel()
     layoutEpoch = layoutEpoch + 1
     layoutAddSlotsTarget = nil
     ResetCategoryGroups()
@@ -732,9 +723,16 @@ local function LayoutItemsInternal(force)
         emptyButtonFamilies[index] = nil
     end
     emptyButtonCount = 0
+end
+
+local function BuildItemGroups(showCategories)
+    local emptyRepresentative
+    local emptyRepresentativePriority = math.huge
+    local emptyCount = 0
+    local normalBagLimit = inventoryConstants.NumBagSlots
 
     local flatGroup
-    if not B.config.categories then
+    if not showCategories then
         flatGroup = AcquireCategoryGroup("all", "", 1)
     end
 
@@ -749,7 +747,7 @@ local function LayoutItemsInternal(force)
 
         if itemID then
             local group = flatGroup
-            if B.config.categories then
+            if showCategories then
                 local key, label, order = GetCategory(itemID)
                 group = AcquireCategoryGroup(key, label, order)
             end
@@ -757,7 +755,7 @@ local function LayoutItemsInternal(force)
         elseif snapshotExtended[index] then
             layoutAddSlotsTarget = layoutAddSlotsTarget or itemButton
             local group = flatGroup
-            if B.config.categories then
+            if showCategories then
                 group = AcquireCategoryGroup("locked", L["Bag Slots"], 900)
             end
             group.items[#group.items + 1] = itemButton
@@ -788,36 +786,48 @@ local function LayoutItemsInternal(force)
 
     if emptyRepresentative then
         local group = flatGroup
-        if B.config.categories then
+        if showCategories then
             group = AcquireCategoryGroup("empty", _G.EMPTY or "Empty", 1000)
         end
         group.items[#group.items + 1] = emptyRepresentative
     end
 
     local groupCount = #categoryGroups
-    if B.config.categories then
+    if showCategories then
         sort(categoryGroups, CompareCategoryGroups)
     end
+    return emptyRepresentative, emptyCount, groupCount
+end
 
-    local function CalculateHeight(columnCount)
-        local height = top + footerHeight
-        for groupIndex = 1, groupCount do
-            local group = categoryGroups[groupIndex]
-            if B.config.categories then
-                height = height + CATEGORY_HEADER_HEIGHT
-            end
-
-            local rows = ceil(#group.items / columnCount)
-            if rows > 0 then
-                height = height + (rows * ITEM_SIZE) + ((rows - 1) * spacing)
-            end
-            if B.config.categories and groupIndex < groupCount then
-                height = height + CATEGORY_SPACING
-            end
+local function CalculateLayoutHeight(columnCount, top, footerHeight, spacing, groupCount, showCategories)
+    local height = top + footerHeight
+    for groupIndex = 1, groupCount do
+        local group = categoryGroups[groupIndex]
+        if showCategories then
+            height = height + CATEGORY_HEADER_HEIGHT
         end
-        return height
-    end
 
+        local rows = ceil(#group.items / columnCount)
+        if rows > 0 then
+            height = height + (rows * ITEM_SIZE) + ((rows - 1) * spacing)
+        end
+        if showCategories and groupIndex < groupCount then
+            height = height + CATEGORY_SPACING
+        end
+    end
+    return height
+end
+
+local function CalculateLayoutMetrics(
+    requestedColumns,
+    spacing,
+    top,
+    footerHeight,
+    screenWidth,
+    screenHeight,
+    groupCount,
+    showCategories
+)
     local maxWidth = floor(screenWidth * 0.9)
     local maxHeight = floor(screenHeight * 0.9)
     local maxColumns = math.max(
@@ -827,15 +837,25 @@ local function LayoutItemsInternal(force)
             / (ITEM_SIZE + spacing)
         )
     )
-    columns = math.min(columns, maxColumns)
+    local columns = math.min(requestedColumns, maxColumns)
 
     local width = (HORIZONTAL_PADDING * 2)
         + (columns * ITEM_SIZE)
         + ((columns - 1) * spacing)
         + SCROLLBAR_GUTTER
-    local fullHeight = CalculateHeight(columns)
+    local fullHeight = CalculateLayoutHeight(
+        columns,
+        top,
+        footerHeight,
+        spacing,
+        groupCount,
+        showCategories
+    )
     local height = math.min(fullHeight, maxHeight)
+    return columns, width, fullHeight, height
+end
 
+local function PrepareLayoutFrame(emptyRepresentative, emptyCount, width, height, fullHeight, top, footerHeight)
     local previousEmptyRepresentative = layoutEmptyRepresentative
     layoutHeight = height
     layoutTop = top
@@ -855,13 +875,15 @@ local function LayoutItemsInternal(force)
     end
 
     combinedFrame:SetSize(width, height)
+end
 
+local function BuildLayoutEntries(columns, spacing, top, groupCount, showCategories, emptyRepresentative)
     local cursorY = -top
     AddScrollStop(0)
 
     for groupIndex = 1, groupCount do
         local group = categoryGroups[groupIndex]
-        if B.config.categories then
+        if showCategories then
             local header = GetCategoryHeader(groupIndex)
             header:SetText(group.label)
             AddScrollStop(-top - cursorY)
@@ -893,7 +915,7 @@ local function LayoutItemsInternal(force)
         if rows > 0 then
             cursorY = cursorY - (rows * ITEM_SIZE) - ((rows - 1) * spacing)
         end
-        if B.config.categories and groupIndex < groupCount then
+        if showCategories and groupIndex < groupCount then
             cursorY = cursorY - CATEGORY_SPACING
         end
     end
@@ -908,9 +930,11 @@ local function LayoutItemsInternal(force)
         end
     end
 
-    HideUnusedHeaders(B.config.categories and (groupCount + 1) or 1)
+    HideUnusedHeaders(showCategories and (groupCount + 1) or 1)
     LayoutBagButtons(spacing)
+end
 
+local function LayoutScrollTrack(top, footerHeight, height)
     local visibleContentHeight = math.max(1, height - top - footerHeight)
     if scrollStopCount > 1 then
         local fullContentHeight = visibleContentHeight + maxScroll
@@ -924,6 +948,32 @@ local function LayoutItemsInternal(force)
     else
         scrollTrack:Hide()
     end
+end
+
+local function LayoutItemsInternal(force)
+    local changed, footerHeight, screenWidth, screenHeight = CaptureLayoutSnapshot(force)
+    if not changed then return end
+
+    local showCategories = B.config.categories
+    local requestedColumns = B.config.columns
+    local spacing = B.config.spacing
+    local top = B.config.showBagSlots and BAG_TOP_WITH_SLOTS or BAG_TOP_WITHOUT_SLOTS
+
+    ResetLayoutModel()
+    local emptyRepresentative, emptyCount, groupCount = BuildItemGroups(showCategories)
+    local columns, width, fullHeight, height = CalculateLayoutMetrics(
+        requestedColumns,
+        spacing,
+        top,
+        footerHeight,
+        screenWidth,
+        screenHeight,
+        groupCount,
+        showCategories
+    )
+    PrepareLayoutFrame(emptyRepresentative, emptyCount, width, height, fullHeight, top, footerHeight)
+    BuildLayoutEntries(columns, spacing, top, groupCount, showCategories, emptyRepresentative)
+    LayoutScrollTrack(top, footerHeight, height)
 
     -- Keep the configured item size identical in flat and category modes.
     -- Vertical overflow uses cached geometry and discrete row/header stops.
