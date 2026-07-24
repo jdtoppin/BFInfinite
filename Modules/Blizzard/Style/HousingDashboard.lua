@@ -47,13 +47,40 @@ end
 ---------------------------------------------------------------------
 -- side tabs
 ---------------------------------------------------------------------
+local function UpdateSideTab(tab, checked)
+    tab.Icon:SetTexture(AF.GetIcon(tab._BFIHousingIcon))
+    tab.Icon:ResetTexCoord()
+    tab.Icon:SetVertexColor(AF.GetColorRGB(checked and "white" or "darkgray"))
+    AF.ClearPoints(tab.Icon)
+    AF.SetPoint(tab.Icon, "CENTER")
+    AF.SetSize(tab.Icon, 24, 24)
+    tab.SelectedTexture:SetShown(checked or tab:IsMouseOver())
+end
+
+local function StyleSideTab(tab, icon)
+    S.StyleSideTab(tab)
+
+    if not tab._BFIHousingSideTabStyled then
+        tab._BFIHousingSideTabStyled = true
+        tab._BFIHousingIcon = icon
+        hooksecurefunc(tab, "SetChecked", UpdateSideTab)
+    end
+end
+
 local function StyleSideTabs(frame)
     for i, tab in ipairs(frame.TabButtons) do
-        S.StyleSideTab(tab)
+        local icon = "Home"
+        if tab == frame.CatalogTabButton then
+            icon = "Layout"
+        elseif frame.CollectionTabButton and tab == frame.CollectionTabButton then
+            icon = "Layers"
+        end
+        StyleSideTab(tab, icon)
 
         -- Both 12.0.7's HousingDashboardSideTabTemplate and 12.1's
-        -- LargeSideTabButtonTemplate expose Icon and SetChecked. Calling
-        -- SetChecked after styling restores the appropriate identity atlas.
+        -- LargeSideTabButtonTemplate expose Icon and SetChecked. The live
+        -- active/inactive atlases contain the entire circular button, so
+        -- UpdateSideTab replaces those with icon-only AF glyphs.
         local checked = frame.activeTab and frame.activeTab.tabButton == tab
         tab:SetChecked(checked)
 
@@ -81,9 +108,9 @@ local function UpdateCatalogEntry(frame, isPressed)
         color = "widget"
     end
 
-    local alpha = frame.isSelected and 0.45 or 0.8
+    local alpha = frame.isSelected and 0.35 or 0.8
     frame.BFIHousingBackground:SetVertexColor(AF.GetColorRGB(color, alpha))
-    frame.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(frame.isSelected and "BFI" or "border"))
+    frame.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
 end
 
 local function StyleCatalogEntry(frame)
@@ -92,10 +119,13 @@ local function StyleCatalogEntry(frame)
 
     CreateSquareElement(frame)
 
-    -- Keep the decor icon/model, special-room markers, quantities, and dye
+    -- Keep the decor icon/model, special-room marker, quantities, and dye
     -- state. Only the ornamental card chrome is replaced.
     frame.Background:SetAlpha(0)
     frame.HoverBackground:SetAlpha(0)
+    if frame.SpecialRoomFrame then
+        frame.SpecialRoomFrame:SetAlpha(0)
+    end
 
     hooksecurefunc(frame, "UpdateVisuals", UpdateCatalogEntry)
     hooksecurefunc(frame, "UpdateBackground", UpdateCatalogEntry)
@@ -126,9 +156,24 @@ local function UpdateCatalogCategory(frame)
         color = "widget"
     end
 
-    local alpha = frame.isActive and 0.45 or 0.8
+    local alpha = frame.isActive and 0.6 or 0.8
     frame.BFIHousingBackground:SetVertexColor(AF.GetColorRGB(color, alpha))
-    frame.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(frame.isActive and "BFI" or "border"))
+    frame.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
+
+    -- Blizzard category atlases include their circular chrome. Enlarge the
+    -- inactive identity art behind a square mask so only the central category
+    -- glyph remains, while the BFI background owns hover/selection state.
+    local inactiveAtlas = frame.atlasNames and frame.atlasNames["_inactive"]
+    if inactiveAtlas then
+        frame.Icon:SetAtlas(inactiveAtlas)
+    end
+    frame.Icon:SetVertexColor(AF.GetColorRGB(frame:IsEnabled() and "white" or "disabled"))
+    AF.SetOutside(frame.Icon, frame.BFIBackdrop, 10)
+
+    if frame.SelectedBackground then
+        frame.SelectedBackground:SetAlpha(0)
+        frame.SelectedBackground.FlipbookSparkleAnim:Stop()
+    end
 end
 
 local function StyleCatalogCategory(frame)
@@ -136,6 +181,14 @@ local function StyleCatalogCategory(frame)
     frame._BFIHousingCategoryStyled = true
 
     CreateSquareElement(frame)
+    frame.HoverIcon:SetAlpha(0)
+
+    local mask = frame:CreateMaskTexture(nil, "ARTWORK")
+    mask:SetTexture(AF.GetPlainTexture())
+    AF.SetOnePixelInside(mask, frame.BFIBackdrop)
+    frame.Icon:AddMaskTexture(mask)
+    frame.BFIHousingIconMask = mask
+
     frame:HookScript("OnEnter", UpdateCatalogCategory)
     frame:HookScript("OnLeave", UpdateCatalogCategory)
     frame:HookScript("OnEnable", UpdateCatalogCategory)
@@ -159,17 +212,28 @@ local function StyleCatalogCategories(categories)
 end
 
 local function StyleCatalog(catalog)
+    catalog.Background:SetAlpha(0)
+    catalog.Divider:SetColorTexture(AF.GetColorRGB("border", 0.65))
+    AF.SetWidth(catalog.Divider, 1)
+
     S.StyleDropdownButton(catalog.Filters.FilterDropdown)
     catalog.Filters.FilterDropdown.displacedRegions = nil
     S.StyleEditBox(catalog.SearchBox, -4)
 
     local categories = catalog.Categories
+    categories.Background:SetAlpha(0)
+    categories.TopBorder:SetAlpha(0)
+    categories.SubcategoriesDivider:SetAlpha(0)
+    CreateSquareElement(categories)
+    categories.BFIHousingBackground:SetVertexColor(AF.GetColorRGB("background"))
+
     StyleCatalogCategories(categories)
     hooksecurefunc(categories, "DisplayTopLevelCategories", StyleCatalogCategories)
     hooksecurefunc(categories, "DisplaySubcategoriesUnderCategory", StyleCatalogCategories)
 
     local options = catalog.OptionsContainer
     S.StyleScrollBar(options.ScrollBar)
+    options.ScrollBox:ClearEdgeFade()
     hooksecurefunc(options.ScrollBox, "Update", StyleVisibleCatalogEntries)
     StyleVisibleCatalogEntries(options.ScrollBox)
 
