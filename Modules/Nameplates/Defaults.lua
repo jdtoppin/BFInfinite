@@ -59,12 +59,6 @@ NP.SCHEMA_VERSION = SCHEMA_VERSION
 local defaults = {
     schemaVersion = SCHEMA_VERSION,
     enabled = false,
-    -- Retail 12.x has one shared native nameplate size. Existing friendly and
-    -- hostile profile values therefore contribute to the same maximum bounds.
-    friendlyClickableAreaWidth = 120,
-    friendlyClickableAreaHeight = 40,
-    hostileClickableAreaWidth = 120,
-    hostileClickableAreaHeight = 40,
     cvars = nil,
     alphas = {
         -- base
@@ -162,12 +156,16 @@ do
             },
             threatGlow = {
                 enabled = true,
+                style = "both",
+                borderSize = 2,
                 size = 4,
-                alpha = 1,
+                outset = 3,
+                alpha = 0.8,
             },
         },
         nameText = {
             enabled = true,
+            placement = "outside",
             position = {"BOTTOM", "TOP", 0, 1},
             anchorTo = "healthBar",
             parent = "healthBar",
@@ -502,6 +500,7 @@ do
     local friendly = {
         nameText = {
             enabled = true,
+            placement = "outside",
             position = {"CENTER", "CENTER", 0, -10},
             anchorTo = "root",
             parent = "root",

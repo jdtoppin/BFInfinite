@@ -6,14 +6,17 @@ local NP = BFI.modules.Nameplates
 
 local function HealthBar_Update(self)
     self:UpdateAll()
+    self.threatIndicator:Refresh()
 end
 
 local function HealthBar_Enable(self)
     self:SetUnit(self.root.unit)
+    self.threatIndicator:SetNativeUnitFrame(self.root.unitFrame)
     self:Show()
 end
 
 local function HealthBar_Disable(self)
+    self.threatIndicator:Clear()
     self:ClearUnit()
     self:Hide()
 end
@@ -30,6 +33,16 @@ local function HealthBar_LoadConfig(self, config)
     self:LSM_SetTexture(config.texture)
     self:SetBackgroundColor(AF.UnpackColor(config.bgColor))
     self:SetBorderColor(AF.UnpackColor(config.borderColor))
+
+    local threatGlow = config.threatGlow or {}
+    self.threatIndicator:Configure({
+        enabled = threatGlow.enabled,
+        style = threatGlow.style,
+        thickness = threatGlow.borderSize,
+        glowThickness = threatGlow.size,
+        glowOutset = threatGlow.outset,
+        alpha = threatGlow.alpha,
+    })
 
     local semanticColor = config.semanticColor
     if self.root.configKey == "hostile_npc"
@@ -90,6 +103,12 @@ function NP.CreateHealthBar(parent, name)
     local bar = AF.CreateSecretHealthBar(parent, name)
     bar.root = parent
     bar:Hide()
+
+    bar.threatIndicator =
+        AF.CreateSecretNamePlateThreatIndicator(
+            bar,
+            name .. "ThreatIndicator"
+        )
 
     bar.Update = HealthBar_Update
     bar.Enable = HealthBar_Enable

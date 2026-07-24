@@ -4,6 +4,9 @@ local BFI = select(2, ...)
 local AF = _G.AbstractFramework
 local NP = BFI.modules.Nameplates
 
+local INSIDE_POSITION = {"CENTER", "CENTER", 0, 0}
+local INSIDE_LENGTH = 0.9
+
 local function NameText_Update(self)
     self:UpdateName()
 end
@@ -49,13 +52,32 @@ local function NameText_LoadConfig(self, config)
         config.font[4],
     }
     self:SetTargetEmphasis(false)
+
+    local position = config.position
+    local anchorTo = config.anchorTo
+    local parent = config.parent
+    local length = config.length
+
+    if config.placement == "inside" then
+        position = INSIDE_POSITION
+        anchorTo = "healthBar"
+        length = INSIDE_LENGTH
+
+        -- A friendly name-only plate keeps the text visible even though its
+        -- health bar is disabled. When a bar is active, parent to it so the
+        -- centered text draws above the status-bar texture.
+        parent = NP.GetIndicator(self.root, "healthBar", true)
+            and "healthBar"
+            or "root"
+    end
+
     NP.LoadIndicatorPosition(
         self,
-        config.position,
-        config.anchorTo,
-        config.parent
+        position,
+        anchorTo,
+        parent
     )
-    self:SetLength(config.length)
+    self:SetLength(length)
 
     if config.color.type == "custom_color" then
         self.color = {

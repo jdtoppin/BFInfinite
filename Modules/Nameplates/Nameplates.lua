@@ -23,6 +23,7 @@ local hasNameplateFoundation =
     and type(AF.CreateSecretNameText) == "function"
     and type(AF.CreateSecretAuraList) == "function"
     and type(AF.CreateSecretCastBar) == "function"
+    and type(AF.CreateSecretNamePlateThreatIndicator) == "function"
     and hasNameplateGeometryAPI
 
 NP.created = {}
@@ -42,6 +43,8 @@ local GetNamePlateHitTestInsets =
     C_NamePlateManager.GetNamePlateHitTestInsets
 local SetNamePlateHitTestInsets =
     C_NamePlateManager.SetNamePlateHitTestInsets
+local GetCVarBitfield = C_CVar.GetCVarBitfield
+local SetCVarBitfield = C_CVar.SetCVarBitfield
 local InCombatLockdown = InCombatLockdown
 local UnitCanAttack = UnitCanAttack
 local UnitIsEnemy = UnitIsEnemy
@@ -54,16 +57,23 @@ local nextNameplateID = 0
 local appliedConfig
 local previousClickGeometry
 local appliedClickGeometry
+local progressiveThreatCaptured
+local previousProgressiveThreatDisplay
+local ownsProgressiveThreatDisplay
+local ApplyCustomHitTest
+local RestoreNativeHitTest
+local ApplyPendingUpdate
 
-local FULL_HIT_TEST_INSET = -10000
-local FULL_HIT_TEST_INSETS = {
-    left = FULL_HIT_TEST_INSET,
-    right = FULL_HIT_TEST_INSET,
-    top = FULL_HIT_TEST_INSET,
-    bottom = FULL_HIT_TEST_INSET,
+local ZERO_HIT_TEST_INSETS = {
+    left = 0,
+    right = 0,
+    top = 0,
+    bottom = 0,
 }
 local FRIENDLY_NAME_PLATE = Enum.NamePlateType.Friendly
 local ENEMY_NAME_PLATE = Enum.NamePlateType.Enemy
+local PROGRESSIVE_THREAT =
+    Enum.NamePlateThreatDisplay.Progressive
 
 local function GetConfigKey(unit)
     local isPlayer = UnitIsPlayer(unit)
@@ -78,6 +88,81 @@ local function GetConfigKey(unit)
         return isHostile and "hostile_player" or "friendly_player"
     end
     return isHostile and "hostile_npc" or "friendly_npc"
+end
+
+local function IsThreatWarningConfigured(config)
+    if not config then return false end
+
+    for _, configKey in ipairs({
+        "hostile_npc",
+        "hostile_player",
+    }) do
+        local plateConfig = config[configKey]
+        local healthBar = plateConfig and plateConfig.healthBar
+        local threatGlow = healthBar and healthBar.threatGlow
+        if healthBar
+            and healthBar.enabled
+            and threatGlow
+            and threatGlow.enabled
+        then
+            return true
+        end
+    end
+    return false
+end
+
+local function ApplyProgressiveThreatDisplay(config)
+    local requested = IsThreatWarningConfigured(config)
+    local current = GetCVarBitfield(
+        "nameplateThreatDisplay",
+        PROGRESSIVE_THREAT
+    ) == true
+
+    if requested then
+        if not progressiveThreatCaptured then
+            progressiveThreatCaptured = true
+            previousProgressiveThreatDisplay = current
+            ownsProgressiveThreatDisplay = not current
+        end
+
+        if not current then
+            -- If the user or another addon turns the bit off while BFI's
+            -- option remains enabled, treat that newer false value as the
+            -- state to restore after BFI releases the carrier.
+            if not ownsProgressiveThreatDisplay then
+                previousProgressiveThreatDisplay = false
+                ownsProgressiveThreatDisplay = true
+            end
+
+            -- Retail 12.0.7.68887 (4383ced) and 12.1.0.68824
+            -- (fa38386) drive the native aggro carrier from this public CVar
+            -- bit. Maintain it only while BFI's threat option consumes it.
+            SetCVarBitfield(
+                "nameplateThreatDisplay",
+                PROGRESSIVE_THREAT,
+                true
+            )
+        end
+        return
+    end
+
+    -- Compare-and-swap restoration: release only the bit BFI enabled, and
+    -- only while it still has BFI's applied value. Other threat-display bits
+    -- remain untouched.
+    if progressiveThreatCaptured
+        and ownsProgressiveThreatDisplay
+        and current
+    then
+        SetCVarBitfield(
+            "nameplateThreatDisplay",
+            PROGRESSIVE_THREAT,
+            previousProgressiveThreatDisplay
+        )
+    end
+
+    progressiveThreatCaptured = nil
+    previousProgressiveThreatDisplay = nil
+    ownsProgressiveThreatDisplay = nil
 end
 
 local function CreateNameplate(nameplate)
@@ -99,6 +184,26 @@ local function CreateNameplate(nameplate)
     np.indicators = {}
     nameplate.bfi = np
     NP.created[nameplate] = np
+
+    local function ReassertCustomHitTest()
+        if np.customActive then
+            ApplyCustomHitTest(np)
+        end
+    end
+    if type(nameplate.SetHitTestPoints) == "function" then
+        hooksecurefunc(
+            nameplate,
+            "SetHitTestPoints",
+            ReassertCustomHitTest
+        )
+    end
+    if type(nameplate.ClearAllHitTestPoints) == "function" then
+        hooksecurefunc(
+            nameplate,
+            "ClearAllHitTestPoints",
+            ReassertCustomHitTest
+        )
+    end
 
     NP.CreateIndicators(np)
     return np
@@ -122,13 +227,16 @@ function NP.IterateAllVisibleNameplates(func, configKey)
 end
 
 local function DetachNameplate(np, clearUnit)
-    if np.customActive then
+    local wasCustomActive = np.customActive
+    np.customActive = nil
+
+    if wasCustomActive then
         NP.OnNameplateHide(np)
     else
         NP.DisableIndicators(np)
     end
 
-    np.customActive = nil
+    RestoreNativeHitTest(np)
     np:Hide()
 
     if np.unitFrame then
@@ -178,8 +286,8 @@ local function GetAnchorFactor(point, negative, positive)
 end
 
 local function GetHealthBarBounds(healthBar)
-    local width = healthBar.width or 0
-    local height = healthBar.height or 0
+    local width = healthBar.width or 120
+    local height = healthBar.height or 13
     local position = healthBar.position or {
         "CENTER",
         "CENTER",
@@ -203,25 +311,22 @@ local function GetHealthBarBounds(healthBar)
         height + 2 * math.abs(centerY)
 end
 
-local function GetClickSize(config, faction)
-    local width = config[faction .. "ClickableAreaWidth"] or 120
-    local height = config[faction .. "ClickableAreaHeight"] or 40
-    local npcConfig = config[faction .. "_npc"]
-    local playerConfig = config[faction .. "_player"]
-
-    if npcConfig and npcConfig.healthBar then
-        local healthWidth, healthHeight =
-            GetHealthBarBounds(npcConfig.healthBar)
-        width = math.max(width, healthWidth)
-        height = math.max(height, healthHeight)
+local function GetRequiredNamePlateSize(config)
+    local width, height = 120, 13
+    for _, configKey in ipairs({
+        "friendly_npc",
+        "friendly_player",
+        "hostile_npc",
+        "hostile_player",
+    }) do
+        local plateConfig = config[configKey]
+        if plateConfig and plateConfig.healthBar then
+            local healthWidth, healthHeight =
+                GetHealthBarBounds(plateConfig.healthBar)
+            width = math.max(width, healthWidth)
+            height = math.max(height, healthHeight)
+        end
     end
-    if playerConfig and playerConfig.healthBar then
-        local healthWidth, healthHeight =
-            GetHealthBarBounds(playerConfig.healthBar)
-        width = math.max(width, healthWidth)
-        height = math.max(height, healthHeight)
-    end
-
     return width, height
 end
 
@@ -270,50 +375,31 @@ end
 local function ApplyClickGeometry(config)
     CaptureClickGeometry()
 
-    local friendlyWidth, friendlyHeight =
-        GetClickSize(config, "friendly")
-    local enemyWidth, enemyHeight =
-        GetClickSize(config, "hostile")
-
-    -- Retail 12.0.7.68887 and 12.1.0.68824 provide one shared C++
-    -- nameplate size plus per-faction numeric hit-test insets. Expanding the
-    -- native region to those bounds avoids measuring restricted frame regions.
+    local requiredWidth, requiredHeight =
+        GetRequiredNamePlateSize(config)
     local width = math.max(
         previousClickGeometry.width,
-        friendlyWidth,
-        enemyWidth
+        requiredWidth
     )
     local height = math.max(
         previousClickGeometry.height,
-        friendlyHeight,
-        enemyHeight
+        requiredHeight
     )
+
+    -- The per-frame hit-test anchors below provide the exact shape. Neutral
+    -- manager insets keep that shape precise, while the shared native bounds
+    -- remain large enough for configured custom bars.
     SetNamePlateSize(width, height)
-    SetNamePlateHitTestInsets(
-        FRIENDLY_NAME_PLATE,
-        FULL_HIT_TEST_INSET,
-        FULL_HIT_TEST_INSET,
-        FULL_HIT_TEST_INSET,
-        FULL_HIT_TEST_INSET
-    )
-    SetNamePlateHitTestInsets(
-        ENEMY_NAME_PLATE,
-        FULL_HIT_TEST_INSET,
-        FULL_HIT_TEST_INSET,
-        FULL_HIT_TEST_INSET,
-        FULL_HIT_TEST_INSET
-    )
+    SetInsets(FRIENDLY_NAME_PLATE, ZERO_HIT_TEST_INSETS)
+    SetInsets(ENEMY_NAME_PLATE, ZERO_HIT_TEST_INSETS)
 
     local appliedWidth, appliedHeight = GetNamePlateSize()
     local friendlyInsets = GetInsets(FRIENDLY_NAME_PLATE)
     local enemyInsets = GetInsets(ENEMY_NAME_PLATE)
-
-    -- Another nameplate addon may synchronously reassert these globals from a
-    -- secure post-hook. Only claim ownership when our entire bundle stuck.
     if appliedWidth == width
         and appliedHeight == height
-        and InsetsEqual(friendlyInsets, FULL_HIT_TEST_INSETS)
-        and InsetsEqual(enemyInsets, FULL_HIT_TEST_INSETS)
+        and InsetsEqual(friendlyInsets, ZERO_HIT_TEST_INSETS)
+        and InsetsEqual(enemyInsets, ZERO_HIT_TEST_INSETS)
     then
         appliedClickGeometry = {
             width = appliedWidth,
@@ -326,22 +412,18 @@ local function ApplyClickGeometry(config)
     end
 end
 
-local function InsetsMatch(plateType, expectedInsets)
-    return InsetsEqual(GetInsets(plateType), expectedInsets)
-end
-
 local function ClickGeometryIsApplied()
     if not appliedClickGeometry then return false end
 
     local width, height = GetNamePlateSize()
     return width == appliedClickGeometry.width
         and height == appliedClickGeometry.height
-        and InsetsMatch(
-            FRIENDLY_NAME_PLATE,
+        and InsetsEqual(
+            GetInsets(FRIENDLY_NAME_PLATE),
             appliedClickGeometry.friendlyInsets
         )
-        and InsetsMatch(
-            ENEMY_NAME_PLATE,
+        and InsetsEqual(
+            GetInsets(ENEMY_NAME_PLATE),
             appliedClickGeometry.enemyInsets
         )
 end
@@ -366,6 +448,59 @@ local function RestoreClickGeometry()
 
     previousClickGeometry = nil
     appliedClickGeometry = nil
+end
+
+local function CanChangeHitTestPoints(nameplate)
+    return nameplate
+        and type(nameplate.CanChangeHitTestPoints) == "function"
+        and nameplate:CanChangeHitTestPoints()
+end
+
+ApplyCustomHitTest = function(np)
+    local healthBar = NP.GetIndicator(np, "healthBar", true)
+    local clickRegion = healthBar
+        or NP.GetIndicator(np, "nameText", true)
+    if not clickRegion
+        or not CanChangeHitTestPoints(np.base)
+        or type(np.base.SetAllHitTestPoints) ~= "function"
+    then
+        return false
+    end
+
+    -- Retail 12.0.7 and 12.1 let a nameplate bind its protected click target
+    -- directly to an untainted region on the tick a unit is assigned. Using
+    -- the custom bar itself gives exact targeting without reading or measuring
+    -- a restricted nameplate region.
+    np.base:SetAllHitTestPoints(clickRegion)
+    np.customHitTest = true
+    return true
+end
+
+RestoreNativeHitTest = function(np)
+    if not np.customHitTest
+        or not CanChangeHitTestPoints(np.base)
+        or not np.unitFrame
+    then
+        return false
+    end
+
+    if type(np.unitFrame.UpdateHitTestArea) == "function" then
+        np.unitFrame:UpdateHitTestArea(NamePlateSetupOptions)
+    elseif type(np.unitFrame.ApplyFrameOptions) == "function"
+        and type(np.base.GetFrameOptions) == "function"
+    then
+        -- 12.0.7 sets the native hit-test points as part of this method;
+        -- 12.1 exposes the narrower UpdateHitTestArea helper above.
+        np.unitFrame:ApplyFrameOptions(
+            NamePlateSetupOptions,
+            np.base:GetFrameOptions()
+        )
+    else
+        return false
+    end
+
+    np.customHitTest = nil
+    return true
 end
 
 local function AttachNameplate(np, unit)
@@ -404,10 +539,11 @@ local function AttachNameplate(np, unit)
     np:Show()
     NP.OnNameplateShow(np)
     np.customActive = true
+    ApplyCustomHitTest(np)
 
     -- Keep Blizzard's unit-frame controller alive. AF only suppresses its
-    -- visual presentation; Blizzard retains click ownership while the global
-    -- native hit region above covers BFI's health bar.
+    -- visual presentation; Blizzard retains protected click ownership while
+    -- its hit-test points follow BFI's visible health bar.
     AF.SetNativeNamePlateVisualSuppressed(np.unitFrame, true)
 end
 
@@ -464,6 +600,18 @@ end
 local function NamePlateFactionChanged(_, _, unit)
     local np = NP.byUnit[unit]
     if np then
+        -- A faction change can switch the visible click carrier between the
+        -- health bar and name text. Outside the protected same-tick update
+        -- window, keep the current visual and hit target paired until combat
+        -- ends instead of leaving a stale invisible click region.
+        if InCombatLockdown() then
+            NP:RegisterEvent(
+                "PLAYER_REGEN_ENABLED",
+                ApplyPendingUpdate
+            )
+            return
+        end
+
         AttachNameplate(np, unit)
         UpdateTargetIndicators()
     end
@@ -487,10 +635,12 @@ local function ApplyModuleState()
 
     if NP.config and NP.config.enabled then
         appliedConfig = AF.Copy(NP.config)
+        ApplyProgressiveThreatDisplay(appliedConfig)
         ApplyClickGeometry(appliedConfig)
         SyncVisibleNameplates()
     else
         appliedConfig = nil
+        ApplyProgressiveThreatDisplay(nil)
         for _, np in next, NP.created do
             DetachNameplate(np, false)
         end
@@ -498,25 +648,39 @@ local function ApplyModuleState()
     end
 end
 
-local function ApplyPendingUpdate()
+local function NamePlateCVarUpdated(_, _, cvar)
+    if cvar == "nameplateThreatDisplay"
+        and appliedConfig
+    then
+        ApplyProgressiveThreatDisplay(appliedConfig)
+    end
+end
+
+local function PlayerLogout()
+    -- Keep the temporary Progressive bit from persisting across a logout or
+    -- reload. An enabled BFI profile will acquire it again on the next load.
+    appliedConfig = nil
+    ApplyProgressiveThreatDisplay(nil)
+end
+
+ApplyPendingUpdate = function()
     ApplyModuleState()
 end
 
 local function NativeNamePlateSizeUpdated()
-    if not appliedConfig
-        or not previousClickGeometry
-        or not appliedClickGeometry
-    then
+    if not appliedConfig or not previousClickGeometry then
         return
     end
 
-    -- Preserve Blizzard's newest requested size for disable/restore before BFI
-    -- resumes ownership. Do not call restricted setters from combat.
+    -- Preserve Blizzard's newest requested native bounds for disable/restore,
+    -- then reapply BFI's required bounds when restricted setters are legal.
     local width, height = GetNamePlateSize()
     previousClickGeometry.width = width
     previousClickGeometry.height = height
-    appliedClickGeometry.width = width
-    appliedClickGeometry.height = height
+    if appliedClickGeometry then
+        appliedClickGeometry.width = width
+        appliedClickGeometry.height = height
+    end
 
     if InCombatLockdown() then
         NP:RegisterEvent(
@@ -546,6 +710,8 @@ NP:RegisterEvent("NAME_PLATE_CREATED", NamePlateCreated)
 NP:RegisterEvent("NAME_PLATE_UNIT_ADDED", NamePlateUnitAdded)
 NP:RegisterEvent("NAME_PLATE_UNIT_REMOVED", NamePlateUnitRemoved)
 NP:RegisterEvent("UNIT_FACTION", NamePlateFactionChanged)
+NP:RegisterEvent("CVAR_UPDATE", NamePlateCVarUpdated)
+NP:RegisterEvent("PLAYER_LOGOUT", PlayerLogout)
 NP:RegisterEvent("PLAYER_TARGET_CHANGED", UpdateTargetIndicators)
 NP:RegisterEvent("PLAYER_FOCUS_CHANGED", UpdateTargetIndicators)
 if NamePlateDriverFrame

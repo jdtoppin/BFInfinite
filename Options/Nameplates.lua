@@ -123,6 +123,20 @@ local function SetSharedIndicatorEnabled(indicator, enabled)
     UpdateNameplates()
 end
 
+local function SetSharedNamePlacement(placement)
+    for _, plateType in ipairs(PLATE_TYPES) do
+        NP.config[plateType].nameText.placement = placement
+    end
+    UpdateNameplates()
+end
+
+local function SetHostileThreatValue(key, value)
+    for _, plateType in ipairs(PLATE_TYPE_GROUPS.hostile) do
+        NP.config[plateType].healthBar.threatGlow[key] = value
+    end
+    UpdateNameplates()
+end
+
 local function SetScopeIndicatorEnabled(
     scope,
     indicator,
@@ -329,6 +343,7 @@ local function CreateNameplatesPanel()
         {text = L["Colors"], value = "colors"},
         {text = L["Casts"], value = "casts"},
         {text = L["Target"], value = "target"},
+        {text = L["Threat"], value = "threat"},
         {text = L["Auras"], value = "auras"},
     })
 
@@ -352,18 +367,23 @@ local function CreateNameplatesPanel()
     AF.SetPoint(targetPage, "TOPLEFT", sectionSwitch, "BOTTOMLEFT", 0, -15)
     AF.SetPoint(targetPage, "BOTTOMRIGHT", nameplatesPanel, -15, 15)
 
+    local threatPage = AF.CreateFrame(nameplatesPanel)
+    AF.SetPoint(threatPage, "TOPLEFT", sectionSwitch, "BOTTOMLEFT", 0, -15)
+    AF.SetPoint(threatPage, "BOTTOMRIGHT", nameplatesPanel, -15, 15)
+
     sectionSwitch:SetOnSelect(function(value)
         generalPage:SetShown(value == "general")
         colorsPage:SetShown(value == "colors")
         castsPage:SetShown(value == "casts")
         targetPage:SetShown(value == "target")
+        threatPage:SetShown(value == "threat")
         aurasPage:SetShown(value == "auras")
     end)
 
     --------------------------------------------------
     -- shared settings
     --------------------------------------------------
-    local sharedPane = AF.CreateTitledPane(generalPage, L["Shared Nameplate Settings"], nil, 220)
+    local sharedPane = AF.CreateTitledPane(generalPage, L["Shared Nameplate Settings"], nil, 245)
     AF.SetPoint(sharedPane, "TOPLEFT", generalPage)
     AF.SetPoint(sharedPane, "TOPRIGHT", generalPage)
 
@@ -403,18 +423,167 @@ local function CreateNameplatesPanel()
         SetSharedIndicatorEnabled("debuffs", checked)
     end)
 
+    local namePlacement = AF.CreateDropdown(sharedPane, 180)
+    namePlacement:SetLabel(L["Name Placement"])
+    AF.SetPoint(namePlacement, "TOPLEFT", sharedPane, 285, -195)
+    namePlacement:SetItems({
+        {text = L["Outside Health Bar"], value = "outside"},
+        {text = L["Inside Health Bar"], value = "inside"},
+    })
+    namePlacement:SetOnSelect(function(value)
+        SetSharedNamePlacement(value)
+    end)
+
     --------------------------------------------------
     -- compatibility
     --------------------------------------------------
-    local compatibilityPane = AF.CreateTitledPane(generalPage, L["Compatibility"], nil, 95, "sand")
+    local compatibilityPane = AF.CreateTitledPane(generalPage, L["Compatibility"], nil, 115, "sand")
     AF.SetPoint(compatibilityPane, "TOPLEFT", sharedPane, "BOTTOMLEFT", 0, -15)
     AF.SetPoint(compatibilityPane, "TOPRIGHT", sharedPane, "BOTTOMRIGHT", 0, -15)
 
-    local compatibilityNotice = AF.CreateFontString(compatibilityPane, L["Native special and quest widgets remain Blizzard-owned. Blizzard's click target expands to cover the BFI health bar. Changes made during combat may be deferred until combat ends."], "sand")
+    local compatibilityNotice = AF.CreateFontString(compatibilityPane, L["Native special and quest widgets remain Blizzard-owned. Blizzard's protected click target follows the visible BFI health bar precisely; an outside name is visual-only, while an inside name shares the bar's click target. Changes made during combat may be deferred until combat ends."], "sand")
     AF.SetPoint(compatibilityNotice, "TOPLEFT", compatibilityPane, 15, -30)
     AF.SetPoint(compatibilityNotice, "TOPRIGHT", compatibilityPane, -15, -30)
     compatibilityNotice:SetJustifyH("LEFT")
     compatibilityNotice:SetWordWrap(true)
+
+    --------------------------------------------------
+    -- threat
+    --------------------------------------------------
+    local threatPane = AF.CreateTitledPane(
+        threatPage,
+        L["Threat Warning"],
+        nil,
+        300
+    )
+    AF.SetPoint(threatPane, "TOPLEFT", threatPage)
+    AF.SetPoint(threatPane, "TOPRIGHT", threatPage)
+
+    local threatNotice = AF.CreateFontString(
+        threatPane,
+        L["BFI temporarily enables Blizzard's role-aware Progressive threat signal and restores it when released, without reading restricted threat values. For tanks, a warning color means threat is slipping and red means threat is lost; no warning means secure threat or no active threat."],
+        "gray"
+    )
+    AF.SetPoint(threatNotice, "TOPLEFT", threatPane, 15, -30)
+    AF.SetPoint(threatNotice, "TOPRIGHT", threatPane, -15, -30)
+    threatNotice:SetJustifyH("LEFT")
+    threatNotice:SetWordWrap(true)
+
+    local UpdateThreatWidgets
+
+    local threatEnabled = AF.CreateCheckButton(
+        threatPane,
+        L["Enable Threat Warning"]
+    )
+    AF.SetPoint(threatEnabled, "TOPLEFT", threatPane, 15, -100)
+    threatEnabled:SetOnCheck(function(checked)
+        SetHostileThreatValue("enabled", checked)
+        UpdateThreatWidgets()
+    end)
+
+    local threatStyle = AF.CreateDropdown(threatPane, 180)
+    threatStyle:SetLabel(L["Style"])
+    AF.SetPoint(threatStyle, "TOPLEFT", threatPane, 285, -105)
+    threatStyle:SetItems({
+        {text = L["Border"], value = "border"},
+        {text = L["Glow"], value = "glow"},
+        {text = L["Border + Glow"], value = "both"},
+    })
+    threatStyle:SetOnSelect(function(value)
+        SetHostileThreatValue("style", value)
+        UpdateThreatWidgets()
+    end)
+
+    local threatBorderSize = AF.CreateSlider(
+        threatPane,
+        L["Border Thickness"],
+        180,
+        1,
+        12,
+        1,
+        nil,
+        true
+    )
+    AF.SetPoint(threatBorderSize, "TOPLEFT", threatPane, 15, -165)
+    threatBorderSize:SetAfterValueChanged(function(value)
+        SetHostileThreatValue("borderSize", value)
+    end)
+
+    local threatGlowSize = AF.CreateSlider(
+        threatPane,
+        L["Glow Thickness"],
+        180,
+        1,
+        16,
+        1,
+        nil,
+        true
+    )
+    AF.SetPoint(threatGlowSize, "TOPLEFT", threatPane, 285, -165)
+    threatGlowSize:SetAfterValueChanged(function(value)
+        SetHostileThreatValue("size", value)
+    end)
+
+    local threatOutset = AF.CreateSlider(
+        threatPane,
+        L["Glow Outset"],
+        180,
+        0,
+        16,
+        1,
+        nil,
+        true
+    )
+    AF.SetPoint(threatOutset, "TOPLEFT", threatPane, 15, -225)
+    threatOutset:SetAfterValueChanged(function(value)
+        SetHostileThreatValue("outset", value)
+    end)
+
+    local threatAlpha = AF.CreateSlider(
+        threatPane,
+        L["Opacity"],
+        180,
+        0.1,
+        1,
+        0.05,
+        true,
+        true
+    )
+    AF.SetPoint(threatAlpha, "TOPLEFT", threatPane, 285, -225)
+    threatAlpha:SetAfterValueChanged(function(value)
+        SetHostileThreatValue("alpha", value)
+    end)
+
+    UpdateThreatWidgets = function()
+        local config =
+            NP.config.hostile_npc.healthBar.threatGlow
+        local borderShown = config.style == "border"
+            or config.style == "both"
+        local glowShown = config.style == "glow"
+            or config.style == "both"
+
+        threatEnabled:SetChecked(config.enabled)
+        threatStyle:SetSelectedValue(config.style)
+        threatBorderSize:SetValue(config.borderSize)
+        threatGlowSize:SetValue(config.size)
+        threatOutset:SetValue(config.outset)
+        threatAlpha:SetValue(config.alpha)
+
+        AF.SetEnabled(
+            config.enabled,
+            threatStyle,
+            threatAlpha
+        )
+        AF.SetEnabled(
+            config.enabled and borderShown,
+            threatBorderSize
+        )
+        AF.SetEnabled(
+            config.enabled and glowShown,
+            threatGlowSize,
+            threatOutset
+        )
+    end
 
     --------------------------------------------------
     -- hostile NPC semantic colors
@@ -1531,6 +1700,9 @@ local function CreateNameplatesPanel()
         width:SetValue(config.hostile_npc.healthBar.width)
         height:SetValue(config.hostile_npc.healthBar.height)
         nameText:SetChecked(IsIndicatorEnabledForAnyPlateType("nameText"))
+        namePlacement:SetSelectedValue(
+            config.hostile_npc.nameText.placement or "outside"
+        )
         castBar:SetChecked(IsIndicatorEnabledForAnyPlateType("castBar"))
         debuffs:SetChecked(IsIndicatorEnabledForAnyPlateType("debuffs"))
 
@@ -1540,6 +1712,7 @@ local function CreateNameplatesPanel()
         targetScope:SetSelectedValue(selectedTargetScope)
         targetState:SetSelectedValue(selectedTargetState)
         UpdateTargetWidgets()
+        UpdateThreatWidgets()
 
         cooldownStyle:SetSelectedValue(config.hostile_npc.debuffs.cooldownStyle)
         durationEnabled:SetChecked(IsDebuffDurationEnabledForAnyPlateType())
