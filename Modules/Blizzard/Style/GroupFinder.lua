@@ -6,7 +6,6 @@ local F = BFI.funcs
 local AF = _G.AbstractFramework
 
 local PVEFrame = _G.PVEFrame
-local GroupFinderFrame = _G.GroupFinderFrame
 local LFDQueueFrame = _G.LFDQueueFrame
 local LFGListFrame = _G.LFGListFrame
 local RaidFinderQueueFrame = _G.RaidFinderQueueFrame
@@ -394,7 +393,6 @@ local function StyleLFDQueueFrame()
     local rewardFrame = _G.LFDQueueFrameRandomScrollFrameChildFrame
 
     -- moneyReward - LargeItemButtonTemplate
-    local moneyReward = rewardFrame.MoneyReward
     S.StyleLargeItemButton(rewardFrame.MoneyReward)
 
     -- LFGRewardsFrame_SetItemButton - LFGRewardsLootTemplate -> LargeItemButtonTemplate
@@ -442,7 +440,6 @@ local function StyleRaidFinderQueueFrame()
     local rewardFrame = _G.RaidFinderQueueFrameScrollFrameChildFrame
 
     -- moneyReward - LargeItemButtonTemplate
-    local moneyReward = rewardFrame.MoneyReward
     S.StyleLargeItemButton(rewardFrame.MoneyReward)
 
     -- NOTE: RaidFinderQueueFrameRewards_UpdateFrame -> LFGRewardsFrame_UpdateFrame -> LFGRewardsFrame_SetItemButton
@@ -451,8 +448,6 @@ end
 ---------------------------------------------------------------------
 -- LFGListFrame
 ---------------------------------------------------------------------
-local HasSearchResultInfo = C_LFGList.HasSearchResultInfo
-local GetApplicationInfo = C_LFGList.GetApplicationInfo
 local UnitIsGroupLeader = UnitIsGroupLeader
 
 local function StyleLFGListFrame()
@@ -550,8 +545,6 @@ local function StyleLFGListFrame()
             button.BackgroundTexture:SetVertexColor(AF.GetColorRGB("green", 0.12))
         elseif button.isSelected then
             button.BackgroundTexture:SetVertexColor(AF.GetColorRGB("yellow", 0.12))
-        else
-            -- button.BackgroundTexture:Hide()
         end
     end)
 
@@ -630,11 +623,11 @@ local function StyleLFGListFrame()
 
     S.StyleCheckButton(ApplicationViewer.AutoAcceptButton, 14)
 
-    local RefreshButton = ApplicationViewer.RefreshButton
-    StyleRefreshButton(RefreshButton)
-    RefreshButton:ClearAllPoints()
-    RefreshButton:SetPoint("RIGHT", InfoBackground)
-    RefreshButton:SetPoint("BOTTOM", ApplicationViewer.NameColumnHeader)
+    local ApplicationRefreshButton = ApplicationViewer.RefreshButton
+    StyleRefreshButton(ApplicationRefreshButton)
+    ApplicationRefreshButton:ClearAllPoints()
+    ApplicationRefreshButton:SetPoint("RIGHT", InfoBackground)
+    ApplicationRefreshButton:SetPoint("BOTTOM", ApplicationViewer.NameColumnHeader)
 
     -- ApplicationViewer.Inset:Hide()
     ApplicationViewer.Inset:SetPoint("TOPLEFT", 0, -150)
@@ -686,24 +679,182 @@ local function StyleLFGListFrame()
 end
 
 ---------------------------------------------------------------------
+-- dungeon finder confirmations
+---------------------------------------------------------------------
+-- Frame ownership and reward creation are unchanged between Retail
+-- 12.0.7.68887 (wow-ui-source 4383ced30106d51b27e3e86d1987f1552f0d259d)
+-- and PTR 12.1.0.68914
+-- (wow-ui-source d3915c78aba77a7a9be76acbfa35c674bbb6abe9):
+-- Blizzard_GroupFinder/Mainline/LFGFrame.xml, Mainline/LFDFrame.xml,
+-- and Shared/LFGReadyCheck.xml.
+local function HideConfirmationBorder(border)
+    border:SetAlpha(0)
+end
+
+local function CreateConfirmationHeaderFrame(popup, parent, height)
+    local header = AF.CreateBorderedFrame(parent, nil, nil, nil, "header", "border")
+    header:SetPoint("TOPLEFT")
+    header:SetPoint("TOPRIGHT")
+    AF.SetHeight(header, height)
+    AF.SetFrameLevel(header, 1, parent)
+    AF.RemoveFromPixelUpdater(header)
+    AF.AddToPixelUpdater_CustomGroup("BFIStyled", header)
+
+    header.tex = AF.CreateGradientTexture(header, "HORIZONTAL", AF.GetColorTable("BFI", 0.4), AF.GetColorTable("BFI", 0), nil, "ARTWORK")
+    AF.SetOnePixelInside(header.tex, header)
+    AF.RemoveFromPixelUpdater(header.tex)
+    AF.AddToPixelUpdater_CustomGroup("BFIStyled", header.tex)
+
+    header.TitleText = AF.CreateFontString(header, nil, "white", "GameFontHighlight")
+    header.TitleText:SetPoint("CENTER")
+    header.TitleText:SetWidth(popup:GetWidth() - 64)
+    header.TitleText:SetJustifyH("CENTER")
+    header.TitleText:SetJustifyV("MIDDLE")
+
+    return header
+end
+
+local function CreateConfirmationHeader(popup, height)
+    popup._BFIConfirmationStyled = true
+
+    S.CreateBackdrop(popup)
+
+    popup.BFIHeader = CreateConfirmationHeaderFrame(popup, popup, height)
+    S.MakeMovable(popup, popup.BFIHeader)
+end
+
+local function SyncConfirmationTitle(popup, source)
+    local text = source:GetText()
+    if F.isValueNonSecret(text) then
+        popup.BFIHeader.TitleText:SetText(text)
+        source:SetAlpha(0)
+    else
+        popup.BFIHeader.TitleText:SetText("")
+        source:SetAlpha(1)
+    end
+end
+
+local function WatchConfirmationTitle(popup, source)
+    local function SyncTitle()
+        SyncConfirmationTitle(popup, source)
+    end
+
+    hooksecurefunc(source, "SetText", SyncTitle)
+    hooksecurefunc(source, "SetFormattedText", SyncTitle)
+    SyncTitle()
+end
+
+local function StyleConfirmationCloseButton(button, popup, header)
+    S.StyleCloseButton(button)
+    button:ClearAllPoints()
+    button:SetPoint("TOPRIGHT", popup)
+    AF.SetFrameLevel(button, 1, header)
+end
+
+local function StyleDungeonReadyReward(reward)
+    if reward._BFIConfirmationStyled then return end
+    reward._BFIConfirmationStyled = true
+
+    S.StyleSquareIcon(reward.texture, reward.CircleMask, true)
+
+    local border = _G[reward:GetName() .. "Border"]
+    S.StyleIconBorder(border, reward.texture.BFIBackdrop)
+end
+
+local function StyleDungeonReadyRewards()
+    for _, reward in next, _G.LFGDungeonReadyDialogRewardsFrame.Rewards do
+        StyleDungeonReadyReward(reward)
+    end
+end
+
+local function UpdateDungeonReadyStyle()
+    local dialog = _G.LFGDungeonReadyDialog
+    local status = _G.LFGDungeonReadyStatus
+    SyncConfirmationTitle(dialog, dialog.label)
+    SyncConfirmationTitle(status, _G.LFGDungeonReadyStatusLabel)
+end
+
+local function StyleLFGDungeonReadyPopup()
+    local popup = _G.LFGDungeonReadyPopup
+    if popup._BFIConfirmationStyled then return end
+
+    local dialog = _G.LFGDungeonReadyDialog
+    local status = _G.LFGDungeonReadyStatus
+
+    popup._BFIConfirmationStyled = true
+    S.CreateBackdrop(popup)
+
+    popup.BFIHeader = CreateConfirmationHeaderFrame(popup, popup, 28)
+    dialog.BFIHeader = popup.BFIHeader
+    status.BFIHeader = popup.BFIHeader
+    S.MakeMovable(popup, popup.BFIHeader)
+
+    HideConfirmationBorder(dialog.Border)
+    HideConfirmationBorder(status.Border)
+
+    S.StyleButton(dialog.enterButton, "BFI")
+    S.StyleButton(dialog.leaveButton, "red")
+    StyleConfirmationCloseButton(_G.LFGDungeonReadyDialogCloseButton, popup, dialog.BFIHeader)
+    StyleConfirmationCloseButton(_G.LFGDungeonReadyStatusCloseButton, popup, status.BFIHeader)
+
+    StyleDungeonReadyRewards()
+    hooksecurefunc("LFGDungeonReadyDialog_UpdateRewards", StyleDungeonReadyRewards)
+    hooksecurefunc("LFGDungeonReadyPopup_Update", UpdateDungeonReadyStyle)
+    UpdateDungeonReadyStyle()
+end
+
+---------------------------------------------------------------------
 -- LFDRoleCheckPopup
 ---------------------------------------------------------------------
 local function StyleLFDRoleCheckPopup()
+    local popup = _G.LFDRoleCheckPopup
+    if popup._BFIConfirmationStyled then return end
 
+    CreateConfirmationHeader(popup, 28)
+    HideConfirmationBorder(popup.Border)
+    WatchConfirmationTitle(popup, popup.Text)
+
+    StyleRoleButton(_G.LFDRoleCheckPopupRoleButtonTank)
+    StyleRoleButton(_G.LFDRoleCheckPopupRoleButtonHealer)
+    StyleRoleButton(_G.LFDRoleCheckPopupRoleButtonDPS)
+
+    S.StyleButton(_G.LFDRoleCheckPopupAcceptButton, "BFI")
+    S.StyleButton(_G.LFDRoleCheckPopupDeclineButton, "red")
+end
+
+---------------------------------------------------------------------
+-- LFGReadyCheckPopup
+---------------------------------------------------------------------
+local function StyleLFGReadyCheckPopup()
+    local popup = _G.LFGReadyCheckPopup
+    if popup._BFIConfirmationStyled then return end
+
+    CreateConfirmationHeader(popup, 50)
+    HideConfirmationBorder(popup.Border)
+    WatchConfirmationTitle(popup, popup.Text)
+
+    S.StyleButton(popup.YesButton, "BFI")
+    S.StyleButton(popup.NoButton, "red")
 end
 
 ---------------------------------------------------------------------
 -- LFGInvitePopup
 ---------------------------------------------------------------------
 local function StyleLFGInvitePopup()
-    --[[ test code - (inviter, roleTankAvailable, roleHealerAvailable, roleDamagerAvailable, allowMultipleRoles, isQuestSessionActive)
-    LFGInvitePopup_Update("BB7", true, true, true, true, true)
-    LFGInvitePopup:SetPoint("CENTER")
-    LFGInvitePopup:Show()
-    ]]
-end
+    local popup = _G.LFGInvitePopup
+    if popup._BFIConfirmationStyled then return end
 
--- TODO: LFGDungeonReadyDialog
+    CreateConfirmationHeader(popup, 45)
+    HideConfirmationBorder(popup.Border)
+    WatchConfirmationTitle(popup, _G.LFGInvitePopupText)
+
+    for _, button in next, popup.RoleButtons do
+        StyleRoleButton(button)
+    end
+
+    S.StyleButton(_G.LFGInvitePopupAcceptButton, "BFI")
+    S.StyleButton(_G.LFGInvitePopupDeclineButton, "red")
+end
 
 ---------------------------------------------------------------------
 -- init
@@ -715,6 +866,11 @@ local function StyleBlizzard()
     StyleLFDQueueFrame()
     StyleLFGListFrame()
     StyleRaidFinderQueueFrame()
+
+    StyleLFGDungeonReadyPopup()
+    StyleLFDRoleCheckPopup()
+    StyleLFGReadyCheckPopup()
+    StyleLFGInvitePopup()
 end
 AF.RegisterCallback("BFI_StyleBlizzard", StyleBlizzard)
 
