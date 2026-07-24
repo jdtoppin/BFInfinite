@@ -415,7 +415,6 @@ local function UpdateTargetIndicators()
 
     for nameplate, np in next, NP.created do
         if np.customActive then
-            np:SetFrameLevel(nameplate:GetFrameLevel() + 100)
             local indicator = NP.GetIndicator(
                 np,
                 "targetIndicator",

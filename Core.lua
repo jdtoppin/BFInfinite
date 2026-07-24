@@ -5,7 +5,7 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local REQUIRED_AF_VERSION = 22
+local REQUIRED_AF_VERSION = 23
 
 local GetCVar = GetCVar
 local SetCVar = SetCVar

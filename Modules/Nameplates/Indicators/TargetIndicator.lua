@@ -4,29 +4,138 @@ local BFI = select(2, ...)
 local AF = _G.AbstractFramework
 local NP = BFI.modules.Nameplates
 
+local HALF_PI = math.pi / 2
+
+local function TargetIndicator_ClearTargetState(self)
+    self.targetVisual:Hide()
+    self.focusVisual:Hide()
+
+    if self.nameTextEmphasized then
+        local nameText = NP.GetIndicator(self.root, "nameText")
+        if nameText and nameText.SetTargetEmphasis then
+            nameText:SetTargetEmphasis(false)
+        end
+    end
+
+    self.nameTextEmphasized = nil
+    self:Hide()
+end
+
+local function TargetIndicator_LoadStateVisual(
+    self,
+    visual,
+    config
+)
+    local size = config.size or self.defaultSize
+    local sideSize = config.sideSize or 22
+    local sideSpacing = config.sideSpacing or 0
+    local layout = config.layout or "top"
+    local texture = AF.GetTexture(config.texture, BFI.name)
+
+    visual:Hide()
+    visual:SetSize(size, size)
+    visual:ClearAllPoints()
+    visual:SetPoint("CENTER", self, "CENTER", 0, 0)
+
+    for _, icon in next, visual.icons do
+        icon:SetTexture(texture)
+        icon:SetVertexColor(AF.UnpackColor(config.color))
+    end
+
+    visual.topIcon:SetShown(layout == "top")
+
+    -- Use the already-resolved anchor region directly. Nameplate regions
+    -- can be restricted, so prepare geometry during configuration with
+    -- direct setters that do not read effective scale. Target/focus events
+    -- only toggle preconfigured visuals.
+    visual.leftIcon:SetSize(sideSize, sideSize)
+    visual.leftIcon:ClearAllPoints()
+    visual.leftIcon:SetPoint(
+        "RIGHT",
+        self.anchorRegion,
+        "LEFT",
+        -sideSpacing,
+        0
+    )
+    visual.leftIcon:SetShown(layout == "sides")
+
+    visual.rightIcon:SetSize(sideSize, sideSize)
+    visual.rightIcon:ClearAllPoints()
+    visual.rightIcon:SetPoint(
+        "LEFT",
+        self.anchorRegion,
+        "RIGHT",
+        sideSpacing,
+        0
+    )
+    visual.rightIcon:SetShown(layout == "sides")
+
+    local healthBar = NP.GetIndicator(self.root, "healthBar")
+    local healthHighlight = config.healthBarHighlight
+    if healthBar and healthHighlight then
+        visual.healthBarHighlight:ClearAllPoints()
+        visual.healthBarHighlight:SetPoint(
+            "TOPLEFT",
+            healthBar,
+            "TOPLEFT",
+            0,
+            0
+        )
+        visual.healthBarHighlight:SetPoint(
+            "BOTTOMRIGHT",
+            healthBar,
+            "BOTTOMRIGHT",
+            0,
+            0
+        )
+        visual.healthBarHighlight:SetColorTexture(
+            AF.UnpackColor(healthHighlight.color)
+        )
+    end
+    visual.healthBarHighlight:SetShown(
+        healthBar ~= nil
+            and healthBar.enabled
+            and healthHighlight ~= nil
+            and healthHighlight.enabled
+    )
+
+    visual.nameTextEmphasis = config.nameTextEmphasis
+end
+
+local function TargetIndicator_ApplyTargetState(self, visual)
+    local nameEmphasis = visual.nameTextEmphasis
+    local nameText = NP.GetIndicator(self.root, "nameText")
+    if nameText
+        and nameText.enabled
+        and nameText.SetTargetEmphasis
+        and nameEmphasis
+        and nameEmphasis.enabled
+    then
+        nameText:SetTargetEmphasis(true, nameEmphasis)
+        self.nameTextEmphasized = true
+    end
+
+    self:Show()
+    visual:Show()
+end
+
 local function TargetIndicator_SetTargetState(
     self,
     isTarget,
     isFocus
 )
+    TargetIndicator_ClearTargetState(self)
+
     if isFocus then
-        self.icon:SetTexture(
-            AF.GetTexture(self.focusTexture, BFI.name)
+        TargetIndicator_ApplyTargetState(
+            self,
+            self.focusVisual
         )
-        self.icon:SetVertexColor(
-            AF.UnpackColor(self.focusColor)
-        )
-        self:Show()
     elseif isTarget then
-        self.icon:SetTexture(
-            AF.GetTexture(self.targetTexture, BFI.name)
+        TargetIndicator_ApplyTargetState(
+            self,
+            self.targetVisual
         )
-        self.icon:SetVertexColor(
-            AF.UnpackColor(self.targetColor)
-        )
-        self:Show()
-    else
-        self:Hide()
     end
 end
 
@@ -39,22 +148,66 @@ local function TargetIndicator_Enable(self)
 end
 
 local function TargetIndicator_Disable(self)
-    self:Hide()
+    TargetIndicator_ClearTargetState(self)
 end
 
 local function TargetIndicator_LoadConfig(self, config)
+    TargetIndicator_ClearTargetState(self)
+
     AF.SetFrameLevel(self, config.frameLevel, self.root)
-    AF.SetSize(self, config.size, config.size)
-    NP.LoadIndicatorPosition(
+    self.defaultSize = config.size or 40
+    AF.SetSize(self, self.defaultSize, self.defaultSize)
+    self.anchorRegion = NP.LoadIndicatorPosition(
         self,
         config.position,
         config.anchorTo
     )
 
-    self.targetTexture = config.target.texture
-    self.targetColor = config.target.color
-    self.focusTexture = config.focus.texture
-    self.focusColor = config.focus.color
+    TargetIndicator_LoadStateVisual(
+        self,
+        self.targetVisual,
+        config.target
+    )
+    TargetIndicator_LoadStateVisual(
+        self,
+        self.focusVisual,
+        config.focus
+    )
+end
+
+local function CreateStateVisual(parent)
+    local visual = CreateFrame("Frame", nil, parent)
+    visual:Hide()
+
+    local topIcon = visual:CreateTexture(nil, "ARTWORK")
+    visual.topIcon = topIcon
+    topIcon:SetAllPoints()
+
+    local leftIcon = visual:CreateTexture(nil, "ARTWORK")
+    visual.leftIcon = leftIcon
+    leftIcon:SetRotation(HALF_PI)
+    leftIcon:Hide()
+
+    local rightIcon = visual:CreateTexture(nil, "ARTWORK")
+    visual.rightIcon = rightIcon
+    rightIcon:SetRotation(-HALF_PI)
+    rightIcon:Hide()
+
+    visual.icons = {
+        topIcon,
+        leftIcon,
+        rightIcon,
+    }
+
+    local healthBarHighlight = visual:CreateTexture(
+        nil,
+        "OVERLAY"
+    )
+    visual.healthBarHighlight = healthBarHighlight
+    healthBarHighlight:SetBlendMode("ADD")
+    healthBarHighlight:Hide()
+
+    return visual
 end
 
 function NP.CreateTargetIndicator(parent, name)
@@ -62,9 +215,8 @@ function NP.CreateTargetIndicator(parent, name)
     frame.root = parent
     frame:Hide()
 
-    local icon = frame:CreateTexture(nil, "ARTWORK")
-    frame.icon = icon
-    icon:SetAllPoints()
+    frame.targetVisual = CreateStateVisual(frame)
+    frame.focusVisual = CreateStateVisual(frame)
 
     frame.SetTargetState = TargetIndicator_SetTargetState
     frame.Update = TargetIndicator_Update

@@ -148,6 +148,8 @@ function NP.LoadIndicatorPosition(self, position, anchorTo, parent)
     else
         AF.LoadWidgetPosition(self, position, anchorRegion)
     end
+
+    return anchorRegion
 end
 
 function NP.GetIndicator(frame, indicatorName, requireEnabled)

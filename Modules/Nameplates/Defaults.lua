@@ -286,14 +286,44 @@ do
             position = {"BOTTOM", "TOP", 0, 30},
             anchorTo = "healthBar",
             frameLevel = 1,
+            -- Kept for profiles created before target/focus presentation
+            -- settings became independent.
             size = 40,
             target = {
                 texture = "Arrow1_Red",
                 color = AF.GetColorTable("white"),
+                layout = "top",
+                size = 40,
+                sideSize = 22,
+                sideSpacing = 2,
+                healthBarHighlight = {
+                    enabled = false,
+                    color = AF.GetColorTable("white", 0.25),
+                },
+                nameTextEmphasis = {
+                    enabled = false,
+                    sizeDelta = 2,
+                    outline = "thickoutline",
+                    shadow = true,
+                },
             },
             focus = {
                 texture = "Arrow1_Blue",
                 color = AF.GetColorTable("white"),
+                layout = "top",
+                size = 40,
+                sideSize = 22,
+                sideSpacing = 2,
+                healthBarHighlight = {
+                    enabled = false,
+                    color = AF.GetColorTable("white", 0.25),
+                },
+                nameTextEmphasis = {
+                    enabled = false,
+                    sizeDelta = 2,
+                    outline = "thickoutline",
+                    shadow = true,
+                },
             },
         },
         buffs = {
@@ -491,14 +521,47 @@ do
             position = {"BOTTOM", "TOP", 0, 15},
             anchorTo = "nameText",
             frameLevel = 1,
+            -- Kept for profiles created before target/focus presentation
+            -- settings became independent.
             size = 40,
             target = {
                 texture = "Arrow1_Green",
                 color = AF.GetColorTable("white"),
+                layout = "top",
+                size = 40,
+                sideSize = 22,
+                sideSpacing = 2,
+                healthBarHighlight = {
+                    enabled = false,
+                    color = AF.GetColorTable("white", 0.25),
+                },
+                nameTextEmphasis = {
+                    enabled = false,
+                    sizeDelta = 2,
+                    outline = "thickoutline",
+                    shadow = true,
+                },
             },
             focus = {
-                texture = "none",
+                texture = "Arrow1_Blue",
                 color = AF.GetColorTable("white"),
+                -- Friendly focus markers were historically hidden by using
+                -- an empty texture. Keep them hidden by presentation instead
+                -- so choosing a layout in options can show a real marker.
+                layout = "none",
+                size = 40,
+                sideSize = 22,
+                sideSpacing = 2,
+                healthBarHighlight = {
+                    enabled = false,
+                    color = AF.GetColorTable("white", 0.25),
+                },
+                nameTextEmphasis = {
+                    enabled = false,
+                    sizeDelta = 2,
+                    outline = "thickoutline",
+                    shadow = true,
+                },
             },
         },
         buffs = {
@@ -717,6 +780,49 @@ function NP.MigrateConfig(config)
         -- The legacy implementation defaulted to enabled. Require an
         -- explicit opt-in the first time that configuration is migrated.
         config.enabled = false
+    end
+
+    -- Preserve a legacy custom marker size when hydrating the new
+    -- target/focus-specific presentation tables.
+    for _, plateType in ipairs({
+        "hostile_npc",
+        "hostile_player",
+        "friendly_npc",
+        "friendly_player",
+    }) do
+        local plateConfig = config[plateType]
+        local indicator = type(plateConfig) == "table"
+            and plateConfig.targetIndicator
+        if type(indicator) == "table" then
+            for _, stateKey in ipairs({"target", "focus"}) do
+                local state = indicator[stateKey]
+                if state == nil then
+                    state = {}
+                    indicator[stateKey] = state
+                end
+                if type(state) == "table" then
+                    if state.layout == nil
+                        and state.texture ~= nil
+                    then
+                        if plateType:find("^friendly_")
+                            and stateKey == "focus"
+                            and state.texture == "none"
+                        then
+                            state.layout = "none"
+                            state.texture = "Arrow1_Blue"
+                        else
+                            state.layout = "top"
+                        end
+                    end
+
+                    if state.size == nil
+                        and indicator.size ~= nil
+                    then
+                        state.size = indicator.size
+                    end
+                end
+            end
+        end
     end
 
     config.schemaVersion = SCHEMA_VERSION
