@@ -2,5 +2,6 @@
     xsi:schemaLocation="http://www.blizzard.com/wow/ui/ https://raw.githubusercontent.com/Gethe/wow-ui-source/live/Interface/AddOns/Blizzard_SharedXML/UI.xsd">
     <Script file="Defaults.lua"/>
     <Include file="BFIAuraButtonTemplate.xml"/>
+    <Script file="NativeAuraFrames.lua"/>
     <Script file="BuffsDebuffs.lua"/>
 </Ui>
