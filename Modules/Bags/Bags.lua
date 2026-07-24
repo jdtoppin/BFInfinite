@@ -1339,10 +1339,20 @@ local function CreateEmptyStateOverlays()
     end
 end
 
+local function UpdateCombinedFrameTitle(frame)
+    if IsEnabled() then
+        frame:SetTitle(L["Bags"])
+    end
+end
+
 local function StyleCombinedFrame()
     S.StyleTitledFrame(combinedFrame)
     combinedFrame:SetClampedToScreen(true)
     SuppressCombinedMenu()
+    UpdateCombinedFrameTitle(combinedFrame)
+
+    -- Retail 12.0.7 UpdateName restores COMBINED_BAG_TITLE during updates.
+    hooksecurefunc(combinedFrame, "UpdateName", UpdateCombinedFrameTitle)
 
     if combinedFrame.MoneyFrame and combinedFrame.MoneyFrame.Border then
         combinedFrame.MoneyFrame.Border:SetAlpha(0)
