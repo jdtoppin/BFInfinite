@@ -10,6 +10,7 @@ select(2, ...).L = setmetatable({
     ["Preferred Columns"] = "Preferred Columns",
     ["Group Items by Category"] = "Group Items by Category",
     ["Show Bags"] = "Show Bags",
+    ["Show Blizzard Bag Bar"] = "Show Blizzard Bag Bar",
     ["Show Combined View"] = "Show Combined View",
     ["Slot Spacing"] = "Slot Spacing",
     ["castBar"] = "Cast Bar",

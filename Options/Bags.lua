@@ -44,8 +44,15 @@ local function CreateAppearancePane()
         B.Refresh()
     end)
 
+    local showBlizzardBagBar = AF.CreateCheckButton(appearancePane, L["Show Blizzard Bag Bar"])
+    AF.SetPoint(showBlizzardBagBar, "TOPLEFT", showBagSlots, "BOTTOMLEFT", 0, -18)
+    showBlizzardBagBar:SetOnCheck(function(checked)
+        B.config.showBlizzardBagBar = checked
+        B.Refresh()
+    end)
+
     local categories = AF.CreateCheckButton(appearancePane, L["Group Items by Category"])
-    AF.SetPoint(categories, "TOPLEFT", showBagSlots, "BOTTOMLEFT", 0, -18)
+    AF.SetPoint(categories, "TOPLEFT", showBlizzardBagBar, "BOTTOMLEFT", 0, -18)
     categories:SetOnCheck(function(checked)
         B.config.categories = checked
         B.Refresh()
@@ -69,11 +76,13 @@ local function CreateAppearancePane()
         local config = B.config
         enabled:SetChecked(config.enabled)
         showBagSlots:SetChecked(config.showBagSlots)
+        showBlizzardBagBar:SetChecked(config.showBlizzardBagBar)
         categories:SetChecked(config.categories)
         columns:SetValue(config.columns)
         spacing:SetValue(config.spacing)
 
         showBagSlots:SetEnabled(config.enabled)
+        showBlizzardBagBar:SetEnabled(config.enabled)
         categories:SetEnabled(config.enabled)
         columns:SetEnabled(config.enabled)
         spacing:SetEnabled(config.enabled)

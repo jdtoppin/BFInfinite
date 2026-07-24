@@ -10,6 +10,7 @@ local defaults = {
     position = {"BOTTOMRIGHT", -35, 110},
     categories = false,
     showBagSlots = true,
+    showBlizzardBagBar = false,
     columns = 12,
     spacing = 4,
 }
@@ -18,6 +19,9 @@ local function NormalizeConfig(config)
     if type(config.enabled) ~= "boolean" then config.enabled = defaults.enabled end
     if type(config.categories) ~= "boolean" then config.categories = defaults.categories end
     if type(config.showBagSlots) ~= "boolean" then config.showBagSlots = defaults.showBagSlots end
+    if type(config.showBlizzardBagBar) ~= "boolean" then
+        config.showBlizzardBagBar = defaults.showBlizzardBagBar
+    end
 
     local columns = tonumber(config.columns)
     config.columns = columns and math.max(10, math.min(16, math.floor(columns + 0.5))) or defaults.columns

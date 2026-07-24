@@ -39,6 +39,7 @@ L["Equipment - %s"] = "装备 - %s"
 L["Preferred Columns"] = "首选列数"
 L["Group Items by Category"] = "按类别分组物品"
 L["Show Bags"] = "显示背包"
+L["Show Blizzard Bag Bar"] = "显示暴雪背包栏"
 L["Show Combined View"] = "显示合并视图"
 L["Slot Spacing"] = "格子间距"
 

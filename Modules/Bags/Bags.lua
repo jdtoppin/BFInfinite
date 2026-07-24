@@ -130,15 +130,71 @@ local snapshotBagIDs = {}
 local snapshotSlotIDs = {}
 local snapshotItemIDs = {}
 local snapshotExtended = {}
+local blizzardBagBarWasShown
+local hasBlizzardBagBarState
 
 -- API and lifecycle evidence: Retail 12.0.7
 -- Blizzard_APIDocumentationGenerated/ContainerDocumentation.lua and
 -- Blizzard_UIPanels_Game/Mainline/ContainerFrame.lua. The native combined
 -- container owns item interaction, search, sorting, currency, and its
 -- show-only event registrations. BFI only extends its pooled layout.
+-- Blizzard_MainMenuBarBagButtons/Shared/BagsBar.lua and
+-- Blizzard_FrameXMLBase/Mainline/FrameLocks.lua show that BagsBar separately
+-- owns the persistent HUD buttons and may have a lock-managed logical state.
 
 local function IsEnabled()
     return moduleEnabled and B.config and B.config.enabled
+end
+
+local function IsBlizzardBagBarLogicallyShown(bagsBar)
+    if _G.IsFrameSmartShown then
+        return _G.IsFrameSmartShown(bagsBar)
+    end
+    return bagsBar:IsShown()
+end
+
+local function ShouldShowBlizzardBagBar()
+    return B.config.showBlizzardBagBar
+        and not _G.C_GameRules.IsGameRuleActive(_G.Enum.GameRule.BagsUIDisabled)
+end
+
+local function SetBlizzardBagBarShown(bagsBar, shown)
+    if shown then
+        bagsBar:Show()
+    else
+        bagsBar:Hide()
+    end
+end
+
+local function UpdateBlizzardBagBarVisibility()
+    if not IsEnabled() then return end
+
+    local bagsBar = _G.BagsBar
+    if not bagsBar then
+        B:RegisterEvent("ADDON_LOADED", B.ADDON_LOADED)
+        return
+    end
+
+    if not hasBlizzardBagBarState then
+        blizzardBagBarWasShown = IsBlizzardBagBarLogicallyShown(bagsBar)
+        hasBlizzardBagBarState = true
+    end
+
+    local shouldShow = ShouldShowBlizzardBagBar()
+    if IsBlizzardBagBarLogicallyShown(bagsBar) ~= shouldShow then
+        SetBlizzardBagBarShown(bagsBar, shouldShow)
+    end
+end
+
+local function RestoreBlizzardBagBar()
+    local bagsBar = _G.BagsBar
+    if hasBlizzardBagBarState and bagsBar
+        and IsBlizzardBagBarLogicallyShown(bagsBar) ~= blizzardBagBarWasShown then
+        SetBlizzardBagBarShown(bagsBar, blizzardBagBarWasShown)
+    end
+
+    blizzardBagBarWasShown = nil
+    hasBlizzardBagBarState = nil
 end
 
 local function ApplyPosition()
@@ -1217,7 +1273,6 @@ local function Initialize()
     end
 
     initialized = true
-    B:UnregisterEvent("ADDON_LOADED")
     StyleCombinedFrame()
 
     hooksecurefunc(combinedFrame, "UpdateItemSlots", AppendReagentBagSlots)
@@ -1263,14 +1318,20 @@ local function Initialize()
 end
 
 local function EnableModule()
+    moduleEnabled = true
+    UpdateBlizzardBagBarVisibility()
+
     if not Initialize() then return end
 
-    if not moduleEnabled then
+    if not hasPreviousCombinedBags then
         previousCombinedBags = GetCVarBool("combinedBags")
         hasPreviousCombinedBags = true
     end
 
-    moduleEnabled = true
+    if _G.BagsBar then
+        B:UnregisterEvent("ADDON_LOADED")
+    end
+
     SuppressCombinedMenu()
     AF.UpdateMoverSave(combinedFrame, B.config.position)
     B:RegisterEvent("USE_COMBINED_BAGS_CHANGED", B.USE_COMBINED_BAGS_CHANGED)
@@ -1293,6 +1354,7 @@ end
 
 local function DisableModule()
     moduleEnabled = nil
+    RestoreBlizzardBagBar()
     B:UnregisterAllEvents()
     if not initialized then return end
 
@@ -1329,11 +1391,13 @@ local function DisableModule()
 end
 
 function B:ADDON_LOADED(_, addonName)
-    if addonName == "Blizzard_UIPanels_Game" then
-        B:UnregisterEvent("ADDON_LOADED")
-        if B.config and B.config.enabled then
-            EnableModule()
-        end
+    if addonName ~= "Blizzard_UIPanels_Game"
+        and addonName ~= "Blizzard_MainMenuBarBagButtons" then
+        return
+    end
+
+    if B.config and B.config.enabled then
+        EnableModule()
     end
 end
 
@@ -1363,6 +1427,7 @@ function B:DISPLAY_SIZE_CHANGED()
 end
 
 function B.Refresh()
+    UpdateBlizzardBagBarVisibility()
     if IsEnabled() and combinedFrame and combinedFrame:IsShown() then
         LayoutItems(true)
     end
