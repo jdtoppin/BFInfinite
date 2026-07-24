@@ -16,7 +16,9 @@ local hasNameplateGeometryAPI =
     and type(Enum.NamePlateType) == "table"
 
 local hasNameplateFoundation =
-    type(AF.SetNativeNamePlateVisualSuppressed) == "function"
+    type(AF.versionNum) == "number"
+    and AF.versionNum >= BFI.requiredAFVersion
+    and type(AF.SetNativeNamePlateVisualSuppressed) == "function"
     and type(AF.CreateSecretHealthBar) == "function"
     and type(AF.CreateSecretNameText) == "function"
     and type(AF.CreateSecretAuraList) == "function"

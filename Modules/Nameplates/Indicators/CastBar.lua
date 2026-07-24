@@ -10,74 +10,25 @@ local function SetBorderColor(self, r, g, b, a)
     self.iconBG:SetVertexColor(r, g, b, a)
 end
 
-local function SetNormalStyle(self)
-    self.bar:SetStatusBarColor(AF.GetColorRGB("cast_normal"))
-    self.uninterruptible:Hide()
-    SetBorderColor(self, AF.UnpackColor(self.borderColor))
+local function SetDefaultBorderColor(self)
+    SetBorderColor(
+        self,
+        AF.UnpackColor(
+            self.borderColor or AF.GetColorTable("border")
+        )
+    )
 end
 
-local function SetInterruptibleStyle(self)
-    local r, g, b, a = AF.GetColorRGB("cast_interruptible")
-    self.bar:SetStatusBarColor(r, g, b, a)
-    self.uninterruptible:Hide()
-
-    if self.interruptibleColorBorder then
-        SetBorderColor(self, r, g, b, a)
-    else
-        SetBorderColor(self, AF.UnpackColor(self.borderColor))
-    end
-end
-
-local function SetUninterruptibleStyle(self)
-    local r, g, b, a = AF.GetColorRGB("cast_uninterruptible")
-    self.bar:SetStatusBarColor(r, g, b, a)
-
-    if self.showUninterruptibleTexture then
-        self.uninterruptible:Show()
-        if self.interruptibleColorBorder then
-            r, g, b, a = AF.GetColorRGB("cast_uninterruptible_texture", 1)
-        end
-    else
-        self.uninterruptible:Hide()
-    end
-
-    if self.interruptibleColorBorder then
-        SetBorderColor(self, r, g, b, a)
-    else
-        SetBorderColor(self, AF.UnpackColor(self.borderColor))
-    end
-end
-
-local function UpdateInterruptibilityStyle(self)
-    if not self.interruptibleCheckEnabled or self.interruptible == nil then
-        SetNormalStyle(self)
-    elseif self.interruptible then
-        SetInterruptibleStyle(self)
-    else
-        SetUninterruptibleStyle(self)
-    end
-end
-
-local function CastBar_OnCastStart(self, _, _, isNewCast)
-    if isNewCast then
-        self.interruptible = nil
-    end
+local function CastBar_OnCastStart(self)
     self.status:Hide()
     self.bar:Show()
-    UpdateInterruptibilityStyle(self)
+    SetDefaultBorderColor(self)
 end
 
 local function CastBar_OnCastStop(self)
-    self.interruptible = nil
     self.bar:Hide()
     self.status:Hide()
-end
-
-local function CastBar_OnInterruptibilityChanged(self, interruptible)
-    -- The shared widget derives this from the two non-secret-conditional
-    -- interruptibility event names, never from restricted cast return values.
-    self.interruptible = interruptible
-    UpdateInterruptibilityStyle(self)
+    SetDefaultBorderColor(self)
 end
 
 local function CastBar_Update(self)
@@ -117,6 +68,104 @@ local function CastBar_SetupDurationText(self, config)
     AF.LoadTextPosition(self.durationText, config.position)
     self.durationText:SetTextColor(AF.UnpackColor(config.color))
     self.showDuration = config.enabled
+end
+
+local function CastBar_SetupSpellTargetText(self, config)
+    config = config or {}
+
+    local enabled = config.enabled == true
+    local font = config.font or {"BFI", 10, "outline", true}
+    local position = config.position or {"TOP", "BOTTOM", 0, -1}
+    local color = config.color or AF.GetColorTable("white")
+
+    self.spellTargetTextRegion:SetShown(enabled)
+    AF.SetFont(
+        self.spellTargetTextRegion,
+        font,
+        config.fontSize,
+        config.outline
+    )
+    AF.LoadTextPosition(self.spellTargetTextRegion, position)
+    self.spellTargetTextRegion:SetTextColor(AF.UnpackColor(color))
+
+    if enabled then
+        self:SetSpellTargetText(self.spellTargetTextRegion)
+    else
+        self:SetSpellTargetText(nil)
+    end
+end
+
+local function CastBar_SetupImportantGlow(self, config)
+    config = config or {}
+
+    local enabled = config.enabled == true
+    local color = config.color or AF.GetColorTable("gold")
+    self.importantGlow:SetBackdropBorderColor(AF.UnpackColor(color))
+    AF.SetFrameLevel(self.importantGlow, 3, self)
+    self.importantGlow:SetShown(enabled)
+
+    if enabled then
+        self:SetImportantCastRegion(self.importantGlow)
+    else
+        self:SetImportantCastRegion(nil)
+    end
+end
+
+local function CastBar_SetupPlayerTargetHighlight(self, config)
+    config = config or {}
+
+    local enabled = config.enabled == true
+    local color = config.color or AF.GetColorTable("white", 0.2)
+    self.playerTargetOverlay:SetVertexColor(AF.UnpackColor(color))
+    self.playerTargetOverlay:SetShown(enabled)
+
+    if enabled then
+        self:SetPlayerTargetRegion(self.playerTargetOverlay)
+    else
+        self:SetPlayerTargetRegion(nil)
+    end
+end
+
+local function CastBar_SetupInterruptibility(self, config)
+    local interruptibleCheck = config.interruptibleCheck or {}
+    local normalColor = config.color or AF.GetColorTable("cast_normal")
+    local interruptibleColor = config.interruptibleColor
+        or AF.GetColorTable("cast_interruptible")
+    local uninterruptibleColor = config.uninterruptibleColor
+        or AF.GetColorTable("cast_uninterruptible")
+
+    self.borderColor = config.borderColor or AF.GetColorTable("border")
+    self.interruptibleCheckEnabled = interruptibleCheck.enabled ~= false
+
+    if self.interruptibleCheckEnabled then
+        self:SetInterruptibilityColors(
+            normalColor,
+            interruptibleColor,
+            uninterruptibleColor
+        )
+    else
+        self:SetInterruptibilityColors(
+            normalColor,
+            normalColor,
+            normalColor
+        )
+    end
+
+    local r, g, b, a = AF.UnpackColor(uninterruptibleColor)
+    self.uninterruptible:SetVertexColor(
+        r,
+        g,
+        b,
+        math.min(a, 0.6)
+    )
+
+    local showTexture = self.interruptibleCheckEnabled
+        and interruptibleCheck.showTexture == true
+    self.uninterruptible:SetShown(showTexture)
+    self:SetUninterruptibleCastRegion(
+        showTexture and self.uninterruptible or nil
+    )
+    SetDefaultBorderColor(self)
 end
 
 local function CastBar_SetupIcon(self, config)
@@ -173,13 +222,13 @@ local function CastBar_UpdatePixels(self)
     AF.RePoint(self.iconBG)
     AF.RePoint(self.nameText)
     AF.RePoint(self.durationText)
+    AF.RePoint(self.spellTargetTextRegion)
+    AF.RePoint(self.playerTargetOverlay)
+    AF.RePoint(self.importantGlow)
 end
 
 local function CastBar_LoadConfig(self, config)
-    self.borderColor = config.borderColor
-    self.interruptibleCheckEnabled = config.interruptibleCheck.enabled
-    self.showUninterruptibleTexture = config.interruptibleCheck.showTexture
-    self.interruptibleColorBorder = config.interruptibleCheck.colorBorder
+    self.config = config
 
     AF.SetFrameLevel(self, config.frameLevel, self.root)
     NP.LoadIndicatorPosition(self, config.position, config.anchorTo)
@@ -189,14 +238,22 @@ local function CastBar_LoadConfig(self, config)
 
     self:SetBackdropColor(AF.UnpackColor(config.bgColor))
     self:SetBackdropBorderColor(AF.UnpackColor(config.borderColor))
-    self.uninterruptible:SetVertexColor(AF.GetColorRGB("cast_uninterruptible_texture"))
 
+    CastBar_SetupInterruptibility(self, config)
     CastBar_SetupNameText(self, config.nameText)
     CastBar_SetupDurationText(self, config.durationText)
+    CastBar_SetupSpellTargetText(self, config.spellTargetText)
     CastBar_SetupIcon(self, config.icon)
     CastBar_SetupSpark(self, config.spark)
+    CastBar_SetupImportantGlow(self, config.importantGlow)
+    CastBar_SetupPlayerTargetHighlight(
+        self,
+        config.playerTargetHighlight
+    )
 
-    UpdateInterruptibilityStyle(self)
+    if self.unit then
+        self:UpdateCurrentCast()
+    end
 end
 
 AF.RegisterCallback("BFI_UpdateConfig", function(_, module, group)
@@ -208,8 +265,22 @@ AF.RegisterCallback("BFI_UpdateConfig", function(_, module, group)
         local castBar = NP.GetIndicator(frame, "castBar")
         if castBar then
             castBar.spark:SetVertexColor(AF.GetColorRGB("cast_spark"))
-            castBar.uninterruptible:SetVertexColor(AF.GetColorRGB("cast_uninterruptible_texture"))
-            UpdateInterruptibilityStyle(castBar)
+            CastBar_SetupImportantGlow(
+                castBar,
+                castBar.config and castBar.config.importantGlow
+            )
+            CastBar_SetupPlayerTargetHighlight(
+                castBar,
+                castBar.config
+                    and castBar.config.playerTargetHighlight
+            )
+            CastBar_SetupInterruptibility(
+                castBar,
+                castBar.config or {}
+            )
+            if castBar.unit then
+                castBar:UpdateCurrentCast()
+            end
         end
     end
 end)
@@ -254,11 +325,32 @@ function NP.CreateCastBar(parent, name)
     overlay:SetAllPoints()
     AF.SetFrameLevel(overlay, 2, frame)
 
+    local playerTargetOverlay =
+        overlay:CreateTexture(nil, "BACKGROUND")
+    frame.playerTargetOverlay = playerTargetOverlay
+    AF.SetOnePixelInside(playerTargetOverlay, overlay)
+    playerTargetOverlay:SetTexture(
+        AF.GetTexture("Square_Soft_Edge")
+    )
+    playerTargetOverlay:SetBlendMode("ADD")
+    playerTargetOverlay:SetAlpha(0)
+
     local nameText = overlay:CreateFontString(nil, "OVERLAY", "AF_FONT_NORMAL")
     frame.nameText = nameText
 
     local durationText = overlay:CreateFontString(nil, "OVERLAY", "AF_FONT_NORMAL")
     frame.durationText = durationText
+
+    local spellTargetTextRegion =
+        overlay:CreateFontString(nil, "OVERLAY", "AF_FONT_NORMAL")
+    frame.spellTargetTextRegion = spellTargetTextRegion
+
+    local importantGlow = AF.CreateGlow(frame, "gold", 3)
+    frame.importantGlow = importantGlow
+    importantGlow:EnableMouse(false)
+    importantGlow:SetBorderBlendMode("ADD")
+    importantGlow:SetAlpha(0)
+    AF.SetFrameLevel(importantGlow, 3, frame)
 
     frame:SetStatusBar(bar)
     frame:SetNameText(nameText)
@@ -267,7 +359,6 @@ function NP.CreateCastBar(parent, name)
 
     frame.OnCastStart = CastBar_OnCastStart
     frame.OnCastStop = CastBar_OnCastStop
-    frame.OnInterruptibilityChanged = CastBar_OnInterruptibilityChanged
     frame.Update = CastBar_Update
     frame.Enable = CastBar_Enable
     frame.Disable = CastBar_Disable

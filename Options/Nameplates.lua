@@ -24,6 +24,13 @@ local PLATE_TYPE_GROUPS = {
     },
 }
 
+local SEMANTIC_COLOR_CATEGORIES = {
+    {key = "boss", label = "Boss"},
+    {key = "lieutenant", label = "Lieutenant / Miniboss"},
+    {key = "caster", label = "Caster"},
+    {key = "default", label = "Default / Melee"},
+}
+
 local nameplatesPanel
 
 local function UpdateNameplates()
@@ -33,6 +40,78 @@ end
 local function SetSharedHealthBarValue(key, value)
     for _, plateType in ipairs(PLATE_TYPES) do
         NP.config[plateType].healthBar[key] = value
+    end
+    UpdateNameplates()
+end
+
+local function GetSemanticColorConfig()
+    return NP.config.hostile_npc.healthBar.semanticColor
+end
+
+local function SetSemanticColorEnabled(key, enabled)
+    GetSemanticColorConfig()[key].enabled = enabled
+    UpdateNameplates()
+end
+
+local function SetSemanticColor(key, r, g, b)
+    AF.FillColorTable(
+        GetSemanticColorConfig()[key].rgb,
+        r,
+        g,
+        b
+    )
+    UpdateNameplates()
+end
+
+local function SetSharedCastValue(key, value)
+    for _, plateType in ipairs(PLATE_TYPES) do
+        NP.config[plateType].castBar[key] = value
+    end
+    UpdateNameplates()
+end
+
+local function SetSharedCastSectionValue(section, key, value)
+    for _, plateType in ipairs(PLATE_TYPES) do
+        NP.config[plateType].castBar[section][key] = value
+    end
+    UpdateNameplates()
+end
+
+local function GetSharedCastColorTables(key, section)
+    local colors = {}
+    for _, plateType in ipairs(PLATE_TYPES) do
+        local castConfig = NP.config[plateType].castBar
+        colors[#colors + 1] = section
+            and castConfig[section][key]
+            or castConfig[key]
+    end
+    return colors
+end
+
+local function SetSharedCastColor(
+    key,
+    section,
+    r,
+    g,
+    b,
+    a,
+    preserveAlpha
+)
+    for _, color in ipairs(GetSharedCastColorTables(key, section)) do
+        AF.FillColorTable(
+            color,
+            r,
+            g,
+            b,
+            preserveAlpha and color[4] or a
+        )
+    end
+    UpdateNameplates()
+end
+
+local function SetSharedCastFontValue(index, value)
+    for _, plateType in ipairs(PLATE_TYPES) do
+        NP.config[plateType].castBar.spellTargetText.font[index] = value
     end
     UpdateNameplates()
 end
@@ -247,6 +326,8 @@ local function CreateNameplatesPanel()
     AF.SetPoint(sectionSwitch, "TOPRIGHT", modulePane, "BOTTOMRIGHT", 0, -15)
     sectionSwitch:SetLabels({
         {text = L["General"], value = "general"},
+        {text = L["Colors"], value = "colors"},
+        {text = L["Casts"], value = "casts"},
         {text = L["Target"], value = "target"},
         {text = L["Auras"], value = "auras"},
     })
@@ -259,12 +340,22 @@ local function CreateNameplatesPanel()
     AF.SetPoint(aurasPage, "TOPLEFT", sectionSwitch, "BOTTOMLEFT", 0, -15)
     AF.SetPoint(aurasPage, "BOTTOMRIGHT", nameplatesPanel, -15, 15)
 
+    local colorsPage = AF.CreateFrame(nameplatesPanel)
+    AF.SetPoint(colorsPage, "TOPLEFT", sectionSwitch, "BOTTOMLEFT", 0, -15)
+    AF.SetPoint(colorsPage, "BOTTOMRIGHT", nameplatesPanel, -15, 15)
+
+    local castsPage = AF.CreateFrame(nameplatesPanel)
+    AF.SetPoint(castsPage, "TOPLEFT", sectionSwitch, "BOTTOMLEFT", 0, -15)
+    AF.SetPoint(castsPage, "BOTTOMRIGHT", nameplatesPanel, -15, 15)
+
     local targetPage = AF.CreateFrame(nameplatesPanel)
     AF.SetPoint(targetPage, "TOPLEFT", sectionSwitch, "BOTTOMLEFT", 0, -15)
     AF.SetPoint(targetPage, "BOTTOMRIGHT", nameplatesPanel, -15, 15)
 
     sectionSwitch:SetOnSelect(function(value)
         generalPage:SetShown(value == "general")
+        colorsPage:SetShown(value == "colors")
+        castsPage:SetShown(value == "casts")
         targetPage:SetShown(value == "target")
         aurasPage:SetShown(value == "auras")
     end)
@@ -324,6 +415,562 @@ local function CreateNameplatesPanel()
     AF.SetPoint(compatibilityNotice, "TOPRIGHT", compatibilityPane, -15, -30)
     compatibilityNotice:SetJustifyH("LEFT")
     compatibilityNotice:SetWordWrap(true)
+
+    --------------------------------------------------
+    -- hostile NPC semantic colors
+    --------------------------------------------------
+    local colorsPane = AF.CreateTitledPane(
+        colorsPage,
+        L["Dungeon Priority Colors"],
+        nil,
+        330
+    )
+    AF.SetPoint(colorsPane, "TOPLEFT", colorsPage)
+    AF.SetPoint(colorsPane, "TOPRIGHT", colorsPage)
+
+    local colorsNotice = AF.CreateFontString(
+        colorsPane,
+        L["These colors apply only to hostile NPC health bars. No NPC names or IDs are used."],
+        "gray"
+    )
+    AF.SetPoint(colorsNotice, "TOPLEFT", colorsPane, 15, -30)
+    AF.SetPoint(colorsNotice, "TOPRIGHT", colorsPane, -15, -30)
+    colorsNotice:SetJustifyH("LEFT")
+    colorsNotice:SetWordWrap(true)
+
+    local fallbackNotice = AF.CreateFontString(
+        colorsPane,
+        L["Priority: Boss > Lieutenant / Miniboss > Caster > Default / Melee. Disabled or unavailable categories fall through; Blizzard's selection color is the final fallback."],
+        "sand"
+    )
+    AF.SetPoint(
+        fallbackNotice,
+        "TOPLEFT",
+        colorsNotice,
+        "BOTTOMLEFT",
+        0,
+        -8
+    )
+    AF.SetPoint(
+        fallbackNotice,
+        "TOPRIGHT",
+        colorsNotice,
+        "BOTTOMRIGHT",
+        0,
+        -8
+    )
+    fallbackNotice:SetJustifyH("LEFT")
+    fallbackNotice:SetWordWrap(true)
+
+    local semanticColorWidgets = {}
+
+    local function CreateSemanticColorRow(info, index)
+        local key = info.key
+        local enabledButton = AF.CreateCheckButton(
+            colorsPane,
+            L[info.label]
+        )
+        AF.SetPoint(
+            enabledButton,
+            "TOPLEFT",
+            colorsPane,
+            15,
+            -125 - (index - 1) * 48
+        )
+
+        local picker = AF.CreateColorPicker(
+            colorsPane,
+            L["Color"]
+        )
+        AF.SetPoint(
+            picker,
+            "TOPLEFT",
+            colorsPane,
+            300,
+            -125 - (index - 1) * 48
+        )
+
+        local colorPreviewed
+
+        enabledButton:SetOnCheck(function(checked)
+            AF.CancelColorPicker(picker)
+            SetSemanticColorEnabled(key, checked)
+            AF.SetEnabled(checked, picker)
+        end)
+
+        picker:SetOnChange(function(r, g, b, a)
+            local color = GetSemanticColorConfig()[key].rgb
+            colorPreviewed = PreviewColorTables(
+                picker,
+                {color},
+                r,
+                g,
+                b,
+                a,
+                true
+            ) or colorPreviewed
+        end)
+        picker:SetOnConfirm(function(r, g, b)
+            SetSemanticColor(key, r, g, b)
+            colorPreviewed = nil
+        end)
+        picker:SetOnAccept(function()
+            if colorPreviewed then
+                UpdateNameplates()
+                colorPreviewed = nil
+            end
+        end)
+
+        local function ResetColorPreview()
+            colorPreviewed = nil
+            UpdateNameplates()
+        end
+        picker:SetOnCancel(ResetColorPreview)
+        picker:SetOnDiscard(ResetColorPreview)
+
+        semanticColorWidgets[#semanticColorWidgets + 1] = {
+            key = key,
+            enabledButton = enabledButton,
+            picker = picker,
+        }
+    end
+
+    for index, info in ipairs(SEMANTIC_COLOR_CATEGORIES) do
+        CreateSemanticColorRow(info, index)
+    end
+
+    local function UpdateSemanticColorWidgets()
+        local semanticColor = GetSemanticColorConfig()
+        for _, widgets in ipairs(semanticColorWidgets) do
+            local category = semanticColor[widgets.key]
+            widgets.enabledButton:SetChecked(category.enabled)
+            if not AF.IsColorPickerOpen(widgets.picker) then
+                widgets.picker:SetColor(category.rgb)
+            end
+            AF.SetEnabled(category.enabled, widgets.picker)
+        end
+    end
+
+    --------------------------------------------------
+    -- cast appearance
+    --------------------------------------------------
+    local castsPane = AF.CreateTitledPane(
+        castsPage,
+        L["Cast Bar Appearance"],
+        nil,
+        470
+    )
+    AF.SetPoint(castsPane, "TOPLEFT", castsPage)
+    AF.SetPoint(castsPane, "TOPRIGHT", castsPage)
+
+    local castsNotice = AF.CreateFontString(
+        castsPane,
+        L["Cast settings apply to every nameplate. Important casts and player-targeted casts use Blizzard's secret-safe classifications; no custom spell or NPC lists are used."],
+        "gray"
+    )
+    AF.SetPoint(castsNotice, "TOPLEFT", castsPane, 15, -30)
+    AF.SetPoint(castsNotice, "TOPRIGHT", castsPane, -15, -30)
+    castsNotice:SetJustifyH("LEFT")
+    castsNotice:SetWordWrap(true)
+
+    local UpdateCastWidgets
+
+    local castWidth = AF.CreateSlider(
+        castsPane,
+        L["Width"],
+        180,
+        40,
+        300,
+        1,
+        nil,
+        true
+    )
+    AF.SetPoint(castWidth, "TOPLEFT", castsPane, 15, -85)
+    castWidth:SetAfterValueChanged(function(value)
+        SetSharedCastValue("width", value)
+    end)
+
+    local castHeight = AF.CreateSlider(
+        castsPane,
+        L["Height"],
+        180,
+        4,
+        40,
+        1,
+        nil,
+        true
+    )
+    AF.SetPoint(castHeight, "TOPLEFT", castsPane, 285, -85)
+    castHeight:SetAfterValueChanged(function(value)
+        SetSharedCastValue("height", value)
+    end)
+
+    local normalCastColor = AF.CreateColorPicker(
+        castsPane,
+        L["Normal"]
+    )
+    AF.SetPoint(normalCastColor, "TOPLEFT", castsPane, 15, -145)
+
+    local interruptibleCastColor = AF.CreateColorPicker(
+        castsPane,
+        L["Interruptible"]
+    )
+    AF.SetPoint(
+        interruptibleCastColor,
+        "TOPLEFT",
+        castsPane,
+        200,
+        -145
+    )
+
+    local uninterruptibleCastColor = AF.CreateColorPicker(
+        castsPane,
+        L["Uninterruptible"]
+    )
+    AF.SetPoint(
+        uninterruptibleCastColor,
+        "TOPLEFT",
+        castsPane,
+        385,
+        -145
+    )
+
+    local castColorPickers = {}
+    local castColorPreviewed = {}
+
+    local function WireCastColorPicker(
+        picker,
+        key,
+        section,
+        preserveAlpha
+    )
+        castColorPickers[#castColorPickers + 1] = picker
+
+        picker:SetOnChange(function(r, g, b, a)
+            castColorPreviewed[picker] = PreviewColorTables(
+                picker,
+                GetSharedCastColorTables(key, section),
+                r,
+                g,
+                b,
+                a,
+                preserveAlpha
+            ) or castColorPreviewed[picker]
+        end)
+        picker:SetOnConfirm(function(r, g, b, a)
+            SetSharedCastColor(
+                key,
+                section,
+                r,
+                g,
+                b,
+                a,
+                preserveAlpha
+            )
+            castColorPreviewed[picker] = nil
+        end)
+        picker:SetOnAccept(function()
+            if castColorPreviewed[picker] then
+                UpdateNameplates()
+                castColorPreviewed[picker] = nil
+            end
+        end)
+
+        local function ResetCastColorPreview()
+            castColorPreviewed[picker] = nil
+            UpdateNameplates()
+        end
+        picker:SetOnCancel(ResetCastColorPreview)
+        picker:SetOnDiscard(ResetCastColorPreview)
+    end
+
+    WireCastColorPicker(
+        normalCastColor,
+        "color",
+        nil,
+        true
+    )
+    WireCastColorPicker(
+        interruptibleCastColor,
+        "interruptibleColor",
+        nil,
+        true
+    )
+    WireCastColorPicker(
+        uninterruptibleCastColor,
+        "uninterruptibleColor",
+        nil,
+        true
+    )
+
+    local interruptibility = AF.CreateCheckButton(
+        castsPane,
+        L["Color by Interruptibility"]
+    )
+    AF.SetPoint(interruptibility, "TOPLEFT", castsPane, 15, -195)
+    interruptibility:SetOnCheck(function(checked)
+        SetSharedCastSectionValue(
+            "interruptibleCheck",
+            "enabled",
+            checked
+        )
+        UpdateCastWidgets()
+    end)
+
+    local uninterruptibleTexture = AF.CreateCheckButton(
+        castsPane,
+        L["Uninterruptible Texture"]
+    )
+    AF.SetPoint(
+        uninterruptibleTexture,
+        "TOPLEFT",
+        castsPane,
+        285,
+        -195
+    )
+    uninterruptibleTexture:SetOnCheck(function(checked)
+        SetSharedCastSectionValue(
+            "interruptibleCheck",
+            "showTexture",
+            checked
+        )
+    end)
+
+    local importantGlow = AF.CreateCheckButton(
+        castsPane,
+        L["Important Cast Glow"]
+    )
+    AF.SetPoint(importantGlow, "TOPLEFT", castsPane, 15, -235)
+    importantGlow:SetOnCheck(function(checked)
+        SetSharedCastSectionValue(
+            "importantGlow",
+            "enabled",
+            checked
+        )
+        UpdateCastWidgets()
+    end)
+
+    local importantGlowColor = AF.CreateColorPicker(
+        castsPane,
+        L["Glow Color"]
+    )
+    AF.SetPoint(
+        importantGlowColor,
+        "TOPLEFT",
+        castsPane,
+        285,
+        -235
+    )
+    WireCastColorPicker(
+        importantGlowColor,
+        "color",
+        "importantGlow",
+        true
+    )
+
+    local playerTargetHighlight = AF.CreateCheckButton(
+        castsPane,
+        L["Player-target Cast Highlight"]
+    )
+    AF.SetPoint(
+        playerTargetHighlight,
+        "TOPLEFT",
+        castsPane,
+        15,
+        -275
+    )
+    playerTargetHighlight:SetOnCheck(function(checked)
+        SetSharedCastSectionValue(
+            "playerTargetHighlight",
+            "enabled",
+            checked
+        )
+        UpdateCastWidgets()
+    end)
+
+    local playerTargetColor = AF.CreateColorPicker(
+        castsPane,
+        L["Highlight Color"],
+        true
+    )
+    AF.SetPoint(
+        playerTargetColor,
+        "TOPLEFT",
+        castsPane,
+        285,
+        -275
+    )
+    WireCastColorPicker(
+        playerTargetColor,
+        "color",
+        "playerTargetHighlight",
+        false
+    )
+
+    local castName = AF.CreateCheckButton(
+        castsPane,
+        L["Cast Name"]
+    )
+    AF.SetPoint(castName, "TOPLEFT", castsPane, 15, -315)
+    castName:SetOnCheck(function(checked)
+        SetSharedCastSectionValue("nameText", "enabled", checked)
+    end)
+
+    local castIcon = AF.CreateCheckButton(castsPane, L["Icon"])
+    AF.SetPoint(castIcon, "TOPLEFT", castsPane, 200, -315)
+    castIcon:SetOnCheck(function(checked)
+        SetSharedCastSectionValue("icon", "enabled", checked)
+    end)
+
+    local castDuration = AF.CreateCheckButton(
+        castsPane,
+        L["Duration Text"]
+    )
+    AF.SetPoint(castDuration, "TOPLEFT", castsPane, 385, -315)
+    castDuration:SetOnCheck(function(checked)
+        SetSharedCastSectionValue(
+            "durationText",
+            "enabled",
+            checked
+        )
+    end)
+
+    local spellTarget = AF.CreateCheckButton(
+        castsPane,
+        L["Spell Target Text"]
+    )
+    AF.SetPoint(spellTarget, "TOPLEFT", castsPane, 15, -355)
+    spellTarget:SetOnCheck(function(checked)
+        SetSharedCastSectionValue(
+            "spellTargetText",
+            "enabled",
+            checked
+        )
+        UpdateCastWidgets()
+    end)
+
+    local spellTargetColor = AF.CreateColorPicker(
+        castsPane,
+        L["Text Color"]
+    )
+    AF.SetPoint(
+        spellTargetColor,
+        "TOPLEFT",
+        castsPane,
+        285,
+        -355
+    )
+    WireCastColorPicker(
+        spellTargetColor,
+        "color",
+        "spellTargetText",
+        true
+    )
+
+    local spellTargetFont = AF.CreateDropdown(castsPane, 150)
+    spellTargetFont:SetLabel(L["Font"])
+    AF.SetPoint(spellTargetFont, "TOPLEFT", castsPane, 15, -405)
+    spellTargetFont:SetItems(AF.LSM_GetFontDropdownItems())
+    spellTargetFont:SetOnSelect(function(value)
+        SetSharedCastFontValue(1, value)
+    end)
+
+    local spellTargetOutline = AF.CreateDropdown(castsPane, 150)
+    spellTargetOutline:SetLabel(L["Outline"])
+    AF.SetPoint(spellTargetOutline, "TOPLEFT", castsPane, 200, -405)
+    spellTargetOutline:SetItems(AF.LSM_GetFontOutlineDropdownItems())
+    spellTargetOutline:SetOnSelect(function(value)
+        SetSharedCastFontValue(3, value)
+    end)
+
+    local spellTargetSize = AF.CreateSlider(
+        castsPane,
+        L["Size"],
+        150,
+        5,
+        30,
+        1,
+        nil,
+        true
+    )
+    AF.SetPoint(spellTargetSize, "TOPLEFT", castsPane, 385, -405)
+    spellTargetSize:SetAfterValueChanged(function(value)
+        SetSharedCastFontValue(2, value)
+    end)
+
+    UpdateCastWidgets = function()
+        local castConfig = NP.config.hostile_npc.castBar
+        local checkConfig = castConfig.interruptibleCheck
+        local targetConfig = castConfig.spellTargetText
+
+        castWidth:SetValue(castConfig.width)
+        castHeight:SetValue(castConfig.height)
+        if not AF.IsColorPickerOpen(normalCastColor) then
+            normalCastColor:SetColor(castConfig.color)
+        end
+        if not AF.IsColorPickerOpen(interruptibleCastColor) then
+            interruptibleCastColor:SetColor(
+                castConfig.interruptibleColor
+            )
+        end
+        if not AF.IsColorPickerOpen(uninterruptibleCastColor) then
+            uninterruptibleCastColor:SetColor(
+                castConfig.uninterruptibleColor
+            )
+        end
+
+        interruptibility:SetChecked(checkConfig.enabled)
+        uninterruptibleTexture:SetChecked(checkConfig.showTexture)
+
+        importantGlow:SetChecked(castConfig.importantGlow.enabled)
+        if not AF.IsColorPickerOpen(importantGlowColor) then
+            importantGlowColor:SetColor(
+                castConfig.importantGlow.color
+            )
+        end
+
+        playerTargetHighlight:SetChecked(
+            castConfig.playerTargetHighlight.enabled
+        )
+        if not AF.IsColorPickerOpen(playerTargetColor) then
+            playerTargetColor:SetColor(
+                castConfig.playerTargetHighlight.color
+            )
+        end
+
+        castName:SetChecked(castConfig.nameText.enabled)
+        castIcon:SetChecked(castConfig.icon.enabled)
+        castDuration:SetChecked(castConfig.durationText.enabled)
+        spellTarget:SetChecked(targetConfig.enabled)
+        if not AF.IsColorPickerOpen(spellTargetColor) then
+            spellTargetColor:SetColor(targetConfig.color)
+        end
+        spellTargetFont:SetSelectedValue(targetConfig.font[1])
+        spellTargetOutline:SetSelectedValue(targetConfig.font[3])
+        spellTargetSize:SetValue(targetConfig.font[2])
+
+        AF.SetEnabled(
+            checkConfig.enabled,
+            interruptibleCastColor,
+            uninterruptibleCastColor,
+            uninterruptibleTexture
+        )
+        AF.SetEnabled(
+            castConfig.importantGlow.enabled,
+            importantGlowColor
+        )
+        AF.SetEnabled(
+            castConfig.playerTargetHighlight.enabled,
+            playerTargetColor
+        )
+        AF.SetEnabled(
+            targetConfig.enabled,
+            spellTargetColor,
+            spellTargetFont,
+            spellTargetOutline,
+            spellTargetSize
+        )
+    end
 
     --------------------------------------------------
     -- target appearance
@@ -828,12 +1475,40 @@ local function CreateNameplatesPanel()
         UpdateDurationWidgets()
     end)
 
+    local function CancelSemanticColorPickers()
+        for _, widgets in ipairs(semanticColorWidgets) do
+            AF.CancelColorPicker(widgets.picker)
+        end
+    end
+
+    local function HideSemanticColorPickers()
+        for _, widgets in ipairs(semanticColorWidgets) do
+            AF.HideColorPicker(widgets.picker)
+        end
+    end
+
+    local function CancelCastColorPickers()
+        for _, picker in ipairs(castColorPickers) do
+            AF.CancelColorPicker(picker)
+        end
+    end
+
+    local function HideCastColorPickers()
+        for _, picker in ipairs(castColorPickers) do
+            AF.HideColorPicker(picker)
+        end
+    end
+
     local function CancelNameplateColorPickers()
+        CancelSemanticColorPickers()
+        CancelCastColorPickers()
         AF.CancelColorPicker(highlightColor)
         AF.CancelColorPicker(normalColor)
     end
 
     local function HideNameplateColorPickers()
+        HideSemanticColorPickers()
+        HideCastColorPickers()
         AF.HideColorPicker(highlightColor)
         AF.HideColorPicker(normalColor)
     end
@@ -858,6 +1533,9 @@ local function CreateNameplatesPanel()
         nameText:SetChecked(IsIndicatorEnabledForAnyPlateType("nameText"))
         castBar:SetChecked(IsIndicatorEnabledForAnyPlateType("castBar"))
         debuffs:SetChecked(IsIndicatorEnabledForAnyPlateType("debuffs"))
+
+        UpdateSemanticColorWidgets()
+        UpdateCastWidgets()
 
         targetScope:SetSelectedValue(selectedTargetScope)
         targetState:SetSelectedValue(selectedTargetState)
@@ -887,6 +1565,8 @@ local function CreateNameplatesPanel()
     targetPage:HookOnHide(function()
         AF.CancelColorPicker(highlightColor)
     end)
+    colorsPage:HookOnHide(CancelSemanticColorPickers)
+    castsPage:HookOnHide(CancelCastColorPickers)
     aurasPage:HookOnHide(function()
         AF.CancelColorPicker(normalColor)
     end)

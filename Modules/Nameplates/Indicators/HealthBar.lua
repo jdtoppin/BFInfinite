@@ -31,10 +31,25 @@ local function HealthBar_LoadConfig(self, config)
     self:SetBackgroundColor(AF.UnpackColor(config.bgColor))
     self:SetBorderColor(AF.UnpackColor(config.borderColor))
 
-    self:SetupFillColor({
-        type = "selection_color",
-        alpha = config.colorAlpha or 1,
-    })
+    local semanticColor = config.semanticColor
+    if self.root.configKey == "hostile_npc"
+        and semanticColor
+    then
+        self:SetupFillColor({
+            type = "nameplate_semantic",
+            alpha = config.colorAlpha or 1,
+            boss = semanticColor.boss,
+            lieutenant = semanticColor.lieutenant,
+            caster = semanticColor.caster,
+            default = semanticColor.default,
+        })
+    else
+        -- Players and friendly NPCs retain Blizzard's selection color.
+        self:SetupFillColor({
+            type = "selection_color",
+            alpha = config.colorAlpha or 1,
+        })
+    end
 
     if config.lossColor.useDarkerForground then
         self:SetupUnfillColor({

@@ -115,17 +115,6 @@ local defaults = {
     playersInInstance = {
         -- modify some cvars
     },
-    -- TODO:
-    customNpcColors = {},
-    -- efficiency mode
-    optimizedUnits = {
-        "216205:Ravenous Spawn (贪婪之裔)",
-        "227300:Bile-Soaked Spawn (浸透胆汁的子嗣)",
-        "220626:Blood Parasite (鲜血寄生虫)",
-        "219746:Silken Tomb (流丝之墓)",
-        "219739:Infested Spawn (被感染的子嗣)",
-        -- "225982:顺劈训练假人"
-    }
 }
 
 local nameplateDefaults
@@ -141,9 +130,6 @@ do
             frameLevel = 1,
             width = 120,
             height = 13,
-            colorByClass = true,
-            colorByThreat = true,
-            colorByMarker = true,
             colorAlpha = 1,
             lossColor = {
                 useDarkerForground = false,
@@ -225,6 +211,9 @@ do
             frameLevel = 3,
             width = 120,
             height = 13,
+            color = {AF.ConvertHEXToRGB("#FF7E23")},
+            interruptibleColor = {AF.ConvertHEXToRGB("#FFFF00")},
+            uninterruptibleColor = {AF.ConvertHEXToRGB("#CC4D4D")},
             bgColor = AF.GetColorTable("background", 0.75),
             borderColor = AF.GetColorTable("border"),
             texture = "AF",
@@ -233,7 +222,14 @@ do
                 enabled = true,
                 requireUsable = true,
                 showTexture = true,
-                colorBorder = true,
+            },
+            importantGlow = {
+                enabled = true,
+                color = {AF.ConvertHEXToRGB("#FFE157")},
+            },
+            playerTargetHighlight = {
+                enabled = true,
+                color = {1, 0.15, 0.15, 0.22},
             },
             icon = {
                 enabled = true,
@@ -254,6 +250,12 @@ do
                 font = {"BFI", 11 , "none", true},
                 position = {"RIGHT", "RIGHT", -3, 0},
                 format = "%.1f",
+                color = AF.GetColorTable("white"),
+            },
+            spellTargetText = {
+                enabled = true,
+                font = {"BFI", 10, "outline", false},
+                position = {"TOP", "BOTTOM", 0, -1},
                 color = AF.GetColorTable("white"),
             },
             spark = {
@@ -716,6 +718,27 @@ do
 
     -- hostile
     defaults.hostile_npc = AF.Copy(nameplateDefaults, hostile, hostile_npc)
+    -- Semantic classification is evaluated entirely by AF's secret-safe
+    -- health-color pipeline. Do not add NPC identities or Lua-side unit
+    -- classification here.
+    defaults.hostile_npc.healthBar.semanticColor = {
+        boss = {
+            enabled = true,
+            rgb = {AF.ConvertHEXToRGB("#FF00FF")},
+        },
+        lieutenant = {
+            enabled = true,
+            rgb = {AF.ConvertHEXToRGB("#9370DB")},
+        },
+        caster = {
+            enabled = true,
+            rgb = {AF.ConvertHEXToRGB("#00BFFF")},
+        },
+        default = {
+            enabled = true,
+            rgb = {AF.ConvertHEXToRGB("#BE301D")},
+        },
+    }
     defaults.hostile_player = AF.Copy(nameplateDefaults, hostile)
 
     -- update hostile_player
