@@ -42,13 +42,61 @@ local function LayoutVerticalTabs(tabs)
     end
 end
 
+local function StyleCommunitiesTab(tab)
+    if not tab then return end
+
+    S.StyleSideTab(tab, 32, 32)
+
+    -- Communities tabs sit directly against the frame edge, where a button
+    -- outline is partially obscured. Keep the World Map selected background,
+    -- but place the white hover directly on the semantic icon.
+    tab.BFIBackdrop:SetBackdropBorderColor(0, 0, 0, 0)
+
+    local icon = tab.Icon
+    if icon then
+        if not tab._BFICommunitiesTabStyled then
+            tab._BFICommunitiesTabStyled = true
+            S.StyleIcon(icon)
+
+            -- These icons fill nearly the entire button, hiding the selected
+            -- backdrop. Tint the icon face while checked so the active state
+            -- reads like the World Map tabs without restoring an outline.
+            local selected = tab:CreateTexture(nil, "ARTWORK", nil, 1)
+            selected:SetColorTexture(AF.GetColorRGB("BFI", 0.45))
+            selected:SetAllPoints(icon)
+            tab:SetCheckedTexture(selected)
+
+            local highlight = tab:GetHighlightTexture()
+            if highlight then
+                AF.ClearPoints(highlight)
+                highlight:SetAllPoints(icon)
+            end
+        end
+
+        -- The tabs are initially hidden and Blizzard fills iconTexture during
+        -- OnLoad. Refresh it after selected-club updates so opening the frame
+        -- later does not depend on having reloaded with Communities visible.
+        if tab.iconTexture then
+            icon:SetTexture(tab.iconTexture)
+        end
+        icon:SetAlpha(1)
+        icon:Show()
+    end
+end
+
 local function LayoutCommunitiesTabs(frame)
-    LayoutVerticalTabs({
+    local tabs = {
         frame.ChatTab,
         frame.RosterTab,
         frame.GuildBenefitsTab,
         frame.GuildInfoTab,
-    })
+    }
+
+    for _, tab in ipairs(tabs) do
+        StyleCommunitiesTab(tab)
+    end
+
+    LayoutVerticalTabs(tabs)
 end
 
 ---------------------------------------------------------------------
@@ -74,7 +122,7 @@ local function StyleCommunitiesListEntry(button)
 
     SetFlatTexture(button.Background, button:IsEnabled() and "widget" or "disabled", 0.75)
     SetFlatTexture(button.Selection, "BFI", 0.45)
-    SetFlatTexture(button:GetHighlightTexture(), "widget_highlight", 0.75)
+    SetFlatTexture(button:GetHighlightTexture(), "white", 0.2)
     SetFlatTexture(button.NewCommunityFlash, "BFI", 0.55, "ADD")
 
     button.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(button:IsEnabled() and "border" or "disabled"))
@@ -259,11 +307,12 @@ local function StyleNoteBackground(frame)
 end
 
 local function StyleGuildMemberDetail(frame)
-    if not frame or frame._BFICommunitiesStyled then return end
-    frame._BFICommunitiesStyled = true
+    if not frame or frame._BFIGuildMemberDetailStyled then return end
 
     frame.Border:SetAlpha(0)
-    S.CreateBackdrop(frame)
+    -- This popup's text is drawn directly on a level-1000 frame. Put the
+    -- child backdrop one level behind it so it cannot cover the member data.
+    S.CreateBackdrop(frame, nil, nil, -1)
     frame.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("background"))
 
     S.StyleCloseButton(frame.CloseButton)
@@ -275,6 +324,8 @@ local function StyleGuildMemberDetail(frame)
     StyleDropdown(frame.RankDropdown)
     StyleNoteBackground(frame.NoteBackground)
     StyleNoteBackground(frame.OfficerNoteBackground)
+
+    frame._BFIGuildMemberDetailStyled = true
 end
 
 local function StyleGuildNewsFiltersFrame(frame)
@@ -317,15 +368,34 @@ local function StyleGuildPanes(frame)
         S.StyleIconButton(frame.CommunitiesCalendarButton, AF.GetIcon("Calendar"), 16, nil, "widget")
     end
 
-    StyleGuildMemberDetail(frame.GuildMemberDetailFrame)
     StyleGuildNewsFiltersFrame(_G.CommunitiesGuildNewsFiltersFrame)
 end
 
 ---------------------------------------------------------------------
 -- main frame
 ---------------------------------------------------------------------
+local function RefreshCommunitiesFrame(frame)
+    if not frame then return end
+
+    LayoutCommunitiesTabs(frame)
+
+    local communitiesList = frame.CommunitiesList
+    if communitiesList and communitiesList.ScrollBox then
+        communitiesList.ScrollBox:ForEachFrame(StyleCommunitiesListEntry)
+    end
+
+    local memberDetail = frame.GuildMemberDetailFrame
+    if memberDetail and memberDetail:IsShown() then
+        StyleGuildMemberDetail(memberDetail)
+    end
+end
+
 local function StyleCommunitiesFrame(frame)
-    if not frame or frame._BFICommunitiesStyled then return end
+    if not frame then return end
+    if frame._BFICommunitiesStyled then
+        RefreshCommunitiesFrame(frame)
+        return
+    end
     frame._BFICommunitiesStyled = true
 
     S.StyleTitledFrame(frame)
@@ -342,14 +412,6 @@ local function StyleCommunitiesFrame(frame)
     StyleGuildPanes(frame)
     StyleColumnDisplay(frame.MemberList.ColumnDisplay)
 
-    for _, tab in next, {
-        frame.ChatTab,
-        frame.RosterTab,
-        frame.GuildBenefitsTab,
-        frame.GuildInfoTab,
-    } do
-        S.StyleSideTab(tab, 32, 32)
-    end
     LayoutCommunitiesTabs(frame)
 
     StyleDropdown(frame.StreamDropdown)
@@ -374,6 +436,7 @@ local function StyleCommunitiesFrame(frame)
     AF.SetHeight(frame.ChatEditBox, 20)
     S.StyleEditBox(frame.ChatEditBox)
     frame.Chat.MessageFrame:SetFont(_G.STANDARD_TEXT_FONT, 13 + BFI.vars.blizzardFontSizeDelta, "")
+    frame:HookScript("OnShow", RefreshCommunitiesFrame)
 
     if not communitiesHooksInstalled then
         communitiesHooksInstalled = true
@@ -384,8 +447,15 @@ local function StyleCommunitiesFrame(frame)
         hooksecurefunc(_G.CommunitiesGuildPerksButtonMixin, "Init", StyleGuildBenefitEntry)
         hooksecurefunc(_G.CommunitiesGuildRewardsButtonMixin, "Init", StyleGuildBenefitEntry)
         hooksecurefunc(_G.CommunitiesGuildNewsButtonMixin, "Init", StyleGuildNewsEntry)
-        hooksecurefunc(_G.CommunitiesFrameMixin, "UpdateCommunitiesTabs", LayoutCommunitiesTabs)
+        -- The XML frame already copied its mixin methods by ADDON_LOADED, so
+        -- hook the live instance rather than the source mixin table.
+        hooksecurefunc(frame, "UpdateCommunitiesTabs", RefreshCommunitiesFrame)
+        hooksecurefunc(frame, "OpenGuildMemberDetailFrame", function(self)
+            StyleGuildMemberDetail(self.GuildMemberDetailFrame)
+        end)
     end
+
+    RefreshCommunitiesFrame(frame)
 end
 
 ---------------------------------------------------------------------
