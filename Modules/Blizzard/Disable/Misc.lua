@@ -29,12 +29,9 @@ local function DisableBlizzard()
         F.DisableFrame(_G.PetCastingBarFrame)
     end
 
-    -- auras
-    if config.auras then
-        F.DisableFrame(_G.BuffFrame)
-        _G.BuffFrame.numHideableBuffs = 0
-        F.DisableFrame(_G.DebuffFrame)
-    end
+    -- BuffsDebuffs keeps these roots active and suppresses only verified public
+    -- visuals after a replacement exists. DebuffFrame continues to own
+    -- private-aura anchors and deadly-debuff warnings.
 
     F.DisableEditMode(_G.EncounterBar)
 

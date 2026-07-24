@@ -7,6 +7,26 @@ local BD = BFI.modules.BuffsDebuffs
 local AF = _G.AbstractFramework
 
 local GetUnitAuraInstanceIDs = C_UnitAuras.GetUnitAuraInstanceIDs
+local GetWeaponEnchantInfo = GetWeaponEnchantInfo
+local InCombatLockdown = InCombatLockdown
+local mainHandSlot = GetInventorySlotInfo("MainHandSlot")
+local secondaryHandSlot = GetInventorySlotInfo("SecondaryHandSlot")
+
+local REQUIRED_AF_VERSION = 21
+
+-- Retail 12.0.7 loads the implementation and template together from
+-- Blizzard_RestrictedAddOnEnvironment/SecureGroupHeaders. Retail 12.1 only
+-- loads the replacement SecureAuraHeader files for Classic clients.
+function BD.HasSecureAuraHeaderBackend()
+    return AF.isRetail
+        and (tonumber(AF.versionNum) or 0) >= REQUIRED_AF_VERSION
+        and type(_G.SecureAuraHeader_Update) == "function"
+        and type(_G.SecureAuraHeader_UpdateEventRegistrations) == "function"
+        and type(GetUnitAuraInstanceIDs) == "function"
+        and type(GetWeaponEnchantInfo) == "function"
+        and type(BD.CanSuppressNativePublicAuras) == "function"
+        and type(BD.SetNativePublicAurasSuppressed) == "function"
+end
 
 ---------------------------------------------------------------------
 -- header
@@ -14,12 +34,13 @@ local GetUnitAuraInstanceIDs = C_UnitAuras.GetUnitAuraInstanceIDs
 local function CreateHeader(name, moverName, filter)
     local header = CreateFrame("Frame", name, AF.UIParent, "SecureAuraHeaderTemplate")
     header:SetAttribute("template", "BFIAuraButtonTemplate")
-    header:SetAttribute("includeWeapons", 1)
+    if filter == "HELPFUL" then
+        header:SetAttribute("includeWeapons", 1)
+        header:SetAttribute("weaponTemplate", "BFITemporaryEnchantButtonTemplate")
+    end
     header:SetAttribute("filter", filter)
     header.filter = filter
 
-    header:UnregisterEvent("UNIT_AURA")
-    -- header:RegisterUnitEvent("UNIT_AURA", "player", "vehicle")
     header:SetAttribute("unit", "player")
     RegisterAttributeDriver(header, "unit", "[vehicleui] vehicle;player")
 
@@ -31,7 +52,6 @@ local function CreateHeader(name, moverName, filter)
     ]])
 
     AF.CreateMover(header, "BFI: " .. L["UI Widgets"], moverName)
-    header:Show()
 
     return header
 end
@@ -43,10 +63,12 @@ local buffFrame, debuffFrame
 
 local function CreateBuffHeader()
     buffFrame = CreateHeader("BFIBuffFrame", _G.HUD_EDIT_MODE_BUFF_FRAME_LABEL, "HELPFUL")
+    return buffFrame
 end
 
 local function CreateDebuffHeader()
     debuffFrame = CreateHeader("BFIDebuffFrame", _G.HUD_EDIT_MODE_DEBUFF_FRAME_LABEL, "HARMFUL")
+    return debuffFrame
 end
 
 ---------------------------------------------------------------------
@@ -105,7 +127,7 @@ function BD.InitAuraButton(button)
     button.header = button:GetParent()
     button.filter = button.header.filter
 
-    AF.InitAura(button)
+    AF.InitAura(button, nil, true)
     AF.SetOnePixelInside(button.icon, button)
     button:SetFallbackIcon(button.filter == "HELPFUL" and 135953 or 136071)
     button:EnableDispelColor(button.filter == "HARMFUL")
@@ -113,11 +135,6 @@ function BD.InitAuraButton(button)
     button.LoadConfig = Button_LoadConfig
     AF.AddToPixelUpdater_Auto(button, Button_UpdatePixels)
     AF.ApplyDefaultBackdropColors(button)
-
-    -- click
-    -- NOTE: RegisterForClicks is protected for secure frames since 11.1.7
-    -- moved to BFIAuraButtonTemplate.xml
-    -- button:RegisterForClicks("RightButtonUp", "RightButtonDown")
 
     button:EnableTooltip({
         enabled = true,
@@ -128,6 +145,62 @@ function BD.InitAuraButton(button)
     button:SetScript("OnAttributeChanged", Button_OnAttributeChanged)
     -- button:SetScript("OnUpdate", Button_OnUpdate)
     button:SetScript("OnSizeChanged", AF.ReCalcTexCoordForAura)
+end
+
+local function GetTemporaryEnchantInfo(inventorySlot)
+    local hasMainHandEnchant, mainHandExpiration, mainHandCharges,
+        _, hasSecondaryHandEnchant, secondaryHandExpiration, secondaryHandCharges = GetWeaponEnchantInfo()
+
+    if inventorySlot == mainHandSlot then
+        return hasMainHandEnchant, mainHandExpiration, mainHandCharges
+    elseif inventorySlot == secondaryHandSlot then
+        return hasSecondaryHandEnchant, secondaryHandExpiration, secondaryHandCharges
+    end
+end
+
+local function RefreshTemporaryEnchant(button)
+    local inventorySlot = button:GetAttribute("target-slot")
+    local hasEnchant, remainingTimeMs, applications = GetTemporaryEnchantInfo(inventorySlot)
+    if hasEnchant and remainingTimeMs then
+        button:SetTemporaryEnchant("player", inventorySlot, remainingTimeMs, applications or 0)
+        if GameTooltip:IsOwned(button) then
+            button:ShowTooltip()
+        end
+    else
+        if GameTooltip:IsOwned(button) then
+            button:HideTooltip()
+        end
+        button:ClearAura()
+    end
+end
+
+local function TemporaryEnchant_OnAttributeChanged(button, name)
+    if name == "target-slot" then
+        RefreshTemporaryEnchant(button)
+    end
+end
+
+function BD.InitTemporaryEnchantButton(button)
+    button.header = button:GetParent()
+
+    AF.InitAura(button, nil, true)
+    AF.SetOnePixelInside(button.icon, button)
+    button:SetFallbackIcon(134400)
+
+    button.LoadConfig = Button_LoadConfig
+    AF.AddToPixelUpdater_Auto(button, Button_UpdatePixels)
+    AF.ApplyDefaultBackdropColors(button)
+
+    button:EnableTooltip({
+        enabled = true,
+        anchorTo = "self_adaptive",
+    })
+
+    button:SetScript("OnAttributeChanged", TemporaryEnchant_OnAttributeChanged)
+    button:SetScript("OnEvent", RefreshTemporaryEnchant)
+    button:SetScript("OnSizeChanged", AF.ReCalcTexCoordForAura)
+    button:RegisterEvent("WEAPON_ENCHANT_CHANGED")
+    button:RegisterEvent("WEAPON_SLOT_CHANGED")
 end
 
 ---------------------------------------------------------------------
@@ -203,8 +276,9 @@ local function GetAttributes(config)
 end
 
 local function SetupHeader(header, config)
-    header:RegisterUnitEvent("UNIT_AURA", "player", "vehicle")
-
+    -- Attribute changes update a visible secure header immediately. Configure
+    -- it while hidden so children are rebuilt once, from a complete state.
+    header:Hide()
     header.config = config
 
     header:SetAttribute("separateOwn", config.separateOwn)
@@ -212,6 +286,12 @@ local function SetupHeader(header, config)
     header:SetAttribute("sortDirection", config.sortDirection)
     header:SetAttribute("maxWraps", config.maxWraps)
     header:SetAttribute("wrapAfter", config.wrapAfter)
+    -- Blizzard applies maxAuraCount before its Lua TIME/NAME sort. Bound the
+    -- INDEX candidate set only; capping other modes would change their result.
+    header:SetAttribute(
+        "maxAuraCount",
+        config.sortMethod == "INDEX" and config.wrapAfter * config.maxWraps or nil
+    )
 
     local point, x, y, wrapX, wrapY, minWidth, minHeight = GetAttributes(config)
     header:SetAttribute("point", point)
@@ -236,22 +316,78 @@ end
 ---------------------------------------------------------------------
 -- update
 ---------------------------------------------------------------------
-local function UpdateBuffsDebuffs(_, module, which)
+local updatePending
+local pendingWhich
+local UpdateBuffsDebuffs
+
+local function RetryBuffsDebuffsUpdate()
+    BD:UnregisterEvent("PLAYER_REGEN_ENABLED", RetryBuffsDebuffsUpdate)
+
+    local which = pendingWhich
+    updatePending = nil
+    pendingWhich = nil
+    UpdateBuffsDebuffs(nil, "buffsDebuffs", which)
+end
+
+local function DisableHeader(which, header)
+    if not BD.SetNativePublicAurasSuppressed(which, false) then return end
+    if header then
+        header.enabled = false
+        header:Hide()
+    end
+end
+
+local function EnableHeader(which, header, createHeader, config)
+    -- Restore native visuals before protected reconfiguration. If a later
+    -- operation fails, Blizzard remains the visible fallback.
+    if not BD.SetNativePublicAurasSuppressed(which, false) then return header end
+
+    if not BD.CanSuppressNativePublicAuras(which) then
+        if header then
+            header.enabled = false
+            header:Hide()
+        end
+        return header
+    end
+
+    if not header then
+        header = createHeader()
+    end
+    header.enabled = true
+    SetupHeader(header, config)
+    AF.UpdateMoverSave(header, config.position)
+    AF.LoadPosition(header, config.position)
+
+    if not BD.SetNativePublicAurasSuppressed(which, true) then
+        header.enabled = false
+        header:Hide()
+    end
+    return header
+end
+
+UpdateBuffsDebuffs = function(_, module, which)
     if module and module ~= "buffsDebuffs" then return end
+    if which and which ~= "buffs" and which ~= "debuffs" then return end
+    if not BD.HasSecureAuraHeaderBackend() then return end
+
+    if InCombatLockdown() then
+        if not updatePending then
+            pendingWhich = which
+        elseif pendingWhich ~= which then
+            pendingWhich = nil
+        end
+        updatePending = true
+        BD:RegisterEvent("PLAYER_REGEN_ENABLED", RetryBuffsDebuffsUpdate)
+        return
+    end
 
     -- buffs
     local config = BD.config.buffs
     if not which or which == "buffs" then
         if config.enabled then
-            if not buffFrame then CreateBuffHeader() end
-            buffFrame.enabled = true
-            SetupHeader(buffFrame, config)
-            AF.UpdateMoverSave(buffFrame, config.position)
-            AF.LoadPosition(buffFrame, config.position)
-        elseif buffFrame then
-            buffFrame.enabled = false
-            buffFrame:Hide()
-            buffFrame:UnregisterEvent("UNIT_AURA")
+            buffFrame = EnableHeader("buffs", buffFrame, CreateBuffHeader, config)
+        else
+            DisableHeader("buffs", buffFrame)
         end
     end
 
@@ -259,15 +395,9 @@ local function UpdateBuffsDebuffs(_, module, which)
     config = BD.config.debuffs
     if not which or which == "debuffs" then
         if config.enabled then
-            if not debuffFrame then CreateDebuffHeader() end
-            debuffFrame.enabled = true
-            SetupHeader(debuffFrame, config)
-            AF.UpdateMoverSave(debuffFrame, config.position)
-            AF.LoadPosition(debuffFrame, config.position)
-        elseif debuffFrame then
-            debuffFrame.enabled = false
-            debuffFrame:Hide()
-            debuffFrame:UnregisterEvent("UNIT_AURA")
+            debuffFrame = EnableHeader("debuffs", debuffFrame, CreateDebuffHeader, config)
+        else
+            DisableHeader("debuffs", debuffFrame)
         end
     end
 end

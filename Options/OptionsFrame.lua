@@ -11,6 +11,8 @@ local LIST_WIDTH = 170
 local HEADER_HEIGHT = 35
 
 local optionsFrame
+local buffsDebuffsAvailable = type(BFI.modules.BuffsDebuffs.HasSecureAuraHeaderBackend) == "function"
+    and BFI.modules.BuffsDebuffs.HasSecureAuraHeaderBackend()
 
 ---------------------------------------------------------------------
 -- list
@@ -26,8 +28,9 @@ local list = {
     "unitFrames",
     "nameplates",
     "actionBars",
-    "-buffsDebuffs",
-    "-tooltip",
+    "bags",
+    buffsDebuffsAvailable and "buffsDebuffs" or "-buffsDebuffs",
+    "tooltip",
     "uiWidgets",
     "dataBars",
     -- "dataBroker",

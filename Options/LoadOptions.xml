@@ -14,6 +14,7 @@
     <Script file="Nameplates.lua"/>
     <Script file="ActionBars_Options.lua"/>
     <Script file="ActionBars.lua"/>
+    <Script file="Bags.lua"/>
     <Script file="BuffsDebuffs.lua"/>
     <Script file="UIWidgets_Options.lua"/>
     <Script file="UIWidgets.lua"/>
@@ -22,6 +23,8 @@
     <Script file="Maps_Options.lua"/>
     <Script file="Maps.lua"/>
     <Script file="Chat.lua"/>
+    <Script file="Tooltip_Options.lua"/>
+    <Script file="Tooltip.lua"/>
     <Script file="Profiles.lua"/>
     <Script file="About.lua"/>
     <Script file="CVarRestoreFrame.lua"/>

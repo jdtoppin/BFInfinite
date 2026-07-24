@@ -264,6 +264,8 @@ local function InitAndBackupCVars()
         "assistedCombatHighlight",
         "lockActionBars",
         "AutoPushSpellToActionBar",
+        -- bags
+        "combinedBags",
         -- chat
         "chatStyle",
         "whisperMode",
