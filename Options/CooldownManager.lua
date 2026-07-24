@@ -405,7 +405,7 @@ LoadOptions = function(button)
         else
             AF.SetPoint(pane, "TOPLEFT", scroll.scrollContent)
         end
-        AF.SetPoint(pane, "RIGHT", scroll.scrollContent)
+        AF.SetPoint(pane, "RIGHT", scroll.scrollContent, -7, 0)
         last = pane
         heights[#heights + 1] = pane._height or tostring(pane:GetHeight())
     end
