@@ -7,15 +7,27 @@ local AF = _G.AbstractFramework
 
 local GameTooltip = _G.GameTooltip
 local GameTooltipStatusBar = _G.GameTooltipStatusBar
+local C_ClassColor_GetClassColor = C_ClassColor.GetClassColor
+local C_PlayerInfo_GetContentDifficultyCreatureForPlayer =
+    C_PlayerInfo.GetContentDifficultyCreatureForPlayer
 local DISABLED_FONT_COLOR = _G.DISABLED_FONT_COLOR
+local GetDifficultyColor = _G.GetDifficultyColor
+local GetFactionColor = _G.GetFactionColor
 local IsAltKeyDown = _G.IsAltKeyDown
 local HIGHLIGHT_FONT_COLOR = _G.HIGHLIGHT_FONT_COLOR
 local InCombatLockdown = _G.InCombatLockdown
 local IsShiftKeyDown = _G.IsShiftKeyDown
 local NORMAL_FONT_COLOR = _G.NORMAL_FONT_COLOR
+local UnitClassBase = _G.UnitClassBase
+local UnitExists = _G.UnitExists
+local UnitFactionGroup = _G.UnitFactionGroup
+local UnitIsPlayer = _G.UnitIsPlayer
 
 local NATIVE_STATUS_BAR_HEIGHT = 8
 local MOUSEOVER_UNIT = "mouseover"
+local NONE_LINE = Enum.TooltipDataLineType.None
+local UNIT_LEVEL_LINE = Enum.TooltipDataLineType.UnitLevel
+local UNIT_TYPE_LINE = Enum.TooltipDataLineType.UnitType
 local DUNGEON_SCORE_LABEL = _G.DUNGEON_SCORE or L["Dungeon Score"]
 local ITEM_LEVEL_LABEL = _G.STAT_AVERAGE_ITEM_LEVEL or _G.ITEM_LEVEL or L["Item Level"]
 local OVERTIME_LABEL = L["OT"]
@@ -135,6 +147,91 @@ end
 -- unit visibility
 ---------------------------------------------------------------------
 local unitTooltipActive
+
+local function GetPlayerIdentityLineIndices(data)
+    if not data.lines then return end
+
+    local previousNoneLineIndex
+    local lastNoneLineIndex
+    local unitTypeLineIndex
+
+    for _, line in ipairs(data.lines) do
+        if UNIT_TYPE_LINE and line.type == UNIT_TYPE_LINE then
+            unitTypeLineIndex = line.lineIndex
+        elseif not UNIT_TYPE_LINE and line.type == NONE_LINE and line.lineIndex then
+            previousNoneLineIndex = lastNoneLineIndex
+            lastNoneLineIndex = line.lineIndex
+        end
+    end
+
+    if unitTypeLineIndex then
+        -- Retail 12.1 gives the class/specification line its own type. The
+        -- faction line is the following native identity line.
+        return unitTypeLineIndex, unitTypeLineIndex + 1
+    end
+
+    -- Retail 12.0.7 (Gethe/wow-ui-source 4383ced) does not give the
+    -- specialization/class line its own type. In the native player identity
+    -- block it is the penultimate generic line, immediately before faction.
+    -- Retail 12.1 adds TooltipDataLineType.UnitType, handled above.
+    return previousNoneLineIndex, lastNoneLineIndex
+end
+
+local function ApplyPlayerIdentityColors(tooltip, data, config)
+    -- UnitIsPlayer remains non-secret in the generated 12.0.7 and 12.1 API
+    -- contracts. UnitClassBase may return a secret in 12.1; pass that value
+    -- directly through the C-level class-color API, then pass the resulting
+    -- visual values directly to FontString:SetTextColor.
+    if not UnitIsPlayer(MOUSEOVER_UNIT) then return end
+
+    local color = C_ClassColor_GetClassColor(UnitClassBase(MOUSEOVER_UNIT))
+    if not color then return end
+
+    tooltip:GetLeftLine(1):SetTextColor(color.r, color.g, color.b)
+
+    local classLineIndex, factionLineIndex = GetPlayerIdentityLineIndices(data)
+    if classLineIndex then
+        tooltip:GetLeftLine(classLineIndex):SetTextColor(color.r, color.g, color.b)
+    end
+
+    -- UnitFactionGroup is documented as non-secret in both versions. Use
+    -- Blizzard's standard PLAYER_FACTION_COLORS mapping and leave the native
+    -- guild line untouched so its established green remains intact.
+    local factionColor = GetFactionColor(UnitFactionGroup(MOUSEOVER_UNIT))
+    if factionColor and factionLineIndex then
+        tooltip:GetLeftLine(factionLineIndex):SetTextColor(
+            factionColor.r,
+            factionColor.g,
+            factionColor.b
+        )
+    end
+
+    -- StatusBar:SetStatusBarColor accepts secret visual values on both
+    -- 12.0.7 and 12.1. Forward the C-side class color directly.
+    if config.healthBar.enabled and config.healthBar.colorMode == "class" then
+        GameTooltipStatusBar:SetStatusBarColor(color.r, color.g, color.b)
+    end
+end
+
+local function ApplyUnitLevelDifficultyColor(tooltip, lineData)
+    local config = T.config
+    if tooltip ~= GameTooltip
+        or tooltip:IsForbidden()
+        or not config
+        or not config.enabled
+        or not config.levelDifficultyColor
+        or not UnitExists(MOUSEOVER_UNIT)
+    then
+        return
+    end
+
+    -- Blizzard explicitly recommends this C-side classifier instead of
+    -- calculating relative difficulty from unit levels in Lua. Its returned
+    -- enum is non-secret in both 12.0.7 and 12.1.
+    local difficulty = C_PlayerInfo_GetContentDifficultyCreatureForPlayer(MOUSEOVER_UNIT)
+    local color = GetDifficultyColor(difficulty)
+    tooltip:GetLeftLine(lineData.lineIndex):SetTextColor(color.r, color.g, color.b)
+end
 
 local function OnUnitTooltipPreCall(tooltip)
     local config = T.config
@@ -293,7 +390,7 @@ local function AddItemLevel(tooltip, itemLevel, extrasAdded)
     return true
 end
 
-local function OnUnitTooltipPostCall(tooltip)
+local function OnUnitTooltipPostCall(tooltip, data)
     local config = T.config
     if tooltip ~= GameTooltip
         or tooltip:IsForbidden()
@@ -303,6 +400,8 @@ local function OnUnitTooltipPostCall(tooltip)
     then
         return
     end
+
+    ApplyPlayerIdentityColors(tooltip, data, config)
 
     local extrasAdded = AddMythicPlus(tooltip, config.mythicPlus)
     AddItemLevel(tooltip, config.itemLevel, extrasAdded)
@@ -409,6 +508,9 @@ local function Initialize()
     GameTooltip:HookScript("OnTooltipCleared", ClearUnitTooltipState)
     TooltipDataProcessor.AddTooltipPreCall(Enum.TooltipDataType.Unit, OnUnitTooltipPreCall)
     TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, OnUnitTooltipPostCall)
+    if UNIT_LEVEL_LINE then
+        TooltipDataProcessor.AddLinePostCall(UNIT_LEVEL_LINE, ApplyUnitLevelDifficultyColor)
+    end
     T:RegisterEvent("PLAYER_REGEN_DISABLED", PLAYER_REGEN_DISABLED)
     T:RegisterEvent("MODIFIER_STATE_CHANGED", MODIFIER_STATE_CHANGED)
     T:RegisterEvent("CHALLENGE_MODE_MAPS_UPDATE", CHALLENGE_MODE_MAPS_UPDATE)
@@ -439,5 +541,7 @@ local function UpdateTooltip(_, module)
         GameTooltipStatusBar:SetAlpha(1)
         AF.SetHeight(GameTooltipStatusBar, NATIVE_STATUS_BAR_HEIGHT)
     end
+
+    RefreshActiveUnitTooltip()
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateTooltip)
