@@ -29,6 +29,10 @@ local function TargetIndicator_LoadStateVisual(
     local size = config.size or self.defaultSize
     local sideSize = config.sideSize or 22
     local sideSpacing = config.sideSpacing or 0
+    local topSpacing = config.topSpacing
+    if type(topSpacing) ~= "number" then
+        topSpacing = self.defaultTopSpacing or 0
+    end
     local layout = config.layout or "top"
     local texture = AF.GetTexture(config.texture, BFI.name)
 
@@ -42,6 +46,15 @@ local function TargetIndicator_LoadStateVisual(
         icon:SetVertexColor(AF.UnpackColor(config.color))
     end
 
+    visual.topIcon:SetSize(size, size)
+    visual.topIcon:ClearAllPoints()
+    visual.topIcon:SetPoint(
+        "BOTTOM",
+        self.anchorRegion,
+        "TOP",
+        0,
+        topSpacing
+    )
     visual.topIcon:SetShown(layout == "top")
 
     -- Use the already-resolved anchor region directly. Nameplate regions
@@ -156,6 +169,12 @@ local function TargetIndicator_LoadConfig(self, config)
 
     AF.SetFrameLevel(self, config.frameLevel, self.root)
     self.defaultSize = config.size or 40
+    local position = config.position
+    self.defaultTopSpacing =
+        type(position) == "table"
+        and type(position[4]) == "number"
+        and position[4]
+        or 0
     AF.SetSize(self, self.defaultSize, self.defaultSize)
     self.anchorRegion = NP.LoadIndicatorPosition(
         self,
@@ -181,7 +200,6 @@ local function CreateStateVisual(parent)
 
     local topIcon = visual:CreateTexture(nil, "ARTWORK")
     visual.topIcon = topIcon
-    topIcon:SetAllPoints()
 
     local leftIcon = visual:CreateTexture(nil, "ARTWORK")
     visual.leftIcon = leftIcon

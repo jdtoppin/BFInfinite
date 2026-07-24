@@ -294,6 +294,7 @@ do
                 color = AF.GetColorTable("white"),
                 layout = "top",
                 size = 40,
+                topSpacing = 30,
                 sideSize = 22,
                 sideSpacing = 2,
                 healthBarHighlight = {
@@ -312,6 +313,7 @@ do
                 color = AF.GetColorTable("white"),
                 layout = "top",
                 size = 40,
+                topSpacing = 30,
                 sideSize = 22,
                 sideSpacing = 2,
                 healthBarHighlight = {
@@ -530,6 +532,7 @@ do
                 color = AF.GetColorTable("white"),
                 layout = "top",
                 size = 40,
+                topSpacing = 15,
                 sideSize = 22,
                 sideSpacing = 2,
                 healthBarHighlight = {
@@ -551,6 +554,7 @@ do
                 -- so choosing a layout in options can show a real marker.
                 layout = "none",
                 size = 40,
+                topSpacing = 15,
                 sideSize = 22,
                 sideSpacing = 2,
                 healthBarHighlight = {
@@ -841,6 +845,15 @@ function NP.MigrateConfig(config)
                         and indicator.size ~= nil
                     then
                         state.size = indicator.size
+                    end
+
+                    if state.topSpacing == nil
+                        and type(indicator.position) == "table"
+                        and indicator.position[1] == "BOTTOM"
+                        and indicator.position[2] == "TOP"
+                        and type(indicator.position[4]) == "number"
+                    then
+                        state.topSpacing = indicator.position[4]
                     end
                 end
             end

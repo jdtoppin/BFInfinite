@@ -313,12 +313,183 @@ local function CreateNameplatesPanel()
     nameplatesPanel = AF.CreateFrame(BFIOptionsFrame_ContentPane, "BFIOptionsFrame_NameplatesPanel")
     nameplatesPanel:SetAllPoints()
 
+    local contentPane = AF.CreateFrame(nameplatesPanel)
+    AF.SetPoint(contentPane, "TOPLEFT", nameplatesPanel, 15, -15)
+    AF.SetPoint(contentPane, "BOTTOMRIGHT", nameplatesPanel, -15, 15)
+
+    local sectionOrder = {
+        "general",
+        "colors",
+        "casts",
+        "target",
+        "threat",
+        "auras",
+    }
+    local sectionPanes = {
+        general = {},
+        colors = {},
+        casts = {},
+        target = {},
+        threat = {},
+        auras = {},
+    }
+    local sectionCleanup = {}
+
+    local sectionList = AF.CreateScrollList(
+        contentPane,
+        nil,
+        0,
+        0,
+        28,
+        20,
+        -1
+    )
+    sectionList:SetPoint("TOPLEFT")
+    AF.SetWidth(sectionList, 150)
+
+    local scrollSettings = AF.CreateScrollFrame(
+        contentPane,
+        nil,
+        nil,
+        nil,
+        "none",
+        "none"
+    )
+    scrollSettings.scrollBar:SetBackdropBorderColor(
+        AF.GetColorRGB("border")
+    )
+    AF.SetPoint(
+        scrollSettings,
+        "TOPLEFT",
+        sectionList,
+        "TOPRIGHT",
+        15,
+        0
+    )
+    AF.SetPoint(scrollSettings, "BOTTOM", sectionList)
+    AF.SetPoint(scrollSettings, "RIGHT")
+    scrollSettings:SetScrollStep(50)
+    AF.ApplyCombatProtectionToFrame(
+        scrollSettings.scrollContent,
+        0,
+        0,
+        0,
+        0
+    )
+
+    local function CreateSectionPane(
+        section,
+        title,
+        height,
+        titleColor
+    )
+        local pane = AF.CreateBorderedFrame(
+            scrollSettings.scrollContent,
+            nil,
+            nil,
+            height
+        )
+        pane:Hide()
+        sectionPanes[section][#sectionPanes[section] + 1] = pane
+
+        if title then
+            local paneTitle = AF.CreateFontString(
+                pane,
+                title,
+                titleColor or "BFI"
+            )
+            AF.SetPoint(paneTitle, "TOPLEFT", pane, 15, -10)
+        end
+
+        return pane
+    end
+
+    local selectedSection
+    local function ShowSection(button)
+        if selectedSection and sectionCleanup[selectedSection] then
+            sectionCleanup[selectedSection]()
+        end
+
+        for _, section in ipairs(sectionOrder) do
+            for _, pane in ipairs(sectionPanes[section]) do
+                pane:Hide()
+                AF.ClearPoints(pane)
+            end
+        end
+
+        selectedSection = button.id
+        local panes = sectionPanes[selectedSection]
+        local heights = {}
+        local last
+        for _, pane in ipairs(panes) do
+            if last then
+                AF.SetPoint(
+                    pane,
+                    "TOPLEFT",
+                    last,
+                    "BOTTOMLEFT",
+                    0,
+                    -10
+                )
+            else
+                AF.SetPoint(
+                    pane,
+                    "TOPLEFT",
+                    scrollSettings.scrollContent
+                )
+            end
+            AF.SetPoint(
+                pane,
+                "RIGHT",
+                scrollSettings.scrollContent
+            )
+            pane:Show()
+            heights[#heights + 1] = pane._height or 0
+            last = pane
+        end
+
+        scrollSettings:SetContentHeights(heights, 10)
+        C_Timer.After(0, function()
+            AF.RePoint(scrollSettings)
+        end)
+    end
+
+    local sectionItems = {
+        {text = L["General"], value = "general"},
+        {text = L["Colors"], value = "colors"},
+        {text = L["Casts"], value = "casts"},
+        {text = L["Target"], value = "target"},
+        {text = L["Threat"], value = "threat"},
+        {text = L["Auras"], value = "auras"},
+    }
+    local sectionButtons = {}
+    for _, item in ipairs(sectionItems) do
+        local button = AF.CreateButton(
+            sectionList,
+            item.text,
+            "BFI_transparent",
+            nil,
+            nil,
+            nil,
+            "none",
+            ""
+        )
+        button.id = item.value
+        button:EnablePushEffect(false)
+        button:SetTextJustifyH("LEFT")
+        sectionButtons[#sectionButtons + 1] = button
+    end
+    sectionList:SetWidgets(sectionButtons)
+    AF.CreateButtonGroup(sectionButtons, ShowSection)
+
     --------------------------------------------------
     -- module
     --------------------------------------------------
-    local modulePane = AF.CreateTitledPane(nameplatesPanel, L["Nameplates"], nil, 100)
-    AF.SetPoint(modulePane, "TOPLEFT", nameplatesPanel, 15, -15)
-    AF.SetPoint(modulePane, "TOPRIGHT", nameplatesPanel, -15, -15)
+    local modulePane = CreateSectionPane(
+        "general",
+        L["Nameplates"],
+        100
+    )
 
     local enabled = AF.CreateCheckButton(modulePane, L["Enable BFI Nameplates"])
     AF.SetPoint(enabled, "TOPLEFT", modulePane, 15, -32)
@@ -335,57 +506,14 @@ local function CreateNameplatesPanel()
     optInNotice:SetJustifyH("LEFT")
     optInNotice:SetWordWrap(true)
 
-    local sectionSwitch = AF.CreateSwitch(nameplatesPanel, nil, 20)
-    AF.SetPoint(sectionSwitch, "TOPLEFT", modulePane, "BOTTOMLEFT", 0, -15)
-    AF.SetPoint(sectionSwitch, "TOPRIGHT", modulePane, "BOTTOMRIGHT", 0, -15)
-    sectionSwitch:SetLabels({
-        {text = L["General"], value = "general"},
-        {text = L["Colors"], value = "colors"},
-        {text = L["Casts"], value = "casts"},
-        {text = L["Target"], value = "target"},
-        {text = L["Threat"], value = "threat"},
-        {text = L["Auras"], value = "auras"},
-    })
-
-    local generalPage = AF.CreateFrame(nameplatesPanel)
-    AF.SetPoint(generalPage, "TOPLEFT", sectionSwitch, "BOTTOMLEFT", 0, -15)
-    AF.SetPoint(generalPage, "BOTTOMRIGHT", nameplatesPanel, -15, 15)
-
-    local aurasPage = AF.CreateFrame(nameplatesPanel)
-    AF.SetPoint(aurasPage, "TOPLEFT", sectionSwitch, "BOTTOMLEFT", 0, -15)
-    AF.SetPoint(aurasPage, "BOTTOMRIGHT", nameplatesPanel, -15, 15)
-
-    local colorsPage = AF.CreateFrame(nameplatesPanel)
-    AF.SetPoint(colorsPage, "TOPLEFT", sectionSwitch, "BOTTOMLEFT", 0, -15)
-    AF.SetPoint(colorsPage, "BOTTOMRIGHT", nameplatesPanel, -15, 15)
-
-    local castsPage = AF.CreateFrame(nameplatesPanel)
-    AF.SetPoint(castsPage, "TOPLEFT", sectionSwitch, "BOTTOMLEFT", 0, -15)
-    AF.SetPoint(castsPage, "BOTTOMRIGHT", nameplatesPanel, -15, 15)
-
-    local targetPage = AF.CreateFrame(nameplatesPanel)
-    AF.SetPoint(targetPage, "TOPLEFT", sectionSwitch, "BOTTOMLEFT", 0, -15)
-    AF.SetPoint(targetPage, "BOTTOMRIGHT", nameplatesPanel, -15, 15)
-
-    local threatPage = AF.CreateFrame(nameplatesPanel)
-    AF.SetPoint(threatPage, "TOPLEFT", sectionSwitch, "BOTTOMLEFT", 0, -15)
-    AF.SetPoint(threatPage, "BOTTOMRIGHT", nameplatesPanel, -15, 15)
-
-    sectionSwitch:SetOnSelect(function(value)
-        generalPage:SetShown(value == "general")
-        colorsPage:SetShown(value == "colors")
-        castsPage:SetShown(value == "casts")
-        targetPage:SetShown(value == "target")
-        threatPage:SetShown(value == "threat")
-        aurasPage:SetShown(value == "auras")
-    end)
-
     --------------------------------------------------
     -- shared settings
     --------------------------------------------------
-    local sharedPane = AF.CreateTitledPane(generalPage, L["Shared Nameplate Settings"], nil, 245)
-    AF.SetPoint(sharedPane, "TOPLEFT", generalPage)
-    AF.SetPoint(sharedPane, "TOPRIGHT", generalPage)
+    local sharedPane = CreateSectionPane(
+        "general",
+        L["Shared Nameplate Settings"],
+        255
+    )
 
     local sharedNotice = AF.CreateFontString(sharedPane, L["Shared width, height, and feature changes apply to hostile and friendly NPC and player nameplates."], "gray")
     AF.SetPoint(sharedNotice, "TOPLEFT", sharedPane, 15, -30)
@@ -393,39 +521,57 @@ local function CreateNameplatesPanel()
     sharedNotice:SetJustifyH("LEFT")
     sharedNotice:SetWordWrap(true)
 
-    local width = AF.CreateSlider(sharedPane, L["Width"], 180, 40, 300, 1, nil, true)
-    AF.SetPoint(width, "TOPLEFT", sharedPane, 15, -90)
+    local width = AF.CreateSlider(
+        sharedPane,
+        L["Width"],
+        165,
+        40,
+        300,
+        1,
+        nil,
+        true
+    )
+    AF.SetPoint(width, "TOPLEFT", sharedPane, 15, -105)
     width:SetAfterValueChanged(function(value)
         SetSharedHealthBarValue("width", value)
     end)
 
-    local height = AF.CreateSlider(sharedPane, L["Height"], 180, 4, 40, 1, nil, true)
-    AF.SetPoint(height, "TOPLEFT", sharedPane, 285, -90)
+    local height = AF.CreateSlider(
+        sharedPane,
+        L["Height"],
+        165,
+        4,
+        40,
+        1,
+        nil,
+        true
+    )
+    AF.SetPoint(height, "TOPLEFT", sharedPane, 200, -105)
     height:SetAfterValueChanged(function(value)
         SetSharedHealthBarValue("height", value)
     end)
 
     local nameText = AF.CreateCheckButton(sharedPane, L["Name"])
-    AF.SetPoint(nameText, "TOPLEFT", sharedPane, 15, -150)
+    AF.SetPoint(nameText, "TOPLEFT", sharedPane, 15, -165)
     nameText:SetOnCheck(function(checked)
         SetSharedIndicatorEnabled("nameText", checked)
     end)
 
     local castBar = AF.CreateCheckButton(sharedPane, L["castBar"])
-    AF.SetPoint(castBar, "TOPLEFT", sharedPane, 285, -150)
+    AF.SetPoint(castBar, "TOPLEFT", sharedPane, 200, -165)
     castBar:SetOnCheck(function(checked)
         SetSharedIndicatorEnabled("castBar", checked)
     end)
 
     local debuffs = AF.CreateCheckButton(sharedPane, L["debuffs"])
-    AF.SetPoint(debuffs, "TOPLEFT", sharedPane, 15, -180)
+    AF.SetPoint(debuffs, "TOPLEFT", sharedPane, 15, -200)
     debuffs:SetOnCheck(function(checked)
         SetSharedIndicatorEnabled("debuffs", checked)
     end)
 
-    local namePlacement = AF.CreateDropdown(sharedPane, 180)
+    local namePlacement = AF.CreateDropdown(sharedPane, 165)
     namePlacement:SetLabel(L["Name Placement"])
-    AF.SetPoint(namePlacement, "TOPLEFT", sharedPane, 285, -195)
+    AF.SetPoint(namePlacement, "TOPLEFT", sharedPane, 200, -215)
     namePlacement:SetItems({
         {text = L["Outside Health Bar"], value = "outside"},
         {text = L["Inside Health Bar"], value = "inside"},
@@ -437,9 +583,12 @@ local function CreateNameplatesPanel()
     --------------------------------------------------
     -- compatibility
     --------------------------------------------------
-    local compatibilityPane = AF.CreateTitledPane(generalPage, L["Compatibility"], nil, 115, "sand")
-    AF.SetPoint(compatibilityPane, "TOPLEFT", sharedPane, "BOTTOMLEFT", 0, -15)
-    AF.SetPoint(compatibilityPane, "TOPRIGHT", sharedPane, "BOTTOMRIGHT", 0, -15)
+    local compatibilityPane = CreateSectionPane(
+        "general",
+        L["Compatibility"],
+        150,
+        "sand"
+    )
 
     local compatibilityNotice = AF.CreateFontString(compatibilityPane, L["Native special and quest widgets remain Blizzard-owned. Blizzard's protected click target follows the visible BFI health bar precisely; an outside name is visual-only, while an inside name shares the bar's click target. Changes made during combat may be deferred until combat ends."], "sand")
     AF.SetPoint(compatibilityNotice, "TOPLEFT", compatibilityPane, 15, -30)
@@ -450,14 +599,11 @@ local function CreateNameplatesPanel()
     --------------------------------------------------
     -- threat
     --------------------------------------------------
-    local threatPane = AF.CreateTitledPane(
-        threatPage,
+    local threatPane = CreateSectionPane(
+        "threat",
         L["Threat Warning"],
-        nil,
-        300
+        145
     )
-    AF.SetPoint(threatPane, "TOPLEFT", threatPage)
-    AF.SetPoint(threatPane, "TOPRIGHT", threatPage)
 
     local threatNotice = AF.CreateFontString(
         threatPane,
@@ -470,20 +616,42 @@ local function CreateNameplatesPanel()
     threatNotice:SetWordWrap(true)
 
     local UpdateThreatWidgets
+    local threatStylePane = CreateSectionPane(
+        "threat",
+        L["Style"],
+        85
+    )
+    local threatGeometryPane = CreateSectionPane(
+        "threat",
+        L["Border + Glow"],
+        145
+    )
 
     local threatEnabled = AF.CreateCheckButton(
-        threatPane,
+        threatStylePane,
         L["Enable Threat Warning"]
     )
-    AF.SetPoint(threatEnabled, "TOPLEFT", threatPane, 15, -100)
+    AF.SetPoint(
+        threatEnabled,
+        "TOPLEFT",
+        threatStylePane,
+        15,
+        -45
+    )
     threatEnabled:SetOnCheck(function(checked)
         SetHostileThreatValue("enabled", checked)
         UpdateThreatWidgets()
     end)
 
-    local threatStyle = AF.CreateDropdown(threatPane, 180)
+    local threatStyle = AF.CreateDropdown(threatStylePane, 165)
     threatStyle:SetLabel(L["Style"])
-    AF.SetPoint(threatStyle, "TOPLEFT", threatPane, 285, -105)
+    AF.SetPoint(
+        threatStyle,
+        "TOPLEFT",
+        threatStylePane,
+        200,
+        -50
+    )
     threatStyle:SetItems({
         {text = L["Border"], value = "border"},
         {text = L["Glow"], value = "glow"},
@@ -495,61 +663,85 @@ local function CreateNameplatesPanel()
     end)
 
     local threatBorderSize = AF.CreateSlider(
-        threatPane,
+        threatGeometryPane,
         L["Border Thickness"],
-        180,
+        165,
         1,
         12,
         1,
         nil,
         true
     )
-    AF.SetPoint(threatBorderSize, "TOPLEFT", threatPane, 15, -165)
+    AF.SetPoint(
+        threatBorderSize,
+        "TOPLEFT",
+        threatGeometryPane,
+        15,
+        -50
+    )
     threatBorderSize:SetAfterValueChanged(function(value)
         SetHostileThreatValue("borderSize", value)
     end)
 
     local threatGlowSize = AF.CreateSlider(
-        threatPane,
+        threatGeometryPane,
         L["Glow Thickness"],
-        180,
+        165,
         1,
         16,
         1,
         nil,
         true
     )
-    AF.SetPoint(threatGlowSize, "TOPLEFT", threatPane, 285, -165)
+    AF.SetPoint(
+        threatGlowSize,
+        "TOPLEFT",
+        threatGeometryPane,
+        200,
+        -50
+    )
     threatGlowSize:SetAfterValueChanged(function(value)
         SetHostileThreatValue("size", value)
     end)
 
     local threatOutset = AF.CreateSlider(
-        threatPane,
+        threatGeometryPane,
         L["Glow Outset"],
-        180,
+        165,
         0,
         16,
         1,
         nil,
         true
     )
-    AF.SetPoint(threatOutset, "TOPLEFT", threatPane, 15, -225)
+    AF.SetPoint(
+        threatOutset,
+        "TOPLEFT",
+        threatGeometryPane,
+        15,
+        -110
+    )
     threatOutset:SetAfterValueChanged(function(value)
         SetHostileThreatValue("outset", value)
     end)
 
     local threatAlpha = AF.CreateSlider(
-        threatPane,
+        threatGeometryPane,
         L["Opacity"],
-        180,
+        165,
         0.1,
         1,
         0.05,
         true,
         true
     )
-    AF.SetPoint(threatAlpha, "TOPLEFT", threatPane, 285, -225)
+    AF.SetPoint(
+        threatAlpha,
+        "TOPLEFT",
+        threatGeometryPane,
+        200,
+        -110
+    )
     threatAlpha:SetAfterValueChanged(function(value)
         SetHostileThreatValue("alpha", value)
     end)
@@ -588,14 +780,11 @@ local function CreateNameplatesPanel()
     --------------------------------------------------
     -- hostile NPC semantic colors
     --------------------------------------------------
-    local colorsPane = AF.CreateTitledPane(
-        colorsPage,
+    local colorsPane = CreateSectionPane(
+        "colors",
         L["Dungeon Priority Colors"],
-        nil,
-        330
+        160
     )
-    AF.SetPoint(colorsPane, "TOPLEFT", colorsPage)
-    AF.SetPoint(colorsPane, "TOPRIGHT", colorsPage)
 
     local colorsNotice = AF.CreateFontString(
         colorsPane,
@@ -631,32 +820,37 @@ local function CreateNameplatesPanel()
     fallbackNotice:SetJustifyH("LEFT")
     fallbackNotice:SetWordWrap(true)
 
+    local colorSettingsPane = CreateSectionPane(
+        "colors",
+        L["Colors"],
+        225
+    )
     local semanticColorWidgets = {}
 
     local function CreateSemanticColorRow(info, index)
         local key = info.key
         local enabledButton = AF.CreateCheckButton(
-            colorsPane,
+            colorSettingsPane,
             L[info.label]
         )
         AF.SetPoint(
             enabledButton,
             "TOPLEFT",
-            colorsPane,
+            colorSettingsPane,
             15,
-            -125 - (index - 1) * 48
+            -45 - (index - 1) * 45
         )
 
         local picker = AF.CreateColorPicker(
-            colorsPane,
+            colorSettingsPane,
             L["Color"]
         )
         AF.SetPoint(
             picker,
             "TOPLEFT",
-            colorsPane,
-            300,
-            -125 - (index - 1) * 48
+            colorSettingsPane,
+            200,
+            -45 - (index - 1) * 45
         )
 
         local colorPreviewed
@@ -723,14 +917,11 @@ local function CreateNameplatesPanel()
     --------------------------------------------------
     -- cast appearance
     --------------------------------------------------
-    local castsPane = AF.CreateTitledPane(
-        castsPage,
+    local castsPane = CreateSectionPane(
+        "casts",
         L["Cast Bar Appearance"],
-        nil,
-        470
+        105
     )
-    AF.SetPoint(castsPane, "TOPLEFT", castsPage)
-    AF.SetPoint(castsPane, "TOPRIGHT", castsPage)
 
     local castsNotice = AF.CreateFontString(
         castsPane,
@@ -743,65 +934,96 @@ local function CreateNameplatesPanel()
     castsNotice:SetWordWrap(true)
 
     local UpdateCastWidgets
+    local castBasePane = CreateSectionPane(
+        "casts",
+        L["Size"] .. " / " .. L["Colors"],
+        185
+    )
+    local castInterruptibilityPane = CreateSectionPane(
+        "casts",
+        L["Color by Interruptibility"],
+        80
+    )
+    local castHighlightsPane = CreateSectionPane(
+        "casts",
+        L["Glow"] .. " / " .. L["Highlight Color"],
+        110
+    )
+    local castContentPane = CreateSectionPane(
+        "casts",
+        L["Cast Name"],
+        90
+    )
+    local spellTargetPane = CreateSectionPane(
+        "casts",
+        L["Spell Target Text"],
+        185
+    )
 
     local castWidth = AF.CreateSlider(
-        castsPane,
+        castBasePane,
         L["Width"],
-        180,
+        165,
         40,
         300,
         1,
         nil,
         true
     )
-    AF.SetPoint(castWidth, "TOPLEFT", castsPane, 15, -85)
+    AF.SetPoint(castWidth, "TOPLEFT", castBasePane, 15, -50)
     castWidth:SetAfterValueChanged(function(value)
         SetSharedCastValue("width", value)
     end)
 
     local castHeight = AF.CreateSlider(
-        castsPane,
+        castBasePane,
         L["Height"],
-        180,
+        165,
         4,
         40,
         1,
         nil,
         true
     )
-    AF.SetPoint(castHeight, "TOPLEFT", castsPane, 285, -85)
+    AF.SetPoint(castHeight, "TOPLEFT", castBasePane, 200, -50)
     castHeight:SetAfterValueChanged(function(value)
         SetSharedCastValue("height", value)
     end)
 
     local normalCastColor = AF.CreateColorPicker(
-        castsPane,
+        castBasePane,
         L["Normal"]
     )
-    AF.SetPoint(normalCastColor, "TOPLEFT", castsPane, 15, -145)
+    AF.SetPoint(
+        normalCastColor,
+        "TOPLEFT",
+        castBasePane,
+        15,
+        -110
+    )
 
     local interruptibleCastColor = AF.CreateColorPicker(
-        castsPane,
+        castBasePane,
         L["Interruptible"]
     )
     AF.SetPoint(
         interruptibleCastColor,
         "TOPLEFT",
-        castsPane,
+        castBasePane,
         200,
-        -145
+        -110
     )
 
     local uninterruptibleCastColor = AF.CreateColorPicker(
-        castsPane,
+        castBasePane,
         L["Uninterruptible"]
     )
     AF.SetPoint(
         uninterruptibleCastColor,
         "TOPLEFT",
-        castsPane,
-        385,
-        -145
+        castBasePane,
+        15,
+        -155
     )
 
     local castColorPickers = {}
@@ -873,10 +1095,16 @@ local function CreateNameplatesPanel()
     )
 
     local interruptibility = AF.CreateCheckButton(
-        castsPane,
+        castInterruptibilityPane,
         L["Color by Interruptibility"]
     )
-    AF.SetPoint(interruptibility, "TOPLEFT", castsPane, 15, -195)
+    AF.SetPoint(
+        interruptibility,
+        "TOPLEFT",
+        castInterruptibilityPane,
+        15,
+        -45
+    )
     interruptibility:SetOnCheck(function(checked)
         SetSharedCastSectionValue(
             "interruptibleCheck",
@@ -887,15 +1115,15 @@ local function CreateNameplatesPanel()
     end)
 
     local uninterruptibleTexture = AF.CreateCheckButton(
-        castsPane,
+        castInterruptibilityPane,
         L["Uninterruptible Texture"]
     )
     AF.SetPoint(
         uninterruptibleTexture,
         "TOPLEFT",
-        castsPane,
-        285,
-        -195
+        castInterruptibilityPane,
+        200,
+        -45
     )
     uninterruptibleTexture:SetOnCheck(function(checked)
         SetSharedCastSectionValue(
@@ -906,10 +1134,16 @@ local function CreateNameplatesPanel()
     end)
 
     local importantGlow = AF.CreateCheckButton(
-        castsPane,
+        castHighlightsPane,
         L["Important Cast Glow"]
     )
-    AF.SetPoint(importantGlow, "TOPLEFT", castsPane, 15, -235)
+    AF.SetPoint(
+        importantGlow,
+        "TOPLEFT",
+        castHighlightsPane,
+        15,
+        -40
+    )
     importantGlow:SetOnCheck(function(checked)
         SetSharedCastSectionValue(
             "importantGlow",
@@ -920,15 +1154,15 @@ local function CreateNameplatesPanel()
     end)
 
     local importantGlowColor = AF.CreateColorPicker(
-        castsPane,
+        castHighlightsPane,
         L["Glow Color"]
     )
     AF.SetPoint(
         importantGlowColor,
         "TOPLEFT",
-        castsPane,
-        285,
-        -235
+        castHighlightsPane,
+        200,
+        -40
     )
     WireCastColorPicker(
         importantGlowColor,
@@ -938,15 +1172,15 @@ local function CreateNameplatesPanel()
     )
 
     local playerTargetHighlight = AF.CreateCheckButton(
-        castsPane,
+        castHighlightsPane,
         L["Player-target Cast Highlight"]
     )
     AF.SetPoint(
         playerTargetHighlight,
         "TOPLEFT",
-        castsPane,
+        castHighlightsPane,
         15,
-        -275
+        -75
     )
     playerTargetHighlight:SetOnCheck(function(checked)
         SetSharedCastSectionValue(
@@ -958,16 +1192,16 @@ local function CreateNameplatesPanel()
     end)
 
     local playerTargetColor = AF.CreateColorPicker(
-        castsPane,
+        castHighlightsPane,
         L["Highlight Color"],
         true
     )
     AF.SetPoint(
         playerTargetColor,
         "TOPLEFT",
-        castsPane,
-        285,
-        -275
+        castHighlightsPane,
+        200,
+        -75
     )
     WireCastColorPicker(
         playerTargetColor,
@@ -977,25 +1211,34 @@ local function CreateNameplatesPanel()
     )
 
     local castName = AF.CreateCheckButton(
-        castsPane,
+        castContentPane,
         L["Cast Name"]
     )
-    AF.SetPoint(castName, "TOPLEFT", castsPane, 15, -315)
+    AF.SetPoint(castName, "TOPLEFT", castContentPane, 15, -40)
     castName:SetOnCheck(function(checked)
         SetSharedCastSectionValue("nameText", "enabled", checked)
     end)
 
-    local castIcon = AF.CreateCheckButton(castsPane, L["Icon"])
-    AF.SetPoint(castIcon, "TOPLEFT", castsPane, 200, -315)
+    local castIcon = AF.CreateCheckButton(
+        castContentPane,
+        L["Icon"]
+    )
+    AF.SetPoint(castIcon, "TOPLEFT", castContentPane, 200, -40)
     castIcon:SetOnCheck(function(checked)
         SetSharedCastSectionValue("icon", "enabled", checked)
     end)
 
     local castDuration = AF.CreateCheckButton(
-        castsPane,
+        castContentPane,
         L["Duration Text"]
     )
-    AF.SetPoint(castDuration, "TOPLEFT", castsPane, 385, -315)
+    AF.SetPoint(
+        castDuration,
+        "TOPLEFT",
+        castContentPane,
+        15,
+        -70
+    )
     castDuration:SetOnCheck(function(checked)
         SetSharedCastSectionValue(
             "durationText",
@@ -1005,10 +1248,16 @@ local function CreateNameplatesPanel()
     end)
 
     local spellTarget = AF.CreateCheckButton(
-        castsPane,
+        spellTargetPane,
         L["Spell Target Text"]
     )
-    AF.SetPoint(spellTarget, "TOPLEFT", castsPane, 15, -355)
+    AF.SetPoint(
+        spellTarget,
+        "TOPLEFT",
+        spellTargetPane,
+        15,
+        -40
+    )
     spellTarget:SetOnCheck(function(checked)
         SetSharedCastSectionValue(
             "spellTargetText",
@@ -1019,15 +1268,15 @@ local function CreateNameplatesPanel()
     end)
 
     local spellTargetColor = AF.CreateColorPicker(
-        castsPane,
+        spellTargetPane,
         L["Text Color"]
     )
     AF.SetPoint(
         spellTargetColor,
         "TOPLEFT",
-        castsPane,
-        285,
-        -355
+        spellTargetPane,
+        200,
+        -40
     )
     WireCastColorPicker(
         spellTargetColor,
@@ -1036,33 +1285,54 @@ local function CreateNameplatesPanel()
         true
     )
 
-    local spellTargetFont = AF.CreateDropdown(castsPane, 150)
+    local spellTargetFont = AF.CreateDropdown(spellTargetPane, 165)
     spellTargetFont:SetLabel(L["Font"])
-    AF.SetPoint(spellTargetFont, "TOPLEFT", castsPane, 15, -405)
+    AF.SetPoint(
+        spellTargetFont,
+        "TOPLEFT",
+        spellTargetPane,
+        15,
+        -95
+    )
     spellTargetFont:SetItems(AF.LSM_GetFontDropdownItems())
     spellTargetFont:SetOnSelect(function(value)
         SetSharedCastFontValue(1, value)
     end)
 
-    local spellTargetOutline = AF.CreateDropdown(castsPane, 150)
+    local spellTargetOutline = AF.CreateDropdown(
+        spellTargetPane,
+        165
+    )
     spellTargetOutline:SetLabel(L["Outline"])
-    AF.SetPoint(spellTargetOutline, "TOPLEFT", castsPane, 200, -405)
+    AF.SetPoint(
+        spellTargetOutline,
+        "TOPLEFT",
+        spellTargetPane,
+        200,
+        -95
+    )
     spellTargetOutline:SetItems(AF.LSM_GetFontOutlineDropdownItems())
     spellTargetOutline:SetOnSelect(function(value)
         SetSharedCastFontValue(3, value)
     end)
 
     local spellTargetSize = AF.CreateSlider(
-        castsPane,
+        spellTargetPane,
         L["Size"],
-        150,
+        165,
         5,
         30,
         1,
         nil,
         true
     )
-    AF.SetPoint(spellTargetSize, "TOPLEFT", castsPane, 385, -405)
+    AF.SetPoint(
+        spellTargetSize,
+        "TOPLEFT",
+        spellTargetPane,
+        15,
+        -150
+    )
     spellTargetSize:SetAfterValueChanged(function(value)
         SetSharedCastFontValue(2, value)
     end)
@@ -1144,14 +1414,11 @@ local function CreateNameplatesPanel()
     --------------------------------------------------
     -- target appearance
     --------------------------------------------------
-    local targetPane = AF.CreateTitledPane(
-        targetPage,
+    local targetPane = CreateSectionPane(
+        "target",
         L["Target Indicator"],
-        nil,
-        365
+        160
     )
-    AF.SetPoint(targetPane, "TOPLEFT", targetPage)
-    AF.SetPoint(targetPane, "TOPRIGHT", targetPage)
 
     local targetIndicator = AF.CreateCheckButton(
         targetPane,
@@ -1164,7 +1431,7 @@ local function CreateNameplatesPanel()
         L["Target marker changes apply to NPC and player nameplates in the selected group."],
         "gray"
     )
-    AF.SetPoint(targetNotice, "TOPLEFT", targetPane, 150, -27)
+    AF.SetPoint(targetNotice, "TOPLEFT", targetPane, 110, -30)
     AF.SetPoint(targetNotice, "TOPRIGHT", targetPane, -15, -27)
     targetNotice:SetJustifyH("LEFT")
     targetNotice:SetWordWrap(true)
@@ -1172,25 +1439,41 @@ local function CreateNameplatesPanel()
     local selectedTargetScope = "hostile"
     local selectedTargetState = "target"
 
-    local targetScope = AF.CreateSwitch(targetPane, 250, 20)
+    local targetScope = AF.CreateSwitch(targetPane, 165, 20)
     targetScope:SetLabel(L["Nameplate Group"])
-    AF.SetPoint(targetScope, "TOPLEFT", targetPane, 15, -85)
+    AF.SetPoint(targetScope, "TOPLEFT", targetPane, 15, -110)
     targetScope:SetLabels({
         {text = L["Hostile"], value = "hostile"},
         {text = L["Friendly"], value = "friendly"},
     })
 
-    local targetState = AF.CreateSwitch(targetPane, 250, 20)
+    local targetState = AF.CreateSwitch(targetPane, 165, 20)
     targetState:SetLabel(L["Marker State"])
-    AF.SetPoint(targetState, "TOPLEFT", targetPane, 300, -85)
+    AF.SetPoint(targetState, "TOPLEFT", targetPane, 200, -110)
     targetState:SetLabels({
         {text = L["Target"], value = "target"},
         {text = L["Focus"], value = "focus"},
     })
 
-    local markerLayout = AF.CreateDropdown(targetPane, 220)
+    local markerPane = CreateSectionPane(
+        "target",
+        L["Marker Layout"],
+        205
+    )
+    local healthHighlightPane = CreateSectionPane(
+        "target",
+        L["Highlight Health Bar"],
+        80
+    )
+    local nameEmphasisPane = CreateSectionPane(
+        "target",
+        L["Emphasize Name Text"],
+        145
+    )
+
+    local markerLayout = AF.CreateDropdown(markerPane, 165)
     markerLayout:SetLabel(L["Marker Layout"])
-    AF.SetPoint(markerLayout, "TOPLEFT", targetPane, 15, -140)
+    AF.SetPoint(markerLayout, "TOPLEFT", markerPane, 15, -50)
     markerLayout:SetItems({
         {text = _G.NONE, value = "none"},
         {text = L["Top Arrow"], value = "top"},
@@ -1198,77 +1481,113 @@ local function CreateNameplatesPanel()
     })
 
     local markerSize = AF.CreateSlider(
-        targetPane,
+        markerPane,
         L["Marker Size"],
-        180,
+        165,
         8,
         80,
         1,
         nil,
         true
     )
-    AF.SetPoint(markerSize, "TOPLEFT", targetPane, 300, -140)
+    AF.SetPoint(markerSize, "TOPLEFT", markerPane, 15, -110)
 
     local sideArrowSize = AF.CreateSlider(
-        targetPane,
+        markerPane,
         L["Side Arrow Size"],
-        180,
+        165,
         8,
         60,
         1,
         nil,
         true
     )
-    AF.SetPoint(sideArrowSize, "TOPLEFT", targetPane, 15, -200)
+    AF.SetPoint(
+        sideArrowSize,
+        "TOPLEFT",
+        markerPane,
+        15,
+        -170
+    )
 
-    local arrowGap = AF.CreateSlider(
-        targetPane,
-        L["Arrow Gap"],
-        180,
+    local topArrowGap = AF.CreateSlider(
+        markerPane,
+        L["Top Arrow Gap"],
+        165,
         0,
         30,
         1,
         nil,
         true
     )
-    AF.SetPoint(arrowGap, "TOPLEFT", targetPane, 300, -200)
+    AF.SetPoint(
+        topArrowGap,
+        "TOPLEFT",
+        markerPane,
+        200,
+        -110
+    )
+
+    local sideArrowGap = AF.CreateSlider(
+        markerPane,
+        L["Side Arrow Gap"],
+        165,
+        0,
+        30,
+        1,
+        nil,
+        true
+    )
+    AF.SetPoint(
+        sideArrowGap,
+        "TOPLEFT",
+        markerPane,
+        200,
+        -170
+    )
 
     local highlightHealthBar = AF.CreateCheckButton(
-        targetPane,
+        healthHighlightPane,
         L["Highlight Health Bar"]
     )
     AF.SetPoint(
         highlightHealthBar,
         "TOPLEFT",
-        targetPane,
+        healthHighlightPane,
         15,
-        -245
+        -45
     )
 
     local highlightColor = AF.CreateColorPicker(
-        targetPane,
+        healthHighlightPane,
         L["Highlight Color"],
         true
     )
-    AF.SetPoint(highlightColor, "TOPLEFT", targetPane, 300, -245)
+    AF.SetPoint(
+        highlightColor,
+        "TOPLEFT",
+        healthHighlightPane,
+        200,
+        -45
+    )
     local targetColorPreviewed
 
     local emphasizeNameText = AF.CreateCheckButton(
-        targetPane,
+        nameEmphasisPane,
         L["Emphasize Name Text"]
     )
     AF.SetPoint(
         emphasizeNameText,
         "TOPLEFT",
-        targetPane,
+        nameEmphasisPane,
         15,
-        -280
+        -40
     )
 
     local nameSizeIncrease = AF.CreateSlider(
-        targetPane,
+        nameEmphasisPane,
         L["Name Size Increase"],
-        150,
+        165,
         0,
         8,
         1,
@@ -1278,21 +1597,33 @@ local function CreateNameplatesPanel()
     AF.SetPoint(
         nameSizeIncrease,
         "TOPLEFT",
-        targetPane,
+        nameEmphasisPane,
         15,
-        -335
+        -95
     )
 
-    local nameOutline = AF.CreateDropdown(targetPane, 150)
+    local nameOutline = AF.CreateDropdown(nameEmphasisPane, 165)
     nameOutline:SetLabel(L["Outline"])
-    AF.SetPoint(nameOutline, "TOPLEFT", targetPane, 200, -335)
+    AF.SetPoint(
+        nameOutline,
+        "TOPLEFT",
+        nameEmphasisPane,
+        200,
+        -95
+    )
     nameOutline:SetItems(AF.LSM_GetFontOutlineDropdownItems())
 
     local nameShadow = AF.CreateCheckButton(
-        targetPane,
+        nameEmphasisPane,
         L["Shadow"]
     )
-    AF.SetPoint(nameShadow, "TOPLEFT", targetPane, 390, -317)
+    AF.SetPoint(
+        nameShadow,
+        "TOPLEFT",
+        nameEmphasisPane,
+        15,
+        -130
+    )
 
     local function UpdateTargetWidgets()
         local config = GetTargetStateConfig(
@@ -1318,7 +1649,8 @@ local function CreateNameplatesPanel()
         markerLayout:SetSelectedValue(config.layout)
         markerSize:SetValue(config.size)
         sideArrowSize:SetValue(config.sideSize)
-        arrowGap:SetValue(config.sideSpacing)
+        topArrowGap:SetValue(config.topSpacing or 0)
+        sideArrowGap:SetValue(config.sideSpacing or 0)
         highlightHealthBar:SetChecked(healthHighlight.enabled)
         if not AF.IsColorPickerOpen(highlightColor) then
             highlightColor:SetColor(healthHighlight.color)
@@ -1328,11 +1660,15 @@ local function CreateNameplatesPanel()
         nameOutline:SetSelectedValue(nameEmphasis.outline)
         nameShadow:SetChecked(nameEmphasis.shadow)
 
-        AF.SetEnabled(config.layout == "top", markerSize)
+        AF.SetEnabled(
+            config.layout == "top",
+            markerSize,
+            topArrowGap
+        )
         AF.SetEnabled(
             config.layout == "sides",
             sideArrowSize,
-            arrowGap
+            sideArrowGap
         )
         AF.SetEnabled(healthBarEnabled, highlightHealthBar)
         AF.SetEnabled(
@@ -1400,7 +1736,16 @@ local function CreateNameplatesPanel()
         )
     end)
 
-    arrowGap:SetAfterValueChanged(function(value)
+    topArrowGap:SetAfterValueChanged(function(value)
+        SetTargetStateValue(
+            selectedTargetScope,
+            selectedTargetState,
+            "topSpacing",
+            value
+        )
+    end)
+
+    sideArrowGap:SetAfterValueChanged(function(value)
         SetTargetStateValue(
             selectedTargetScope,
             selectedTargetState,
@@ -1510,9 +1855,11 @@ local function CreateNameplatesPanel()
     --------------------------------------------------
     -- debuff aura appearance
     --------------------------------------------------
-    local auraPane = AF.CreateTitledPane(aurasPage, L["debuffs"], nil, 365)
-    AF.SetPoint(auraPane, "TOPLEFT", aurasPage)
-    AF.SetPoint(auraPane, "TOPRIGHT", aurasPage)
+    local auraPane = CreateSectionPane(
+        "auras",
+        L["debuffs"],
+        105
+    )
 
     local auraNotice = AF.CreateFontString(auraPane, L["Debuff timer appearance changes apply to hostile and friendly NPC and player nameplates."], "gray")
     AF.SetPoint(auraNotice, "TOPLEFT", auraPane, 15, -30)
@@ -1520,9 +1867,36 @@ local function CreateNameplatesPanel()
     auraNotice:SetJustifyH("LEFT")
     auraNotice:SetWordWrap(true)
 
-    local cooldownStyle = AF.CreateDropdown(auraPane, 250)
+    local cooldownPane = CreateSectionPane(
+        "auras",
+        L["Cooldown Style"],
+        80
+    )
+    local durationPane = CreateSectionPane(
+        "auras",
+        L["Duration Text"],
+        80
+    )
+    local durationTextPane = CreateSectionPane(
+        "auras",
+        L["Text"],
+        145
+    )
+    local durationPositionPane = CreateSectionPane(
+        "auras",
+        L["Position"],
+        145
+    )
+
+    local cooldownStyle = AF.CreateDropdown(cooldownPane, 350)
     cooldownStyle:SetLabel(L["Cooldown Style"])
-    AF.SetPoint(cooldownStyle, "TOPLEFT", auraPane, 15, -90)
+    AF.SetPoint(
+        cooldownStyle,
+        "TOPLEFT",
+        cooldownPane,
+        15,
+        -50
+    )
     cooldownStyle:SetItems({
         {text = _G.NONE, value = "none"},
         {text = L["Vertical"], value = "vertical"},
@@ -1536,14 +1910,32 @@ local function CreateNameplatesPanel()
         SetSharedDebuffValue("cooldownStyle", value)
     end)
 
-    local durationEnabled = AF.CreateCheckButton(auraPane, L["Duration Text"])
-    AF.SetPoint(durationEnabled, "TOPLEFT", auraPane, 300, -72)
+    local durationEnabled = AF.CreateCheckButton(
+        durationPane,
+        L["Duration Text"]
+    )
+    AF.SetPoint(
+        durationEnabled,
+        "TOPLEFT",
+        durationPane,
+        15,
+        -45
+    )
 
     -- Retail 12.0.7's native DurationTextBinding cannot apply threshold
     -- colors without exposing restricted duration values to Lua. Keep the
     -- supported normal color here; 12.1 curve modes need a separate design.
-    local normalColor = AF.CreateColorPicker(auraPane, L["Normal"])
-    AF.SetPoint(normalColor, "TOPLEFT", auraPane, 300, -105)
+    local normalColor = AF.CreateColorPicker(
+        durationPane,
+        L["Normal"]
+    )
+    AF.SetPoint(
+        normalColor,
+        "TOPLEFT",
+        durationPane,
+        200,
+        -45
+    )
     local durationColorPreviewed
     normalColor:SetOnChange(function(r, g, b, a)
         local colors = {}
@@ -1578,58 +1970,130 @@ local function CreateNameplatesPanel()
     normalColor:SetOnCancel(ResetDurationColorPreview)
     normalColor:SetOnDiscard(ResetDurationColorPreview)
 
-    local font = AF.CreateDropdown(auraPane, 150)
+    local font = AF.CreateDropdown(durationTextPane, 165)
     font:SetLabel(L["Font"])
-    AF.SetPoint(font, "TOPLEFT", auraPane, 15, -150)
+    AF.SetPoint(font, "TOPLEFT", durationTextPane, 15, -50)
     font:SetItems(AF.LSM_GetFontDropdownItems())
     font:SetOnSelect(function(value)
         SetSharedDebuffDurationArrayValue("font", 1, value)
     end)
 
-    local outline = AF.CreateDropdown(auraPane, 150)
+    local outline = AF.CreateDropdown(durationTextPane, 165)
     outline:SetLabel(L["Outline"])
-    AF.SetPoint(outline, "TOPLEFT", font, 185, 0)
+    AF.SetPoint(
+        outline,
+        "TOPLEFT",
+        durationTextPane,
+        200,
+        -50
+    )
     outline:SetItems(AF.LSM_GetFontOutlineDropdownItems())
     outline:SetOnSelect(function(value)
         SetSharedDebuffDurationArrayValue("font", 3, value)
     end)
 
-    local size = AF.CreateSlider(auraPane, L["Size"], 150, 5, 50, 1, nil, true)
-    AF.SetPoint(size, "TOPLEFT", font, "BOTTOMLEFT", 0, -30)
+    local size = AF.CreateSlider(
+        durationTextPane,
+        L["Size"],
+        165,
+        5,
+        50,
+        1,
+        nil,
+        true
+    )
+    AF.SetPoint(size, "TOPLEFT", durationTextPane, 15, -110)
     size:SetAfterValueChanged(function(value)
         SetSharedDebuffDurationArrayValue("font", 2, value)
     end)
 
-    local shadow = AF.CreateCheckButton(auraPane, L["Shadow"])
-    AF.SetPoint(shadow, "LEFT", size, 185, 0)
+    local shadow = AF.CreateCheckButton(
+        durationTextPane,
+        L["Shadow"]
+    )
+    AF.SetPoint(
+        shadow,
+        "TOPLEFT",
+        durationTextPane,
+        200,
+        -95
+    )
     shadow:SetOnCheck(function(checked)
         SetSharedDebuffDurationArrayValue("font", 4, checked)
     end)
 
-    local anchorPoint = AF.CreateDropdown(auraPane, 150)
+    local anchorPoint = AF.CreateDropdown(
+        durationPositionPane,
+        165
+    )
     anchorPoint:SetLabel(L["Anchor Point"])
-    AF.SetPoint(anchorPoint, "TOPLEFT", size, "BOTTOMLEFT", 0, -40)
+    AF.SetPoint(
+        anchorPoint,
+        "TOPLEFT",
+        durationPositionPane,
+        15,
+        -50
+    )
     anchorPoint:SetItems(AF.GetDropdownItems_AnchorPoint())
     anchorPoint:SetOnSelect(function(value)
         SetSharedDebuffDurationArrayValue("position", 1, value)
     end)
 
-    local relativePoint = AF.CreateDropdown(auraPane, 150)
+    local relativePoint = AF.CreateDropdown(
+        durationPositionPane,
+        165
+    )
     relativePoint:SetLabel(L["Relative Point"])
-    AF.SetPoint(relativePoint, "TOPLEFT", anchorPoint, 185, 0)
+    AF.SetPoint(
+        relativePoint,
+        "TOPLEFT",
+        durationPositionPane,
+        200,
+        -50
+    )
     relativePoint:SetItems(AF.GetDropdownItems_AnchorPoint())
     relativePoint:SetOnSelect(function(value)
         SetSharedDebuffDurationArrayValue("position", 2, value)
     end)
 
-    local xOffset = AF.CreateSlider(auraPane, L["X Offset"], 150, -100, 100, 0.5, nil, true)
-    AF.SetPoint(xOffset, "TOPLEFT", anchorPoint, "BOTTOMLEFT", 0, -25)
+    local xOffset = AF.CreateSlider(
+        durationPositionPane,
+        L["X Offset"],
+        165,
+        -100,
+        100,
+        0.5,
+        nil,
+        true
+    )
+    AF.SetPoint(
+        xOffset,
+        "TOPLEFT",
+        durationPositionPane,
+        15,
+        -110
+    )
     xOffset:SetAfterValueChanged(function(value)
         SetSharedDebuffDurationArrayValue("position", 3, value)
     end)
 
-    local yOffset = AF.CreateSlider(auraPane, L["Y Offset"], 150, -100, 100, 0.5, nil, true)
-    AF.SetPoint(yOffset, "TOPLEFT", xOffset, 185, 0)
+    local yOffset = AF.CreateSlider(
+        durationPositionPane,
+        L["Y Offset"],
+        165,
+        -100,
+        100,
+        0.5,
+        nil,
+        true
+    )
+    AF.SetPoint(
+        yOffset,
+        "TOPLEFT",
+        durationPositionPane,
+        200,
+        -110
+    )
     yOffset:SetAfterValueChanged(function(value)
         SetSharedDebuffDurationArrayValue("position", 4, value)
     end)
@@ -1735,17 +2199,17 @@ local function CreateNameplatesPanel()
         CancelNameplateColorPickers()
     end, "high")
 
-    targetPage:HookOnHide(function()
+    sectionCleanup.target = function()
         AF.CancelColorPicker(highlightColor)
-    end)
-    colorsPage:HookOnHide(CancelSemanticColorPickers)
-    castsPage:HookOnHide(CancelCastColorPickers)
-    aurasPage:HookOnHide(function()
+    end
+    sectionCleanup.colors = CancelSemanticColorPickers
+    sectionCleanup.casts = CancelCastColorPickers
+    sectionCleanup.auras = function()
         AF.CancelColorPicker(normalColor)
-    end)
+    end
     nameplatesPanel:HookOnHide(CancelNameplateColorPickers)
 
-    sectionSwitch:SetSelectedValue("general")
+    sectionButtons[1]:SilentClick()
 end
 
 ---------------------------------------------------------------------

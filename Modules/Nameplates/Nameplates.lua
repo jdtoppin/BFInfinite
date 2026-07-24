@@ -477,23 +477,39 @@ ApplyCustomHitTest = function(np)
 end
 
 RestoreNativeHitTest = function(np)
-    if not np.customHitTest
-        or not CanChangeHitTestPoints(np.base)
+    if not np.customHitTest then return false end
+
+    -- Blizzard clears NamePlateBaseMixin.unitToken before addon
+    -- NAME_PLATE_UNIT_REMOVED callbacks run, then releases UnitFrame. There is
+    -- no live click target to restore at that point, and both 12.0.7 and 12.1
+    -- reapply native frame options before the next unit's OnUnitSet callback.
+    -- Avoid asking GetFrameOptions to classify a nil unit token or touching a
+    -- stale pooled frame.
+    local base = np.base
+    if not base
         or not np.unitFrame
+        or base.UnitFrame ~= np.unitFrame
+        or type(base.GetUnit) ~= "function"
+        or not base:GetUnit()
     then
+        np.customHitTest = nil
+        return true
+    end
+
+    if not CanChangeHitTestPoints(base) then
         return false
     end
 
     if type(np.unitFrame.UpdateHitTestArea) == "function" then
         np.unitFrame:UpdateHitTestArea(NamePlateSetupOptions)
     elseif type(np.unitFrame.ApplyFrameOptions) == "function"
-        and type(np.base.GetFrameOptions) == "function"
+        and type(base.GetFrameOptions) == "function"
     then
         -- 12.0.7 sets the native hit-test points as part of this method;
         -- 12.1 exposes the narrower UpdateHitTestArea helper above.
         np.unitFrame:ApplyFrameOptions(
             NamePlateSetupOptions,
-            np.base:GetFrameOptions()
+            base:GetFrameOptions()
         )
     else
         return false
