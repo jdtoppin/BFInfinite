@@ -88,8 +88,8 @@ local function RestoreTalentSpendTextPoint(button)
 end
 
 local function StyleChoiceTalentIcon(button)
-    AF.ApplyCircularIconMask(button.IconMask)
-    AF.ApplyCircularIconMask(button.DisabledOverlayMask)
+    AF.ApplyCircularIconMask(button.IconMask, button.Icon, 1)
+    AF.ApplyCircularIconMask(button.DisabledOverlayMask, button.DisabledOverlay, 1)
 
     local iconSplitMask = button.IconSplitMask
     iconSplitMask:SetTexture(AF.GetPlainTexture())
@@ -103,7 +103,7 @@ local function StyleChoiceTalentIcon(button)
     AF.ClearPoints(icon2Mask)
     AF.SetPoint(icon2Mask, "TOP", button.Icon2)
     AF.SetPoint(icon2Mask, "BOTTOMRIGHT", button.Icon2)
-    button.BFIIcon2CircleMask = AF.CreateCircularMask(button.Icon2)
+    button.BFIIcon2CircleMask = AF.CreateCircularMask(button.Icon2, 1)
 
     local arrowLeft = AF.CreateTexture(button, AF.GetIcon("ArrowLeft2"), "border", "OVERLAY", 5)
     button.BFIChoiceArrowLeft = arrowLeft
@@ -133,8 +133,8 @@ local function StyleTalentButton(button)
         StyleChoiceTalentIcon(button)
         button.BFICircleBorder = AF.CreateCircularIconBorder(button, button.Icon, "border", "BACKGROUND", 0)
     elseif isCircle then
-        AF.ApplyCircularIconMask(button.IconMask)
-        AF.ApplyCircularIconMask(button.DisabledOverlayMask)
+        AF.ApplyCircularIconMask(button.IconMask, button.Icon, 1)
+        AF.ApplyCircularIconMask(button.DisabledOverlayMask, button.DisabledOverlay, 1)
         button.BFICircleBorder = AF.CreateCircularIconBorder(button, button.Icon, "border", "BACKGROUND", 0)
     elseif isSquare then
         S.StyleSquareIcon(button.Icon, button.IconMask, true)
@@ -186,8 +186,8 @@ local function StyleTalentSelectionButton(button)
         CaptureTalentSpendTextPoint(button)
         if isPassive then
             S.StyleIcon(button.Icon)
-            AF.ApplyCircularIconMask(button.IconMask, button.Icon)
-            AF.ApplyCircularIconMask(button.DisabledOverlayMask, button.Icon)
+            AF.ApplyCircularIconMask(button.IconMask, button.Icon, 1)
+            AF.ApplyCircularIconMask(button.DisabledOverlayMask, button.DisabledOverlay, 1)
             button.BFICircleBorder = AF.CreateCircularIconBorder(button, button.Icon, "border", "BACKGROUND", 0)
         else
             S.StyleSquareIcon(button.Icon, button.IconMask, true)
@@ -225,7 +225,7 @@ local function StyleSpellBookItem(item)
 
     local isPassive = item.spellBookItemInfo.isPassive
     if isPassive then
-        AF.ApplyCircularIconMask(button.IconMask)
+        AF.ApplyCircularIconMask(button.IconMask, button.Icon, 1)
     end
     button.IconMask:SetShown(isPassive)
     button.Border:Hide()
