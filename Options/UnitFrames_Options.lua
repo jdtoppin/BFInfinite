@@ -3602,7 +3602,7 @@ builder["tooltip"] = function(parent)
     local auraItems = {
         {text = L["Unit Frame"], value = "root"},
         {text = L["Icon"], value = "self"},
-        {text = L["Icon (Adaptive)"], value = "self_adaptive"},
+        {text = L["Icon (Above)"], value = "self_adaptive"},
         {text = L["Group"], value = "parent"},
         {text = L["Default"], value = "default"},
     }

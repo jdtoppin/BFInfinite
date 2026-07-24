@@ -29,7 +29,7 @@ local list = {
     "-nameplates",
     "actionBars",
     buffsDebuffsAvailable and "buffsDebuffs" or "-buffsDebuffs",
-    "-tooltip",
+    "tooltip",
     "uiWidgets",
     "dataBars",
     -- "dataBroker",
