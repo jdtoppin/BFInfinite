@@ -11,8 +11,8 @@ local LIST_WIDTH = 170
 local HEADER_HEIGHT = 35
 
 local optionsFrame
-local buffsDebuffsAvailable = type(BFI.modules.BuffsDebuffs.HasSecureAuraHeaderBackend) == "function"
-    and BFI.modules.BuffsDebuffs.HasSecureAuraHeaderBackend()
+local buffsDebuffsAvailable = type(BFI.modules.BuffsDebuffs.HasAuraBackend) == "function"
+    and BFI.modules.BuffsDebuffs.HasAuraBackend()
 
 ---------------------------------------------------------------------
 -- list
