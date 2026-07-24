@@ -2,6 +2,7 @@
 local BFI = select(2, ...)
 ---@class Style
 local S = BFI.modules.Style
+local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
@@ -500,7 +501,7 @@ function S.StyleSpellItemButton(button)
 
     S.CreateBackdrop(button, true, nil, 1)
 
-    local iconTexture = name and _G[name .. "IconTexture"] or button.IconTexture or button.Icon
+    local iconTexture = name and _G[name .. "IconTexture"] or button.IconTexture or button.Icon or button.icon
     if iconTexture then
         S.StyleIcon(iconTexture)
         -- AF.SetOnePixelInside(iconTexture, button.BFIBackdrop)
@@ -511,7 +512,9 @@ function S.StyleSpellItemButton(button)
         S.StyleIconBorder(iconBorder)
     end
 
-    local normalTexture = name and _G[name .. "NormalTexture"] or button.NormalTexture
+    local normalTexture = name and _G[name .. "NormalTexture"]
+        or button.NormalTexture
+        or (button.GetNormalTexture and button:GetNormalTexture())
     if normalTexture then
         normalTexture:SetAlpha(0)
     end
@@ -819,7 +822,160 @@ end
 ---------------------------------------------------------------------
 -- titled frame
 ---------------------------------------------------------------------
-function S.StyleTitledFrame(frame)
+local movableFrames = setmetatable({}, {__mode = "k"})
+local movableHooksRegistered
+
+local function GetSavedFramePosition(frame)
+    local name = frame:GetName()
+    if not name then return frame._BFIMovablePosition end
+
+    local config = _G.BFIConfig
+    local general = type(config) == "table" and config.general
+    local positions = type(general) == "table" and general.blizzardFramePositions
+    return type(positions) == "table" and positions[name]
+end
+
+local function SetSavedFramePosition(frame, position)
+    local name = frame:GetName()
+    if not name then
+        frame._BFIMovablePosition = position
+        return
+    end
+
+    local config = _G.BFIConfig
+    if type(config) ~= "table" then return end
+    if type(config.general) ~= "table" then config.general = {} end
+    if type(config.general.blizzardFramePositions) ~= "table" then
+        config.general.blizzardFramePositions = {}
+    end
+    config.general.blizzardFramePositions[name] = position
+end
+
+local function ArePublicNumbers(...)
+    for i = 1, select("#", ...) do
+        local value = select(i, ...)
+        if not F.isValueNonSecret(value) or type(value) ~= "number" then
+            return false
+        end
+    end
+    return true
+end
+
+local function SaveFramePosition(frame)
+    local x, y = frame:GetCenter()
+    local frameScale = frame:GetEffectiveScale()
+    local parentScale = _G.UIParent:GetEffectiveScale()
+    local parentWidth = _G.UIParent:GetWidth()
+    local parentHeight = _G.UIParent:GetHeight()
+
+    if not ArePublicNumbers(x, y, frameScale, parentScale, parentWidth, parentHeight) then return end
+    if frameScale == 0 or parentScale == 0 or parentWidth == 0 or parentHeight == 0 then return end
+
+    local scaleRatio = frameScale / parentScale
+    SetSavedFramePosition(frame, {
+        x = (x * scaleRatio) / parentWidth,
+        y = (y * scaleRatio) / parentHeight,
+    })
+end
+
+local function RestoreFramePosition(frame)
+    if frame._BFIMoving or not frame:IsShown() then return end
+    if frame:IsProtected() and InCombatLockdown() then return end
+    if _G.GetUIPanel and _G.GetUIPanel("fullscreen") == frame then return end
+    if frame._BFIMovableCanRestore and not frame._BFIMovableCanRestore(frame) then return end
+    local position = GetSavedFramePosition(frame)
+    if type(position) ~= "table" or not ArePublicNumbers(position.x, position.y) then return end
+
+    local frameScale = frame:GetEffectiveScale()
+    local parentScale = _G.UIParent:GetEffectiveScale()
+    local parentWidth = _G.UIParent:GetWidth()
+    local parentHeight = _G.UIParent:GetHeight()
+
+    if not ArePublicNumbers(frameScale, parentScale, parentWidth, parentHeight) then return end
+    if frameScale == 0 or parentScale == 0 or parentWidth == 0 or parentHeight == 0 then return end
+
+    local scaleRatio = frameScale / parentScale
+    frame:ClearAllPoints()
+    frame:SetPoint(
+        "CENTER",
+        _G.UIParent,
+        "BOTTOMLEFT",
+        position.x * parentWidth / scaleRatio,
+        position.y * parentHeight / scaleRatio
+    )
+end
+
+function S.ClearMovableFramePosition(frame)
+    assert(frame, "ClearMovableFramePosition: frame is nil")
+    SetSavedFramePosition(frame, nil)
+end
+
+S.RestoreMovableFramePosition = RestoreFramePosition
+
+local function RestoreShownMovableFrames()
+    for frame in next, movableFrames do
+        RestoreFramePosition(frame)
+    end
+end
+
+local function RegisterMovableHooks()
+    if movableHooksRegistered then return end
+    movableHooksRegistered = true
+
+    -- UIParentPanelManager 12.1.0.68914 unconditionally reanchors its panel
+    -- slots. Restore only BFI positions after Blizzard finishes its layout.
+    hooksecurefunc("UpdateUIPanelPositions", RestoreShownMovableFrames)
+    hooksecurefunc("UpdateScaleForFitForOpenPanels", RestoreShownMovableFrames)
+    hooksecurefunc("StaticPopup_SetUpPosition", RestoreShownMovableFrames)
+    S:RegisterEvent("PLAYER_REGEN_ENABLED", RestoreShownMovableFrames)
+end
+
+function S.MakeMovable(frame, dragHandle)
+    assert(frame, "MakeMovable: frame is nil")
+
+    if frame._BFIMovable or frame:IsForbidden() then return end
+    if frame:IsProtected() and InCombatLockdown() then
+        if not frame._BFIMovablePending then
+            frame._BFIMovablePending = true
+            S:RegisterEventOnce("PLAYER_REGEN_ENABLED", function()
+                frame._BFIMovablePending = nil
+                S.MakeMovable(frame, dragHandle)
+            end)
+        end
+        return
+    end
+    frame._BFIMovable = true
+
+    dragHandle = dragHandle or frame
+    movableFrames[frame] = true
+    RegisterMovableHooks()
+
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
+    dragHandle:EnableMouse(true)
+    dragHandle:SetMouseClickEnabled(true)
+    dragHandle:RegisterForDrag("LeftButton")
+
+    -- The handle is BFI-owned, so these scripts do not replace Blizzard logic.
+    dragHandle:SetScript("OnDragStart", function()
+        if frame:IsProtected() and InCombatLockdown() then return end
+        frame._BFIMoving = true
+        frame:StartMoving(true)
+    end)
+    dragHandle:SetScript("OnDragStop", function()
+        if not frame._BFIMoving then return end
+        frame:StopMovingOrSizing()
+        frame._BFIMoving = nil
+        frame:SetUserPlaced(false)
+        SaveFramePosition(frame)
+        RestoreFramePosition(frame)
+    end)
+
+    frame:HookScript("OnShow", RestoreFramePosition)
+    RestoreFramePosition(frame)
+end
+
+function S.StyleTitledFrame(frame, movableTarget)
     assert(frame, "StyleTitledFrame: frame is nil")
 
     if frame._BFIStyled then return end
@@ -871,14 +1027,15 @@ function S.StyleTitledFrame(frame)
     else
         -- old style
         AF.SetFrameLevel(frame.BFIHeader, 1, frame)
-        frame.TitleText:ClearAllPoints()
-        frame.TitleText:SetPoint("CENTER", frame.BFIHeader)
+        local title = frame.TitleText or frame.Title
+        title:ClearAllPoints()
+        title:SetPoint("CENTER", frame.BFIHeader)
         frame:DisableDrawLayer("BACKGROUND")
         frame:DisableDrawLayer("BORDER")
     end
 
     -- close button
-    local closeButton = frame.CloseButton or (name and _G[name .. "CloseButton"])
+    local closeButton = frame.CloseButton or frame.ClosePanelButton or (name and _G[name .. "CloseButton"])
     S.StyleCloseButton(closeButton)
     closeButton:ClearAllPoints()
     closeButton:SetPoint("TOPRIGHT")
@@ -898,6 +1055,13 @@ function S.StyleTitledFrame(frame)
         AF.SetFrameLevel(minimizeButton, 1, frame.BFIHeader)
         minimizeButton:ClearAllPoints()
         AF.SetPoint(minimizeButton, "TOPRIGHT", closeButton, "TOPLEFT", 1, 0)
+    end
+
+    -- BFI owns the drag handle and preserves Blizzard's panel-management
+    -- behavior while restoring the user's saved screen-relative position.
+    -- Pass false for shells whose native positioning must remain authoritative.
+    if movableTarget ~= false then
+        S.MakeMovable(movableTarget or frame, frame.BFIHeader)
     end
 end
 
@@ -996,61 +1160,64 @@ end
 ---------------------------------------------------------------------
 -- side tab - SidePanelTabButtonMixin
 ---------------------------------------------------------------------
-local function SideTab_OnMouseDown(tab, button)
-    if button == "LeftButton" then
-        tab.Icon:SetPoint("CENTER", 0, -1)
-    end
-end
-
-local function SideTab_OnMouseUp(tab, button)
-    if button == "LeftButton" then
-        tab.Icon:SetPoint("CENTER")
-    end
-end
-
-local function SideTab_OnEnter(tab)
-    tab.SelectedTexture:Show()
-    if tab.tooltipText then
-        GameTooltip:SetOwner(tab, "ANCHOR_NONE")
-        GameTooltip:SetPoint("TOPLEFT", tab, "TOPRIGHT", 1, 0)
-        GameTooltip:SetText(tab.tooltipText)
-        GameTooltip:Show()
-    end
-end
-
-local function SideTab_OnLeave(tab)
-    if not tab._checked then
-        tab.SelectedTexture:Hide()
-    end
-    GameTooltip:Hide()
-end
-
 local function SideTab_SetChecked(tab, checked)
-    tab._checked = checked
+    tab._BFIChecked = checked and true or false
+    if tab._BFIChecked then
+        tab.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("BFI", 0.45))
+    else
+        tab.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget"))
+    end
 end
 
-function S.StyleSideTab(tab)
+function S.StyleSideTab(tab, width, height)
     assert(tab, "StyleSideTab: tab is nil")
 
     if tab._BFIStyled then return end
     tab._BFIStyled = true
 
-    S.RemoveTextures(tab)
+    local wasChecked
+    if tab.GetChecked then
+        wasChecked = tab:GetChecked()
+    end
+    if wasChecked == nil and tab.SelectedTexture then
+        wasChecked = tab.SelectedTexture:IsShown()
+    end
+
+    -- Keep functional artwork such as SocialUI's pooled icon and counter.
+    -- Clearing every texture here also prevents SidePanelTabButtonMixin
+    -- from swapping its active/inactive icon atlas.
+    for _, region in next, {tab:GetRegions()} do
+        if region:IsObjectType("Texture")
+            and region ~= tab.Icon
+            and region ~= tab.IconOverlay
+            and region ~= tab.TabGlow
+        then
+            S.RemoveTextures(region, true)
+        end
+    end
+
+    if tab.SetNormalTexture then tab:SetNormalTexture(AF.GetEmptyTexture()) end
+    if tab.SetPushedTexture then tab:SetPushedTexture(AF.GetEmptyTexture()) end
+    if tab.SetDisabledTexture then tab:SetDisabledTexture(AF.GetEmptyTexture()) end
+    if tab.SetCheckedTexture then tab:SetCheckedTexture(AF.GetEmptyTexture()) end
+    if tab.SetDisabledCheckedTexture then tab:SetDisabledCheckedTexture(AF.GetEmptyTexture()) end
+
     S.CreateBackdrop(tab)
     tab.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget"))
 
-    AF.SetSize(tab, 35, 50)
-    tab.Icon:SetPoint("CENTER")
+    AF.SetSize(tab, width or 35, height or 50)
 
-    tab.SelectedTexture = AF.CreateTexture(tab, nil, AF.GetColorTable("BFI", 0.6), "BORDER", -1)
-    tab.SelectedTexture:SetAllPoints()
-    tab.SelectedTexture:Hide()
+    local hover = AF.CreateTexture(tab, nil, AF.GetColorTable("white", 0.2), "HIGHLIGHT")
+    AF.SetOnePixelInside(hover, tab.BFIBackdrop)
+    if tab.SetHighlightTexture then
+        tab:SetHighlightTexture(hover)
+    end
 
-    tab:HookScript("OnMouseDown", SideTab_OnMouseDown)
-    tab:HookScript("OnMouseUp", SideTab_OnMouseUp)
-    tab:SetScript("OnEnter", SideTab_OnEnter)
-    tab:SetScript("OnLeave", SideTab_OnLeave)
+    -- Hook rather than replace Blizzard's scripts. Communities supplies
+    -- tooltip/tooltip2, while 12.1 SocialUI adds disabled-reason text.
     hooksecurefunc(tab, "SetChecked", SideTab_SetChecked)
+
+    SideTab_SetChecked(tab, wasChecked)
 end
 
 ---------------------------------------------------------------------

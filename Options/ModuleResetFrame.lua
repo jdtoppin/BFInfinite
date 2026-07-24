@@ -47,6 +47,7 @@ local resetterInfo = {
     unitFrames = {},
     nameplates = {},
     actionBars = {},
+    bags = {},
     cooldownManager = {requireReload = true},
     buffsDebuffs = {},
     tooltip = {},

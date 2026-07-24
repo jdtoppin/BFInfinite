@@ -25,6 +25,7 @@ local moduleNames = {
     auras = {localized = L["Auras"], class = "Auras"},
     -- profile
     actionBars = {localized = L["Action Bars"], class = "ActionBars"},
+    bags = {localized = L["Bags"], class = "Bags"},
     buffsDebuffs = {localized = L["Buffs & Debuffs"], class = "BuffsDebuffs"},
     chat = {localized = L["Chat"], class = "Chat"},
     cooldownManager = {localized = L["Cooldown Manager"], class = "CooldownManager"},
@@ -62,6 +63,7 @@ end
 function F.GetProfileModuleClassNames()
     return {
         "ActionBars",
+        "Bags",
         "BuffsDebuffs",
         "Chat",
         "CooldownManager",

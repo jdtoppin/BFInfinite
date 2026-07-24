@@ -15,9 +15,11 @@ local defaults = {
         y = -5,
     },
     hideUnitTooltipsInCombat = false,
+    levelDifficultyColor = true,
     healthBar = {
         enabled = true,
         height = 4,
+        colorMode = "class",
     },
     mythicPlus = {
         enabled = true,
