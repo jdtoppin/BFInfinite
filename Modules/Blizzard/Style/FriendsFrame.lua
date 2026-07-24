@@ -43,10 +43,14 @@ local function SetFlatTexture(texture, color, alpha, blendMode)
     texture:SetBlendMode(blendMode or "BLEND")
 end
 
-local function StyleArtworkButton(button)
+local function SetBrightHighlight(texture, alpha)
+    SetFlatTexture(texture, "white", alpha or 0.2)
+end
+
+local function StyleArtworkButton(button, artwork)
     if not button or button._BFIStyled then return end
 
-    local icon = button.Icon
+    local icon = artwork or button.Icon
     local atlas = icon and icon:GetAtlas()
     local texture = icon and icon:GetTexture()
     local width = icon and icon:GetWidth()
@@ -74,23 +78,126 @@ local function StyleArtworkButton(button)
     end
 end
 
+local function StyleSocialActionButton(button)
+    if not button or button._BFISocialActionStyled then return end
+    button._BFISocialActionStyled = true
+
+    -- SocialCardActionButtonMixin moves ActionIcon on mouse down/up. Keep
+    -- those scripts and the dynamically selected atlas, replacing only the
+    -- Blizzard button chrome.
+    button:SetNormalTexture(AF.GetEmptyTexture())
+    button:SetPushedTexture(AF.GetEmptyTexture())
+    button:SetHighlightTexture(AF.GetEmptyTexture())
+    button:SetDisabledTexture(AF.GetEmptyTexture())
+
+    button._BFINormalColor = AF.GetButtonNormalColor("BFI_hover")
+    button._BFIHoverColor = AF.GetButtonHoverColor("BFI_hover")
+
+    S.CreateBackdrop(button)
+    button.BFIBackdrop:SetBackdropColor(AF.UnpackColor(button._BFINormalColor))
+    button.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
+
+    button:HookScript("OnEnter", function(self)
+        if self:IsEnabled() then
+            self.BFIBackdrop:SetBackdropColor(AF.UnpackColor(self._BFIHoverColor))
+        end
+    end)
+    button:HookScript("OnLeave", function(self)
+        self.BFIBackdrop:SetBackdropColor(AF.UnpackColor(self._BFINormalColor))
+    end)
+    button:HookScript("OnDisable", function(self)
+        self.BFIBackdrop:SetBackdropColor(AF.UnpackColor(self._BFINormalColor))
+    end)
+end
+
+local function StylePlainDialog(frame)
+    if not frame or frame._BFIPlainDialogStyled then return end
+    frame._BFIPlainDialogStyled = true
+
+    if frame.Border then
+        frame.Border:SetAlpha(0)
+    end
+    S.RemoveNineSliceAndBackground(frame)
+    S.CreateBackdrop(frame)
+
+    frame.BFITopStrip = AF.CreateTexture(frame, nil, "BFI")
+    AF.SetPoint(frame.BFITopStrip, "TOPLEFT", frame.BFIBackdrop, 1, -1)
+    AF.SetPoint(frame.BFITopStrip, "TOPRIGHT", frame.BFIBackdrop, -1, -1)
+    AF.SetHeight(frame.BFITopStrip, 2)
+
+    if frame.CloseButton then
+        S.StyleCloseButton(frame.CloseButton)
+        AF.ClearPoints(frame.CloseButton)
+        AF.SetPoint(frame.CloseButton, "TOPRIGHT")
+    end
+end
+
+local function StyleRoleIcon(icon, role)
+    if not icon or icon._BFIRoleStyled then return end
+    icon._BFIRoleStyled = true
+
+    -- AF's second role sheet stays sharp at both the 17px legacy size and the
+    -- 24px Social UI size. Retain Blizzard's atlas on older AF versions.
+    if AF.SetRoleIcon then
+        AF.SetRoleIcon(icon, 2, role)
+    end
+    S.CreateBackdrop(icon, true, nil, 1)
+end
+
+local function StyleCheckButtonWithArtwork(button, size, artwork)
+    if not button then return end
+
+    local atlas = artwork and artwork:GetAtlas()
+    local texture = artwork and artwork:GetTexture()
+    local width = artwork and artwork:GetWidth()
+    local height = artwork and artwork:GetHeight()
+    local texCoords = artwork and {artwork:GetTexCoord()}
+
+    S.StyleCheckButton(button, size)
+
+    -- StyleCheckButton clears direct texture regions. The modern Raid assist
+    -- checkbox also owns a semantic assistant icon, so restore that artwork.
+    if artwork then
+        if atlas then
+            artwork:SetAtlas(atlas, false)
+        elseif texture then
+            artwork:SetTexture(texture)
+        end
+        if texCoords and #texCoords > 0 then
+            artwork:SetTexCoord(unpack(texCoords))
+        end
+        if width and height then
+            artwork:SetSize(width, height)
+        end
+        artwork:SetAlpha(1)
+        artwork:Show()
+    end
+end
+
 local function StyleSquarePortrait(icon, owner, mask)
-    if not icon then return end
+    if not icon or not owner or not owner.BFIHeader then return end
+
+    -- Keep Blizzard's portrait region available to its own update code, but
+    -- display the project logo in the 20px BFI header so it cannot overlap
+    -- the title or the Raid/Social content below it.
+    icon:SetAlpha(0)
+    if mask then
+        mask:SetAlpha(0)
+    end
 
     local atlas = WOW_PROJECT_ATLAS[_G.WOW_PROJECT_ID]
-    if atlas and _G.C_Texture.GetAtlasInfo(atlas) then
-        icon:SetAtlas(atlas, false)
+    if not atlas or not _G.C_Texture.GetAtlasInfo(atlas) then
+        return
     end
 
-    if mask then
-        S.StyleSquareIcon(icon, mask, true)
-    else
-        S.StyleIcon(icon, true)
+    if not owner.BFIProjectIcon then
+        owner.BFIProjectIcon = owner.BFIHeader:CreateTexture(nil, "ARTWORK")
+        S.StyleIcon(owner.BFIProjectIcon, true)
+        AF.SetSize(owner.BFIProjectIcon, 16, 16)
+        AF.SetPoint(owner.BFIProjectIcon, "LEFT", owner.BFIHeader, 3, 0)
     end
 
-    AF.SetSize(icon, 40, 40)
-    AF.ClearPoints(icon)
-    AF.SetPoint(icon, "TOPLEFT", owner, "TOPLEFT", 5, -5)
+    owner.BFIProjectIcon:SetAtlas(atlas, false)
 end
 
 local function SetWoWProjectIcon(icon, gameAccountInfo)
@@ -148,6 +255,25 @@ end
 ---------------------------------------------------------------------
 -- legacy FriendsFrame (live, and the 12.1 Who fallback)
 ---------------------------------------------------------------------
+local function StyleLegacyPartyButton(button, owner)
+    if not button then return end
+
+    if not button._BFIStyled then
+        S.StyleIconButton(button, AF.GetIcon("Plus_Small"), 12, nil, "BFI_hover")
+        AF.SetSize(button, 24, 24)
+        AF.ClearPoints(button)
+        AF.SetPoint(button, "RIGHT", owner, -1, 0)
+    end
+
+    -- FriendsFrame_UpdateFriendButton reapplies faction-specific Blizzard
+    -- state atlases on every refresh. Clear those after the update while
+    -- retaining the BFI icon and the native invite click/tooltip scripts.
+    button:SetNormalTexture(AF.GetEmptyTexture())
+    button:SetPushedTexture(AF.GetEmptyTexture())
+    button:SetHighlightTexture(AF.GetEmptyTexture())
+    button:SetDisabledTexture(AF.GetEmptyTexture())
+end
+
 local function StyleLegacyFriendButton(button)
     if not button or not button.background or not button.gameIcon then return end
 
@@ -157,7 +283,9 @@ local function StyleLegacyFriendButton(button)
     end
 
     SetFlatTexture(button.background, "widget_dark", 0.65)
-    SetFlatTexture(button.highlight, "widget_highlight", 0.8)
+    SetBrightHighlight(button.highlight)
+    button:UnlockHighlight()
+    StyleLegacyPartyButton(button.travelPassButton, button)
 
     if button.buttonType == _G.FRIENDS_BUTTON_TYPE_BNET then
         local accountInfo = _G.C_BattleNet.GetFriendAccountInfo(button.id)
@@ -169,7 +297,6 @@ local function StyleLegacyFriendButton(button)
         end
     end
 
-    button.gameIcon:SetTexCoord(AF.GetDefaultTexCoord())
     button.gameIcon.BFIBackdrop:SetShown(button.gameIcon:IsShown())
 end
 
@@ -197,7 +324,7 @@ local function StyleLegacyInviteHeader(button)
     end
 
     SetFlatTexture(button.BG, "widget_dark", 0.75)
-    SetFlatTexture(button:GetHighlightTexture(), "widget_highlight", 0.8)
+    SetBrightHighlight(button:GetHighlightTexture())
 end
 
 local function StyleLegacyListElement(button)
@@ -214,7 +341,7 @@ local function StyleRecentAllyButton(button)
     if not button or not button.GetNormalTexture then return end
 
     SetFlatTexture(button.NormalTexture or button:GetNormalTexture(), "widget_dark", 0.65)
-    SetFlatTexture(button.HighlightTexture or button:GetHighlightTexture(), "widget_highlight", 0.8)
+    SetBrightHighlight(button.HighlightTexture or button:GetHighlightTexture())
 end
 
 local function StyleLegacyTabs(frame)
@@ -242,7 +369,15 @@ end
 local function StyleWhoFrame(whoFrame)
     if not whoFrame then return end
 
-    S.StyleEditBox(whoFrame.EditBox, -4)
+    local editBox = whoFrame.EditBox or _G.WhoFrameEditBox
+    if editBox then
+        -- SearchBoxTemplate's extra glue-style Backdrop is not one of the
+        -- generic Left/Middle/Right regions removed by StyleEditBox.
+        if editBox.Backdrop then
+            editBox.Backdrop:SetAlpha(0)
+        end
+        S.StyleEditBox(editBox, -4)
+    end
     S.RemoveNineSliceAndBackground(whoFrame.WhoFrameListInset)
     StyleDropdown(_G.WhoFrameDropdown)
     StyleButton(_G.WhoFrameGroupInviteButton)
@@ -252,6 +387,74 @@ local function StyleWhoFrame(whoFrame)
 
     for i = 1, 4 do
         StyleButton(_G["WhoFrameColumnHeader" .. i], "widget")
+    end
+end
+
+local function StyleWhoListButton(button)
+    if button and button.GetHighlightTexture then
+        SetBrightHighlight(button:GetHighlightTexture())
+    end
+end
+
+local function StyleAddFriendFrame()
+    local frame = _G.AddFriendFrame
+    if frame and not frame._BFIAddFriendStyled then
+        frame._BFIAddFriendStyled = true
+        StylePlainDialog(frame)
+
+        local infoFrame = frame.InfoFrame
+        if infoFrame then
+            StyleButton(infoFrame.OkayButton or infoFrame.ContinueButton)
+        end
+
+        local entryFrame = frame.EntryFrame
+        local editBoxContainer = entryFrame and entryFrame.EditBoxContainer
+        local nameEditBox = (editBoxContainer and editBoxContainer.NameEditBox)
+            or (entryFrame and entryFrame.NameEditBox)
+            or _G.AddFriendNameEditBox
+        if nameEditBox then
+            S.StyleEditBox(nameEditBox, -4)
+        end
+
+        StyleButton((editBoxContainer and editBoxContainer.AcceptButton)
+            or (entryFrame and entryFrame.AcceptButton)
+            or _G.AddFriendEntryFrameAcceptButton)
+        StyleButton((editBoxContainer and editBoxContainer.CancelButton)
+            or (entryFrame and entryFrame.CancelButton)
+            or _G.AddFriendEntryFrameCancelButton)
+    end
+
+    local inviteFrame = _G.BattleNetInviteFrame
+    if inviteFrame and not inviteFrame._BFIBattleNetInviteStyled then
+        inviteFrame._BFIBattleNetInviteStyled = true
+        StylePlainDialog(inviteFrame)
+        StyleButton(inviteFrame.SendButton)
+        StyleButton(inviteFrame.CancelButton)
+    end
+end
+
+local function StyleLegacyRaidFrame()
+    local raidFrame = _G.RaidFrame
+    if not raidFrame or raidFrame._BFILegacyRaidStyled then return end
+    raidFrame._BFILegacyRaidStyled = true
+
+    StyleButton(_G.RaidFrameRaidInfoButton)
+    StyleButton(_G.RaidFrameConvertToRaidButton)
+
+    if _G.RaidFrameAllAssistCheckButton then
+        S.StyleCheckButton(_G.RaidFrameAllAssistCheckButton, 14)
+    end
+
+    local roleCount = raidFrame.RoleCount
+    if roleCount then
+        StyleRoleIcon(roleCount.TankIcon, "TANK")
+        StyleRoleIcon(roleCount.HealerIcon, "HEALER")
+        StyleRoleIcon(roleCount.DamagerIcon, "DAMAGER")
+    end
+
+    local notInRaid = raidFrame.RaidFrameNotInRaid
+    if notInRaid and notInRaid.ScrollingDescriptionScrollBar then
+        S.StyleScrollBar(notInRaid.ScrollingDescriptionScrollBar)
     end
 end
 
@@ -279,8 +482,20 @@ local function InstallLegacyHooks()
     if legacyHooksInstalled then return end
     legacyHooksInstalled = true
 
+    if _G.FriendsFrame_Update then
+        hooksecurefunc("FriendsFrame_Update", function()
+            StyleSquarePortrait(_G.FriendsFrameIcon, _G.FriendsFrame)
+        end)
+    end
     if _G.FriendsFrame_UpdateFriendButton then
         hooksecurefunc("FriendsFrame_UpdateFriendButton", StyleLegacyFriendButton)
+    end
+    if _G.FriendsFrame_FriendButtonSetSelection then
+        hooksecurefunc("FriendsFrame_FriendButtonSetSelection", function(button)
+            -- Selection remains available to Send Message and context actions,
+            -- but the Contacts list has no persistent active-row state.
+            button:UnlockHighlight()
+        end)
     end
     if _G.FriendsFrame_UpdateFriendInviteButton then
         hooksecurefunc("FriendsFrame_UpdateFriendInviteButton", StyleLegacyInvite)
@@ -293,6 +508,9 @@ local function InstallLegacyHooks()
     end
     if _G.FriendsFrame_UpdatePartyInviteHeaderButton then
         hooksecurefunc("FriendsFrame_UpdatePartyInviteHeaderButton", StyleLegacyInviteHeader)
+    end
+    if _G.WhoList_InitButton then
+        hooksecurefunc("WhoList_InitButton", StyleWhoListButton)
     end
 end
 
@@ -320,8 +538,13 @@ local function StyleLegacyFriendsFrame()
     _G.FriendsListFrame.ScrollBox:ForEachFrame(StyleLegacyListElement)
 
     StyleWhoFrame(_G.WhoFrame)
+    if _G.WhoFrame and _G.WhoFrame.ScrollBox then
+        _G.WhoFrame.ScrollBox:ForEachFrame(StyleWhoListButton)
+    end
     StyleLegacyIgnoreList(frame.IgnoreListWindow)
     StyleLegacyBroadcast(header.BattlenetFrame.BroadcastFrame)
+    StyleAddFriendFrame()
+    StyleLegacyRaidFrame()
 
     InstallLegacyHooks()
 end
@@ -346,13 +569,16 @@ local function StyleSocialCard(card)
     end
 
     SetFlatTexture(card.Background, "widget_dark", 0.7)
-    SetFlatTexture(card:GetHighlightTexture(), "widget_highlight", 0.8)
+    SetBrightHighlight(card:GetHighlightTexture())
+    card:SetHighlightLocked(false)
+
+    StyleSocialActionButton(card.PartyButton)
+    StyleSocialActionButton(card.RAFSummonButton)
 
     local gameIconHolder = card.GameIconHolder
     if gameIconHolder and gameIconHolder.Icon and gameIconHolder.Icon.BFIBackdrop then
         local accountInfo = card.elementData and card.elementData.accountInfo
         SetWoWProjectIcon(gameIconHolder.Icon, accountInfo and accountInfo.gameAccountInfo)
-        gameIconHolder.Icon:SetTexCoord(AF.GetDefaultTexCoord())
         gameIconHolder.Icon.BFIBackdrop:SetShown(gameIconHolder:IsShown())
 
         local characterName = GetClassColoredCharacterName(accountInfo)
@@ -366,7 +592,8 @@ local function StyleFriendRequestCard(card)
     if not card or not card.Background then return end
 
     SetFlatTexture(card.Background, "widget_dark", 0.7)
-    SetFlatTexture(card:GetHighlightTexture(), "widget_highlight", 0.8)
+    SetBrightHighlight(card:GetHighlightTexture())
+    card:SetHighlightLocked(false)
     StyleButton(card.AcceptButton, "BFI")
     if not card.DeclineButton._BFIStyled then
         S.StyleIconButton(card.DeclineButton, AF.GetIcon("Close"), 12, nil, "widget")
@@ -447,7 +674,7 @@ local function StyleQuickJoinButton(button)
     if not button or not button.Background then return end
 
     SetFlatTexture(button.Background, "widget_dark", 0.65)
-    SetFlatTexture(button.Highlight, "widget_highlight", 0.8)
+    SetBrightHighlight(button.Highlight)
     SetFlatTexture(button.Selected, "BFI", 0.45)
 end
 
@@ -481,10 +708,33 @@ local function InstallSocialHooks()
     end
     if _G.FriendsListSocialCardMixin then
         hooksecurefunc(_G.FriendsListSocialCardMixin, "Initialize", StyleSocialCard)
+        hooksecurefunc(_G.FriendsListSocialCardMixin, "SetSelected", function(card)
+            card:SetHighlightLocked(false)
+        end)
     end
     if _G.FriendRequestsListSocialCardMixin then
         hooksecurefunc(_G.FriendRequestsListSocialCardMixin, "Initialize", StyleFriendRequestCard)
+        hooksecurefunc(_G.FriendRequestsListSocialCardMixin, "SetSelected", function(card)
+            card:SetHighlightLocked(false)
+        end)
     end
+end
+
+local function StyleSocialRaidFrame(raidFrame)
+    if not raidFrame or raidFrame._BFISocialRaidStyled then return end
+    raidFrame._BFISocialRaidStyled = true
+
+    StyleButton(raidFrame.RaidInfoButton)
+    StyleButton(raidFrame.ConvertToRaidButton)
+    StyleCheckButtonWithArtwork(
+        raidFrame.AllAssistCheckButton,
+        14,
+        raidFrame.AllAssistCheckButton and raidFrame.AllAssistCheckButton.Icon
+    )
+
+    StyleRoleIcon(raidFrame.TankFrame and raidFrame.TankFrame.Icon, "TANK")
+    StyleRoleIcon(raidFrame.HealerFrame and raidFrame.HealerFrame.Icon, "HEALER")
+    StyleRoleIcon(raidFrame.DamagerFrame and raidFrame.DamagerFrame.Icon, "DAMAGER")
 end
 
 local function StyleSocialUI()
@@ -500,7 +750,6 @@ local function StyleSocialUI()
     frame.BottomFade:SetAlpha(0)
 
     local portraitContainer = frame.PortraitContainer
-    portraitContainer:SetAlpha(1)
     StyleSquarePortrait(portraitContainer.portrait, frame, portraitContainer.CircleMask)
 
     local battleNetBar = frame.BattleNetBar
@@ -519,6 +768,17 @@ local function StyleSocialUI()
         StyleSocialContent(tabData.contentFrame)
     end
 
+    local friendsList = frame.FriendsList
+    if friendsList and friendsList.ScrollBox then
+        friendsList.ScrollBox:ForEachFrame(StyleSocialCard)
+    end
+
+    local friendRequestsList = frame.FriendRequestsList
+    if friendRequestsList and friendRequestsList.ScrollBox then
+        friendRequestsList.ScrollBox:ForEachFrame(StyleFriendRequestCard)
+    end
+
+    StyleSocialRaidFrame(frame.RaidFrame)
     StyleSocialIgnoreList(frame.IgnoreListFrame)
     StyleSocialBroadcast(frame.BattleNetBroadcastFrame)
     InstallSocialHooks()
@@ -527,15 +787,28 @@ end
 ---------------------------------------------------------------------
 -- init
 ---------------------------------------------------------------------
+local function StyleRaidFrames()
+    StyleLegacyRaidFrame()
+
+    local socialFrame = _G.SocialUIFrame
+    if socialFrame then
+        StyleSocialRaidFrame(socialFrame.RaidFrame)
+    end
+end
+
 local function StyleBlizzard()
     StyleLegacyFriendsFrame()
     StyleSocialUI()
     StyleRecentAllies()
     StyleQuickJoin()
+    StyleAddFriendFrame()
+    StyleRaidFrames()
 end
 
 AF.RegisterCallback("BFI_StyleBlizzard", StyleBlizzard)
 AF.RegisterAddonLoaded("Blizzard_FriendsFrame", StyleLegacyFriendsFrame)
+AF.RegisterAddonLoaded("Blizzard_AddFriend", StyleAddFriendFrame)
 AF.RegisterAddonLoaded("Blizzard_RecentAllies", StyleRecentAllies)
 AF.RegisterAddonLoaded("Blizzard_QuickJoin", StyleQuickJoin)
+AF.RegisterAddonLoaded("Blizzard_RaidFrame", StyleRaidFrames)
 AF.RegisterAddonLoaded("Blizzard_SocialUI", StyleBlizzard)
