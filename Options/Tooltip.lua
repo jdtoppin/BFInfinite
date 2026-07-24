@@ -43,6 +43,7 @@ local function CreateContentPane()
     end)
     list:SetData({
         {text = L["General"], id = "general"},
+        {text = L["Mythic+"], id = "mythicPlus", configKey = "mythicPlus"},
     })
 
     local scrollSettings = AF.CreateScrollFrame(contentPane, nil, nil, nil, "none", "none")

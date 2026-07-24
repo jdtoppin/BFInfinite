@@ -17,6 +17,9 @@ local settings = {
         "position",
         "healthBar",
     },
+    mythicPlus = {
+        "mythicPlus",
+    },
 }
 
 local function UpdateModule()
@@ -203,6 +206,75 @@ builder.healthBar = function(parent)
 
     pane.enabled = enabled
     pane.height = height
+    return pane
+end
+
+---------------------------------------------------------------------
+-- Mythic+
+---------------------------------------------------------------------
+local function UpdateMythicPlusWidgets()
+    local pane = created.mythicPlus
+    if not pane then return end
+
+    local enabled = T.config.enabled and T.config.mythicPlus.enabled
+    AF.SetEnabled(T.config.enabled, pane.enabled)
+    AF.SetEnabled(enabled, pane.showBestRunLevel, pane.showTimedRunsOnShift)
+end
+
+builder.mythicPlus = function(parent)
+    if created.mythicPlus then return created.mythicPlus end
+
+    local pane = AF.CreateTitledPane(parent, L["Mythic+"], nil, 165)
+    created.mythicPlus = pane
+
+    local enabled = AF.CreateCheckButton(pane, L["Show Mythic+ Information"])
+    AF.SetPoint(enabled, "TOPLEFT", pane, 10, -35)
+    enabled:SetOnCheck(function(checked)
+        pane.t.cfg.enabled = checked
+        AF.Fire("BFI_UpdateTooltipOptionsList")
+        UpdateMythicPlusWidgets()
+        UpdateModule()
+    end)
+
+    local enabledTips = AF.CreateTipsButton(pane)
+    AF.SetPoint(enabledTips, "LEFT", enabled.label, "RIGHT", 5, 0)
+    enabledTips:SetTips(
+        L["Show Mythic+ Information"],
+        L["Adds the hovered player's current-season Dungeon Score and optional per-dungeon best-scoring runs without replacing Blizzard's unit tooltip"]
+    )
+
+    local showBestRunLevel = AF.CreateCheckButton(pane, L["Show Best Timed Level"])
+    AF.SetPoint(showBestRunLevel, "TOPLEFT", enabled, "BOTTOMLEFT", 0, -15)
+    showBestRunLevel:SetOnCheck(function(checked)
+        pane.t.cfg.showBestRunLevel = checked
+        UpdateModule()
+    end)
+
+    local showTimedRunsOnShift = AF.CreateCheckButton(pane, L["Show Dungeon Bests with Shift"])
+    AF.SetPoint(showTimedRunsOnShift, "TOPLEFT", showBestRunLevel, "BOTTOMLEFT", 0, -15)
+    showTimedRunsOnShift:SetOnCheck(function(checked)
+        pane.t.cfg.showTimedRunsOnShift = checked
+        UpdateModule()
+    end)
+
+    local shiftTips = AF.CreateTipsButton(pane)
+    AF.SetPoint(shiftTips, "LEFT", showTimedRunsOnShift.label, "RIGHT", 5, 0)
+    shiftTips:SetTips(
+        L["Show Dungeon Bests with Shift"],
+        L["Hold Shift while hovering a player to show the best-scoring run reported for each current-season dungeon; overtime runs are marked OT"]
+    )
+
+    function pane.Load(t)
+        pane.t = t
+        enabled:SetChecked(t.cfg.enabled)
+        showBestRunLevel:SetChecked(t.cfg.showBestRunLevel)
+        showTimedRunsOnShift:SetChecked(t.cfg.showTimedRunsOnShift)
+        UpdateMythicPlusWidgets()
+    end
+
+    pane.enabled = enabled
+    pane.showBestRunLevel = showBestRunLevel
+    pane.showTimedRunsOnShift = showTimedRunsOnShift
     return pane
 end
 
