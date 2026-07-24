@@ -181,6 +181,8 @@ local function StyleTalentSelectionButton(button)
         HideTalentTexture(button.StateBorderHover)
         HideTalentTexture(button.BorderSheen)
         HideTalentTexture(button.SelectableGlow)
+        HideTalentTexture(button.Glow)
+        HideTalentTexture(button.Ghost)
 
         hooksecurefunc(button, "SetAndApplySize", UpdateTalentSelectionButtonShape)
         hooksecurefunc(button, "UpdateStateBorder", UpdateTalentIconBorder)
