@@ -43,17 +43,40 @@ local function UpdateTalentIconBorder(button, visualState)
             button.BFIChoiceArrowLeft:SetColor(color)
             button.BFIChoiceArrowRight:SetColor(color)
         end
-    elseif button.Icon.BFIBackdrop then
+    end
+    if button.Icon.BFIBackdrop then
         button.Icon.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(color))
     end
+end
+
+local function CaptureTalentSpendTextPoint(button)
+    if not button.SpendText or button._BFISpendTextPoint then return end
+
+    local point, relativeTo, relativePoint, x, y = button.SpendText:GetPoint()
+    button._BFISpendTextPoint = {
+        point = point,
+        relativeTo = relativeTo,
+        relativePoint = relativePoint,
+        x = x,
+        y = y,
+    }
 end
 
 local function UpdateCircularTalentSpendText(button)
     if not button.SpendText then return end
 
+    CaptureTalentSpendTextPoint(button)
     local offset = button.Icon:GetWidth() / 6
     AF.ClearPoints(button.SpendText)
     AF.SetPoint(button.SpendText, "CENTER", button.Icon, "CENTER", offset, -offset)
+end
+
+local function RestoreTalentSpendTextPoint(button)
+    if not button.SpendText or not button._BFISpendTextPoint then return end
+
+    local p = button._BFISpendTextPoint
+    AF.ClearPoints(button.SpendText)
+    button.SpendText:SetPoint(p.point, p.relativeTo, p.relativePoint, p.x, p.y)
 end
 
 local function StyleChoiceTalentIcon(button)
@@ -85,7 +108,7 @@ local function StyleChoiceTalentIcon(button)
     AF.SetPoint(arrowRight, "LEFT", button.Icon, "RIGHT", 1, 0)
 end
 
-local function StyleTalentButton(button, forceShape)
+local function StyleTalentButton(button)
     if button._BFIIconStyled then return end
     button._BFIIconStyled = true
 
@@ -96,8 +119,8 @@ local function StyleTalentButton(button, forceShape)
 
     local isChoice = button.Icon2 ~= nil
     local iconMask = button.artSet.iconMask
-    local isCircle = forceShape == "circle" or (not forceShape and iconMask == "talents-node-circle-mask")
-    local isSquare = forceShape == "square" or (not forceShape and not iconMask)
+    local isCircle = iconMask == "talents-node-circle-mask"
+    local isSquare = not iconMask
     if isChoice then
         StyleChoiceTalentIcon(button)
         button.BFICircleBorder = AF.CreateCircularIconBorder(button, button.Icon, "border", "OVERLAY", 4)
@@ -124,6 +147,46 @@ local function StyleTalentButton(button, forceShape)
     end
 
     hooksecurefunc(button, "UpdateStateBorder", UpdateTalentIconBorder)
+    UpdateTalentIconBorder(button, button:GetVisualState())
+end
+
+local function UpdateTalentSelectionButtonShape(button)
+    local spellID = button:GetSpellID()
+    local isPassive = not spellID or C_Spell.IsSpellPassive(spellID)
+
+    button.IconMask:SetShown(isPassive)
+    button.DisabledOverlayMask:SetShown(isPassive)
+    button.Icon.BFIBackdrop:SetShown(not isPassive)
+    button.BFICircleBorder:SetShown(isPassive)
+
+    if isPassive then
+        UpdateCircularTalentSpendText(button)
+    else
+        RestoreTalentSpendTextPoint(button)
+    end
+end
+
+local function StyleTalentSelectionButton(button)
+    if not button._BFISelectionIconStyled then
+        button._BFISelectionIconStyled = true
+
+        CaptureTalentSpendTextPoint(button)
+        S.StyleIcon(button.Icon, true)
+        AF.ApplyCircularIconMask(button.IconMask, button.Icon)
+        AF.ApplyCircularIconMask(button.DisabledOverlayMask, button.Icon)
+        button.BFICircleBorder = AF.CreateCircularIconBorder(button, button.Icon, "border", "OVERLAY", 4)
+
+        HideTalentTexture(button.Shadow)
+        HideTalentTexture(button.StateBorder)
+        HideTalentTexture(button.StateBorderHover)
+        HideTalentTexture(button.BorderSheen)
+        HideTalentTexture(button.SelectableGlow)
+
+        hooksecurefunc(button, "SetAndApplySize", UpdateTalentSelectionButtonShape)
+        hooksecurefunc(button, "UpdateStateBorder", UpdateTalentIconBorder)
+    end
+
+    UpdateTalentSelectionButtonShape(button)
     UpdateTalentIconBorder(button, button:GetVisualState())
 end
 
@@ -200,8 +263,7 @@ local function StyleTalentsFrame()
         if selectionFrame:GetTalentFrame() ~= talentsFrame then return end
 
         for _, selectionButton in ipairs(selectionFrame.selectionFrameArray) do
-            local shape = selectionButton.artSet.iconMask == "talents-node-circle-mask" and "circle" or "square"
-            StyleTalentButton(selectionButton, shape)
+            StyleTalentSelectionButton(selectionButton)
         end
     end)
 end
