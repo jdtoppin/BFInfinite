@@ -21,12 +21,16 @@ local SetCVar = _G.SetCVar
 local BAG_TOP_WITH_SLOTS = 100
 local BAG_TOP_WITHOUT_SLOTS = 64
 local CATEGORY_HEADER_HEIGHT = 18
+local CATEGORY_HEADER_GAP = 4
 local CATEGORY_SPACING = 7
+local CATEGORY_SECTION_SPACING = 12
+local CATEGORY_MIN_COLUMNS = 3
+local CATEGORY_TARGET_ROWS = 4
 local ITEM_SIZE = 37
 local HORIZONTAL_PADDING = 12
 local FOOTER_PADDING = 12
-local SCROLLBAR_WIDTH = 5
-local SCROLLBAR_GUTTER = 9
+local MIN_FRAME_WIDTH = 320
+local SCREEN_EDGE_MARGIN = 16
 local BACKPACK_ICON = 134400
 local EMPTY_BAG_ICON = 133633
 
@@ -68,8 +72,6 @@ local REAGENT_BAG_ID = inventoryConstants.NumBagSlots + inventoryConstants.NumRe
 local combinedFrame
 local categoryButton
 local bagSlotsButton
-local scrollTrack
-local scrollThumb
 local emptyCountOverlay
 local emptyCountText
 local initialized
@@ -77,14 +79,7 @@ local moduleEnabled
 local refreshPending
 local layoutInProgress
 local layoutScale = 1
-local scrollOffset = 0
-local maxScroll = 0
-local scrollStopCount = 0
-local scrollIndex = 1
 local layoutEntryCount = 0
-local layoutHeight = 0
-local layoutTop = 0
-local layoutFooterHeight = 0
 local layoutEmptyRepresentative
 local layoutEmptyEntryIndex
 local layoutEmptyCount = 0
@@ -100,7 +95,6 @@ local snapshotWidth
 local snapshotHeight
 local snapshotFooterHeight
 local hoveredBagID
-local previousMouseWheelEnabled
 local portraitWasShown
 local portraitMouseEnabled
 local portraitAlpha
@@ -124,12 +118,9 @@ local bagFamilies = {}
 local emptyButtons = {}
 local emptyButtonBagIDs = {}
 local emptyButtonFamilies = {}
-local scrollStops = {}
 local layoutObjects = {}
-local layoutObjectIsHeader = {}
 local layoutObjectX = {}
 local layoutObjectY = {}
-local layoutObjectHeight = {}
 local snapshotButtons = {}
 local snapshotBagIDs = {}
 local snapshotSlotIDs = {}
@@ -217,6 +208,10 @@ local function ResetCategoryGroups()
         group.key = nil
         group.label = nil
         group.order = nil
+        group.layoutX = nil
+        group.layoutY = nil
+        group.layoutColumns = nil
+        group.layoutWidth = nil
         categoryGroupPool[index] = group
     end
     wipe(categoryGroups)
@@ -263,7 +258,7 @@ local function StyleItemButton(button)
         S.StyleIcon(icon)
     end
 
-    S.CreateBackdrop(button, true, nil, -1)
+    S.CreateBackdrop(button, true, nil, 1)
     if button.IconBorder then
         S.StyleIconBorder(button.IconBorder, button.BFIBackdrop)
     end
@@ -430,53 +425,21 @@ end
 local function ClearLayoutEntries()
     for index = 1, layoutEntryCount do
         layoutObjects[index] = nil
-        layoutObjectIsHeader[index] = nil
         layoutObjectX[index] = nil
         layoutObjectY[index] = nil
-        layoutObjectHeight[index] = nil
     end
     layoutEntryCount = 0
 end
 
-local function AddLayoutEntry(object, isHeader, x, y, height)
+local function AddLayoutEntry(object, isHeader, x, y)
     layoutEntryCount = layoutEntryCount + 1
     layoutObjects[layoutEntryCount] = object
-    layoutObjectIsHeader[layoutEntryCount] = isHeader
     layoutObjectX[layoutEntryCount] = x
     layoutObjectY[layoutEntryCount] = y
-    layoutObjectHeight[layoutEntryCount] = height
     if not isHeader then
         object._BFIBagLayoutEpoch = layoutEpoch
     end
     return layoutEntryCount
-end
-
-local function ClearScrollStops()
-    for index = 1, scrollStopCount do
-        scrollStops[index] = nil
-    end
-    scrollStopCount = 0
-end
-
-local function AddScrollStop(offset)
-    offset = floor(math.max(0, math.min(maxScroll, offset)) + 0.5)
-    if scrollStopCount == 0 or offset > scrollStops[scrollStopCount] then
-        scrollStopCount = scrollStopCount + 1
-        scrollStops[scrollStopCount] = offset
-    end
-end
-
-local function FindNearestScrollStop(offset)
-    local nearestIndex = 1
-    local nearestDistance = math.huge
-    for index = 1, scrollStopCount do
-        local distance = math.abs(scrollStops[index] - offset)
-        if distance < nearestDistance then
-            nearestIndex = index
-            nearestDistance = distance
-        end
-    end
-    return nearestIndex
 end
 
 local function GetBagFamily(bagID)
@@ -517,7 +480,6 @@ local function ClearLayoutState()
     end
     emptyButtonCount = 0
     ClearLayoutEntries()
-    ClearScrollStops()
     InvalidateLayoutSnapshot()
     wipe(emptyCountsByBag)
     wipe(bagFamilies)
@@ -526,12 +488,6 @@ local function ClearLayoutState()
     layoutEmptyCount = 0
     layoutAddSlotsTarget = nil
     hoveredBagID = nil
-    layoutHeight = 0
-    layoutTop = 0
-    layoutFooterHeight = 0
-    scrollOffset = 0
-    maxScroll = 0
-    scrollIndex = 1
 end
 
 local function CaptureLayoutSnapshot(force)
@@ -589,31 +545,12 @@ local function CaptureLayoutSnapshot(force)
     return changed, footerHeight, screenWidth, screenHeight
 end
 
-local function RenderViewport()
-    local viewportTop = -layoutTop
-    local viewportBottom = -(layoutHeight - layoutFooterHeight)
-
+local function RenderLayout()
     for index = 1, layoutEntryCount do
         local object = layoutObjects[index]
-        local y = layoutObjectY[index] + scrollOffset
-        local visible = y <= viewportTop and (y - layoutObjectHeight[index]) >= viewportBottom
-
-        if visible then
-            object:ClearAllPoints()
-            if layoutObjectIsHeader[index] then
-                object:SetPoint("TOPLEFT", combinedFrame, "TOPLEFT", HORIZONTAL_PADDING, y)
-                object:SetPoint(
-                    "TOPRIGHT",
-                    combinedFrame,
-                    "TOPRIGHT",
-                    -(HORIZONTAL_PADDING + SCROLLBAR_GUTTER),
-                    y
-                )
-            else
-                object:SetPoint("TOPLEFT", combinedFrame, "TOPLEFT", layoutObjectX[index], y)
-            end
-        end
-        SetShownIfChanged(object, visible)
+        object:ClearAllPoints()
+        object:SetPoint("TOPLEFT", combinedFrame, "TOPLEFT", layoutObjectX[index], layoutObjectY[index])
+        SetShownIfChanged(object, true)
     end
 
     if layoutEmptyRepresentative and layoutEmptyRepresentative:IsShown() then
@@ -636,10 +573,6 @@ local function RenderViewport()
             addSlotsButton:SetPoint("LEFT", layoutAddSlotsTarget, "LEFT", -14, -2)
         end
         SetShownIfChanged(addSlotsButton, showAddSlots)
-    end
-
-    if scrollStopCount > 1 then
-        scrollTrack:SetValue(scrollStopCount - scrollIndex + 1)
     end
 end
 
@@ -704,7 +637,7 @@ UpdateEmptyRepresentativeForCursor = function(button)
     if hoveredBagID then
         combinedFrame:SetItemsMatchingBagHighlighted(hoveredBagID, true)
     end
-    RenderViewport()
+    RenderLayout()
 end
 
 -- WoW's Lua runtime limits each function to 60 captured upvalues, so keep the
@@ -714,7 +647,6 @@ local function ResetLayoutModel()
     layoutAddSlotsTarget = nil
     ResetCategoryGroups()
     ClearLayoutEntries()
-    ClearScrollStops()
     wipe(emptyCountsByBag)
     wipe(bagFamilies)
     for index = 1, emptyButtonCount do
@@ -799,71 +731,122 @@ local function BuildItemGroups(showCategories)
     return emptyRepresentative, emptyCount, groupCount
 end
 
-local function CalculateLayoutHeight(columnCount, top, footerHeight, spacing, groupCount, showCategories)
-    local height = top + footerHeight
-    for groupIndex = 1, groupCount do
-        local group = categoryGroups[groupIndex]
-        if showCategories then
-            height = height + CATEGORY_HEADER_HEIGHT
-        end
-
-        local rows = ceil(#group.items / columnCount)
-        if rows > 0 then
-            height = height + (rows * ITEM_SIZE) + ((rows - 1) * spacing)
-        end
-        if showCategories and groupIndex < groupCount then
-            height = height + CATEGORY_SPACING
-        end
-    end
-    return height
+local function GetGridWidth(columnCount, spacing)
+    return (columnCount * ITEM_SIZE) + ((columnCount - 1) * spacing)
 end
 
-local function CalculateLayoutMetrics(
+local function GetGridHeight(itemCount, columnCount, spacing)
+    local rowCount = ceil(itemCount / columnCount)
+    if rowCount == 0 then return 0 end
+    return (rowCount * ITEM_SIZE) + ((rowCount - 1) * spacing)
+end
+
+local function GetLayoutConstraints(spacing, screenWidth, screenHeight)
+    local maxFrameWidth = math.max(
+        ITEM_SIZE + (HORIZONTAL_PADDING * 2),
+        screenWidth - (SCREEN_EDGE_MARGIN * 2)
+    )
+    local maxColumns = math.max(
+        1,
+        floor((maxFrameWidth - (HORIZONTAL_PADDING * 2) + spacing) / (ITEM_SIZE + spacing))
+    )
+    local maxFrameHeight = math.max(1, screenHeight - (SCREEN_EDGE_MARGIN * 2))
+    return maxColumns, maxFrameHeight, math.min(MIN_FRAME_WIDTH, maxFrameWidth)
+end
+
+local function CalculateFlatLayoutMetrics(
+    itemCount,
+    requestedColumns,
+    spacing,
+    top,
+    footerHeight,
+    screenWidth,
+    screenHeight
+)
+    local maxColumns, maxFrameHeight, minFrameWidth = GetLayoutConstraints(spacing, screenWidth, screenHeight)
+    local columns = math.min(requestedColumns, maxColumns)
+    local height = top + GetGridHeight(itemCount, columns, spacing) + footerHeight
+
+    while height > maxFrameHeight and columns < maxColumns do
+        columns = columns + 1
+        height = top + GetGridHeight(itemCount, columns, spacing) + footerHeight
+    end
+
+    local width = math.max(
+        minFrameWidth,
+        (HORIZONTAL_PADDING * 2) + GetGridWidth(columns, spacing)
+    )
+    return columns, width, height
+end
+
+local function MeasureCategoryGroups(columnCount, spacing, groupCount)
+    local contentWidth = GetGridWidth(columnCount, spacing)
+    local rowX = 0
+    local rowY = 0
+    local rowHeight = 0
+
+    for groupIndex = 1, groupCount do
+        local group = categoryGroups[groupIndex]
+        local itemCount = #group.items
+        local groupColumns = math.min(
+            columnCount,
+            math.max(CATEGORY_MIN_COLUMNS, ceil(itemCount / CATEGORY_TARGET_ROWS))
+        )
+        local groupWidth = GetGridWidth(groupColumns, spacing)
+        local groupHeight = CATEGORY_HEADER_HEIGHT
+            + CATEGORY_HEADER_GAP
+            + GetGridHeight(itemCount, groupColumns, spacing)
+
+        if rowX > 0 and rowX + groupWidth > contentWidth then
+            rowY = rowY + rowHeight + CATEGORY_SPACING
+            rowX = 0
+            rowHeight = 0
+        end
+
+        group.layoutX = rowX
+        group.layoutY = rowY
+        group.layoutColumns = groupColumns
+        group.layoutWidth = groupWidth
+
+        rowX = rowX + groupWidth + CATEGORY_SECTION_SPACING
+        rowHeight = math.max(rowHeight, groupHeight)
+    end
+
+    return rowY + rowHeight
+end
+
+local function CalculateCategoryLayoutMetrics(
     requestedColumns,
     spacing,
     top,
     footerHeight,
     screenWidth,
     screenHeight,
-    groupCount,
-    showCategories
+    groupCount
 )
-    local maxWidth = floor(screenWidth * 0.9)
-    local maxHeight = floor(screenHeight * 0.9)
-    local maxColumns = math.max(
-        1,
-        floor(
-            (maxWidth - (HORIZONTAL_PADDING * 2) - SCROLLBAR_GUTTER + spacing)
-            / (ITEM_SIZE + spacing)
-        )
-    )
+    local maxColumns, maxFrameHeight, minFrameWidth = GetLayoutConstraints(spacing, screenWidth, screenHeight)
     local columns = math.min(requestedColumns, maxColumns)
+    local contentHeight = MeasureCategoryGroups(columns, spacing, groupCount)
+    local height = top + contentHeight + footerHeight
 
-    local width = (HORIZONTAL_PADDING * 2)
-        + (columns * ITEM_SIZE)
-        + ((columns - 1) * spacing)
-        + SCROLLBAR_GUTTER
-    local fullHeight = CalculateLayoutHeight(
-        columns,
-        top,
-        footerHeight,
-        spacing,
-        groupCount,
-        showCategories
+    while height > maxFrameHeight and columns < maxColumns do
+        columns = columns + 1
+        contentHeight = MeasureCategoryGroups(columns, spacing, groupCount)
+        height = top + contentHeight + footerHeight
+    end
+
+    local width = math.max(
+        minFrameWidth,
+        (HORIZONTAL_PADDING * 2) + GetGridWidth(columns, spacing)
     )
-    local height = math.min(fullHeight, maxHeight)
-    return columns, width, fullHeight, height
+    return width, height
 end
 
-local function PrepareLayoutFrame(emptyRepresentative, emptyCount, width, height, fullHeight, top, footerHeight)
+local function PrepareLayoutFrame(emptyRepresentative, emptyCount, width, height)
     local previousEmptyRepresentative = layoutEmptyRepresentative
-    layoutHeight = height
-    layoutTop = top
-    layoutFooterHeight = footerHeight
     layoutEmptyRepresentative = emptyRepresentative
     layoutEmptyEntryIndex = nil
     layoutEmptyCount = emptyCount
-    maxScroll = math.max(0, fullHeight - height)
 
     if previousEmptyRepresentative
         and previousEmptyRepresentative ~= emptyRepresentative
@@ -877,53 +860,56 @@ local function PrepareLayoutFrame(emptyRepresentative, emptyCount, width, height
     combinedFrame:SetSize(width, height)
 end
 
-local function BuildLayoutEntries(columns, spacing, top, groupCount, showCategories, emptyRepresentative)
-    local cursorY = -top
-    AddScrollStop(0)
+local function BuildFlatLayoutEntries(columns, spacing, top, emptyRepresentative)
+    local group = categoryGroups[1]
+    if not group then return end
 
+    local cursorY = -top
+    for itemIndex, itemButton in ipairs(group.items) do
+        local row = floor((itemIndex - 1) / columns)
+        local column = (itemIndex - 1) % columns
+        AF.SetSize(itemButton, ITEM_SIZE, ITEM_SIZE)
+        local entryIndex = AddLayoutEntry(
+            itemButton,
+            false,
+            HORIZONTAL_PADDING + (column * (ITEM_SIZE + spacing)),
+            cursorY - (row * (ITEM_SIZE + spacing))
+        )
+        if itemButton == emptyRepresentative then
+            layoutEmptyEntryIndex = entryIndex
+        end
+    end
+end
+
+local function BuildCategoryLayoutEntries(spacing, top, groupCount, emptyRepresentative)
     for groupIndex = 1, groupCount do
         local group = categoryGroups[groupIndex]
-        if showCategories then
-            local header = GetCategoryHeader(groupIndex)
-            header:SetText(group.label)
-            AddScrollStop(-top - cursorY)
-            AddLayoutEntry(header, true, 0, cursorY, CATEGORY_HEADER_HEIGHT)
-            cursorY = cursorY - CATEGORY_HEADER_HEIGHT
-        end
+        local groupX = HORIZONTAL_PADDING + group.layoutX
+        local headerY = -top - group.layoutY
+        local header = GetCategoryHeader(groupIndex)
+        header:SetText(group.label)
+        header:SetSize(group.layoutWidth, CATEGORY_HEADER_HEIGHT)
+        AddLayoutEntry(header, true, groupX, headerY)
 
+        local itemTop = headerY - CATEGORY_HEADER_HEIGHT - CATEGORY_HEADER_GAP
         for itemIndex, itemButton in ipairs(group.items) do
-            local row = floor((itemIndex - 1) / columns)
-            local column = (itemIndex - 1) % columns
-            local itemY = cursorY - (row * (ITEM_SIZE + spacing))
-            if column == 0 then
-                AddScrollStop(-top - itemY)
-            end
+            local row = floor((itemIndex - 1) / group.layoutColumns)
+            local column = (itemIndex - 1) % group.layoutColumns
             AF.SetSize(itemButton, ITEM_SIZE, ITEM_SIZE)
             local entryIndex = AddLayoutEntry(
                 itemButton,
                 false,
-                HORIZONTAL_PADDING + (column * (ITEM_SIZE + spacing)),
-                itemY,
-                ITEM_SIZE
+                groupX + (column * (ITEM_SIZE + spacing)),
+                itemTop - (row * (ITEM_SIZE + spacing))
             )
             if itemButton == emptyRepresentative then
                 layoutEmptyEntryIndex = entryIndex
             end
         end
-
-        local rows = ceil(#group.items / columns)
-        if rows > 0 then
-            cursorY = cursorY - (rows * ITEM_SIZE) - ((rows - 1) * spacing)
-        end
-        if showCategories and groupIndex < groupCount then
-            cursorY = cursorY - CATEGORY_SPACING
-        end
     end
+end
 
-    AddScrollStop(maxScroll)
-    scrollIndex = FindNearestScrollStop(scrollOffset)
-    scrollOffset = scrollStops[scrollIndex] or 0
-
+local function FinalizeLayoutEntries(spacing, groupCount, showCategories)
     for _, itemButton in ipairs(combinedFrame.Items) do
         if itemButton._BFIBagLayoutEpoch ~= layoutEpoch then
             SetShownIfChanged(itemButton, false)
@@ -932,22 +918,6 @@ local function BuildLayoutEntries(columns, spacing, top, groupCount, showCategor
 
     HideUnusedHeaders(showCategories and (groupCount + 1) or 1)
     LayoutBagButtons(spacing)
-end
-
-local function LayoutScrollTrack(top, footerHeight, height)
-    local visibleContentHeight = math.max(1, height - top - footerHeight)
-    if scrollStopCount > 1 then
-        local fullContentHeight = visibleContentHeight + maxScroll
-        local thumbHeight = math.max(20, visibleContentHeight * visibleContentHeight / fullContentHeight)
-        scrollThumb:SetHeight(thumbHeight)
-        scrollTrack:ClearAllPoints()
-        scrollTrack:SetPoint("TOPRIGHT", combinedFrame, "TOPRIGHT", -4, -top)
-        scrollTrack:SetPoint("BOTTOMRIGHT", combinedFrame, "BOTTOMRIGHT", -4, footerHeight)
-        scrollTrack:SetMinMaxValues(1, scrollStopCount)
-        scrollTrack:Show()
-    else
-        scrollTrack:Hide()
-    end
 end
 
 local function LayoutItemsInternal(force)
@@ -961,26 +931,44 @@ local function LayoutItemsInternal(force)
 
     ResetLayoutModel()
     local emptyRepresentative, emptyCount, groupCount = BuildItemGroups(showCategories)
-    local columns, width, fullHeight, height = CalculateLayoutMetrics(
-        requestedColumns,
-        spacing,
-        top,
-        footerHeight,
-        screenWidth,
-        screenHeight,
-        groupCount,
-        showCategories
-    )
-    PrepareLayoutFrame(emptyRepresentative, emptyCount, width, height, fullHeight, top, footerHeight)
-    BuildLayoutEntries(columns, spacing, top, groupCount, showCategories, emptyRepresentative)
-    LayoutScrollTrack(top, footerHeight, height)
+    local width
+    local height
 
-    -- Keep the configured item size identical in flat and category modes.
-    -- Vertical overflow uses cached geometry and discrete row/header stops.
+    if showCategories then
+        width, height = CalculateCategoryLayoutMetrics(
+            requestedColumns,
+            spacing,
+            top,
+            footerHeight,
+            screenWidth,
+            screenHeight,
+            groupCount
+        )
+        PrepareLayoutFrame(emptyRepresentative, emptyCount, width, height)
+        BuildCategoryLayoutEntries(spacing, top, groupCount, emptyRepresentative)
+    else
+        local itemCount = groupCount > 0 and #categoryGroups[1].items or 0
+        local columns
+        columns, width, height = CalculateFlatLayoutMetrics(
+            itemCount,
+            requestedColumns,
+            spacing,
+            top,
+            footerHeight,
+            screenWidth,
+            screenHeight
+        )
+        PrepareLayoutFrame(emptyRepresentative, emptyCount, width, height)
+        BuildFlatLayoutEntries(columns, spacing, top, emptyRepresentative)
+    end
+    FinalizeLayoutEntries(spacing, groupCount, showCategories)
+
+    -- Both modes keep full-size items and expand to their natural height.
+    -- Category sections shelf-pack side by side instead of using a viewport.
     layoutScale = 1
     combinedFrame:SetScale(layoutScale)
     LayoutControls(width)
-    RenderViewport()
+    RenderLayout()
     ApplyPosition()
 end
 
@@ -1071,7 +1059,6 @@ end
 
 local function OnCombinedFrameShow()
     if not IsEnabled() then return end
-    scrollOffset = 0
     B:RegisterEvent("BAG_UPDATE", B.BAG_UPDATE)
     B:RegisterEvent("ITEM_LOCK_CHANGED", B.ITEM_LOCK_CHANGED)
     B:RegisterEvent("DISPLAY_SIZE_CHANGED", B.DISPLAY_SIZE_CHANGED)
@@ -1098,7 +1085,6 @@ local function OnCombinedFrameHide()
     ClearLayoutState()
     HideUnusedHeaders(1)
     emptyCountOverlay:Hide()
-    scrollTrack:Hide()
 
     _G.C_Timer.After(0, function()
         if IsEnabled() and not combinedFrame:IsShown() then
@@ -1173,7 +1159,6 @@ local function StyleCombinedFrame()
     categoryButton:SetTooltip(L["Group Items by Category"])
     categoryButton:SetOnClick(function()
         B.config.categories = not B.config.categories
-        scrollOffset = 0
         LayoutItems(true)
         AF.Fire("BFI_RefreshOptions", "bags")
     end)
@@ -1183,7 +1168,6 @@ local function StyleCombinedFrame()
     bagSlotsButton:SetTooltip(L["Show Bag Slots"])
     bagSlotsButton:SetOnClick(function()
         B.config.showBagSlots = not B.config.showBagSlots
-        scrollOffset = 0
         LayoutItems(true)
         AF.Fire("BFI_RefreshOptions", "bags")
     end)
@@ -1194,40 +1178,6 @@ local function StyleCombinedFrame()
     emptyCountText = AF.CreateFontString(emptyCountOverlay, nil, "white", "AF_FONT_OUTLINE")
     emptyCountText:SetPoint("CENTER")
     emptyCountOverlay:Hide()
-
-    scrollTrack = _G.CreateFrame("Slider", nil, combinedFrame, "BackdropTemplate")
-    AF.ApplyDefaultBackdropWithColors(scrollTrack, "widget")
-    scrollTrack:SetOrientation("VERTICAL")
-    scrollTrack:SetValueStep(1)
-    scrollTrack:SetObeyStepOnDrag(true)
-    scrollTrack:SetHitRectInsets(-5, -5, 0, 0)
-    AF.SetSize(scrollTrack, SCROLLBAR_WIDTH, 100)
-    scrollThumb = scrollTrack:CreateTexture(nil, "ARTWORK")
-    scrollThumb:SetColorTexture(AF.GetColorRGB("BFI"))
-    scrollThumb:SetWidth(SCROLLBAR_WIDTH)
-    scrollTrack:SetThumbTexture(scrollThumb)
-    scrollTrack:SetScript("OnValueChanged", function(_, value)
-        if layoutInProgress or scrollStopCount <= 1 then return end
-        local newIndex = scrollStopCount - floor(value + 0.5) + 1
-        newIndex = math.max(1, math.min(scrollStopCount, newIndex))
-        if newIndex == scrollIndex then return end
-        scrollIndex = newIndex
-        scrollOffset = scrollStops[scrollIndex]
-        RenderViewport()
-    end)
-    scrollTrack:Hide()
-
-    previousMouseWheelEnabled = combinedFrame:IsMouseWheelEnabled()
-    combinedFrame:EnableMouseWheel(true)
-    combinedFrame:HookScript("OnMouseWheel", function(_, delta)
-        if not IsEnabled() or scrollStopCount <= 1 then return end
-        local direction = delta > 0 and -1 or 1
-        local newIndex = math.max(1, math.min(scrollStopCount, scrollIndex + direction))
-        if newIndex == scrollIndex then return end
-        scrollIndex = newIndex
-        scrollOffset = scrollStops[scrollIndex]
-        RenderViewport()
-    end)
 
     CreateBagButtons()
 
@@ -1302,7 +1252,6 @@ local function EnableModule()
 
     moduleEnabled = true
     SuppressCombinedMenu()
-    combinedFrame:EnableMouseWheel(true)
     AF.UpdateMoverSave(combinedFrame, B.config.position)
     B:RegisterEvent("USE_COMBINED_BAGS_CHANGED", B.USE_COMBINED_BAGS_CHANGED)
     SetCombinedBags()
@@ -1338,7 +1287,6 @@ local function DisableModule()
     categoryButton:Hide()
     bagSlotsButton:Hide()
     emptyCountOverlay:Hide()
-    scrollTrack:Hide()
     for _, button in ipairs(bagButtons) do
         button:Hide()
     end
@@ -1352,7 +1300,6 @@ local function DisableModule()
         combinedFrame:Update()
     end
 
-    combinedFrame:EnableMouseWheel(previousMouseWheelEnabled)
     RestoreCombinedMenu()
 
     if hasPreviousCombinedBags then
@@ -1397,7 +1344,6 @@ end
 
 function B.Refresh()
     if IsEnabled() and combinedFrame and combinedFrame:IsShown() then
-        scrollOffset = 0
         LayoutItems(true)
     end
 end
