@@ -9,10 +9,13 @@ local _G = _G
 ---------------------------------------------------------------------
 -- shared
 ---------------------------------------------------------------------
-local function StyleInset(frame, color)
+local function StyleInset(frame, color, removeTextures)
     if not frame or frame._BFICollectionsInsetStyled then return end
     frame._BFICollectionsInsetStyled = true
 
+    if removeTextures then
+        S.RemoveTextures(frame, true)
+    end
     S.RemoveNineSliceAndBackground(frame)
     S.CreateBackdrop(frame)
     if color then
@@ -44,6 +47,19 @@ local function StylePagingFrame(pagingFrame)
 
     S.StyleIconButton(pagingFrame.PrevPageButton, AF.GetIcon("ArrowLeft2"), 16)
     S.StyleIconButton(pagingFrame.NextPageButton, AF.GetIcon("ArrowRight2"), 16)
+end
+
+local function StyleFilterDropdown(dropdown)
+    if not dropdown then return end
+
+    S.StyleDropdownButton(dropdown)
+
+    local resetButton = dropdown.ResetButton
+    if resetButton and not resetButton._BFICollectionsResetStyled then
+        resetButton._BFICollectionsResetStyled = true
+        S.StyleIconButton(resetButton, AF.GetIcon("Close"), 10, nil, "red")
+        AF.SetSize(resetButton, 20, 20)
+    end
 end
 
 local function StyleSquareIcon(icon, ...)
@@ -131,11 +147,23 @@ local function StyleCollectionListButton(button)
     if not button or button._BFICollectionsRowStyled then return end
     button._BFICollectionsRowStyled = true
 
-    -- These pooled rows carry collected, selected, favorite, and usability
-    -- state in Blizzard-owned artwork. Add the BFI framing without replacing
-    -- that state-bearing art with the generic button skin.
+    -- Keep Blizzard's pooled Show/Hide and red unusable-state updates, but
+    -- replace the rounded list atlases with flat square BFI state textures.
     S.CreateBackdrop(button, true)
+    if button.background then
+        button.background:SetTexture(AF.GetPlainTexture())
+        button.background:SetAlpha(0.12)
+        AF.SetOnePixelInside(button.background, button.BFIBackdrop)
+    end
+    StyleStateTexture(button.selectedTexture, button.BFIBackdrop, "BFI", 0.35)
+    StyleStateTexture(button:GetHighlightTexture(), button.BFIBackdrop, "white", 0.2)
     StyleSquareIcon(button.icon, button.iconBorder)
+
+    local dragButton = button.DragButton or button.dragButton
+    if dragButton then
+        StyleStateTexture(dragButton.ActiveTexture, button.icon.BFIBackdrop, "BFI", 0.25)
+        StyleStateTexture(dragButton:GetHighlightTexture(), button.icon.BFIBackdrop, "white", 0.25)
+    end
 end
 
 local function StyleTabs(collectionsJournal)
@@ -169,9 +197,10 @@ local function StyleMountJournal()
 
     StyleInset(frame.LeftInset, "widget_dark")
     StyleInset(frame.RightInset, "widget_dark")
-    StyleInset(frame.MountCount, "widget")
+    StyleInset(frame.BottomLeftInset, "widget_dark", true)
+    StyleInset(frame.MountCount, "widget", true)
     S.StyleEditBox(frame.searchBox, -4)
-    S.StyleDropdownButton(frame.FilterDropdown)
+    StyleFilterDropdown(frame.FilterDropdown)
     S.StyleScrollBar(frame.ScrollBar)
     S.StyleButton(frame.MountButton, "BFI")
 
@@ -184,7 +213,20 @@ local function StyleMountJournal()
     StylePanelSpellButton(popup.DynamicFlightModeButton)
     S.StyleIcon(popup.DynamicFlightModeButton.texture)
 
-    StyleSquareIcon(frame.BottomLeftInset.SlotButton.ItemIcon, frame.BottomLeftInset.SlotButton.ItemBorder)
+    local slotButton = frame.BottomLeftInset.SlotButton
+    StyleSquareIcon(slotButton.ItemIcon, slotButton.ItemBorder)
+    S.RemoveTextures(slotButton.SlotBorder, true)
+    StyleStateTexture(slotButton.SlotBorderOpen, slotButton.ItemIcon.BFIBackdrop, "BFI", 0.25)
+    StyleStateTexture(slotButton:GetHighlightTexture(), slotButton.ItemIcon.BFIBackdrop, "white", 0.2)
+    StyleStateTexture(slotButton:GetPushedTexture(), slotButton.ItemIcon.BFIBackdrop, "yellow", 0.2)
+    for _, region in next, {slotButton:GetRegions()} do
+        if region:IsObjectType("Texture") and region:GetAtlas() == "mountequipment-slot-background" then
+            S.RemoveTextures(region, true)
+        end
+    end
+
+    S.RemoveTextures(frame.MountDisplay.ShadowOverlay, true)
+    S.StyleCheckButton(frame.MountDisplay.ModelScene.TogglePlayer)
     StyleSquareIcon(frame.MountDisplay.InfoButton.Icon)
     frame.ScrollBox:ForEachFrame(StyleCollectionListButton)
 end
@@ -196,6 +238,12 @@ local function StylePetLoadoutSlot(slot)
     if not slot or slot._BFICollectionsSlotStyled then return end
     slot._BFICollectionsSlotStyled = true
 
+    S.CreateBackdrop(slot, true)
+    S.RemoveTextures(slot.shadows, true)
+    S.RemoveTextures(slot.helpFrame, true)
+    local name = slot:GetName()
+    S.RemoveTextures(name and _G[name .. "BG"], true)
+
     StyleSquareIcon(slot.icon, slot.iconBorder, slot.qualityBorder)
     StyleProgressBar(slot.healthFrame and slot.healthFrame.healthBar)
 
@@ -205,6 +253,7 @@ local function StylePetLoadoutSlot(slot)
 end
 
 local function StylePetCard(card)
+    S.RemoveTextures(card)
     StyleSquareIcon(card.PetInfo.icon, card.PetInfo.qualityBorder)
     StyleProgressBar(card.HealthFrame.healthBar)
     StyleProgressBar(card.xpBar)
@@ -220,9 +269,9 @@ local function StylePetJournal()
     StyleInset(frame.LeftInset, "widget_dark")
     StyleInset(frame.PetCardInset, "widget_dark")
     StyleInset(frame.RightInset, "widget_dark")
-    StyleInset(frame.PetCount, "widget")
+    StyleInset(frame.PetCount, "widget", true)
     S.StyleEditBox(frame.searchBox, -4)
-    S.StyleDropdownButton(frame.FilterDropdown)
+    StyleFilterDropdown(frame.FilterDropdown)
     S.StyleScrollBar(frame.ScrollBar)
     S.StyleButton(frame.FindBattleButton, "BFI")
     S.StyleButton(frame.SummonButton, "BFI")
@@ -230,6 +279,7 @@ local function StylePetJournal()
     StylePanelSpellButton(frame.HealPetSpellFrame.Button)
     StylePanelSpellButton(frame.SummonRandomPetSpellFrame.Button)
 
+    S.RemoveTextures(frame.loadoutBorder, true)
     StylePetLoadoutSlot(frame.Loadout.Pet1)
     StylePetLoadoutSlot(frame.Loadout.Pet2)
     StylePetLoadoutSlot(frame.Loadout.Pet3)
@@ -250,7 +300,7 @@ local function StyleToyBox()
 
     StyleProgressBar(frame.progressBar, "lime")
     S.StyleEditBox(frame.searchBox, -4)
-    S.StyleDropdownButton(frame.FilterDropdown)
+    StyleFilterDropdown(frame.FilterDropdown)
     StyleCollectionBackground(frame.iconsFrame)
     StylePagingFrame(frame.PagingFrame)
 
@@ -262,8 +312,31 @@ end
 ---------------------------------------------------------------------
 -- heirlooms
 ---------------------------------------------------------------------
+local function RefreshHeirloomLevel(button)
+    local levelBackground = button.levelBackground
+    if not levelBackground then return end
+
+    local isMaxLevel = levelBackground:GetAtlas() == "collections-levelplate-gold"
+
+    if not levelBackground._BFICollectionsLevelStyled then
+        levelBackground._BFICollectionsLevelStyled = true
+        S.CreateBackdrop(levelBackground, true, nil, 1)
+    end
+
+    levelBackground:SetTexture(AF.GetPlainTexture())
+    levelBackground:SetVertexColor(AF.GetColorRGB(isMaxLevel and "yellow" or "widget"))
+    AF.ClearPoints(levelBackground)
+    AF.SetPoint(levelBackground, "BOTTOMRIGHT", button.iconTexture, "BOTTOMRIGHT", -2, 2)
+    AF.SetSize(levelBackground, 29, 14)
+
+    AF.ClearPoints(button.level)
+    AF.SetPoint(button.level, "CENTER", levelBackground)
+    levelBackground.BFIBackdrop:SetShown(levelBackground:IsShown())
+end
+
 local function StyleHeirloomButton(_, button)
     StyleCollectionSpellButton(button)
+    RefreshHeirloomLevel(button)
 end
 
 local function StyleHeirlooms()
@@ -271,13 +344,13 @@ local function StyleHeirlooms()
 
     StyleProgressBar(frame.progressBar, "lime")
     S.StyleEditBox(frame.SearchBox, -4)
-    S.StyleDropdownButton(frame.FilterDropdown)
+    StyleFilterDropdown(frame.FilterDropdown)
     S.StyleDropdownButton(frame.ClassDropdown)
     StyleCollectionBackground(frame.iconsFrame)
     StylePagingFrame(frame.PagingFrame)
 
     for _, button in next, frame.heirloomEntryFrames do
-        StyleCollectionSpellButton(button)
+        StyleHeirloomButton(nil, button)
     end
 end
 
@@ -300,6 +373,42 @@ local function StyleWardrobeSlotButtons(frame)
 
     for _, button in next, buttons do
         StyleWardrobeSlotButton(button)
+    end
+end
+
+local function StyleWardrobeModel(model)
+    if not model._BFICollectionsCardStyled then
+        model._BFICollectionsCardStyled = true
+
+        S.CreateBackdrop(model, true)
+        S.RemoveTextures(model.Border, true)
+        for _, region in next, {model:GetRegions()} do
+            if region:IsObjectType("Texture") and region:GetAtlas() == "transmog-wardrobe-border-highlighted" then
+                StyleStateTexture(region, model.BFIBackdrop, "white", 0.2)
+                break
+            end
+        end
+        StyleStateTexture(model.DisabledOverlay, model.BFIBackdrop, "black", 0.55)
+        StyleStateTexture(model.TransmogStateTexture, model.BFIBackdrop, "BFI", 0.35)
+    end
+
+    local visualInfo = model.visualInfo
+    if not visualInfo then return end
+
+    local color
+    if not visualInfo.isCollected then
+        color = "disabled"
+    elseif not visualInfo.isUsable then
+        color = "red"
+    else
+        color = "BFI"
+    end
+    model.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(color))
+end
+
+local function StyleWardrobeModels(frame)
+    for _, model in ipairs(frame.Models) do
+        StyleWardrobeModel(model)
     end
 end
 
@@ -342,13 +451,15 @@ local function StyleWardrobe()
     S.StyleEditBox(frame.SearchBox, -4)
     StyleProgressBar(frame.SearchBox.ProgressFrame.ProgressBar, "BFI")
     StyleProgressBar(frame.progressBar, "lime")
-    S.StyleDropdownButton(frame.FilterButton)
+    StyleFilterDropdown(frame.FilterButton)
     S.StyleDropdownButton(frame.ClassDropdown)
 
     StyleCollectionBackground(itemsFrame)
     StylePagingFrame(itemsFrame.PagingFrame)
     S.StyleDropdownButton(itemsFrame.WeaponDropdown)
     StyleWardrobeSlotButtons(itemsFrame)
+    hooksecurefunc(itemsFrame, "UpdateItems", StyleWardrobeModels)
+    StyleWardrobeModels(itemsFrame)
 
     StyleInset(setsFrame.LeftInset, "widget_dark")
     StyleCollectionBackground(setsFrame.RightInset)
@@ -364,12 +475,24 @@ end
 -- warband scenes
 ---------------------------------------------------------------------
 local function StyleWarbandSceneEntry(entry)
-    if entry._BFICollectionsCardStyled then return end
-    entry._BFICollectionsCardStyled = true
+    if not entry._BFICollectionsCardStyled then
+        entry._BFICollectionsCardStyled = true
 
-    -- The scene thumbnail, favorite marker, name plate, and hover frame are
-    -- semantic card state, so retain them and add only the shared BFI edge.
-    S.CreateBackdrop(entry, true)
+        S.CreateBackdrop(entry, true)
+        S.RemoveTextures(entry.Border, true)
+        StyleStateTexture(entry.HighlightTexture, entry.BFIBackdrop, "white", 0.2)
+
+        entry.NameBackground:SetTexture(AF.GetPlainTexture())
+        entry.NameBackground:SetVertexColor(AF.GetColorRGB("widget_dark", 0.9))
+        AF.ClearPoints(entry.NameBackground)
+        AF.SetPoint(entry.NameBackground, "BOTTOMLEFT", entry.BFIBackdrop, "BOTTOMLEFT", 1, 1)
+        AF.SetPoint(entry.NameBackground, "BOTTOMRIGHT", entry.BFIBackdrop, "BOTTOMRIGHT", -1, 1)
+        AF.SetHeight(entry.NameBackground, 34)
+    end
+
+    -- Init resets the atlas to its native size for every pooled card.
+    AF.ClearPoints(entry.Icon)
+    AF.SetOnePixelInside(entry.Icon, entry.BFIBackdrop)
 end
 
 local function StyleWarbandScenes()
