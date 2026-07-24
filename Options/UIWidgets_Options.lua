@@ -42,7 +42,7 @@ local settings = {
         {
             AF.WrapTextInColor(L["Target Markers"], "BFI"),
             AF.WrapTextInColor(L["Left-click: "], "tip") .. L["Toggle marker"],
-            AF.WrapTextInColor(L["Right-click: "], "tip") .. L["Lock/unlock marker (only for players in your group)"],
+            AF.WrapTextInColor(L["Right-click: "], "tip") .. L["Clear marker"],
             "",
             AF.WrapTextInColor(L["World Markers"], "BFI"),
             AF.WrapTextInColor(L["Left-click: "], "tip") .. L["Place marker"],
