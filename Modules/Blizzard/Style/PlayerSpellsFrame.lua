@@ -35,10 +35,46 @@ local function HideTalentTexture(texture)
 end
 
 local function UpdateTalentIconBorder(button, visualState)
-    local backdrop = button.Icon.BFIBackdrop
-    if not backdrop then return end
+    local color = TALENT_BORDER_COLORS[visualState] or "border"
 
-    backdrop:SetBackdropBorderColor(AF.GetColorRGB(TALENT_BORDER_COLORS[visualState] or "border"))
+    if button.BFICircleBorder then
+        button.BFICircleBorder:SetColor(color)
+        if button.BFIChoiceArrowLeft then
+            button.BFIChoiceArrowLeft:SetColor(color)
+            button.BFIChoiceArrowRight:SetColor(color)
+        end
+    elseif button.Icon.BFIBackdrop then
+        button.Icon.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(color))
+    end
+end
+
+local function StyleChoiceTalentIcon(button)
+    button.IconMask:SetTexture(AF.GetTexture("Circle"), "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    button.DisabledOverlayMask:SetTexture(AF.GetTexture("Circle"), "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+
+    local iconSplitMask = button.IconSplitMask
+    iconSplitMask:SetTexture(AF.GetPlainTexture())
+    AF.ClearPoints(iconSplitMask)
+    AF.SetPoint(iconSplitMask, "TOPLEFT", button.Icon)
+    AF.SetPoint(iconSplitMask, "BOTTOM", button.Icon)
+
+    local icon2Mask = button.Icon2Mask
+    icon2Mask:SetTexture(AF.GetPlainTexture())
+    icon2Mask:SetRotation(0)
+    AF.ClearPoints(icon2Mask)
+    AF.SetPoint(icon2Mask, "TOP", button.Icon2)
+    AF.SetPoint(icon2Mask, "BOTTOMRIGHT", button.Icon2)
+    button.BFIIcon2CircleMask = AF.CreateCircularMask(button.Icon2)
+
+    local arrowLeft = AF.CreateTexture(button, AF.GetIcon("ArrowLeft2"), "border", "OVERLAY", 5)
+    button.BFIChoiceArrowLeft = arrowLeft
+    AF.SetSize(arrowLeft, 8, 8)
+    AF.SetPoint(arrowLeft, "RIGHT", button.Icon, "LEFT", -1, 0)
+
+    local arrowRight = AF.CreateTexture(button, AF.GetIcon("ArrowRight2"), "border", "OVERLAY", 5)
+    button.BFIChoiceArrowRight = arrowRight
+    AF.SetSize(arrowRight, 8, 8)
+    AF.SetPoint(arrowRight, "LEFT", button.Icon, "RIGHT", 1, 0)
 end
 
 local function StyleTalentButton(button)
@@ -50,17 +86,25 @@ local function StyleTalentButton(button)
         S.StyleIcon(button.Icon2)
     end
 
-    -- Circle nodes are passive and split-icon nodes open a choice popup.
-    -- Preserve Blizzard's masks and state borders so both remain visually distinct.
-    if button.artSet.iconMask or button.Icon2 then return end
-
-    S.StyleSquareIcon(button.Icon, button.IconMask, true)
-    S.StyleSquareIcon(button.DisabledOverlay, button.DisabledOverlayMask)
+    local isChoice = button.Icon2 ~= nil
+    local isCircle = button.artSet.iconMask == "talents-node-circle-mask"
+    if isChoice then
+        StyleChoiceTalentIcon(button)
+        button.BFICircleBorder = AF.CreateCircularIconBorder(button, button.Icon, "border", "OVERLAY", 4)
+    elseif isCircle then
+        button.BFICircleBorder = AF.CreateCircularIconBorder(button, button.Icon, "border", "OVERLAY", 4)
+    elseif not button.artSet.iconMask then
+        S.StyleSquareIcon(button.Icon, button.IconMask, true)
+        S.StyleSquareIcon(button.DisabledOverlay, button.DisabledOverlayMask)
+    else
+        return
+    end
 
     HideTalentTexture(button.Shadow)
     HideTalentTexture(button.StateBorder)
     HideTalentTexture(button.StateBorderHover)
     HideTalentTexture(button.BorderSheen)
+    HideTalentTexture(button.SelectableGlow)
 
     hooksecurefunc(button, "UpdateStateBorder", UpdateTalentIconBorder)
     UpdateTalentIconBorder(button, button:GetVisualState())
@@ -72,12 +116,14 @@ local function StyleSpellBookItem(item)
         button._BFIIconStyled = true
         S.CreateBackdrop(button, true, nil, 1)
         S.StyleIcon(button.Icon)
+        button.BFICircleBorder = AF.CreateCircularIconBorder(button, button.Icon, "border", "OVERLAY", 5)
     end
 
     local isPassive = item.spellBookItemInfo.isPassive
     button.IconMask:SetShown(isPassive)
-    button.Border:SetShown(isPassive)
+    button.Border:Hide()
     button.BFIBackdrop:SetShown(not isPassive)
+    button.BFICircleBorder:SetShown(isPassive)
 
     if isPassive then
         button.IconHighlight:SetAllPoints(button)
