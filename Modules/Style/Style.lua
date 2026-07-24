@@ -996,61 +996,63 @@ end
 ---------------------------------------------------------------------
 -- side tab - SidePanelTabButtonMixin
 ---------------------------------------------------------------------
-local function SideTab_OnMouseDown(tab, button)
-    if button == "LeftButton" then
-        tab.Icon:SetPoint("CENTER", 0, -1)
-    end
-end
-
-local function SideTab_OnMouseUp(tab, button)
-    if button == "LeftButton" then
-        tab.Icon:SetPoint("CENTER")
-    end
-end
-
 local function SideTab_OnEnter(tab)
-    tab.SelectedTexture:Show()
-    if tab.tooltipText then
-        GameTooltip:SetOwner(tab, "ANCHOR_NONE")
-        GameTooltip:SetPoint("TOPLEFT", tab, "TOPRIGHT", 1, 0)
-        GameTooltip:SetText(tab.tooltipText)
-        GameTooltip:Show()
-    end
+    tab.BFISelectedTexture:Show()
 end
 
 local function SideTab_OnLeave(tab)
-    if not tab._checked then
-        tab.SelectedTexture:Hide()
+    if not tab._BFIChecked then
+        tab.BFISelectedTexture:Hide()
     end
-    GameTooltip:Hide()
 end
 
 local function SideTab_SetChecked(tab, checked)
-    tab._checked = checked
+    tab._BFIChecked = checked and true or false
+    tab.BFISelectedTexture:SetShown(tab._BFIChecked)
 end
 
-function S.StyleSideTab(tab)
+function S.StyleSideTab(tab, width, height)
     assert(tab, "StyleSideTab: tab is nil")
 
     if tab._BFIStyled then return end
     tab._BFIStyled = true
 
-    S.RemoveTextures(tab)
+    -- Keep functional artwork such as SocialUI's pooled icon and counter.
+    -- Clearing every texture here also prevents SidePanelTabButtonMixin
+    -- from swapping its active/inactive icon atlas.
+    for _, region in next, {tab:GetRegions()} do
+        if region:IsObjectType("Texture")
+            and region ~= tab.Icon
+            and region ~= tab.IconOverlay
+            and region ~= tab.TabGlow
+        then
+            S.RemoveTextures(region, true)
+        end
+    end
+
+    if tab.SetNormalTexture then tab:SetNormalTexture(AF.GetEmptyTexture()) end
+    if tab.SetPushedTexture then tab:SetPushedTexture(AF.GetEmptyTexture()) end
+    if tab.SetHighlightTexture then tab:SetHighlightTexture(AF.GetEmptyTexture()) end
+    if tab.SetDisabledTexture then tab:SetDisabledTexture(AF.GetEmptyTexture()) end
+
     S.CreateBackdrop(tab)
     tab.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget"))
 
-    AF.SetSize(tab, 35, 50)
-    tab.Icon:SetPoint("CENTER")
+    AF.SetSize(tab, width or 35, height or 50)
 
-    tab.SelectedTexture = AF.CreateTexture(tab, nil, AF.GetColorTable("BFI", 0.6), "BORDER", -1)
-    tab.SelectedTexture:SetAllPoints()
-    tab.SelectedTexture:Hide()
+    tab.BFISelectedTexture = AF.CreateTexture(tab, nil, AF.GetColorTable("BFI", 0.6), "BORDER", -1)
+    tab.BFISelectedTexture:SetAllPoints()
+    tab.BFISelectedTexture:Hide()
 
-    tab:HookScript("OnMouseDown", SideTab_OnMouseDown)
-    tab:HookScript("OnMouseUp", SideTab_OnMouseUp)
-    tab:SetScript("OnEnter", SideTab_OnEnter)
-    tab:SetScript("OnLeave", SideTab_OnLeave)
+    -- Hook rather than replace Blizzard's scripts. Communities supplies
+    -- tooltip/tooltip2, while 12.1 SocialUI adds disabled-reason text.
+    tab:HookScript("OnEnter", SideTab_OnEnter)
+    tab:HookScript("OnLeave", SideTab_OnLeave)
     hooksecurefunc(tab, "SetChecked", SideTab_SetChecked)
+
+    if tab.GetChecked then
+        SideTab_SetChecked(tab, tab:GetChecked())
+    end
 end
 
 ---------------------------------------------------------------------
