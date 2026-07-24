@@ -7,7 +7,7 @@
     <Include file="Misc\Load.xml"/>
     <Include file="Style\Load.xml"/>
     <Include file="Blizzard\Load.xml"/>
-    <!-- <Include file="BuffsDebuffs\Load.xml"/> -->
+    <Include file="BuffsDebuffs\Load.xml"/>
     <Include file="ActionBars\Load.xml"/>
     <Include file="Bags\Load.xml"/>
     <Include file="UnitFrames\Load.xml"/>
@@ -15,6 +15,6 @@
     <Include file="Maps\Load.xml"/>
     <Include file="DataBars\Load.xml"/>
     <Include file="Chat\Load.xml"/>
-    <!-- <Include file="Tooltip\Load.xml"/> -->
+    <Include file="Tooltip\Load.xml"/>
     <Include file="UIWidgets\Load.xml"/>
 </Ui>

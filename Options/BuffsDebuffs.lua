@@ -352,10 +352,11 @@ local function CreateNormalPane()
         AF.SetEnabled(currentConfig.enabled, enabled)
         AF.SetEnabled(currentConfig.enabled and currentTextConfig.enabled, font, size, outline, shadow, anchorPoint, relativePoint, xOffset, yOffset, normalColor)
 
-        local durationEnabled = currentConfig.enabled and currentTextConfig.enabled and textSwitch:GetSelectedValue() == "duration"
-        AF.SetEnabled(durationEnabled, showSecondsUnit, percentCheckButton, secondsCheckButton)
-        AF.SetEnabled(durationEnabled and currentTextConfig.color.percent.enabled, percentColor, percentColor.label2, percentDropdown)
-        AF.SetEnabled(durationEnabled and currentTextConfig.color.seconds.enabled, secondsColor, secondsColor.label2, secondsEditBox, sec)
+        -- AF's secret-safe duration binding currently supports the base text
+        -- style only. Keep the unimplemented formatter/threshold controls
+        -- visible but disabled rather than presenting settings with no effect.
+        AF.SetEnabled(false, showSecondsUnit, percentCheckButton, percentColor, percentColor.label2, percentDropdown)
+        AF.SetEnabled(false, secondsCheckButton, secondsColor, secondsColor.label2, secondsEditBox, sec)
     end
 
     function textsPane.Load(which)

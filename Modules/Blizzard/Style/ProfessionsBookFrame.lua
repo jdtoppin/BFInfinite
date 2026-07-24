@@ -5,6 +5,7 @@ local S = BFI.modules.Style
 local AF = _G.AbstractFramework
 
 local professionFrame
+local PRIMARY_PROFESSION_ICON_SIZE = 50
 
 ---------------------------------------------------------------------
 -- style
@@ -54,9 +55,31 @@ local function StylePrimaryProfession(frame)
 
     -- icon
     _G[frame:GetName() .. "IconBorder"]:Hide()
-    S.StyleIcon(frame.icon, true)
+    S.StyleSquareIcon(frame.icon, frame.CircleMask, true)
+    AF.SetSize(frame.icon, PRIMARY_PROFESSION_ICON_SIZE, PRIMARY_PROFESSION_ICON_SIZE)
     AF.ClearPoints(frame.icon)
     AF.SetPoint(frame.icon, "LEFT", 10, 0)
+
+    -- icon button
+    local iconButton = CreateFrame("Button", nil, frame)
+    frame.BFIProfessionButton = iconButton
+    iconButton:SetAllPoints(frame.icon)
+    AF.SetFrameLevel(iconButton, 2, frame)
+    iconButton:RegisterForClicks("LeftButtonUp")
+    iconButton:SetScript("OnClick", function(_, button)
+        if not InCombatLockdown() and frame.SpellButton1:IsShown() then
+            frame.SpellButton1:Click(button)
+        end
+    end)
+
+    local highlight = iconButton:CreateTexture(nil, "HIGHLIGHT")
+    highlight:SetAllPoints()
+    highlight:SetColorTexture(AF.GetColorRGB("white", 0.2))
+    iconButton:SetHighlightTexture(highlight)
+
+    -- name
+    frame.professionName:ClearAllPoints()
+    frame.professionName:SetPoint("TOPLEFT", 70, -2)
 
     -- bar
     frame.statusBar:ClearAllPoints()
@@ -124,6 +147,10 @@ local function UpdateProfession(frame, index)
 
     -- bgLeft
     frame.bgLeft:SetColor(index and "BFI" or "disabled")
+
+    if frame.BFIProfessionButton then
+        frame.BFIProfessionButton:SetShown(index ~= nil and frame.SpellButton1:IsShown())
+    end
 
     --? spell buttons
     frame.SpellButton1:GetHighlightTexture():SetColorTexture(AF.GetColorRGB("white", 0.25))
