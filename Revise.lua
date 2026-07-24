@@ -132,6 +132,11 @@ function F.ReviseProfile(profile, force)
         end
     end
 
+    local nameplates = BFI.modules.Nameplates
+    if nameplates and nameplates.MigrateConfig then
+        profile.nameplates = nameplates.MigrateConfig(profile.nameplates)
+    end
+
     HydrateProfile(profile)
     MigrateRetiredHealthTextFormats(profile)
     profile.revision = BFI.versionNum

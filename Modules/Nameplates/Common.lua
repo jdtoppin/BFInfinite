@@ -6,87 +6,97 @@ local AF = _G.AbstractFramework
 local NP = BFI.modules.Nameplates
 
 local builders = {
-    healthBar = NP.CreateHealthBar,
-    castBar = NP.CreateCastBar,
-    nameText = NP.CreateNameText,
-    healthText = NP.CreateHealthText,
-    levelText = NP.CreateLevelText,
-    rareIndicator = NP.CreateRareIndicator,
-    raidIcon = NP.CreateRaidIcon,
-    classIcon = NP.CreateClassIcon,
-    debuffs = NP.CreateDebuffs,
-    buffs = NP.CreateBuffs,
-    crowdControls = NP.CreateCrowdControls,
-    questIndicator = NP.CreateQuestIndicator,
-    targetIndicator = NP.CreateTargetIndicator,
+    {"healthBar", NP.CreateHealthBar},
+    {"nameText", NP.CreateNameText},
+    {"castBar", NP.CreateCastBar},
+    {"debuffs", NP.CreateDebuffs},
+    {"targetIndicator", NP.CreateTargetIndicator},
 }
 
-function NP.CreateIndicators(np)
-    for name, builder in next, builders do
-        np.indicators[name] = builder(np, np:GetName()..AF.UpperFirst(name))
-        np.indicators[name].indicatorName = name
+local allowedAnchors = {
+    healthBar = {root = true},
+    nameText = {root = true, healthBar = true},
+    castBar = {root = true, healthBar = true},
+    debuffs = {
+        root = true,
+        healthBar = true,
+        nameText = true,
+        castBar = true,
+    },
+    targetIndicator = {
+        root = true,
+        healthBar = true,
+        nameText = true,
+        castBar = true,
+        debuffs = true,
+    },
+}
+
+local allowedParents = {
+    healthBar = {root = true},
+    nameText = {root = true, healthBar = true},
+    castBar = {root = true},
+    debuffs = {root = true},
+    targetIndicator = {root = true},
+}
+
+local function ResolveRegion(self, requested, allowed)
+    if not requested
+        or requested == "root"
+        or not allowed[requested]
+    then
+        return self.root
     end
+
+    local region = self.root.indicators[requested]
+    if region == self then
+        return self.root
+    end
+    return region or self.root
 end
 
-local efficiencyModeIndicators = {
-    healthBar = true,
-    nameText = true,
-    targetIndicator = true,
-    castBar = true,
-    healthText = false,
-    rareIndicator = false,
-    raidIcon = false,
-    classIcon = false,
-    debuffs = false,
-    buffs = false,
-    crowdControls = false,
-    questIndicator = false,
-}
-
-function NP.SetupIndicators(np, config, mode)
-    if mode == "efficiency" then
-        for name, enabled in next, efficiencyModeIndicators do
-            NP.LoadIndicatorConfig(np, name, enabled and config[name])
-        end
-    else
-        for name in next, builders do
-            NP.LoadIndicatorConfig(np, name, config[name])
-        end
+function NP.CreateIndicators(np)
+    for _, builderInfo in ipairs(builders) do
+        local indicatorName, builder = unpack(builderInfo)
+        local indicator = builder(
+            np,
+            np:GetName() .. AF.UpperFirst(indicatorName)
+        )
+        indicator.indicatorName = indicatorName
+        np.indicators[indicatorName] = indicator
     end
 end
 
 function NP.LoadIndicatorConfig(np, indicatorName, indicatorConfig)
     local indicator = np.indicators[indicatorName]
+    if not indicator then return end
 
     if indicatorConfig then
         indicator:LoadConfig(indicatorConfig)
-        indicator.enabled = indicatorConfig.enabled
+        indicator.enabled = indicatorConfig.enabled == true
     else
         indicator.enabled = false
     end
 
-    if indicator.enabled then
-        if np:IsShown() then
-            indicator:Enable()
-        end
-    else
-        if indicator.Disable then
-            indicator:Disable()
-        else
-            indicator:UnregisterAllEvents()
-            indicator:Hide()
-        end
+    if not indicator.enabled then
+        indicator:Disable()
+    end
+end
+
+function NP.SetupIndicators(np, config)
+    for _, builderInfo in ipairs(builders) do
+        local indicatorName = builderInfo[1]
+        NP.LoadIndicatorConfig(
+            np,
+            indicatorName,
+            config[indicatorName]
+        )
     end
 end
 
 function NP.DisableIndicators(np)
     for _, indicator in next, np.indicators do
-        if indicator.Disable then
-            indicator:Disable()
-        else
-            indicator:UnregisterAllEvents()
-            indicator:Hide()
-        end
+        indicator:Disable()
     end
 end
 
@@ -102,72 +112,51 @@ function NP.OnNameplateShow(np)
     for _, indicator in next, np.indicators do
         if indicator.enabled then
             indicator:Enable()
-        elseif indicator.siblings then
-            indicator:UpdateSiblings()
         end
     end
 end
 
 function NP.OnNameplateHide(np)
-    for _, indicator in next, np.indicators do
-        if indicator.enabled then
-            if indicator.Disable then
-                indicator:Disable()
-            else
-                indicator:UnregisterAllEvents()
-                indicator:Hide()
-            end
-        end
-    end
-end
-
-local function LoadPosition(self, position, anchorTo)
-    if self:GetObjectType() == "FontString" then
-        AF.LoadTextPosition(self, position, anchorTo)
-    else
-        AF.LoadWidgetPosition(self, position, anchorTo)
-    end
+    NP.DisableIndicators(np)
 end
 
 function NP.LoadIndicatorPosition(self, position, anchorTo, parent)
-    if anchorTo == "root" then
-        anchorTo = self.root
-        if self.sibling then
-            self.sibling:RemoveSibling(self)
-            self.sibling = nil
-        end
-    elseif anchorTo then
-        anchorTo = self.root.indicators[anchorTo]
-        if anchorTo.canHaveSibling then
-            anchorTo:AddSibling(self)
-            self.sibling = anchorTo
-        end
+    position = position or {"CENTER", "CENTER", 0, 0}
+
+    -- Indicator-owned subregions (for example the cast icon background)
+    -- intentionally anchor within their existing parent.
+    if not self.root then
+        AF.LoadWidgetPosition(self, position)
+        return
     end
 
-    if parent then
-        if parent == "root" then
-            parent = self.root
-        else
-            parent = self.root.indicators[parent]
-        end
-        self:SetParent(parent)
-    end
+    local indicatorName = self.indicatorName
+    local parentRegion = ResolveRegion(
+        self,
+        parent,
+        allowedParents[indicatorName]
+    )
+    self:SetParent(parentRegion)
 
-    local success = pcall(LoadPosition, self, position, anchorTo)
-    if not success then
-        -- Cannot anchor to itself
-        -- Cannot anchor to a region dependent on it
-        AF.Fire("BFI_IncorrectAnchor", self)
+    local anchorRegion = ResolveRegion(
+        self,
+        anchorTo,
+        allowedAnchors[indicatorName]
+    )
+    if self:GetObjectType() == "FontString" then
+        AF.LoadTextPosition(self, position, anchorRegion)
+    else
+        AF.LoadWidgetPosition(self, position, anchorRegion)
     end
 end
 
 function NP.GetIndicator(frame, indicatorName, requireEnabled)
-    if not (frame and frame.indicators) then return end
+    if not frame or not frame.indicators then return end
 
     local indicator = frame.indicators[indicatorName]
-    if not indicator then return end
-
-    if not requireEnabled or indicator.enabled then
+    if indicator
+        and (not requireEnabled or indicator.enabled)
+    then
         return indicator
     end
 end

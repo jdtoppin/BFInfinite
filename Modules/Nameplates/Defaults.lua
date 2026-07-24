@@ -53,8 +53,14 @@ end
 ---------------------------------------------------------------------
 -- defaults
 ---------------------------------------------------------------------
+local SCHEMA_VERSION = 1
+NP.SCHEMA_VERSION = SCHEMA_VERSION
+
 local defaults = {
-    enabled = true,
+    schemaVersion = SCHEMA_VERSION,
+    enabled = false,
+    -- Retail 12.x has one shared native nameplate size. Existing friendly and
+    -- hostile profile values therefore contribute to the same maximum bounds.
     friendlyClickableAreaWidth = 120,
     friendlyClickableAreaHeight = 40,
     hostileClickableAreaWidth = 120,
@@ -122,10 +128,12 @@ local defaults = {
     }
 }
 
+local nameplateDefaults
+
 do
     defaults.cvars = AF.Copy(NP.GetCVarDefaults())
 
-    local nameplateDefaults = {
+    nameplateDefaults = {
         healthBar = {
             enabled = true,
             position = {"CENTER", "CENTER", 0, 0},
@@ -696,17 +704,35 @@ end
 --     },
 -- }
 
-AF.RegisterCallback("BFI_UpdateProfile", function(_, t)
-    if not t["nameplates"] then
-        t["nameplates"] = AF.Copy(defaults)
-    end
-    NP.config = t["nameplates"]
-end)
-
 function NP.GetDefaults()
     return AF.Copy(defaults)
+end
+
+function NP.MigrateConfig(config)
+    if type(config) ~= "table" then
+        config = {}
+    end
+
+    if tonumber(config.schemaVersion) ~= SCHEMA_VERSION then
+        -- The legacy implementation defaulted to enabled. Require an
+        -- explicit opt-in the first time that configuration is migrated.
+        config.enabled = false
+    end
+
+    config.schemaVersion = SCHEMA_VERSION
+    return F.MergeMissingDefaults(config, defaults)
 end
 
 function NP.GetNameplateDefaults()
     return AF.Copy(nameplateDefaults)
 end
+
+function NP.ResetToDefaults()
+    wipe(NP.config)
+    AF.Merge(NP.config, defaults)
+end
+
+AF.RegisterCallback("BFI_UpdateProfile", function(_, t)
+    t.nameplates = NP.MigrateConfig(t.nameplates)
+    NP.config = t.nameplates
+end)

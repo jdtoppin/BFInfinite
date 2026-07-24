@@ -82,7 +82,7 @@ end
 -- config
 ---------------------------------------------------------------------
 function Auras_UpdateSize(self, numAuras)
-    -- if not (self.width and self.height and self.orientation) then return end
+    if not self.numSlots then return end
 
     -- hide unused
     for i = numAuras + 1, self.numSlots do
@@ -226,6 +226,8 @@ local function Auras_SetupAuras(self, config)
     for i = 1, self.numSlots do
         local aura = self.slots[i]
         aura.root = self.root
+        -- Nameplate hit testing remains owned by Blizzard's native plate.
+        aura:EnableMouse(false)
         aura:EnableDispelColor(
             self.auraFilter == "HARMFUL"
             and config.auraTypeColor
@@ -239,6 +241,7 @@ local function Auras_SetupAuras(self, config)
 end
 
 local function Auras_OnHide(self)
+    if not self.numSlots then return end
     for i = 1, self.numSlots do
         self.slots[i]:Hide()
     end

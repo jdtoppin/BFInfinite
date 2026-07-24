@@ -4,95 +4,48 @@ local BFI = select(2, ...)
 local AF = _G.AbstractFramework
 local NP = BFI.modules.Nameplates
 
----------------------------------------------------------------------
--- local functions
----------------------------------------------------------------------
-local UnitName = UnitName
-local UnitIsConnected = UnitIsConnected
-local UnitIsSameServer = UnitIsSameServer
-local UnitClassBase = AF.UnitClassBase
-
----------------------------------------------------------------------
--- name
----------------------------------------------------------------------
-local function UpdateName(self, event, unitId)
-    local unit = self.root.unit
-    if unitId and unit ~= unitId then return end
-
-    local name = UnitName(unit)
-    if not name then return end
-
-    local class = UnitClassBase(unit)
-
-    -- length
-    AF.SetText(self, name, self.length, nil, (self.showOtherServerSign and not UnitIsSameServer(unit)) and "*")
-
-    -- color
-    local r, g, b
-    if self.color.type == "class_color" then
-        if AF.UnitIsPlayer(unit) then
-            r, g, b = AF.GetClassColor(class)
-        else
-            r, g, b = AF.GetReactionColor(unit)
-        end
-    else
-        if AF.UnitIsPlayer(unit) then
-            if not UnitIsConnected(unit) then
-                r, g, b = AF.GetClassColor(class)
-            else
-                r, g, b = unpack(self.color.rgb)
-            end
-        else
-            r, g, b = unpack(self.color.rgb)
-        end
-    end
-    self:SetTextColor(r, g, b)
-end
-
----------------------------------------------------------------------
--- update
----------------------------------------------------------------------
 local function NameText_Update(self)
-    UpdateName(self)
+    self:UpdateName()
 end
 
----------------------------------------------------------------------
--- enable
----------------------------------------------------------------------
 local function NameText_Enable(self)
-    self:RegisterUnitEvent("UNIT_NAME_UPDATE", self.root.unit, UpdateName)
-    self:RegisterUnitEvent("UNIT_FACTION", self.root.unit, UpdateName)
-
+    self:SetUnit(self.root.unit)
     self:Show()
-    self:Update()
 end
 
----------------------------------------------------------------------
--- load
----------------------------------------------------------------------
+local function NameText_Disable(self)
+    self:ClearUnit()
+    self:Hide()
+end
+
 local function NameText_LoadConfig(self, config)
     AF.SetFont(self, unpack(config.font))
-    NP.LoadIndicatorPosition(self, config.position, config.anchorTo, config.parent)
+    NP.LoadIndicatorPosition(
+        self,
+        config.position,
+        config.anchorTo,
+        config.parent
+    )
+    self:SetLength(config.length)
 
-    self.length = config.length
-    self.color = config.color
-    self.showOtherServerSign = config.showOtherServerSign
+    if config.color.type == "custom_color" then
+        self.color = {
+            type = "custom_color",
+            rgb = config.color.rgb,
+        }
+    else
+        self.color = {type = "selection_color"}
+    end
 end
 
----------------------------------------------------------------------
--- create
----------------------------------------------------------------------
 function NP.CreateNameText(parent, name)
-    local text = parent:CreateFontString(name, "OVERLAY")
+    local text = AF.CreateSecretNameText(parent, name)
     text.root = parent
     text:Hide()
 
-    -- events
-    AF.AddEventHandler(text)
-
-    -- functions
-    text.Enable = NameText_Enable
     text.Update = NameText_Update
+    text.Enable = NameText_Enable
+    text.Disable = NameText_Disable
     text.LoadConfig = NameText_LoadConfig
 
     return text
