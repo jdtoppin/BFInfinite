@@ -29,8 +29,9 @@ local function DisableBlizzard()
         F.DisableFrame(_G.PetCastingBarFrame)
     end
 
-    -- Keep Blizzard's aura frames active until BFI has a complete replacement.
-    -- DebuffFrame also owns private-aura anchors and deadly-debuff warnings.
+    -- BuffsDebuffs keeps these roots active and suppresses only verified public
+    -- visuals after a replacement exists. DebuffFrame continues to own
+    -- private-aura anchors and deadly-debuff warnings.
 
     F.DisableEditMode(_G.EncounterBar)
 
