@@ -5,12 +5,23 @@ local AF = _G.AbstractFramework
 ---@class Nameplates
 local NP = BFI.modules.Nameplates
 
+local hasNameplateGeometryAPI =
+    type(C_NamePlate) == "table"
+    and type(C_NamePlate.GetNamePlateSize) == "function"
+    and type(C_NamePlate.SetNamePlateSize) == "function"
+    and type(C_NamePlateManager) == "table"
+    and type(C_NamePlateManager.GetNamePlateHitTestInsets) == "function"
+    and type(C_NamePlateManager.SetNamePlateHitTestInsets) == "function"
+    and type(Enum) == "table"
+    and type(Enum.NamePlateType) == "table"
+
 local hasNameplateFoundation =
     type(AF.SetNativeNamePlateVisualSuppressed) == "function"
     and type(AF.CreateSecretHealthBar) == "function"
     and type(AF.CreateSecretNameText) == "function"
     and type(AF.CreateSecretAuraList) == "function"
     and type(AF.CreateSecretCastBar) == "function"
+    and hasNameplateGeometryAPI
 
 NP.created = {}
 NP.byUnit = {}
@@ -23,6 +34,12 @@ if not hasNameplateFoundation then return end
 
 local GetNamePlateForUnit = C_NamePlate.GetNamePlateForUnit
 local GetNamePlates = C_NamePlate.GetNamePlates
+local GetNamePlateSize = C_NamePlate.GetNamePlateSize
+local SetNamePlateSize = C_NamePlate.SetNamePlateSize
+local GetNamePlateHitTestInsets =
+    C_NamePlateManager.GetNamePlateHitTestInsets
+local SetNamePlateHitTestInsets =
+    C_NamePlateManager.SetNamePlateHitTestInsets
 local InCombatLockdown = InCombatLockdown
 local UnitCanAttack = UnitCanAttack
 local UnitIsEnemy = UnitIsEnemy
@@ -33,6 +50,18 @@ local UnitNameplateShowsWidgetsOnly = UnitNameplateShowsWidgetsOnly
 
 local nextNameplateID = 0
 local appliedConfig
+local previousClickGeometry
+local appliedClickGeometry
+
+local FULL_HIT_TEST_INSET = -10000
+local FULL_HIT_TEST_INSETS = {
+    left = FULL_HIT_TEST_INSET,
+    right = FULL_HIT_TEST_INSET,
+    top = FULL_HIT_TEST_INSET,
+    bottom = FULL_HIT_TEST_INSET,
+}
+local FRIENDLY_NAME_PLATE = Enum.NamePlateType.Friendly
+local ENEMY_NAME_PLATE = Enum.NamePlateType.Enemy
 
 local function GetConfigKey(unit)
     local isPlayer = UnitIsPlayer(unit)
@@ -139,6 +168,204 @@ local function ApplyRootGeometry(np, config)
     )
 end
 
+local function GetAnchorFactor(point, negative, positive)
+    if type(point) ~= "string" then return 0 end
+    if point:find(negative, 1, true) then return -0.5 end
+    if point:find(positive, 1, true) then return 0.5 end
+    return 0
+end
+
+local function GetHealthBarBounds(healthBar)
+    local width = healthBar.width or 0
+    local height = healthBar.height or 0
+    local position = healthBar.position or {
+        "CENTER",
+        "CENTER",
+        0,
+        0,
+    }
+    local point = position[1] or "CENTER"
+    local relativePoint = position[2] or "CENTER"
+    local offsetX = position[3] or 0
+    local offsetY = position[4] or 0
+    local centerX = (
+        GetAnchorFactor(relativePoint, "LEFT", "RIGHT")
+        - GetAnchorFactor(point, "LEFT", "RIGHT")
+    ) * width + offsetX
+    local centerY = (
+        GetAnchorFactor(relativePoint, "BOTTOM", "TOP")
+        - GetAnchorFactor(point, "BOTTOM", "TOP")
+    ) * height + offsetY
+
+    return width + 2 * math.abs(centerX),
+        height + 2 * math.abs(centerY)
+end
+
+local function GetClickSize(config, faction)
+    local width = config[faction .. "ClickableAreaWidth"] or 120
+    local height = config[faction .. "ClickableAreaHeight"] or 40
+    local npcConfig = config[faction .. "_npc"]
+    local playerConfig = config[faction .. "_player"]
+
+    if npcConfig and npcConfig.healthBar then
+        local healthWidth, healthHeight =
+            GetHealthBarBounds(npcConfig.healthBar)
+        width = math.max(width, healthWidth)
+        height = math.max(height, healthHeight)
+    end
+    if playerConfig and playerConfig.healthBar then
+        local healthWidth, healthHeight =
+            GetHealthBarBounds(playerConfig.healthBar)
+        width = math.max(width, healthWidth)
+        height = math.max(height, healthHeight)
+    end
+
+    return width, height
+end
+
+local function GetInsets(plateType)
+    local left, right, top, bottom =
+        GetNamePlateHitTestInsets(plateType)
+    return {
+        left = left,
+        right = right,
+        top = top,
+        bottom = bottom,
+    }
+end
+
+local function SetInsets(plateType, insets)
+    SetNamePlateHitTestInsets(
+        plateType,
+        insets.left,
+        insets.right,
+        insets.top,
+        insets.bottom
+    )
+end
+
+local function InsetsEqual(first, second)
+    return first
+        and second
+        and first.left == second.left
+        and first.right == second.right
+        and first.top == second.top
+        and first.bottom == second.bottom
+end
+
+local function CaptureClickGeometry()
+    if previousClickGeometry then return end
+
+    local width, height = GetNamePlateSize()
+    previousClickGeometry = {
+        width = width,
+        height = height,
+        friendlyInsets = GetInsets(FRIENDLY_NAME_PLATE),
+        enemyInsets = GetInsets(ENEMY_NAME_PLATE),
+    }
+end
+
+local function ApplyClickGeometry(config)
+    CaptureClickGeometry()
+
+    local friendlyWidth, friendlyHeight =
+        GetClickSize(config, "friendly")
+    local enemyWidth, enemyHeight =
+        GetClickSize(config, "hostile")
+
+    -- Retail 12.0.7.68887 and 12.1.0.68824 provide one shared C++
+    -- nameplate size plus per-faction numeric hit-test insets. Expanding the
+    -- native region to those bounds avoids measuring restricted frame regions.
+    local width = math.max(
+        previousClickGeometry.width,
+        friendlyWidth,
+        enemyWidth
+    )
+    local height = math.max(
+        previousClickGeometry.height,
+        friendlyHeight,
+        enemyHeight
+    )
+    SetNamePlateSize(width, height)
+    SetNamePlateHitTestInsets(
+        FRIENDLY_NAME_PLATE,
+        FULL_HIT_TEST_INSET,
+        FULL_HIT_TEST_INSET,
+        FULL_HIT_TEST_INSET,
+        FULL_HIT_TEST_INSET
+    )
+    SetNamePlateHitTestInsets(
+        ENEMY_NAME_PLATE,
+        FULL_HIT_TEST_INSET,
+        FULL_HIT_TEST_INSET,
+        FULL_HIT_TEST_INSET,
+        FULL_HIT_TEST_INSET
+    )
+
+    local appliedWidth, appliedHeight = GetNamePlateSize()
+    local friendlyInsets = GetInsets(FRIENDLY_NAME_PLATE)
+    local enemyInsets = GetInsets(ENEMY_NAME_PLATE)
+
+    -- Another nameplate addon may synchronously reassert these globals from a
+    -- secure post-hook. Only claim ownership when our entire bundle stuck.
+    if appliedWidth == width
+        and appliedHeight == height
+        and InsetsEqual(friendlyInsets, FULL_HIT_TEST_INSETS)
+        and InsetsEqual(enemyInsets, FULL_HIT_TEST_INSETS)
+    then
+        appliedClickGeometry = {
+            width = appliedWidth,
+            height = appliedHeight,
+            friendlyInsets = friendlyInsets,
+            enemyInsets = enemyInsets,
+        }
+    else
+        appliedClickGeometry = nil
+    end
+end
+
+local function InsetsMatch(plateType, expectedInsets)
+    return InsetsEqual(GetInsets(plateType), expectedInsets)
+end
+
+local function ClickGeometryIsApplied()
+    if not appliedClickGeometry then return false end
+
+    local width, height = GetNamePlateSize()
+    return width == appliedClickGeometry.width
+        and height == appliedClickGeometry.height
+        and InsetsMatch(
+            FRIENDLY_NAME_PLATE,
+            appliedClickGeometry.friendlyInsets
+        )
+        and InsetsMatch(
+            ENEMY_NAME_PLATE,
+            appliedClickGeometry.enemyInsets
+        )
+end
+
+local function RestoreClickGeometry()
+    if not previousClickGeometry then return end
+
+    if ClickGeometryIsApplied() then
+        SetNamePlateSize(
+            previousClickGeometry.width,
+            previousClickGeometry.height
+        )
+        SetInsets(
+            FRIENDLY_NAME_PLATE,
+            previousClickGeometry.friendlyInsets
+        )
+        SetInsets(
+            ENEMY_NAME_PLATE,
+            previousClickGeometry.enemyInsets
+        )
+    end
+
+    previousClickGeometry = nil
+    appliedClickGeometry = nil
+end
+
 local function AttachNameplate(np, unit)
     if np.unit and np.unit ~= unit then
         NP.byUnit[np.unit] = nil
@@ -177,7 +404,8 @@ local function AttachNameplate(np, unit)
     np.customActive = true
 
     -- Keep Blizzard's unit-frame controller alive. AF only suppresses its
-    -- visual presentation; Blizzard retains click and hit-test ownership.
+    -- visual presentation; Blizzard retains click ownership while the global
+    -- native hit region above covers BFI's health bar.
     AF.SetNativeNamePlateVisualSuppressed(np.unitFrame, true)
 end
 
@@ -258,17 +486,45 @@ local function ApplyModuleState()
 
     if NP.config and NP.config.enabled then
         appliedConfig = AF.Copy(NP.config)
+        ApplyClickGeometry(appliedConfig)
         SyncVisibleNameplates()
     else
         appliedConfig = nil
         for _, np in next, NP.created do
             DetachNameplate(np, false)
         end
+        RestoreClickGeometry()
     end
 end
 
 local function ApplyPendingUpdate()
     ApplyModuleState()
+end
+
+local function NativeNamePlateSizeUpdated()
+    if not appliedConfig
+        or not previousClickGeometry
+        or not appliedClickGeometry
+    then
+        return
+    end
+
+    -- Preserve Blizzard's newest requested size for disable/restore before BFI
+    -- resumes ownership. Do not call restricted setters from combat.
+    local width, height = GetNamePlateSize()
+    previousClickGeometry.width = width
+    previousClickGeometry.height = height
+    appliedClickGeometry.width = width
+    appliedClickGeometry.height = height
+
+    if InCombatLockdown() then
+        NP:RegisterEvent(
+            "PLAYER_REGEN_ENABLED",
+            ApplyPendingUpdate
+        )
+    else
+        ApplyClickGeometry(appliedConfig)
+    end
 end
 
 local function UpdateNameplates(_, module)
@@ -291,4 +547,13 @@ NP:RegisterEvent("NAME_PLATE_UNIT_REMOVED", NamePlateUnitRemoved)
 NP:RegisterEvent("UNIT_FACTION", NamePlateFactionChanged)
 NP:RegisterEvent("PLAYER_TARGET_CHANGED", UpdateTargetIndicators)
 NP:RegisterEvent("PLAYER_FOCUS_CHANGED", UpdateTargetIndicators)
+if NamePlateDriverFrame
+    and type(NamePlateDriverFrame.UpdateNamePlateSize) == "function"
+then
+    hooksecurefunc(
+        NamePlateDriverFrame,
+        "UpdateNamePlateSize",
+        NativeNamePlateSizeUpdated
+    )
+end
 AF.RegisterCallback("BFI_UpdateModule", UpdateNameplates)

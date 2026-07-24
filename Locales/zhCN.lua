@@ -299,7 +299,7 @@ L["Shared Nameplate Settings"] = "共享姓名板设置"
 L["Shared width, height, and feature changes apply to hostile and friendly NPC and player nameplates."] = "共享宽度、高度和功能设置会应用于敌对与友方的 NPC 和玩家姓名板。"
 L["Target Indicator"] = "目标指示器"
 L["Compatibility"] = "兼容性"
-L["Native special and quest widgets remain Blizzard-owned. Click targeting uses Blizzard's native region. Changes made during combat may be deferred until combat ends."] = "原生的特殊与任务组件仍由暴雪控制。点击选取使用暴雪的原生区域。战斗中进行的更改可能会推迟到战斗结束后应用。"
+L["Native special and quest widgets remain Blizzard-owned. Blizzard's click target expands to cover the BFI health bar. Changes made during combat may be deferred until combat ends."] = "原生的特殊与任务组件仍由暴雪控制。暴雪的点击选取区域会扩展至覆盖 BFI 的生命条。战斗中进行的更改可能会推迟到战斗结束后应用。"
 
 ---------------------------------------------------------------------
 -- action bars

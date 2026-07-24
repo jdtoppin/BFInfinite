@@ -59,8 +59,8 @@ NP.SCHEMA_VERSION = SCHEMA_VERSION
 local defaults = {
     schemaVersion = SCHEMA_VERSION,
     enabled = false,
-    -- Retained for profile compatibility. Blizzard owns nameplate hit-test
-    -- geometry because its relative regions may be restricted.
+    -- Retail 12.x has one shared native nameplate size. Existing friendly and
+    -- hostile profile values therefore contribute to the same maximum bounds.
     friendlyClickableAreaWidth = 120,
     friendlyClickableAreaHeight = 40,
     hostileClickableAreaWidth = 120,
