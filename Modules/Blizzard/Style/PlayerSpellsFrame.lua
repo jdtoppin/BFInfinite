@@ -48,6 +48,14 @@ local function UpdateTalentIconBorder(button, visualState)
     end
 end
 
+local function UpdateCircularTalentSpendText(button)
+    if not button.SpendText then return end
+
+    local offset = button.Icon:GetWidth() / 6
+    AF.ClearPoints(button.SpendText)
+    AF.SetPoint(button.SpendText, "CENTER", button.Icon, "CENTER", offset, -offset)
+end
+
 local function StyleChoiceTalentIcon(button)
     AF.ApplyCircularIconMask(button.IconMask)
     AF.ApplyCircularIconMask(button.DisabledOverlayMask)
@@ -109,6 +117,11 @@ local function StyleTalentButton(button, forceShape)
     HideTalentTexture(button.StateBorderHover)
     HideTalentTexture(button.BorderSheen)
     HideTalentTexture(button.SelectableGlow)
+
+    if button.BFICircleBorder then
+        UpdateCircularTalentSpendText(button)
+        hooksecurefunc(button, "SetAndApplySize", UpdateCircularTalentSpendText)
+    end
 
     hooksecurefunc(button, "UpdateStateBorder", UpdateTalentIconBorder)
     UpdateTalentIconBorder(button, button:GetVisualState())
