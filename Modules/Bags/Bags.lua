@@ -33,9 +33,13 @@ local MIN_FRAME_WIDTH = 320
 local SCREEN_EDGE_MARGIN = 16
 local CATEGORY_VIEW_ICON = AF.GetIcon("Layout")
 local COMBINED_VIEW_ICON = AF.GetIcon("Menu4")
-local BAG_BUTTON_ATLAS = "bag-main"
+local SHOW_BAGS_ICON = AF.GetIcon("Layers")
+local REAGENT_SPACE_ICON = "bags-icon-reagents"
+local HEADER_ICON_COLOR = AF.player.class
 local BACKPACK_ICON = "Interface\\Icons\\INV_Misc_Bag_08"
 local EMPTY_BAG_ICON = 133633
+local EMPTY_KIND_BAG = 1
+local EMPTY_KIND_REAGENT = 2
 
 local equipmentSlotAliases = {
     INVTYPE_ROBE = "INVTYPE_CHEST",
@@ -76,17 +80,12 @@ local combinedFrame
 local categoryButton
 local bagSlotsButton
 local categoryButtonShowsCombinedView
-local emptyCountOverlay
-local emptyCountText
 local initialized
 local moduleEnabled
 local refreshPending
 local layoutInProgress
 local layoutScale = 1
 local layoutEntryCount = 0
-local layoutEmptyRepresentative
-local layoutEmptyEntryIndex
-local layoutEmptyCount = 0
 local emptyButtonCount = 0
 local layoutAddSlotsTarget
 local layoutEpoch = 0
@@ -122,6 +121,12 @@ local bagFamilies = {}
 local emptyButtons = {}
 local emptyButtonBagIDs = {}
 local emptyButtonFamilies = {}
+local emptyButtonKinds = {}
+local emptyStates = {
+    [EMPTY_KIND_BAG] = {},
+    [EMPTY_KIND_REAGENT] = {},
+}
+local styledItemButtons = setmetatable({}, {__mode = "k"})
 local layoutObjects = {}
 local layoutObjectX = {}
 local layoutObjectY = {}
@@ -309,7 +314,18 @@ local function ItemButtonOnEnter(button)
 end
 
 local function StyleItemButton(button)
-    if button._BFIBagStyled then return end
+    styledItemButtons[button] = true
+    if button._BFIBagStyled then
+        if button.BFIBagHighlight then
+            button.BagIndicator = button.BFIBagHighlight
+            button.BagIndicator:Hide()
+            button.BagIndicator:SetBackdropBorderColor(AF.GetColorRGB("BFI"))
+        end
+        if button._BFIBlizzardBagIndicator then
+            button._BFIBlizzardBagIndicator:Hide()
+        end
+        return
+    end
     button._BFIBagStyled = true
     button:HookScript("OnEnter", ItemButtonOnEnter)
 
@@ -329,10 +345,25 @@ local function StyleItemButton(button)
     if normalTexture then
         normalTexture:SetAlpha(0)
     end
+
+    -- Retail 12.0.7 only toggles BagIndicator with SetShown. Replace its
+    -- padded store artwork with a crisp exterior border without disturbing
+    -- the quality-colored BFIBackdrop underneath.
     if button.BagIndicator then
-        button.BagIndicator:ClearAllPoints()
-        button.BagIndicator:SetAllPoints(button)
-        button.BagIndicator:SetVertexColor(AF.GetColorRGB("BFI"))
+        button._BFIBlizzardBagIndicator = button.BagIndicator
+        button._BFIBlizzardBagIndicator:Hide()
+
+        local bagHighlight = _G.CreateFrame("Frame", nil, button, "BackdropTemplate")
+        AF.ApplyDefaultBackdrop_NoBackground(bagHighlight)
+        bagHighlight:SetBackdropBorderColor(AF.GetColorRGB("BFI"))
+        AF.SetOnePixelOutside(bagHighlight, button.BFIBackdrop)
+        AF.SetFrameLevel(bagHighlight, 2, button)
+        bagHighlight:EnableMouse(false)
+        bagHighlight:Hide()
+        AF.AddToPixelUpdater_CustomGroup("BFIStyled", bagHighlight)
+
+        button.BFIBagHighlight = bagHighlight
+        button.BagIndicator = bagHighlight
     end
 end
 
@@ -361,16 +392,66 @@ local function UpdateBagButton(button)
     button.count:SetText(_G.C_Container.GetContainerNumSlots(bagID))
 end
 
-local function UpdateAggregateEmptyState()
-    if not layoutEmptyRepresentative then return end
-
-    local hoveredEmptyCount
-    if hoveredBagID ~= nil then
-        hoveredEmptyCount = emptyCountsByBag[hoveredBagID] or 0
+local function ResetEmptyStates()
+    for kind = EMPTY_KIND_BAG, EMPTY_KIND_REAGENT do
+        local state = emptyStates[kind]
+        if state.representative and state.representative.BagIndicator then
+            state.representative.BagIndicator:Hide()
+        end
+        if state.overlay then
+            state.overlay:Hide()
+        end
+        state.representative = nil
+        state.representativePriority = nil
+        state.entryIndex = nil
+        state.count = 0
     end
-    emptyCountText:SetText(hoveredEmptyCount ~= nil and hoveredEmptyCount or layoutEmptyCount)
-    if hoveredEmptyCount and hoveredEmptyCount > 0 and layoutEmptyRepresentative:IsShown() then
-        layoutEmptyRepresentative.BagIndicator:SetShown(true)
+end
+
+local function ClearItemBagHighlights()
+    for itemButton in next, styledItemButtons do
+        if itemButton.BFIBagHighlight then
+            itemButton.BFIBagHighlight:Hide()
+        end
+        if itemButton._BFIBlizzardBagIndicator then
+            itemButton._BFIBlizzardBagIndicator:Hide()
+        end
+    end
+end
+
+local function RestoreItemBagIndicators()
+    for itemButton in next, styledItemButtons do
+        if itemButton._BFIBlizzardBagIndicator then
+            itemButton.BFIBagHighlight:Hide()
+            itemButton.BagIndicator = itemButton._BFIBlizzardBagIndicator
+        end
+    end
+end
+
+local function UpdateAggregateEmptyState()
+    local hoveredKind
+    if hoveredBagID ~= nil then
+        hoveredKind = hoveredBagID == REAGENT_BAG_ID and EMPTY_KIND_REAGENT or EMPTY_KIND_BAG
+    end
+
+    for kind = EMPTY_KIND_BAG, EMPTY_KIND_REAGENT do
+        local state = emptyStates[kind]
+        local displayedCount = state.count or 0
+        if hoveredKind == kind then
+            displayedCount = emptyCountsByBag[hoveredBagID] or 0
+        end
+        if state.text then
+            state.text:SetText(displayedCount)
+        end
+
+        local representative = state.representative
+        if representative and representative.BagIndicator then
+            representative.BagIndicator:SetShown(
+                hoveredKind == kind
+                and displayedCount > 0
+                and representative:IsShown()
+            )
+        end
     end
 end
 
@@ -436,9 +517,11 @@ local function UpdateCategoryButtonState()
 
     if showCombinedView then
         categoryButton:SetTexture(COMBINED_VIEW_ICON, {16, 16}, {"CENTER", 0, 0})
+        categoryButton:SetTextureColor(HEADER_ICON_COLOR)
         categoryButton:SetTooltip(L["Show Combined View"])
     else
         categoryButton:SetTexture(CATEGORY_VIEW_ICON, {16, 16}, {"CENTER", 0, 0})
+        categoryButton:SetTextureColor(HEADER_ICON_COLOR)
         categoryButton:SetTooltip(L["Group Items by Category"])
     end
 end
@@ -460,6 +543,7 @@ local function LayoutControls(width)
     end
     categoryButton:Show()
     UpdateCategoryButtonState()
+    categoryButton:SetTextureColor(HEADER_ICON_COLOR)
     if B.config.categories then
         categoryButton:LockHighlight()
     else
@@ -469,6 +553,7 @@ local function LayoutControls(width)
     bagSlotsButton:ClearAllPoints()
     bagSlotsButton:SetPoint("RIGHT", categoryButton, "LEFT", -3, 0)
     bagSlotsButton:Show()
+    bagSlotsButton:SetTextureColor(HEADER_ICON_COLOR)
     if B.config.showBagSlots then
         bagSlotsButton:LockHighlight()
     else
@@ -545,22 +630,19 @@ local function InvalidateLayoutSnapshot()
 end
 
 local function ClearLayoutState()
-    if layoutEmptyRepresentative and layoutEmptyRepresentative.BagIndicator then
-        layoutEmptyRepresentative.BagIndicator:Hide()
-    end
+    ClearItemBagHighlights()
+    ResetEmptyStates()
     for index = 1, emptyButtonCount do
         emptyButtons[index] = nil
         emptyButtonBagIDs[index] = nil
         emptyButtonFamilies[index] = nil
+        emptyButtonKinds[index] = nil
     end
     emptyButtonCount = 0
     ClearLayoutEntries()
     InvalidateLayoutSnapshot()
     wipe(emptyCountsByBag)
     wipe(bagFamilies)
-    layoutEmptyRepresentative = nil
-    layoutEmptyEntryIndex = nil
-    layoutEmptyCount = 0
     layoutAddSlotsTarget = nil
     hoveredBagID = nil
 end
@@ -628,15 +710,19 @@ local function RenderLayout()
         SetShownIfChanged(object, true)
     end
 
-    if layoutEmptyRepresentative and layoutEmptyRepresentative:IsShown() then
-        emptyCountOverlay:ClearAllPoints()
-        emptyCountOverlay:SetAllPoints(layoutEmptyRepresentative)
-        emptyCountOverlay:SetFrameLevel(layoutEmptyRepresentative:GetFrameLevel() + 2)
-        emptyCountOverlay:Show()
-        UpdateAggregateEmptyState()
-    else
-        emptyCountOverlay:Hide()
+    for kind = EMPTY_KIND_BAG, EMPTY_KIND_REAGENT do
+        local state = emptyStates[kind]
+        local representative = state.representative
+        if state.overlay and representative and representative:IsShown() then
+            state.overlay:ClearAllPoints()
+            state.overlay:SetAllPoints(representative)
+            state.overlay:SetFrameLevel(representative:GetFrameLevel() + 3)
+            state.overlay:Show()
+        elseif state.overlay then
+            state.overlay:Hide()
+        end
     end
+    UpdateAggregateEmptyState()
 
     local addSlotsButton = combinedFrame.AddSlotsButton
     if addSlotsButton then
@@ -651,10 +737,22 @@ local function RenderLayout()
     end
 end
 
--- Keep one visual empty slot while retaining native drop validation: when
--- general storage is full, swap its backing button to a compatible bag family.
+local function GetEmptyStateForButton(button)
+    for kind = EMPTY_KIND_BAG, EMPTY_KIND_REAGENT do
+        local state = emptyStates[kind]
+        if state.representative == button then
+            return state, kind
+        end
+    end
+end
+
+-- Each aggregate tile stays backed by a real empty slot. The general tile may
+-- swap between bags 0-4 for native specialty-bag validation; the reagent tile
+-- always remains backed by bag 5 so normal items continue to be rejected.
 UpdateEmptyRepresentativeForCursor = function(button)
-    if button ~= layoutEmptyRepresentative or not layoutEmptyEntryIndex or not _G.CursorHasItem() then return end
+    local state, kind = GetEmptyStateForButton(button)
+    if not state or not state.entryIndex or not _G.CursorHasItem() then return end
+    if kind == EMPTY_KIND_REAGENT then return end
 
     local cursorItemLocation = _G.C_Cursor.GetCursorItem()
     if not cursorItemLocation then return end
@@ -663,45 +761,43 @@ UpdateEmptyRepresentativeForCursor = function(button)
     if not itemID then return end
 
     local itemFamily = _G.C_Item.GetItemFamily(itemID) or 0
-    local isCraftingReagent = select(17, _G.C_Item.GetItemInfo(itemID))
     local compatibleButton
     local compatiblePriority = math.huge
 
     for index = 1, emptyButtonCount do
-        local emptyButton = emptyButtons[index]
-        local bagID = emptyButtonBagIDs[index]
-        local bagFamily = emptyButtonFamilies[index]
-        local isStillEmpty = not _G.C_Container.GetContainerItemID(bagID, emptyButton:GetID())
-        local isCompatible
-        local priority
+        if emptyButtonKinds[index] == kind then
+            local emptyButton = emptyButtons[index]
+            local bagID = emptyButtonBagIDs[index]
+            local bagFamily = emptyButtonFamilies[index]
+            local isStillEmpty = not _G.C_Container.GetContainerItemID(bagID, emptyButton:GetID())
+            local isCompatible
+            local priority
 
-        if bagID == REAGENT_BAG_ID then
-            isCompatible = isCraftingReagent
-            priority = 4
-        elseif bagID == _G.Enum.BagIndex.Backpack then
-            isCompatible = true
-            priority = 1
-        elseif bagFamily == 0 then
-            isCompatible = true
-            priority = 2
-        elseif bagFamily > 0 and itemFamily > 0 then
-            isCompatible = band(bagFamily, itemFamily) ~= 0
-            priority = 3
-        end
+            if bagID == _G.Enum.BagIndex.Backpack then
+                isCompatible = true
+                priority = 1
+            elseif bagFamily == 0 then
+                isCompatible = true
+                priority = 2
+            elseif bagFamily > 0 and itemFamily > 0 then
+                isCompatible = band(bagFamily, itemFamily) ~= 0
+                priority = 3
+            end
 
-        if isStillEmpty and isCompatible and priority < compatiblePriority then
-            compatibleButton = emptyButton
-            compatiblePriority = priority
+            if isStillEmpty and isCompatible and priority < compatiblePriority then
+                compatibleButton = emptyButton
+                compatiblePriority = priority
+            end
         end
     end
 
-    if not compatibleButton or compatibleButton == layoutEmptyRepresentative then return end
+    if not compatibleButton or compatibleButton == state.representative then return end
 
-    local previousRepresentative = layoutEmptyRepresentative
+    local previousRepresentative = state.representative
     previousRepresentative._BFIBagLayoutEpoch = nil
     compatibleButton._BFIBagLayoutEpoch = layoutEpoch
-    layoutObjects[layoutEmptyEntryIndex] = compatibleButton
-    layoutEmptyRepresentative = compatibleButton
+    layoutObjects[state.entryIndex] = compatibleButton
+    state.representative = compatibleButton
 
     if previousRepresentative.BagIndicator then
         previousRepresentative.BagIndicator:Hide()
@@ -720,6 +816,8 @@ end
 local function ResetLayoutModel()
     layoutEpoch = layoutEpoch + 1
     layoutAddSlotsTarget = nil
+    ClearItemBagHighlights()
+    ResetEmptyStates()
     ResetCategoryGroups()
     ClearLayoutEntries()
     wipe(emptyCountsByBag)
@@ -728,16 +826,12 @@ local function ResetLayoutModel()
         emptyButtons[index] = nil
         emptyButtonBagIDs[index] = nil
         emptyButtonFamilies[index] = nil
+        emptyButtonKinds[index] = nil
     end
     emptyButtonCount = 0
 end
 
 local function BuildItemGroups(showCategories)
-    local emptyRepresentative
-    local emptyRepresentativePriority = math.huge
-    local emptyCount = 0
-    local normalBagLimit = inventoryConstants.NumBagSlots
-
     local flatGroup
     if not showCategories then
         flatGroup = AcquireCategoryGroup("all", "", 1)
@@ -767,43 +861,49 @@ local function BuildItemGroups(showCategories)
             end
             group.items[#group.items + 1] = itemButton
         else
-            emptyCount = emptyCount + 1
+            local kind = bagID == REAGENT_BAG_ID and EMPTY_KIND_REAGENT or EMPTY_KIND_BAG
+            local state = emptyStates[kind]
+            state.count = state.count + 1
             emptyCountsByBag[bagID] = (emptyCountsByBag[bagID] or 0) + 1
             local bagFamily = GetBagFamily(bagID)
             emptyButtonCount = emptyButtonCount + 1
             emptyButtons[emptyButtonCount] = itemButton
             emptyButtonBagIDs[emptyButtonCount] = bagID
             emptyButtonFamilies[emptyButtonCount] = bagFamily
+            emptyButtonKinds[emptyButtonCount] = kind
 
             local priority
-            if bagID == _G.Enum.BagIndex.Backpack then
+            if kind == EMPTY_KIND_REAGENT or bagID == _G.Enum.BagIndex.Backpack then
                 priority = 1
-            elseif bagID <= normalBagLimit then
-                priority = bagFamily == 0 and 2 or 3
             else
-                priority = 4
+                priority = bagFamily == 0 and 2 or 3
             end
 
-            if priority < emptyRepresentativePriority then
-                emptyRepresentative = itemButton
-                emptyRepresentativePriority = priority
+            if priority < (state.representativePriority or math.huge) then
+                state.representative = itemButton
+                state.representativePriority = priority
             end
         end
     end
 
-    if emptyRepresentative then
-        local group = flatGroup
-        if showCategories then
-            group = AcquireCategoryGroup("empty", _G.EMPTY or "Empty", 1000)
+    local emptyGroup
+    for kind = EMPTY_KIND_BAG, EMPTY_KIND_REAGENT do
+        local representative = emptyStates[kind].representative
+        if representative then
+            local group = flatGroup
+            if showCategories then
+                emptyGroup = emptyGroup or AcquireCategoryGroup("empty", _G.EMPTY or "Empty", 1000)
+                group = emptyGroup
+            end
+            group.items[#group.items + 1] = representative
         end
-        group.items[#group.items + 1] = emptyRepresentative
     end
 
     local groupCount = #categoryGroups
     if showCategories then
         sort(categoryGroups, CompareCategoryGroups)
     end
-    return emptyRepresentative, emptyCount, groupCount
+    return groupCount
 end
 
 local function GetGridWidth(columnCount, spacing)
@@ -917,17 +1017,7 @@ local function CalculateCategoryLayoutMetrics(
     return width, height
 end
 
-local function PrepareLayoutFrame(emptyRepresentative, emptyCount, width, height)
-    local previousEmptyRepresentative = layoutEmptyRepresentative
-    layoutEmptyRepresentative = emptyRepresentative
-    layoutEmptyEntryIndex = nil
-    layoutEmptyCount = emptyCount
-
-    if previousEmptyRepresentative
-        and previousEmptyRepresentative ~= emptyRepresentative
-        and previousEmptyRepresentative.BagIndicator then
-        previousEmptyRepresentative.BagIndicator:Hide()
-    end
+local function PrepareLayoutFrame(width, height)
     if hoveredBagID then
         combinedFrame:SetItemsMatchingBagHighlighted(hoveredBagID, true)
     end
@@ -935,7 +1025,17 @@ local function PrepareLayoutFrame(emptyRepresentative, emptyCount, width, height
     combinedFrame:SetSize(width, height)
 end
 
-local function BuildFlatLayoutEntries(columns, spacing, top, emptyRepresentative)
+local function RecordEmptyEntryIndex(itemButton, entryIndex)
+    for kind = EMPTY_KIND_BAG, EMPTY_KIND_REAGENT do
+        local state = emptyStates[kind]
+        if itemButton == state.representative then
+            state.entryIndex = entryIndex
+            return
+        end
+    end
+end
+
+local function BuildFlatLayoutEntries(columns, spacing, top)
     local group = categoryGroups[1]
     if not group then return end
 
@@ -950,13 +1050,11 @@ local function BuildFlatLayoutEntries(columns, spacing, top, emptyRepresentative
             HORIZONTAL_PADDING + (column * (ITEM_SIZE + spacing)),
             cursorY - (row * (ITEM_SIZE + spacing))
         )
-        if itemButton == emptyRepresentative then
-            layoutEmptyEntryIndex = entryIndex
-        end
+        RecordEmptyEntryIndex(itemButton, entryIndex)
     end
 end
 
-local function BuildCategoryLayoutEntries(spacing, top, groupCount, emptyRepresentative)
+local function BuildCategoryLayoutEntries(spacing, top, groupCount)
     for groupIndex = 1, groupCount do
         local group = categoryGroups[groupIndex]
         local groupX = HORIZONTAL_PADDING + group.layoutX
@@ -977,9 +1075,7 @@ local function BuildCategoryLayoutEntries(spacing, top, groupCount, emptyReprese
                 groupX + (column * (ITEM_SIZE + spacing)),
                 itemTop - (row * (ITEM_SIZE + spacing))
             )
-            if itemButton == emptyRepresentative then
-                layoutEmptyEntryIndex = entryIndex
-            end
+            RecordEmptyEntryIndex(itemButton, entryIndex)
         end
     end
 end
@@ -1005,7 +1101,7 @@ local function LayoutItemsInternal(force)
     local top = B.config.showBagSlots and BAG_TOP_WITH_SLOTS or BAG_TOP_WITHOUT_SLOTS
 
     ResetLayoutModel()
-    local emptyRepresentative, emptyCount, groupCount = BuildItemGroups(showCategories)
+    local groupCount = BuildItemGroups(showCategories)
     local width
     local height
 
@@ -1019,8 +1115,8 @@ local function LayoutItemsInternal(force)
             screenHeight,
             groupCount
         )
-        PrepareLayoutFrame(emptyRepresentative, emptyCount, width, height)
-        BuildCategoryLayoutEntries(spacing, top, groupCount, emptyRepresentative)
+        PrepareLayoutFrame(width, height)
+        BuildCategoryLayoutEntries(spacing, top, groupCount)
     else
         local itemCount = groupCount > 0 and #categoryGroups[1].items or 0
         local columns
@@ -1033,8 +1129,8 @@ local function LayoutItemsInternal(force)
             screenWidth,
             screenHeight
         )
-        PrepareLayoutFrame(emptyRepresentative, emptyCount, width, height)
-        BuildFlatLayoutEntries(columns, spacing, top, emptyRepresentative)
+        PrepareLayoutFrame(width, height)
+        BuildFlatLayoutEntries(columns, spacing, top)
     end
     FinalizeLayoutEntries(spacing, groupCount, showCategories)
 
@@ -1159,7 +1255,6 @@ local function OnCombinedFrameHide()
     ResetCategoryGroups()
     ClearLayoutState()
     HideUnusedHeaders(1)
-    emptyCountOverlay:Hide()
 
     _G.C_Timer.After(0, function()
         if IsEnabled() and not combinedFrame:IsShown() then
@@ -1217,6 +1312,33 @@ local function RestoreCombinedMenu()
     portraitAlpha = nil
 end
 
+local function CreateEmptyStateOverlays()
+    for kind = EMPTY_KIND_BAG, EMPTY_KIND_REAGENT do
+        local state = emptyStates[kind]
+        local overlay = _G.CreateFrame("Frame", nil, combinedFrame)
+        overlay:EnableMouse(false)
+        AF.SetSize(overlay, ITEM_SIZE, ITEM_SIZE)
+
+        local icon = overlay:CreateTexture(nil, "ARTWORK")
+        AF.SetSize(icon, 15, 15)
+        icon:SetPoint("TOPLEFT", 3, -3)
+        if kind == EMPTY_KIND_REAGENT then
+            icon:SetAtlas(REAGENT_SPACE_ICON)
+        else
+            icon:SetTexture(SHOW_BAGS_ICON)
+        end
+        icon:SetVertexColor(AF.GetColorRGB(HEADER_ICON_COLOR))
+
+        local text = AF.CreateFontString(overlay, nil, "white", "AF_FONT_OUTLINE")
+        text:SetPoint("BOTTOMRIGHT", -3, 3)
+
+        state.overlay = overlay
+        state.icon = icon
+        state.text = text
+        overlay:Hide()
+    end
+end
+
 local function StyleCombinedFrame()
     S.StyleTitledFrame(combinedFrame)
     combinedFrame:SetClampedToScreen(true)
@@ -1227,7 +1349,7 @@ local function StyleCombinedFrame()
     end
 
     S.StyleEditBox(_G.BagItemSearchBox, -3, -2, 3, 2)
-    S.StyleIconButton(_G.BagItemAutoSortButton, AF.GetIcon("Refresh"), 16, nil, "gray")
+    S.StyleIconButton(_G.BagItemAutoSortButton, AF.GetIcon("Refresh"), 16, HEADER_ICON_COLOR, "gray")
     AF.SetSize(_G.BagItemAutoSortButton, 24, 22)
 
     categoryButton = AF.CreateButton(combinedFrame, nil, "gray", 24, 22)
@@ -1240,7 +1362,8 @@ local function StyleCombinedFrame()
     end)
 
     bagSlotsButton = AF.CreateButton(combinedFrame, nil, "gray", 24, 22)
-    bagSlotsButton:SetTexture(BAG_BUTTON_ATLAS, {18, 18}, {"CENTER", 0, 0}, true)
+    bagSlotsButton:SetTexture(SHOW_BAGS_ICON, {16, 16}, {"CENTER", 0, 0})
+    bagSlotsButton:SetTextureColor(HEADER_ICON_COLOR)
     bagSlotsButton:SetTooltip(L["Show Bags"])
     bagSlotsButton:SetOnClick(function()
         B.config.showBagSlots = not B.config.showBagSlots
@@ -1248,12 +1371,7 @@ local function StyleCombinedFrame()
         AF.Fire("BFI_RefreshOptions", "bags")
     end)
 
-    emptyCountOverlay = _G.CreateFrame("Frame", nil, combinedFrame)
-    emptyCountOverlay:EnableMouse(false)
-    AF.SetSize(emptyCountOverlay, ITEM_SIZE, ITEM_SIZE)
-    emptyCountText = AF.CreateFontString(emptyCountOverlay, nil, "white", "AF_FONT_OUTLINE")
-    emptyCountText:SetPoint("CENTER")
-    emptyCountOverlay:Hide()
+    CreateEmptyStateOverlays()
 
     CreateBagButtons()
 
@@ -1363,12 +1481,12 @@ local function DisableModule()
     wipe(categoryCache)
     ResetCategoryGroups()
     ClearLayoutState()
+    RestoreItemBagIndicators()
     layoutScale = 1
     combinedFrame:SetScale(1)
 
     categoryButton:Hide()
     bagSlotsButton:Hide()
-    emptyCountOverlay:Hide()
     for _, button in ipairs(bagButtons) do
         button:Hide()
     end
