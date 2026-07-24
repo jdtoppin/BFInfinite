@@ -26,9 +26,6 @@ local settings = {
         "frameStrata",
         "tooltip"
     },
-    cooldowns = {
-
-    },
     assistant = {
         "assistedHighlight",
         "assistedAnimation",
@@ -121,51 +118,34 @@ builder["copy,paste,reset"] = function(parent)
     local reset = AF.CreateButton(pane, _G.RESET, "red_hover", 107, 20)
     AF.SetPoint(reset, "TOPLEFT", paste, "TOPRIGHT", 7, 0)
     reset:SetOnClick(function()
-        local isResetAll -- = IsShiftKeyDown()
-        local text = AF.WrapTextInColor(L["Reset to default settings?"], "BFI") .. "\n" .. (isResetAll and L["All Settings"] or pane.t.ownerName)
+        local text = AF.WrapTextInColor(L["Reset to default settings?"], "BFI") .. "\n" .. pane.t.ownerName
 
         local dialog = AF.GetDialog(BFIOptionsFrame_ActionBarsPanel, text, 250)
         dialog:SetPoint("TOP", pane, "BOTTOM")
         dialog:SetOnConfirm(function()
-            -- if isResetAll then
-            --     AB.Reset()
-            --     AF.Fire("BFI_UpdateModule", "actionBars")
-            -- else
-                if pane.t.id == "general" then
-                    AB.ResetGeneralAndShared()
-                    AF.Fire("BFI_UpdateModule", "actionBars")
-                elseif pane.t.id == "vehicle" then
-                    AB.ResetVehicle()
-                    AF.Fire("BFI_UpdateModule", "actionBars", "vehicle")
-                elseif pane.t.id == "extra" then
-                    AB.ResetExtra()
-                    AF.Fire("BFI_UpdateModule", "actionBars", "extra")
-                elseif pane.t.id == "assistant" then
-                    AB.ResetAssistant()
-                    AF.Fire("BFI_UpdateModule", "actionBars", "main")
-                elseif pane.t.id == "cooldowns" then
-                    -- TODO: AB.ResetCooldowns()
-                else
-                    AB.ResetBar(pane.t.id)
-                    AF.Fire("BFI_UpdateModule", "actionBars", pane.t.id)
-                end
-            -- end
+            if pane.t.id == "general" then
+                AB.ResetGeneralAndShared()
+                AF.Fire("BFI_UpdateModule", "actionBars")
+            elseif pane.t.id == "vehicle" then
+                AB.ResetVehicle()
+                AF.Fire("BFI_UpdateModule", "actionBars", "vehicle")
+            elseif pane.t.id == "extra" then
+                AB.ResetExtra()
+                AF.Fire("BFI_UpdateModule", "actionBars", "extra")
+            elseif pane.t.id == "assistant" then
+                AB.ResetAssistant()
+                AF.Fire("BFI_UpdateModule", "actionBars", "main")
+            else
+                AB.ResetBar(pane.t.id)
+                AF.Fire("BFI_UpdateModule", "actionBars", pane.t.id)
+            end
             AF.Fire("BFI_RefreshOptions", "actionBars")
         end)
     end)
 
-    -- local resetTooltips = {_G.RESET, L["Hold %s while clicking to reset all settings"]:format(AF.WrapTextInColor("Shift", "BFI"))}
-    -- reset._tooltipOwner = BFIOptionsFrame_ActionBarsPanel
-    -- reset:HookOnEnter(function()
-    --     if pane.t.id == "general" then
-    --         AF.ShowTooltip(reset, "TOPLEFT", 0, 2, resetTooltips)
-    --     end
-    -- end)
-    -- reset:HookOnLeave(AF.HideTooltip)
-
     function pane.Load(t)
         pane.t = t
-        copy:SetEnabled(t.id ~= "general" and t.id ~= "assistant" and t.id ~= "cooldowns")
+        copy:SetEnabled(t.id ~= "general" and t.id ~= "assistant")
         paste:SetEnabled(t.id ~= "general" and copiedSetting == t.setting)
     end
 
