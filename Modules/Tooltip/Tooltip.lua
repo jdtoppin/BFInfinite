@@ -13,6 +13,8 @@ local C_PlayerInfo_GetContentDifficultyCreatureForPlayer =
 local DISABLED_FONT_COLOR = _G.DISABLED_FONT_COLOR
 local GetDifficultyColor = _G.GetDifficultyColor
 local GetFactionColor = _G.GetFactionColor
+local GetGuildInfo = _G.GetGuildInfo
+local GREEN_FONT_COLOR = _G.GREEN_FONT_COLOR
 local IsAltKeyDown = _G.IsAltKeyDown
 local HIGHLIGHT_FONT_COLOR = _G.HIGHLIGHT_FONT_COLOR
 local InCombatLockdown = _G.InCombatLockdown
@@ -191,14 +193,21 @@ local function ApplyPlayerIdentityColors(tooltip, data, config)
 
     tooltip:GetLeftLine(1):SetTextColor(color.r, color.g, color.b)
 
+    -- Player guilds occupy the second native unit-tooltip line. GetGuildInfo
+    -- is used only to establish whether that line exists; its text remains
+    -- entirely under Blizzard's control. The literal mouseover token is valid
+    -- on both 12.0.7 and 12.1 (12.1 only rejects compound unit tokens).
+    if GetGuildInfo(MOUSEOVER_UNIT) then
+        tooltip:GetLeftLine(2):SetTextColor(GREEN_FONT_COLOR:GetRGB())
+    end
+
     local classLineIndex, factionLineIndex = GetPlayerIdentityLineIndices(data)
     if classLineIndex then
         tooltip:GetLeftLine(classLineIndex):SetTextColor(color.r, color.g, color.b)
     end
 
     -- UnitFactionGroup is documented as non-secret in both versions. Use
-    -- Blizzard's standard PLAYER_FACTION_COLORS mapping and leave the native
-    -- guild line untouched so its established green remains intact.
+    -- Blizzard's standard PLAYER_FACTION_COLORS mapping.
     local factionColor = GetFactionColor(UnitFactionGroup(MOUSEOVER_UNIT))
     if factionColor and factionLineIndex then
         tooltip:GetLeftLine(factionLineIndex):SetTextColor(
