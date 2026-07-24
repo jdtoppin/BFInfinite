@@ -31,7 +31,10 @@ local HORIZONTAL_PADDING = 12
 local FOOTER_PADDING = 12
 local MIN_FRAME_WIDTH = 320
 local SCREEN_EDGE_MARGIN = 16
-local BACKPACK_ICON = 134400
+local CATEGORY_VIEW_ICON = AF.GetIcon("Layout")
+local COMBINED_VIEW_ICON = AF.GetIcon("Menu4")
+local BAG_BUTTON_ATLAS = "bag-main"
+local BACKPACK_ICON = "Interface\\Icons\\INV_Misc_Bag_08"
 local EMPTY_BAG_ICON = 133633
 
 local equipmentSlotAliases = {
@@ -72,6 +75,7 @@ local REAGENT_BAG_ID = inventoryConstants.NumBagSlots + inventoryConstants.NumRe
 local combinedFrame
 local categoryButton
 local bagSlotsButton
+local categoryButtonShowsCombinedView
 local emptyCountOverlay
 local emptyCountText
 local initialized
@@ -369,6 +373,20 @@ local function LayoutBagButtons(spacing)
     end
 end
 
+local function UpdateCategoryButtonState()
+    local showCombinedView = B.config.categories
+    if categoryButtonShowsCombinedView == showCombinedView then return end
+    categoryButtonShowsCombinedView = showCombinedView
+
+    if showCombinedView then
+        categoryButton:SetTexture(COMBINED_VIEW_ICON, {16, 16}, {"CENTER", 0, 0})
+        categoryButton:SetTooltip(L["Show Combined View"])
+    else
+        categoryButton:SetTexture(CATEGORY_VIEW_ICON, {16, 16}, {"CENTER", 0, 0})
+        categoryButton:SetTooltip(L["Group Items by Category"])
+    end
+end
+
 local function LayoutControls(width)
     local searchBox = _G.BagItemSearchBox
     local sortButton = _G.BagItemAutoSortButton
@@ -385,6 +403,7 @@ local function LayoutControls(width)
         categoryButton:SetPoint("TOPRIGHT", combinedFrame, "TOPRIGHT", -8, -27)
     end
     categoryButton:Show()
+    UpdateCategoryButtonState()
     if B.config.categories then
         categoryButton:LockHighlight()
     else
@@ -1152,20 +1171,21 @@ local function StyleCombinedFrame()
     end
 
     S.StyleEditBox(_G.BagItemSearchBox, -3, -2, 3, 2)
-    S.CreateBackdrop(_G.BagItemAutoSortButton, true, -1)
+    S.StyleIconButton(_G.BagItemAutoSortButton, AF.GetIcon("Refresh"), 16, nil, "gray")
+    AF.SetSize(_G.BagItemAutoSortButton, 24, 22)
 
     categoryButton = AF.CreateButton(combinedFrame, nil, "gray", 24, 22)
-    categoryButton:SetTexture(AF.GetIcon("Layout"), {16, 16}, {"CENTER", 0, 0})
-    categoryButton:SetTooltip(L["Group Items by Category"])
+    UpdateCategoryButtonState()
     categoryButton:SetOnClick(function()
         B.config.categories = not B.config.categories
+        AF.HideTooltip()
         LayoutItems(true)
         AF.Fire("BFI_RefreshOptions", "bags")
     end)
 
     bagSlotsButton = AF.CreateButton(combinedFrame, nil, "gray", 24, 22)
-    bagSlotsButton:SetTexture(BACKPACK_ICON, {16, 16}, {"CENTER", 0, 0})
-    bagSlotsButton:SetTooltip(L["Show Bag Slots"])
+    bagSlotsButton:SetTexture(BAG_BUTTON_ATLAS, {18, 18}, {"CENTER", 0, 0}, true)
+    bagSlotsButton:SetTooltip(L["Show Bags"])
     bagSlotsButton:SetOnClick(function()
         B.config.showBagSlots = not B.config.showBagSlots
         LayoutItems(true)

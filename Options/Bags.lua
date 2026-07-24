@@ -37,7 +37,7 @@ local function CreateAppearancePane()
         end
     end)
 
-    local showBagSlots = AF.CreateCheckButton(appearancePane, L["Show Bag Slots"])
+    local showBagSlots = AF.CreateCheckButton(appearancePane, L["Show Bags"])
     AF.SetPoint(showBagSlots, "TOPLEFT", enabled, "BOTTOMLEFT", 0, -18)
     showBagSlots:SetOnCheck(function(checked)
         B.config.showBagSlots = checked
