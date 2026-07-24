@@ -2,6 +2,7 @@
 local BFI = select(2, ...)
 ---@class Style
 local S = BFI.modules.Style
+local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
@@ -819,7 +820,153 @@ end
 ---------------------------------------------------------------------
 -- titled frame
 ---------------------------------------------------------------------
-function S.StyleTitledFrame(frame)
+local movableFrames = setmetatable({}, {__mode = "k"})
+local movableHooksRegistered
+
+local function GetSavedFramePosition(frame)
+    local name = frame:GetName()
+    if not name then return frame._BFIMovablePosition end
+
+    local config = _G.BFIConfig
+    local general = type(config) == "table" and config.general
+    local positions = type(general) == "table" and general.blizzardFramePositions
+    return type(positions) == "table" and positions[name]
+end
+
+local function SetSavedFramePosition(frame, position)
+    local name = frame:GetName()
+    if not name then
+        frame._BFIMovablePosition = position
+        return
+    end
+
+    local config = _G.BFIConfig
+    if type(config) ~= "table" then return end
+    if type(config.general) ~= "table" then config.general = {} end
+    if type(config.general.blizzardFramePositions) ~= "table" then
+        config.general.blizzardFramePositions = {}
+    end
+    config.general.blizzardFramePositions[name] = position
+end
+
+local function ArePublicNumbers(...)
+    for i = 1, select("#", ...) do
+        local value = select(i, ...)
+        if not F.isValueNonSecret(value) or type(value) ~= "number" then
+            return false
+        end
+    end
+    return true
+end
+
+local function SaveFramePosition(frame)
+    local x, y = frame:GetCenter()
+    local frameScale = frame:GetEffectiveScale()
+    local parentScale = _G.UIParent:GetEffectiveScale()
+    local parentWidth = _G.UIParent:GetWidth()
+    local parentHeight = _G.UIParent:GetHeight()
+
+    if not ArePublicNumbers(x, y, frameScale, parentScale, parentWidth, parentHeight) then return end
+    if frameScale == 0 or parentScale == 0 or parentWidth == 0 or parentHeight == 0 then return end
+
+    local scaleRatio = frameScale / parentScale
+    SetSavedFramePosition(frame, {
+        x = (x * scaleRatio) / parentWidth,
+        y = (y * scaleRatio) / parentHeight,
+    })
+end
+
+local function RestoreFramePosition(frame)
+    if frame._BFIMoving or not frame:IsShown() then return end
+    if frame:IsProtected() and InCombatLockdown() then return end
+    if _G.GetUIPanel and _G.GetUIPanel("fullscreen") == frame then return end
+
+    local position = GetSavedFramePosition(frame)
+    if type(position) ~= "table" or not ArePublicNumbers(position.x, position.y) then return end
+
+    local frameScale = frame:GetEffectiveScale()
+    local parentScale = _G.UIParent:GetEffectiveScale()
+    local parentWidth = _G.UIParent:GetWidth()
+    local parentHeight = _G.UIParent:GetHeight()
+
+    if not ArePublicNumbers(frameScale, parentScale, parentWidth, parentHeight) then return end
+    if frameScale == 0 or parentScale == 0 or parentWidth == 0 or parentHeight == 0 then return end
+
+    local scaleRatio = frameScale / parentScale
+    frame:ClearAllPoints()
+    frame:SetPoint(
+        "CENTER",
+        _G.UIParent,
+        "BOTTOMLEFT",
+        position.x * parentWidth / scaleRatio,
+        position.y * parentHeight / scaleRatio
+    )
+end
+
+local function RestoreShownMovableFrames()
+    for frame in next, movableFrames do
+        RestoreFramePosition(frame)
+    end
+end
+
+local function RegisterMovableHooks()
+    if movableHooksRegistered then return end
+    movableHooksRegistered = true
+
+    -- UIParentPanelManager 12.1.0.68914 unconditionally reanchors its panel
+    -- slots. Restore only BFI positions after Blizzard finishes its layout.
+    hooksecurefunc("UpdateUIPanelPositions", RestoreShownMovableFrames)
+    hooksecurefunc("UpdateScaleForFitForOpenPanels", RestoreShownMovableFrames)
+    hooksecurefunc("StaticPopup_SetUpPosition", RestoreShownMovableFrames)
+    S:RegisterEvent("PLAYER_REGEN_ENABLED", RestoreShownMovableFrames)
+end
+
+function S.MakeMovable(frame, dragHandle)
+    assert(frame, "MakeMovable: frame is nil")
+
+    if frame._BFIMovable or frame:IsForbidden() then return end
+    if frame:IsProtected() and InCombatLockdown() then
+        if not frame._BFIMovablePending then
+            frame._BFIMovablePending = true
+            S:RegisterEventOnce("PLAYER_REGEN_ENABLED", function()
+                frame._BFIMovablePending = nil
+                S.MakeMovable(frame, dragHandle)
+            end)
+        end
+        return
+    end
+    frame._BFIMovable = true
+
+    dragHandle = dragHandle or frame
+    movableFrames[frame] = true
+    RegisterMovableHooks()
+
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
+    dragHandle:EnableMouse(true)
+    dragHandle:SetMouseClickEnabled(true)
+    dragHandle:RegisterForDrag("LeftButton")
+
+    -- The handle is BFI-owned, so these scripts do not replace Blizzard logic.
+    dragHandle:SetScript("OnDragStart", function()
+        if frame:IsProtected() and InCombatLockdown() then return end
+        frame._BFIMoving = true
+        frame:StartMoving(true)
+    end)
+    dragHandle:SetScript("OnDragStop", function()
+        if not frame._BFIMoving then return end
+        frame:StopMovingOrSizing()
+        frame._BFIMoving = nil
+        frame:SetUserPlaced(false)
+        SaveFramePosition(frame)
+        RestoreFramePosition(frame)
+    end)
+
+    frame:HookScript("OnShow", RestoreFramePosition)
+    RestoreFramePosition(frame)
+end
+
+function S.StyleTitledFrame(frame, movableTarget)
     assert(frame, "StyleTitledFrame: frame is nil")
 
     if frame._BFIStyled then return end
@@ -898,6 +1045,13 @@ function S.StyleTitledFrame(frame)
         AF.SetFrameLevel(minimizeButton, 1, frame.BFIHeader)
         minimizeButton:ClearAllPoints()
         AF.SetPoint(minimizeButton, "TOPRIGHT", closeButton, "TOPLEFT", 1, 0)
+    end
+
+    -- BFI owns the drag handle and preserves Blizzard's panel-management
+    -- behavior while restoring the user's saved screen-relative position.
+    -- Pass false for shells whose native positioning must remain authoritative.
+    if movableTarget ~= false then
+        S.MakeMovable(movableTarget or frame, frame.BFIHeader)
     end
 end
 
