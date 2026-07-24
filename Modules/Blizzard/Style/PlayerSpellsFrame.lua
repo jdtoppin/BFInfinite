@@ -7,6 +7,81 @@ local AF = _G.AbstractFramework
 local spellFrame
 
 ---------------------------------------------------------------------
+-- icons
+---------------------------------------------------------------------
+local TALENT_BORDER_COLORS = {
+    [TalentButtonUtil.BaseVisualState.RefundInvalid] = "red",
+    [TalentButtonUtil.BaseVisualState.DisplayError] = "red",
+    [TalentButtonUtil.BaseVisualState.Gated] = "disabled",
+    [TalentButtonUtil.BaseVisualState.Selectable] = "lime",
+    [TalentButtonUtil.BaseVisualState.Maxed] = "BFI",
+    [TalentButtonUtil.BaseVisualState.Locked] = "disabled",
+    [TalentButtonUtil.BaseVisualState.Disabled] = "disabled",
+}
+
+local function TalentTexture_SetShown(texture, shown)
+    if shown then
+        AF.TextureHide(texture)
+    end
+end
+
+local function HideTalentTexture(texture)
+    if not texture or texture._BFIHidden then return end
+
+    texture._BFIHidden = true
+    texture:Hide()
+    hooksecurefunc(texture, "Show", AF.TextureHide)
+    hooksecurefunc(texture, "SetShown", TalentTexture_SetShown)
+end
+
+local function UpdateTalentIconBorder(button, visualState)
+    local backdrop = button.Icon.BFIBackdrop
+    if not backdrop then return end
+
+    backdrop:SetBackdropBorderColor(AF.GetColorRGB(TALENT_BORDER_COLORS[visualState] or "border"))
+end
+
+local function StyleTalentSplitIcon(button)
+    if not button.Icon2 then return end
+
+    S.StyleIcon(button.Icon2)
+
+    local iconSplitMask = button.IconSplitMask
+    iconSplitMask:SetTexture(AF.GetPlainTexture())
+    AF.ClearPoints(iconSplitMask)
+    AF.SetPoint(iconSplitMask, "TOPLEFT", button.Icon)
+    AF.SetPoint(iconSplitMask, "BOTTOM", button.Icon)
+
+    local icon2Mask = button.Icon2Mask
+    icon2Mask:SetTexture(AF.GetPlainTexture())
+    icon2Mask:SetRotation(0)
+    AF.ClearPoints(icon2Mask)
+    AF.SetPoint(icon2Mask, "TOP", button.Icon2)
+    AF.SetPoint(icon2Mask, "BOTTOMRIGHT", button.Icon2)
+end
+
+local function StyleTalentButton(button)
+    if button._BFIIconStyled then return end
+    button._BFIIconStyled = true
+
+    S.StyleSquareIcon(button.Icon, button.IconMask, true)
+    S.StyleSquareIcon(button.DisabledOverlay, button.DisabledOverlayMask)
+    StyleTalentSplitIcon(button)
+
+    HideTalentTexture(button.Shadow)
+    HideTalentTexture(button.StateBorder)
+    HideTalentTexture(button.StateBorderHover)
+    HideTalentTexture(button.BorderSheen)
+
+    hooksecurefunc(button, "UpdateStateBorder", UpdateTalentIconBorder)
+    UpdateTalentIconBorder(button, button:GetVisualState())
+end
+
+local function StyleSpellBookItem(item)
+    S.StyleSpellItemButton(item.Button)
+end
+
+---------------------------------------------------------------------
 -- SpecFrame
 ---------------------------------------------------------------------
 local function StyleSpecFrame()
@@ -39,6 +114,15 @@ local function StyleTalentsFrame()
     AF.SetPoint(searchPreview, "TOPLEFT", talentsFrame.SearchBox, "BOTTOMLEFT", -4, 1)
     AF.SetPoint(searchPreview, "TOPRIGHT", talentsFrame.SearchBox, "BOTTOMRIGHT", 0, 1)
     S.StyleSpellSearchPreviewContainer(searchPreview)
+
+    -- Retail 12.0.7.68887 (Gethe wow-ui-source 4383ced): talent nodes are pooled and announce each acquisition.
+    talentsFrame:RegisterCallback(TalentFrameBaseMixin.Event.TalentButtonAcquired, function(_, button)
+        StyleTalentButton(button)
+    end, talentsFrame)
+
+    for button in talentsFrame:EnumerateAllTalentButtons() do
+        StyleTalentButton(button)
+    end
 end
 
 ---------------------------------------------------------------------
@@ -83,6 +167,10 @@ local function StyleSpellBookFrame()
     local button = assistedFrame.Button
     S.StyleSpellItemButton(button)
     button.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
+
+    -- Retail 12.0.7.68887 (Gethe wow-ui-source 4383ced): UpdateVisuals reapplies the active/passive icon masks.
+    hooksecurefunc(SpellBookItemMixin, "UpdateVisuals", StyleSpellBookItem)
+    spellBookFrame:ForEachDisplayedSpell(StyleSpellBookItem)
 
     -- page button
     local prevButton = spellBookFrame.PagedSpellsFrame.PagingControls.PrevPageButton

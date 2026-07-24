@@ -186,6 +186,23 @@ function S.StyleIcon(icon, createBackdrop)
     end
 end
 
+local function SquareIconMask_SetShown(mask, shown)
+    if shown then
+        AF.TextureHide(mask)
+    end
+end
+
+function S.StyleSquareIcon(icon, mask, createBackdrop)
+    S.StyleIcon(icon, createBackdrop)
+
+    if mask and not mask._BFIHidden then
+        mask._BFIHidden = true
+        mask:Hide()
+        hooksecurefunc(mask, "Show", AF.TextureHide)
+        hooksecurefunc(mask, "SetShown", SquareIconMask_SetShown)
+    end
+end
+
 function S.StyleIconFrame(frame, backdropOnIcon)
     if frame.Border then
         frame.Border:Hide()
@@ -240,8 +257,12 @@ local iconQuality = {
 
 local function IconBorder_SetAtlas(border, atlas)
     if border.BFIBackdrop then
-        local r, g, b = AF.GetItemQualityColor(iconQuality[atlas])
-        border.BFIBackdrop:SetBackdropBorderColor(r, g, b)
+        local quality = iconQuality[atlas]
+        if quality then
+            border.BFIBackdrop:SetBackdropBorderColor(AF.GetItemQualityColor(quality))
+        else
+            IconBorder_ResetColor(border)
+        end
     end
 end
 
@@ -481,7 +502,7 @@ function S.StyleSpellItemButton(button)
 
     local iconTexture = name and _G[name .. "IconTexture"] or button.IconTexture or button.Icon
     if iconTexture then
-        S.StyleIcon(iconTexture)
+        S.StyleSquareIcon(iconTexture, button.IconMask)
         -- AF.SetOnePixelInside(iconTexture, button.BFIBackdrop)
     end
 
