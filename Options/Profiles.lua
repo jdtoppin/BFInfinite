@@ -891,6 +891,7 @@ local function CreateModuleCopyFrame()
         {text = L["Unit Frames"], id = "unitFrames"},
         {text = L["Nameplates"], id = "nameplates"},
         {text = L["Action Bars"], id = "actionBars"},
+        {text = L["Cooldown Manager"], id = "cooldownManager"},
         {text = L["Buffs & Debuffs"], id = "buffsDebuffs"},
         {text = L["Tooltip"], id = "tooltip"},
         {text = L["UI Widgets"], id = "uiWidgets"},

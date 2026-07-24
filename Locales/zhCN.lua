@@ -342,6 +342,35 @@ L["Visibility"] = "可见性"
 L["Paging"] = "翻页"
 
 ---------------------------------------------------------------------
+-- cooldown manager
+---------------------------------------------------------------------
+L["Cooldown Manager"] = "冷却管理器"
+L["Skin Cooldown Manager Icons"] = "美化冷却管理器图标"
+L["BFI changes presentation only. Blizzard still controls tracked abilities, cooldown data, and alerts."] = "BFI 仅调整外观；追踪项目、冷却数据和提醒仍由暴雪管理。"
+L["Cooldown Text"] = "冷却文本"
+L["Bar Text"] = "条形文本"
+L["Essential Cooldowns"] = "核心冷却"
+L["Utility Cooldowns"] = "功能冷却"
+L["Buff Icons"] = "增益图标"
+L["Buff Bars"] = "增益条"
+L["Center Incomplete Lines"] = "居中未满的行列"
+L["Left / Down"] = "向左 / 向下"
+L["Right / Up"] = "向右 / 向上"
+L["In Combat"] = "战斗中"
+L["Icon and Name"] = "图标和名称"
+L["Icon Only"] = "仅图标"
+L["Name Only"] = "仅名称"
+L["Growth Direction"] = "增长方向"
+L["Icons Per Line"] = "每行图标数"
+L["Icon Scale"] = "图标缩放"
+L["Spacing"] = "间距"
+L["Show Cooldown Timers"] = "显示冷却计时"
+L["Show Tooltips"] = "显示鼠标提示"
+L["Hide When Inactive"] = "未激活时隐藏"
+L["Bar Content"] = "条形内容"
+L["Bar Width Scale"] = "条形宽度缩放"
+
+---------------------------------------------------------------------
 -- buffs debuffs
 ---------------------------------------------------------------------
 L["Buffs & Debuffs"] = "增益与减益"
