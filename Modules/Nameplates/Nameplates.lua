@@ -180,13 +180,20 @@ local function CreateNameplate(nameplate)
     np:SetSize(120, 13)
     np:SetFrameLevel(nameplate:GetFrameLevel() + 100)
 
+    -- Keep the protected click carrier independent from every region that
+    -- consumes secret unit data. Its geometry is derived from configuration,
+    -- so targeting never has to measure a restricted name or status bar.
+    np.hitRegion = CreateFrame("Frame", nil, nameplate)
+    np.hitRegion:EnableMouse(false)
+    np.hitRegion:Hide()
+
     np.base = nameplate
     np.indicators = {}
     nameplate.bfi = np
     NP.created[nameplate] = np
 
     local function ReassertCustomHitTest()
-        if np.customActive then
+        if np.customActive and not np.applyingCustomHitTest then
             ApplyCustomHitTest(np)
         end
     end
@@ -237,6 +244,8 @@ local function DetachNameplate(np, clearUnit)
     end
 
     RestoreNativeHitTest(np)
+    np.hitRegion:Hide()
+    np.hitRegionConfigured = nil
     np:Hide()
 
     if np.unitFrame then
@@ -285,10 +294,41 @@ local function GetAnchorFactor(point, negative, positive)
     return 0
 end
 
-local function GetHealthBarBounds(healthBar)
-    local width = healthBar.width or 120
-    local height = healthBar.height or 13
-    local position = healthBar.position or {
+local function MakeBounds(width, height, centerX, centerY)
+    local halfWidth = width / 2
+    local halfHeight = height / 2
+    return {
+        left = centerX - halfWidth,
+        right = centerX + halfWidth,
+        bottom = centerY - halfHeight,
+        top = centerY + halfHeight,
+    }
+end
+
+local function UnionBounds(bounds, addition)
+    if not bounds then
+        return {
+            left = addition.left,
+            right = addition.right,
+            bottom = addition.bottom,
+            top = addition.top,
+        }
+    end
+
+    bounds.left = math.min(bounds.left, addition.left)
+    bounds.right = math.max(bounds.right, addition.right)
+    bounds.bottom = math.min(bounds.bottom, addition.bottom)
+    bounds.top = math.max(bounds.top, addition.top)
+    return bounds
+end
+
+local function GetAnchoredBounds(
+    width,
+    height,
+    position,
+    relativeBounds
+)
+    position = position or {
         "CENTER",
         "CENTER",
         0,
@@ -298,17 +338,159 @@ local function GetHealthBarBounds(healthBar)
     local relativePoint = position[2] or "CENTER"
     local offsetX = position[3] or 0
     local offsetY = position[4] or 0
-    local centerX = (
-        GetAnchorFactor(relativePoint, "LEFT", "RIGHT")
-        - GetAnchorFactor(point, "LEFT", "RIGHT")
-    ) * width + offsetX
-    local centerY = (
-        GetAnchorFactor(relativePoint, "BOTTOM", "TOP")
-        - GetAnchorFactor(point, "BOTTOM", "TOP")
-    ) * height + offsetY
+    local relativeWidth =
+        relativeBounds.right - relativeBounds.left
+    local relativeHeight =
+        relativeBounds.top - relativeBounds.bottom
+    local relativeCenterX =
+        (relativeBounds.left + relativeBounds.right) / 2
+    local relativeCenterY =
+        (relativeBounds.bottom + relativeBounds.top) / 2
+    local centerX = relativeCenterX
+        + GetAnchorFactor(
+            relativePoint,
+            "LEFT",
+            "RIGHT"
+        ) * relativeWidth
+        - GetAnchorFactor(point, "LEFT", "RIGHT") * width
+        + offsetX
+    local centerY = relativeCenterY
+        + GetAnchorFactor(
+            relativePoint,
+            "BOTTOM",
+            "TOP"
+        ) * relativeHeight
+        - GetAnchorFactor(point, "BOTTOM", "TOP") * height
+        + offsetY
 
-    return width + 2 * math.abs(centerX),
-        height + 2 * math.abs(centerY)
+    return MakeBounds(width, height, centerX, centerY)
+end
+
+local function GetNameTextHeight(config)
+    local nameText = config.nameText or {}
+    local font = nameText.font or {}
+    local height = font[2] or 12
+    local targetIndicator = config.targetIndicator
+
+    if targetIndicator and targetIndicator.enabled then
+        for _, stateKey in ipairs({"target", "focus"}) do
+            local state = targetIndicator[stateKey]
+            local emphasis = state and state.nameTextEmphasis
+            if emphasis and emphasis.enabled then
+                height = math.max(
+                    height,
+                    math.max(
+                        1,
+                        (font[2] or 12)
+                            + (emphasis.sizeDelta or 0)
+                    )
+                )
+            end
+        end
+    end
+
+    -- Include a narrow allowance for outlines and shadows without measuring
+    -- the secret FontString.
+    return height + 2
+end
+
+local function GetCustomHitBounds(config)
+    local healthBar = config.healthBar or {}
+    local rootWidth = healthBar.width or 120
+    local rootHeight = healthBar.height or 13
+    local rootBounds = MakeBounds(
+        rootWidth,
+        rootHeight,
+        0,
+        0
+    )
+    local healthBounds = GetAnchoredBounds(
+        healthBar.width or rootWidth,
+        healthBar.height or rootHeight,
+        healthBar.position,
+        rootBounds
+    )
+    local bounds = false
+
+    if healthBar.enabled then
+        bounds = UnionBounds(bounds, healthBounds)
+    end
+
+    local nameText = config.nameText or {}
+    local placement = nameText.placement or "outside"
+    local nameVisible = nameText.enabled
+        and (
+            placement == "inside"
+            or nameText.parent ~= "healthBar"
+            or healthBar.enabled
+        )
+    if nameVisible then
+        local position = nameText.position
+        local anchorBounds = rootBounds
+        local parentWidth = rootWidth
+        local length = nameText.length
+
+        if placement == "inside" then
+            position = {"CENTER", "CENTER", 0, 0}
+            anchorBounds = healthBounds
+            parentWidth = healthBar.enabled
+                and (healthBar.width or rootWidth)
+                or rootWidth
+            length = 0.9
+        else
+            if nameText.anchorTo == "healthBar" then
+                anchorBounds = healthBounds
+            end
+            if nameText.parent == "healthBar" then
+                parentWidth = healthBar.width or rootWidth
+            end
+        end
+
+        -- Auto-width names can contain secret identity text, so their glyph
+        -- width cannot be inspected. A root-width envelope is deterministic
+        -- and bounded; fixed-length names retain their configured precision.
+        local nameWidth = rootWidth
+        if length and length > 0 then
+            nameWidth = parentWidth * length
+        end
+
+        bounds = UnionBounds(
+            bounds,
+            GetAnchoredBounds(
+                nameWidth,
+                GetNameTextHeight(config),
+                position,
+                anchorBounds
+            )
+        )
+    end
+
+    return bounds
+end
+
+local function ConfigureHitRegion(np, config)
+    local bounds = GetCustomHitBounds(config)
+    if not bounds then
+        np.hitRegion:Hide()
+        np.hitRegionConfigured = nil
+        return false
+    end
+
+    np.hitRegion:ClearAllPoints()
+    np.hitRegion:SetSize(
+        math.max(1, bounds.right - bounds.left),
+        math.max(1, bounds.top - bounds.bottom)
+    )
+    np.hitRegion:SetPoint(
+        "BOTTOMLEFT",
+        np.base,
+        "CENTER",
+        bounds.left,
+        bounds.bottom
+    )
+    np.hitRegion:Show()
+    np.hitRegionConfigured = true
+    return true
 end
 
 local function GetRequiredNamePlateSize(config)
@@ -320,11 +502,23 @@ local function GetRequiredNamePlateSize(config)
         "hostile_player",
     }) do
         local plateConfig = config[configKey]
-        if plateConfig and plateConfig.healthBar then
-            local healthWidth, healthHeight =
-                GetHealthBarBounds(plateConfig.healthBar)
-            width = math.max(width, healthWidth)
-            height = math.max(height, healthHeight)
+        local bounds = plateConfig
+            and GetCustomHitBounds(plateConfig)
+        if bounds then
+            width = math.max(
+                width,
+                2 * math.max(
+                    math.abs(bounds.left),
+                    math.abs(bounds.right)
+                )
+            )
+            height = math.max(
+                height,
+                2 * math.max(
+                    math.abs(bounds.bottom),
+                    math.abs(bounds.top)
+                )
+            )
         end
     end
     return width, height
@@ -457,21 +651,25 @@ local function CanChangeHitTestPoints(nameplate)
 end
 
 ApplyCustomHitTest = function(np)
-    local healthBar = NP.GetIndicator(np, "healthBar", true)
-    local clickRegion = healthBar
-        or NP.GetIndicator(np, "nameText", true)
-    if not clickRegion
+    if not np.hitRegion
+        or not np.hitRegionConfigured
+        or np.applyingCustomHitTest
         or not CanChangeHitTestPoints(np.base)
+        or type(np.base.ClearAllHitTestPoints) ~= "function"
         or type(np.base.SetAllHitTestPoints) ~= "function"
     then
         return false
     end
 
-    -- Retail 12.0.7 and 12.1 let a nameplate bind its protected click target
-    -- directly to an untainted region on the tick a unit is assigned. Using
-    -- the custom bar itself gives exact targeting without reading or measuring
-    -- a restricted nameplate region.
-    np.base:SetAllHitTestPoints(clickRegion)
+    -- Retail 12.0.7.68887 (4383ced) and 12.1.0.68824 (fa38386) allow this
+    -- protected update on the unit-assignment tick. Clear Blizzard's existing
+    -- name/health anchors first, then bind the click target to a plain,
+    -- numerically configured carrier. The guard keeps our secure post-hooks
+    -- from recursively re-entering this sequence.
+    np.applyingCustomHitTest = true
+    np.base:ClearAllHitTestPoints()
+    np.base:SetAllHitTestPoints(np.hitRegion)
+    np.applyingCustomHitTest = nil
     np.customHitTest = true
     return true
 end
@@ -551,6 +749,7 @@ local function AttachNameplate(np, unit)
     np:SetFrameLevel(np.base:GetFrameLevel() + 100)
     ApplyRootGeometry(np, config)
     NP.SetupIndicators(np, config)
+    ConfigureHitRegion(np, config)
 
     np:Show()
     NP.OnNameplateShow(np)
@@ -559,7 +758,7 @@ local function AttachNameplate(np, unit)
 
     -- Keep Blizzard's unit-frame controller alive. AF only suppresses its
     -- visual presentation; Blizzard retains protected click ownership while
-    -- its hit-test points follow BFI's visible health bar.
+    -- its hit-test points follow BFI's configured health/name envelope.
     AF.SetNativeNamePlateVisualSuppressed(np.unitFrame, true)
 end
 
