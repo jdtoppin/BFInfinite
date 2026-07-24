@@ -19,6 +19,7 @@
     <Script file="Style\Misc.lua"/>
     <Script file="Style\PlayerSpellsFrame.lua"/>
     <Script file="Style\ProfessionsBookFrame.lua"/>
+    <Script file="Style\ProfessionsCustomerOrdersFrame.lua"/>
     <Script file="Style\GroupFinder.lua"/>
     <Script file="Style\ChallengesUI.lua"/>
     <Script file="Style\StaticPopups.lua"/>
