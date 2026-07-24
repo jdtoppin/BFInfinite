@@ -11,7 +11,6 @@ local GetCVar = GetCVar
 local SetCVar = SetCVar
 local GetPhysicalScreenSize = GetPhysicalScreenSize
 local InCombatLockdown = InCombatLockdown
-local GetNumSpecializationsForClassID = C_SpecializationInfo.GetNumSpecializationsForClassID
 local eventHandler = AF.CreateSimpleEventHandler("ADDON_LOADED")
 
 ---------------------------------------------------------------------
@@ -264,6 +263,8 @@ local function InitAndBackupCVars()
         "assistedCombatHighlight",
         "lockActionBars",
         "AutoPushSpellToActionBar",
+        -- bags
+        "combinedBags",
         -- nameplates
         "nameplateOccludedAlphaMult",
         "nameplateShowOnlyNames",

@@ -30,6 +30,15 @@ L["CVars will not be changed"] = "CVar 不会被更改"
 L["BFI has been updated to version %s\nClick here to view the changelog"] = "BFI 已更新至版本 %s\n点击此处查看更新日志"
 
 L["Unavailable while Cell is enabled"] = "当 Cell 启用时该功能不可用"
+L["Bags"] = "背包"
+L["Bags Performance Tip"] = "BFI 使用暴雪的背包物品池和背包事件。合并背包关闭时不会在后台扫描。禁用后请重载界面以恢复暴雪原始外观。"
+L["Bag Slots"] = "背包栏"
+L["Categories"] = "分类"
+L["Columns"] = "列数"
+L["Preferred Columns"] = "首选列数"
+L["Group Items by Category"] = "按类别分组物品"
+L["Show Bag Slots"] = "显示背包栏"
+L["Slot Spacing"] = "格子间距"
 
 ---------------------------------------------------------------------
 -- general

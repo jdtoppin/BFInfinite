@@ -20,6 +20,7 @@ BFI.name = "BFInfinite"
 ---@field Misc Misc
 ---@field Style Style
 ---@field ActionBars ActionBars
+---@field Bags Bags
 ---@field BuffsDebuffs BuffsDebuffs
 ---@field Chat Chat
 ---@field DataBars DataBars
@@ -59,6 +60,9 @@ AF.AddEventHandler(BFI.modules.BuffsDebuffs)
 
 BFI.modules.ActionBars = {["bars"] = {}}
 AF.AddEventHandler(BFI.modules.ActionBars)
+
+BFI.modules.Bags = {}
+AF.AddEventHandler(BFI.modules.Bags)
 
 BFI.modules.UnitFrames = {}
 AF.AddEventHandler(BFI.modules.UnitFrames)
