@@ -147,6 +147,7 @@ local snapshotItemIDs = {}
 local snapshotExtended = {}
 local blizzardBagBarWasShown
 local hasBlizzardBagBarState
+local cleanupTooltipState = {}
 
 -- API and lifecycle evidence: Retail 12.0.7
 -- Blizzard_APIDocumentationGenerated/ContainerDocumentation.lua and
@@ -1366,6 +1367,45 @@ local function StyleBagSearchBox()
     searchBox.Instructions:SetPoint("BOTTOMRIGHT", -22, 0)
 end
 
+local function SetCleanupTooltipEnabled(enabled)
+    local button = _G.BagItemAutoSortButton
+    if not button then return end
+
+    if not cleanupTooltipState.captured then
+        cleanupTooltipState.captured = true
+        cleanupTooltipState.onEnter = button:GetScript("OnEnter")
+        cleanupTooltipState.onLeave = button:GetScript("OnLeave")
+    end
+
+    if not enabled then
+        AF.ClearTooltip(button)
+        AF.HideTooltip()
+        button:SetScript("OnEnter", cleanupTooltipState.onEnter)
+        button:SetScript("OnLeave", cleanupTooltipState.onLeave)
+        return
+    end
+
+    -- Replace Blizzard's GameTooltip scripts with BFI's two-line info style.
+    button:SetScript("OnEnter", nil)
+    button:SetScript("OnLeave", nil)
+    button.accentColor = "BFI"
+    AF.SetTooltip(
+        button,
+        "TOPLEFT",
+        0,
+        2,
+        _G.BAG_CLEANUP_BAGS,
+        _G.BAG_CLEANUP_BAGS_DESCRIPTION
+    )
+end
+
+local function StyleCleanupButton()
+    local button = _G.BagItemAutoSortButton
+    S.StyleIconButton(button, AF.GetIcon("Refresh"), 16, HEADER_ICON_COLOR, "gray")
+    AF.SetSize(button, 24, 22)
+    SetCleanupTooltipEnabled(true)
+end
+
 local function StyleCombinedFrame()
     S.StyleTitledFrame(combinedFrame)
     combinedFrame:SetClampedToScreen(true)
@@ -1380,8 +1420,7 @@ local function StyleCombinedFrame()
     end
 
     StyleBagSearchBox()
-    S.StyleIconButton(_G.BagItemAutoSortButton, AF.GetIcon("Refresh"), 16, HEADER_ICON_COLOR, "gray")
-    AF.SetSize(_G.BagItemAutoSortButton, 24, 22)
+    StyleCleanupButton()
 
     categoryButton = AF.CreateButton(combinedFrame, nil, "gray", 24, 22)
     UpdateCategoryButtonState()
@@ -1471,6 +1510,7 @@ local function EnableModule()
     UpdateBlizzardBagBarVisibility()
 
     if not Initialize() then return end
+    SetCleanupTooltipEnabled(true)
 
     if not hasPreviousCombinedBags then
         previousCombinedBags = GetCVarBool("combinedBags")
@@ -1506,6 +1546,7 @@ local function DisableModule()
     RestoreBlizzardBagBar()
     B:UnregisterAllEvents()
     if not initialized then return end
+    SetCleanupTooltipEnabled(false)
 
     RestoreReagentFrame()
     wipe(reagentItemButtons)
