@@ -147,6 +147,8 @@ end
 -- unit visibility
 ---------------------------------------------------------------------
 local unitTooltipActive
+local unitTooltipRefreshQueued
+local refreshingUnitTooltip
 
 local function GetPlayerIdentityLineIndices(data)
     if not data.lines then return end
@@ -220,6 +222,7 @@ local function ApplyUnitLevelDifficultyColor(tooltip, lineData)
         or not config
         or not config.enabled
         or not config.levelDifficultyColor
+        or not refreshingUnitTooltip
         or not UnitExists(MOUSEOVER_UNIT)
     then
         return
@@ -248,11 +251,27 @@ local function OnUnitTooltipPreCall(tooltip)
 end
 
 local function RefreshActiveUnitTooltip()
-    if unitTooltipActive and GameTooltip:IsShown() and not GameTooltip:IsForbidden() then
+    if unitTooltipActive
+        and UnitExists(MOUSEOVER_UNIT)
+        and GameTooltip:IsShown()
+        and not GameTooltip:IsForbidden()
+    then
         -- SetUnit is a native secure delegate intended to rebuild standard
         -- tooltips for addon callers without exposing the displayed unit.
+        refreshingUnitTooltip = true
         GameTooltip:SetUnit(MOUSEOVER_UNIT)
+        refreshingUnitTooltip = nil
     end
+end
+
+local function QueueInitialUnitTooltipRefresh()
+    if refreshingUnitTooltip or unitTooltipRefreshQueued then return end
+
+    unitTooltipRefreshQueued = true
+    C_Timer.After(0, function()
+        unitTooltipRefreshQueued = nil
+        RefreshActiveUnitTooltip()
+    end)
 end
 
 ---------------------------------------------------------------------
@@ -398,6 +417,16 @@ local function OnUnitTooltipPostCall(tooltip, data)
         or not config.enabled
         or (config.hideUnitTooltipsInCombat and InCombatLockdown())
     then
+        return
+    end
+
+    -- Native unit tooltip processing reaches its post-call before Show().
+    -- On the first world mouseover, the literal mouseover token may not yet
+    -- describe the rendered unit. Leave that pass untouched and rebuild once
+    -- on the next frame. The synchronous refresh guard prevents recursion and
+    -- ensures identity colors are only derived from the settled token.
+    if not refreshingUnitTooltip then
+        QueueInitialUnitTooltipRefresh()
         return
     end
 
