@@ -7,6 +7,9 @@ local BD = BFI.modules.BuffsDebuffs
 local AF = _G.AbstractFramework
 
 local GetUnitAuraInstanceIDs = C_UnitAuras.GetUnitAuraInstanceIDs
+local GetWeaponEnchantInfo = GetWeaponEnchantInfo
+local mainHandSlot = GetInventorySlotInfo("MainHandSlot")
+local secondaryHandSlot = GetInventorySlotInfo("SecondaryHandSlot")
 
 ---------------------------------------------------------------------
 -- header
@@ -14,7 +17,10 @@ local GetUnitAuraInstanceIDs = C_UnitAuras.GetUnitAuraInstanceIDs
 local function CreateHeader(name, moverName, filter)
     local header = CreateFrame("Frame", name, AF.UIParent, "SecureAuraHeaderTemplate")
     header:SetAttribute("template", "BFIAuraButtonTemplate")
-    header:SetAttribute("includeWeapons", 1)
+    if filter == "HELPFUL" then
+        header:SetAttribute("includeWeapons", 1)
+        header:SetAttribute("weaponTemplate", "BFITemporaryEnchantButtonTemplate")
+    end
     header:SetAttribute("filter", filter)
     header.filter = filter
 
@@ -103,7 +109,7 @@ function BD.InitAuraButton(button)
     button.header = button:GetParent()
     button.filter = button.header.filter
 
-    AF.InitAura(button)
+    AF.InitAura(button, nil, true)
     AF.SetOnePixelInside(button.icon, button)
     button:SetFallbackIcon(button.filter == "HELPFUL" and 135953 or 136071)
     button:EnableDispelColor(button.filter == "HARMFUL")
@@ -121,6 +127,62 @@ function BD.InitAuraButton(button)
     button:SetScript("OnAttributeChanged", Button_OnAttributeChanged)
     -- button:SetScript("OnUpdate", Button_OnUpdate)
     button:SetScript("OnSizeChanged", AF.ReCalcTexCoordForAura)
+end
+
+local function GetTemporaryEnchantInfo(inventorySlot)
+    local hasMainHandEnchant, mainHandExpiration, mainHandCharges,
+        _, hasSecondaryHandEnchant, secondaryHandExpiration, secondaryHandCharges = GetWeaponEnchantInfo()
+
+    if inventorySlot == mainHandSlot then
+        return hasMainHandEnchant, mainHandExpiration, mainHandCharges
+    elseif inventorySlot == secondaryHandSlot then
+        return hasSecondaryHandEnchant, secondaryHandExpiration, secondaryHandCharges
+    end
+end
+
+local function RefreshTemporaryEnchant(button)
+    local inventorySlot = button:GetAttribute("target-slot")
+    local hasEnchant, remainingTimeMs, applications = GetTemporaryEnchantInfo(inventorySlot)
+    if hasEnchant and remainingTimeMs then
+        button:SetTemporaryEnchant("player", inventorySlot, remainingTimeMs, applications or 0)
+        if GameTooltip:IsOwned(button) then
+            button:ShowTooltip()
+        end
+    else
+        if GameTooltip:IsOwned(button) then
+            button:HideTooltip()
+        end
+        button:ClearAura()
+    end
+end
+
+local function TemporaryEnchant_OnAttributeChanged(button, name)
+    if name == "target-slot" then
+        RefreshTemporaryEnchant(button)
+    end
+end
+
+function BD.InitTemporaryEnchantButton(button)
+    button.header = button:GetParent()
+
+    AF.InitAura(button, nil, true)
+    AF.SetOnePixelInside(button.icon, button)
+    button:SetFallbackIcon(134400)
+
+    button.LoadConfig = Button_LoadConfig
+    AF.AddToPixelUpdater_Auto(button, Button_UpdatePixels)
+    AF.ApplyDefaultBackdropColors(button)
+
+    button:EnableTooltip({
+        enabled = true,
+        anchorTo = "self_adaptive",
+    })
+
+    button:SetScript("OnAttributeChanged", TemporaryEnchant_OnAttributeChanged)
+    button:SetScript("OnEvent", RefreshTemporaryEnchant)
+    button:SetScript("OnSizeChanged", AF.ReCalcTexCoordForAura)
+    button:RegisterEvent("WEAPON_ENCHANT_CHANGED")
+    button:RegisterEvent("WEAPON_SLOT_CHANGED")
 end
 
 ---------------------------------------------------------------------

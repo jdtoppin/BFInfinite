@@ -1,13 +1,22 @@
 <Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:schemaLocation="http://www.blizzard.com/wow/ui/ https://raw.githubusercontent.com/Gethe/wow-ui-source/live/Interface/AddOns/Blizzard_SharedXML/UI.xsd">
-    <Button name="BFIAuraButtonTemplate" inherits="SecureActionButtonTemplate,BackdropTemplate" registerForClicks="RightButtonDown" virtual="true">
+    <Button name="BFIAuraButtonBaseTemplate" inherits="SecureActionButtonTemplate,BackdropTemplate" registerForClicks="RightButtonDown" hidden="true" virtual="true">
         <Attributes>
             <!-- Matches Retail 12.0.7's SecureAuraButtonTemplate contract. -->
             <Attribute name="type2" value="cancelaura"/>
         </Attributes>
+    </Button>
+    <Button name="BFIAuraButtonTemplate" inherits="BFIAuraButtonBaseTemplate" virtual="true">
         <Scripts>
             <OnLoad>
                 BFInfinite.modules.BuffsDebuffs.InitAuraButton(self)
+            </OnLoad>
+        </Scripts>
+    </Button>
+    <Button name="BFITemporaryEnchantButtonTemplate" inherits="BFIAuraButtonBaseTemplate" virtual="true">
+        <Scripts>
+            <OnLoad>
+                BFInfinite.modules.BuffsDebuffs.InitTemporaryEnchantButton(self)
             </OnLoad>
         </Scripts>
     </Button>
