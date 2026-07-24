@@ -1256,6 +1256,7 @@ local function OnCombinedFrameShow()
 end
 
 local function OnCombinedFrameHide()
+    B.Cleanup:Cancel(false)
     B:UnregisterEvent("BAG_UPDATE")
     B:UnregisterEvent("ITEM_LOCK_CHANGED")
     B:UnregisterEvent("DISPLAY_SIZE_CHANGED")
@@ -1399,6 +1400,7 @@ local function StyleCleanupButton()
     S.StyleIconButton(button, AF.GetIcon("Refresh"), 16, HEADER_ICON_COLOR, "gray")
     AF.SetSize(button, 24, 22)
     SetupCleanupTooltip()
+    B.Cleanup:Install(button)
 end
 
 local function StyleCombinedFrame()
@@ -1506,6 +1508,7 @@ local function EnableModule()
 
     if not Initialize() then return end
     SetupCleanupTooltip()
+    B.Cleanup:Install(_G.BagItemAutoSortButton)
 
     if not hasPreviousCombinedBags then
         previousCombinedBags = GetCVarBool("combinedBags")
@@ -1539,6 +1542,7 @@ end
 local function DisableModule()
     moduleEnabled = nil
     RestoreBlizzardBagBar()
+    B.Cleanup:Restore()
     B:UnregisterAllEvents()
     if not initialized then return end
     AF.HideTooltip()
@@ -1594,6 +1598,7 @@ end
 
 function B:BAG_UPDATE(_, bagID)
     if bagID == REAGENT_BAG_ID then
+        if B.Cleanup:IsActive() then return end
         QueueRefresh(false)
     end
 end
