@@ -45,11 +45,13 @@ end
 local function StyleCommunitiesTab(tab)
     if not tab then return end
 
-    S.StyleSideTab(tab, 32, 32)
+    -- Match the World Map rail's padded 35x50 footprint. The layout below
+    -- still anchors each visible tab directly to the previous one.
+    S.StyleSideTab(tab)
 
     -- Communities tabs sit directly against the frame edge, where a button
-    -- outline is partially obscured. Keep the World Map selected background,
-    -- but place the white hover directly on the semantic icon.
+    -- outline is partially obscured. Keep the World Map selected background
+    -- and hover treatment without restoring that outline.
     tab.BFIBackdrop:SetBackdropBorderColor(0, 0, 0, 0)
 
     local icon = tab.Icon
@@ -57,20 +59,6 @@ local function StyleCommunitiesTab(tab)
         if not tab._BFICommunitiesTabStyled then
             tab._BFICommunitiesTabStyled = true
             S.StyleIcon(icon)
-
-            -- These icons fill nearly the entire button, hiding the selected
-            -- backdrop. Tint the icon face while checked so the active state
-            -- reads like the World Map tabs without restoring an outline.
-            local selected = tab:CreateTexture(nil, "ARTWORK", nil, 1)
-            selected:SetColorTexture(AF.GetColorRGB("BFI", 0.45))
-            selected:SetAllPoints(icon)
-            tab:SetCheckedTexture(selected)
-
-            local highlight = tab:GetHighlightTexture()
-            if highlight then
-                AF.ClearPoints(highlight)
-                highlight:SetAllPoints(icon)
-            end
         end
 
         -- The tabs are initially hidden and Blizzard fills iconTexture during
