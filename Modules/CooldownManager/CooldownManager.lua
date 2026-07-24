@@ -1,5 +1,6 @@
 ---@type BFI
 local BFI = select(2, ...)
+local L = BFI.L
 ---@class CooldownManager
 local CM = BFI.modules.CooldownManager
 ---@type Style
@@ -25,6 +26,9 @@ local sort = table.sort
 local viewerDefinitions = {
     essential = {
         globalName = "EssentialCooldownViewer",
+        holderName = "BFI_CooldownManagerEssentialHolder",
+        moverName = L["Essential Cooldowns"],
+        defaultPosition = {"BOTTOM", 0, 310},
         itemWidth = 50,
         itemHeight = 50,
         nativePaddingOffset = 4,
@@ -32,6 +36,9 @@ local viewerDefinitions = {
     },
     utility = {
         globalName = "UtilityCooldownViewer",
+        holderName = "BFI_CooldownManagerUtilityHolder",
+        moverName = L["Utility Cooldowns"],
+        defaultPosition = {"BOTTOM", 0, 240},
         itemWidth = 30,
         itemHeight = 30,
         nativePaddingOffset = 4,
@@ -39,6 +46,9 @@ local viewerDefinitions = {
     },
     buffIcon = {
         globalName = "BuffIconCooldownViewer",
+        holderName = "BFI_CooldownManagerBuffIconHolder",
+        moverName = L["Buff Icons"],
+        defaultPosition = {"BOTTOM", 0, 370},
         itemWidth = 40,
         itemHeight = 40,
         nativePaddingOffset = 4,
@@ -46,6 +56,9 @@ local viewerDefinitions = {
     },
     buffBar = {
         globalName = "BuffBarCooldownViewer",
+        holderName = "BFI_CooldownManagerBuffBarHolder",
+        moverName = L["Buff Bars"],
+        defaultPosition = {"BOTTOM", 420, 430},
         itemWidth = 220,
         itemHeight = 30,
         nativePaddingOffset = 2,
@@ -78,12 +91,19 @@ local barContentValues = {
 
 local FONT_NAME = "BFI_CooldownManagerCountdownFont"
 local countdownFont = CreateFont(FONT_NAME)
-local QUEUE_LAYOUT = 1
-local QUEUE_SETTINGS = 2
+local QUEUE_ANCHOR = 1
+local QUEUE_LAYOUT = 2
+local QUEUE_SETTINGS = 3
 local pendingViewers = {}
 local deferredViewers = {}
+local viewerStates = {}
 local flushScheduled
 local applying
+local QueueViewer
+local SyncHolderSize
+local ApplyViewerWithHolder
+local ReleaseViewerHolder
+local PrepareViewerPositionCaptures
 
 local function ApplyFont(fontString, config)
     if not fontString or not config then return end
@@ -228,11 +248,7 @@ end
 local function OnItemShownStateUpdated(item)
     local viewer = item:GetViewerFrame()
     if viewer and not applying then
-        pendingViewers[viewer] = max(pendingViewers[viewer] or 0, QUEUE_LAYOUT)
-        if not flushScheduled then
-            flushScheduled = true
-            C_Timer.After(0, CM.FlushPendingViewers)
-        end
+        QueueViewer(viewer, QUEUE_LAYOUT)
     end
 end
 
@@ -249,6 +265,7 @@ local function StyleAndCenterViewer(viewer, definition, config)
         end
     end
     CenterVisibleItems(viewer, definition, config, items)
+    SyncHolderSize(viewer)
 end
 
 local function ApplyViewerSettings(viewer, definition, config)
@@ -285,9 +302,8 @@ end
 
 local function DeferViewer(viewer, mode)
     deferredViewers[viewer] = max(deferredViewers[viewer] or 0, mode)
-    if not CM:IsEventRegistered("PLAYER_REGEN_ENABLED") then
-        CM:RegisterEvent("PLAYER_REGEN_ENABLED", CM.RetryDeferredViewers)
-    end
+    CM:RegisterEvent("PLAYER_REGEN_ENABLED", CM.RetryDeferredViewers)
+    CM:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED", CM.RetryDeferredViewers)
 end
 
 function CM.FlushPendingViewers()
@@ -295,28 +311,50 @@ function CM.FlushPendingViewers()
     local current = pendingViewers
     pendingViewers = {}
 
-    local config = CM.config
-    if not config or not config.enabled then return end
-
     applying = true
+    if not PrepareViewerPositionCaptures(current) then
+        for viewer, mode in next, current do
+            pendingViewers[viewer] = max(pendingViewers[viewer] or 0, mode)
+        end
+        applying = false
+        return
+    end
+
     for viewer, mode in next, current do
-        local definition = viewer._BFICooldownManagerDefinition
-        local viewerConfig = definition and config.viewers[viewer._BFICooldownManagerKey]
-        if definition and viewerConfig then
+        local state = viewerStates[viewer]
+        if state then
+            local config = CM.config
+            local viewerConfig = config and config.viewers and config.viewers[state.key]
+            local shouldAttach = config and config.enabled and viewerConfig
+            if not shouldAttach and state.holder then
+                state.holder.enabled = false
+                if state.holder.mover:IsShown() then
+                    state.holder.mover:Hide()
+                end
+            end
+
             if not CanChangeGeometry(viewer) then
                 DeferViewer(viewer, mode)
-            elseif mode == QUEUE_SETTINGS then
-                ApplyViewerSettings(viewer, definition, viewerConfig)
+            elseif shouldAttach then
+                ApplyViewerWithHolder(state, viewerConfig, mode)
             else
-                StyleAndCenterViewer(viewer, definition, viewerConfig)
+                ReleaseViewerHolder(state)
             end
         end
     end
     applying = false
 end
 
-function CM.RetryDeferredViewers()
+function CM.RetryDeferredViewers(_, event, _, restrictionState)
+    if event == "ADDON_RESTRICTION_STATE_CHANGED"
+        and restrictionState ~= Enum.AddOnRestrictionState.Inactive
+    then
+        return
+    end
+
     CM:UnregisterEvent("PLAYER_REGEN_ENABLED", CM.RetryDeferredViewers)
+    CM:UnregisterEvent("ADDON_RESTRICTION_STATE_CHANGED", CM.RetryDeferredViewers)
+
     for viewer, mode in next, deferredViewers do
         pendingViewers[viewer] = max(pendingViewers[viewer] or 0, mode)
     end
@@ -328,11 +366,397 @@ function CM.RetryDeferredViewers()
     end
 end
 
-local function QueueViewer(viewer, mode)
+QueueViewer = function(viewer, mode)
     pendingViewers[viewer] = max(pendingViewers[viewer] or 0, mode)
     if not flushScheduled then
         flushScheduled = true
         C_Timer.After(0, CM.FlushPendingViewers)
+    end
+end
+
+---------------------------------------------------------------------
+-- BFI edit mode
+---------------------------------------------------------------------
+local function IsBlizzardEditModeActive()
+    local editMode = _G.EditModeManagerFrame
+    if not editMode then return false end
+    if type(editMode.IsEditModeActive) == "function" then
+        return editMode:IsEditModeActive()
+    end
+    return editMode:IsShown()
+end
+
+local function IsViewerAttached(state)
+    local viewer = state.viewer
+    if not state.holder or viewer:GetParent() ~= _G.UIParent or viewer:GetNumPoints() ~= 1 then
+        return false
+    end
+
+    local point, relativeTo, relativePoint = viewer:GetPoint(1)
+    return point == "CENTER" and relativeTo == state.holder and relativePoint == "CENTER"
+end
+
+SyncHolderSize = function(viewer)
+    local state = viewerStates[viewer]
+    local holder = state and state.holder
+    if not holder then return end
+
+    local width, height = viewer:GetSize()
+    local viewerScale = viewer:GetEffectiveScale()
+    local holderScale = holder:GetEffectiveScale()
+    if not IsValueNonSecret(width)
+        or not IsValueNonSecret(height)
+        or not IsValueNonSecret(viewerScale)
+        or not IsValueNonSecret(holderScale)
+        or type(width) ~= "number"
+        or type(height) ~= "number"
+        or type(viewerScale) ~= "number"
+        or type(holderScale) ~= "number"
+        or holderScale <= 0
+    then
+        return
+    end
+
+    -- The native viewers remain parented to UIParent while BFI movers live
+    -- under AF.UIParent, whose independent scale must be accounted for.
+    local scaleRatio = viewerScale / holderScale
+    holder:SetSize(max(1, width * scaleRatio), max(1, height * scaleRatio))
+end
+
+local function OnMoverVisibilityChanged(state)
+    if not applying then
+        QueueViewer(state.viewer, QUEUE_SETTINGS)
+    end
+end
+
+local function EnsureHolder(state)
+    if state.holder then return state.holder end
+
+    local holder = CreateFrame("Frame", state.definition.holderName, AF.UIParent)
+    holder:SetSize(1, 1)
+    holder.enabled = false
+    holder:Show()
+
+    state.holder = holder
+    AF.CreateMover(holder, "BFI: " .. L["Cooldown Manager"], state.definition.moverName)
+    holder.mover:HookScript("OnShow", function()
+        OnMoverVisibilityChanged(state)
+    end)
+    holder.mover:HookScript("OnHide", function()
+        OnMoverVisibilityChanged(state)
+    end)
+
+    return holder
+end
+
+local function UpdateViewerPreview(state)
+    local viewer = state.viewer
+    local holder = state.holder
+    local previewWanted = holder
+        and holder.enabled
+        and holder.mover:IsShown()
+        and not IsBlizzardEditModeActive()
+
+    if previewWanted then
+        if not viewer:IsEditing() then
+            state.previewForced = true
+            viewer:SetIsEditing(true)
+        end
+    elseif state.previewForced then
+        if not IsBlizzardEditModeActive() and viewer:IsEditing() then
+            viewer:SetIsEditing(false)
+        end
+        state.previewForced = nil
+    end
+end
+
+local function RestoreNativeAnchor(state)
+    if not state.attached and not IsViewerAttached(state) then
+        return true
+    end
+
+    local viewer = state.viewer
+    if type(viewer.ApplySystemAnchor) ~= "function"
+        or (type(viewer.IsInitialized) == "function" and not viewer:IsInitialized())
+    then
+        return false
+    end
+
+    state.attached = false
+    state.reconciling = true
+    state.restoring = true
+    -- ApplySystemAnchor receives no secret values. pcall only guarantees that
+    -- our reconciliation guards are cleared if Blizzard's geometry call fails.
+    local success, errorMessage = pcall(viewer.ApplySystemAnchor, viewer)
+    state.restoring = nil
+    state.reconciling = nil
+    if not success then
+        state.attached = IsViewerAttached(state)
+        if not state.restoreErrorReported then
+            state.restoreErrorReported = true
+            geterrorhandler()(errorMessage)
+        end
+        return false
+    end
+
+    -- Default managed viewers are ignored while hidden. Treat a native
+    -- restore as incomplete if Blizzard left our holder anchor in place.
+    if IsViewerAttached(state) then
+        state.attached = true
+        return false
+    end
+
+    state.restoreErrorReported = nil
+    return true
+end
+
+local function AttachViewer(state)
+    if IsViewerAttached(state) then
+        state.attached = true
+        return
+    end
+
+    local viewer = state.viewer
+    local holder = state.holder
+    state.reconciling = true
+
+    if type(viewer.BreakFromFrameManager) == "function" then
+        viewer:BreakFromFrameManager()
+    end
+    if viewer:GetParent() ~= _G.UIParent then
+        viewer:SetParent(_G.UIParent)
+    end
+
+    -- Bypass Blizzard Edit Mode's tracking overrides. Its saved layout remains
+    -- untouched and can be restored when BFI releases the viewer.
+    if type(viewer.ClearFrameSnap) == "function" then
+        viewer:ClearFrameSnap()
+    end
+    local clearAllPoints = viewer.ClearAllPointsBase or viewer.ClearAllPoints
+    local setPoint = viewer.SetPointBase or viewer.SetPoint
+    clearAllPoints(viewer)
+    setPoint(viewer, "CENTER", holder, "CENTER", 0, 0)
+
+    state.attached = true
+    state.reconciling = nil
+end
+
+local function NeedsPositionCapture(config)
+    return config.captureNativePosition
+        or type(config.position) ~= "table"
+        or not next(config.position)
+end
+
+local function IsViewerInitialized(viewer)
+    return type(viewer.IsInitialized) ~= "function" or viewer:IsInitialized()
+end
+
+local function CaptureViewerPosition(state, config)
+    local viewer = state.viewer
+    local holder = state.holder
+    local centerX, centerY = viewer:GetCenter()
+
+    local position
+    if IsValueNonSecret(centerX)
+        and IsValueNonSecret(centerY)
+        and type(centerX) == "number"
+        and type(centerY) == "number"
+    then
+        AF.ClearPoints(holder)
+        AF.SetPoint(holder, "CENTER", viewer, "CENTER")
+        local holderX, holderY = holder:GetCenter()
+        local parentX, parentY = AF.UIParent:GetCenter()
+        if IsValueNonSecret(holderX)
+            and IsValueNonSecret(holderY)
+            and IsValueNonSecret(parentX)
+            and IsValueNonSecret(parentY)
+            and type(holderX) == "number"
+            and type(holderY) == "number"
+            and type(parentX) == "number"
+            and type(parentY) == "number"
+        then
+            -- Store a center-relative position directly so AF's optional
+            -- mover anchor lock cannot reinterpret this temporary anchor.
+            position = {
+                "CENTER",
+                AF.RoundToDecimal(holderX - parentX, 1),
+                AF.RoundToDecimal(holderY - parentY, 1),
+            }
+        end
+    end
+    if not position then
+        position = AF.Copy(state.definition.defaultPosition)
+    end
+
+    config.position = position
+    config.captureNativePosition = nil
+    return position
+end
+
+local function StopPositionCapturePreviews(captures)
+    for _, capture in next, captures do
+        if capture.editingForced then
+            capture.editingForced = nil
+            local viewer = capture[1].viewer
+            if not IsBlizzardEditModeActive() and viewer:IsEditing() then
+                viewer:SetIsEditing(false)
+            end
+        end
+    end
+end
+
+PrepareViewerPositionCaptures = function(current)
+    local config = CM.config
+    if not config or not config.enabled or not config.viewers then return true end
+
+    local captures = {}
+    for viewer, state in next, viewerStates do
+        local viewerConfig = config.viewers[state.key]
+        if viewerConfig and NeedsPositionCapture(viewerConfig) then
+            local holder = EnsureHolder(state)
+            holder.enabled = false
+            if holder.mover:IsShown() then
+                holder.mover:Hide()
+            end
+
+            captures[#captures + 1] = {state, viewerConfig}
+        end
+    end
+
+    -- Validate the complete capture set before changing any viewer state.
+    for _, capture in next, captures do
+        local viewer = capture[1].viewer
+        if not CanChangeGeometry(viewer) then
+            DeferViewer(viewer, QUEUE_SETTINGS)
+            return false
+        end
+        if not IsViewerInitialized(viewer) then
+            return false
+        end
+    end
+
+    -- Hidden default-managed viewers are skipped by Blizzard's frame manager.
+    -- Show only those viewers temporarily so ApplySystemAnchor can restore
+    -- their native managed position before it is measured.
+    for _, capture in next, captures do
+        local state = capture[1]
+        local viewer = state.viewer
+        UpdateViewerPreview(state)
+
+        local isShown = viewer:IsShown()
+        if not IsValueNonSecret(isShown) then
+            StopPositionCapturePreviews(captures)
+            DeferViewer(viewer, QUEUE_SETTINGS)
+            return false
+        end
+        if not isShown and not viewer:IsEditing() then
+            capture.editingForced = true
+            viewer:SetIsEditing(true)
+        end
+    end
+
+    -- Restore every native anchor before taking any measurements; removing
+    -- one managed viewer can synchronously reflow the remaining viewers.
+    for _, capture in next, captures do
+        if not RestoreNativeAnchor(capture[1]) then
+            StopPositionCapturePreviews(captures)
+            DeferViewer(capture[1].viewer, QUEUE_SETTINGS)
+            return false
+        end
+    end
+
+    -- Snapshot every native position before detaching any managed viewer.
+    for _, capture in next, captures do
+        CaptureViewerPosition(capture[1], capture[2])
+    end
+    StopPositionCapturePreviews(captures)
+
+    for _, capture in next, captures do
+        local viewer = capture[1].viewer
+        current[viewer] = max(current[viewer] or 0, QUEUE_SETTINGS)
+    end
+    return true
+end
+
+local function BindHolderPosition(state, position)
+    if state.position == position then return end
+
+    state.position = position
+    AF.UpdateMoverSave(state.holder, position)
+    AF.LoadPosition(state.holder, position, AF.UIParent)
+end
+
+ApplyViewerWithHolder = function(state, config, mode)
+    local viewer = state.viewer
+    local holder = EnsureHolder(state)
+    holder:Show()
+
+    local capturePosition = NeedsPositionCapture(config)
+    if capturePosition then
+        holder.enabled = false
+        if holder.mover:IsShown() then
+            holder.mover:Hide()
+        end
+        UpdateViewerPreview(state)
+
+        -- Legacy profiles have no BFI position. Wait until Blizzard has
+        -- applied the active native layout, then inherit that exact location.
+        if not IsViewerInitialized(viewer) then return end
+        if not RestoreNativeAnchor(state) then
+            DeferViewer(viewer, mode)
+            return
+        end
+    end
+
+    local position = capturePosition and CaptureViewerPosition(state, config) or config.position
+    if not position then return end
+    BindHolderPosition(state, position)
+    AttachViewer(state)
+    holder.enabled = true
+    UpdateViewerPreview(state)
+
+    if mode == QUEUE_SETTINGS then
+        ApplyViewerSettings(viewer, state.definition, config)
+    elseif mode == QUEUE_LAYOUT then
+        StyleAndCenterViewer(viewer, state.definition, config)
+    end
+
+    SyncHolderSize(viewer)
+end
+
+ReleaseViewerHolder = function(state)
+    local holder = state.holder
+    if not holder then return end
+
+    holder.enabled = false
+    UpdateViewerPreview(state)
+    if holder.mover:IsShown() then
+        holder.mover:Hide()
+    end
+
+    if not RestoreNativeAnchor(state) then
+        DeferViewer(state.viewer, QUEUE_ANCHOR)
+        return
+    end
+    holder:Hide()
+    state.position = nil
+end
+
+function CM.StopEditModePreviews(_, _, _, restrictionState)
+    if restrictionState ~= Enum.AddOnRestrictionState.Activating then return end
+
+    AF.HideMovers()
+    for _, state in next, viewerStates do
+        local holder = state.holder
+        if holder and holder.mover:IsShown() then
+            holder.mover:Hide()
+        end
+        if state.previewForced then
+            if not IsBlizzardEditModeActive() and state.viewer:IsEditing() then
+                state.viewer:SetIsEditing(false)
+            end
+            state.previewForced = nil
+        end
     end
 end
 
@@ -376,12 +800,37 @@ end
 
 local function OnViewerLayout(viewer)
     local config = CM.config
-    if not applying and config and config.enabled then
-        local definition = viewer._BFICooldownManagerDefinition
-        local viewerConfig = definition and config.viewers[viewer._BFICooldownManagerKey]
-        local mode = viewerConfig and ViewerSettingsMatch(viewer, definition, viewerConfig)
+    local state = viewerStates[viewer]
+    if not applying and state and ((config and config.enabled) or state.attached) then
+        local viewerConfig = config and config.viewers and config.viewers[state.key]
+        local mode = viewerConfig and ViewerSettingsMatch(viewer, state.definition, viewerConfig)
             and QUEUE_LAYOUT or QUEUE_SETTINGS
         QueueViewer(viewer, mode)
+    end
+end
+
+local function OnViewerAnchorApplied(viewer)
+    local state = viewerStates[viewer]
+    local config = CM.config
+    if not applying
+        and state
+        and not state.reconciling
+        and not state.restoring
+        and ((config and config.enabled) or state.attached)
+    then
+        QueueViewer(viewer, QUEUE_ANCHOR)
+    end
+end
+
+local function OnViewerShown(viewer)
+    OnViewerAnchorApplied(viewer)
+end
+
+local function SuppressNativeEditModeHighlight(viewer)
+    local state = viewerStates[viewer]
+    local config = CM.config
+    if state and state.attached and config and config.enabled then
+        viewer:ClearHighlight()
     end
 end
 
@@ -390,12 +839,26 @@ local function InitializeViewers(which)
         if not which or key == which then
             local viewer = _G[definition.globalName]
             if viewer then
+                local state = viewerStates[viewer]
+                if not state then
+                    state = {
+                        viewer = viewer,
+                        definition = definition,
+                        key = key,
+                    }
+                    viewerStates[viewer] = state
+                    EnsureHolder(state)
+                end
+
                 viewer._BFICooldownManagerDefinition = definition
                 viewer._BFICooldownManagerKey = key
                 if not viewer._BFICooldownManagerHooksInstalled then
                     viewer._BFICooldownManagerHooksInstalled = true
                     hooksecurefunc(viewer, "RefreshLayout", OnViewerLayout)
                     hooksecurefunc(viewer, "Layout", OnViewerLayout)
+                    hooksecurefunc(viewer, "ApplySystemAnchor", OnViewerAnchorApplied)
+                    hooksecurefunc(viewer, "HighlightSystem", SuppressNativeEditModeHighlight)
+                    viewer:HookScript("OnShow", OnViewerShown)
                 end
                 QueueViewer(viewer, QUEUE_SETTINGS)
             end
@@ -407,14 +870,37 @@ local function UpdateCooldownManager(_, module, which)
     if module and module ~= "cooldownManager" then return end
 
     local config = CM.config
-    if not config or not config.enabled then return end
-
-    InitializeViewers(which)
+    if config and config.enabled then
+        InitializeViewers(which)
+    else
+        for viewer, state in next, viewerStates do
+            if not which or state.key == which then
+                QueueViewer(viewer, QUEUE_ANCHOR)
+            end
+        end
+    end
 end
 
+CM:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED", CM.StopEditModePreviews)
 EventUtil.ContinueOnAddOnLoaded("Blizzard_CooldownViewer", function()
-    if CM.config and CM.config.enabled then
-        InitializeViewers()
-    end
+    UpdateCooldownManager(nil, "cooldownManager")
 end)
 AF.RegisterCallback("BFI_UpdateModule", UpdateCooldownManager)
+AF.RegisterCallback("AF_SCALE_CHANGED", function()
+    local config = CM.config
+    if not config or not config.enabled then return end
+    for viewer in next, viewerStates do
+        QueueViewer(viewer, QUEUE_ANCHOR)
+    end
+end)
+AF.RegisterCallback("BFI_UpdateProfile", function()
+    for _, state in next, viewerStates do
+        local mover = state.holder and state.holder.mover
+        if mover and (mover:IsShown() or mover._original) then
+            -- Close the active mover transaction before its save table changes
+            -- to the newly selected profile.
+            AF.HideMovers()
+            return
+        end
+    end
+end, "low")

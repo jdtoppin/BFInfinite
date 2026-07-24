@@ -50,9 +50,8 @@ local function CreateModulePanes(parent)
     AF.SetPoint(enabled, "LEFT", 15, 0)
     enabled:SetOnCheck(function(checked)
         CM.config.enabled = checked
-        if checked then
-            UpdateModule()
-        else
+        UpdateModule()
+        if not checked then
             RequestReload()
         end
         AF.Fire("BFI_RefreshOptions", "cooldownManager")

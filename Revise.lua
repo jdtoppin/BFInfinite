@@ -28,6 +28,22 @@ local function HydrateProfile(profile)
     end
 end
 
+local function MarkLegacyCooldownManagerPositions(profile)
+    local config = profile.cooldownManager
+    if type(config) ~= "table" or config.positionVersion then return end
+
+    local viewers = config.viewers
+    if type(viewers) ~= "table" then return end
+
+    -- This must run before hydration adds the new default positions. Existing
+    -- CDM profiles should inherit their active Blizzard locations once.
+    for _, viewerConfig in next, viewers do
+        if type(viewerConfig) == "table" then
+            viewerConfig.captureNativePosition = true
+        end
+    end
+end
+
 local retiredHealthTextNumericFormats = {
     current_absorbs_sum = "current",
     current_absorbs_short_sum = "current_short",
@@ -132,6 +148,7 @@ function F.ReviseProfile(profile, force)
         end
     end
 
+    MarkLegacyCooldownManagerPositions(profile)
     HydrateProfile(profile)
     MigrateRetiredHealthTextFormats(profile)
     profile.revision = BFI.versionNum

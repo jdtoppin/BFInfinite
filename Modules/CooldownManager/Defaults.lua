@@ -7,6 +7,7 @@ local AF = _G.AbstractFramework
 
 local defaults = {
     enabled = false,
+    positionVersion = 1,
     skin = true,
     cooldownText = {
         font = {"BFI", 14, "outline", false},
@@ -22,6 +23,7 @@ local defaults = {
     },
     viewers = {
         essential = {
+            position = {"BOTTOM", 0, 310},
             center = true,
             orientation = "horizontal",
             direction = "right",
@@ -34,6 +36,7 @@ local defaults = {
             showTooltips = true,
         },
         utility = {
+            position = {"BOTTOM", 0, 240},
             center = true,
             orientation = "horizontal",
             direction = "right",
@@ -46,6 +49,7 @@ local defaults = {
             showTooltips = true,
         },
         buffIcon = {
+            position = {"BOTTOM", 0, 370},
             center = true,
             orientation = "horizontal",
             direction = "right",
@@ -58,6 +62,7 @@ local defaults = {
             hideWhenInactive = true,
         },
         buffBar = {
+            position = {"BOTTOM", 420, 430},
             center = true,
             orientation = "vertical",
             direction = "left",
