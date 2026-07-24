@@ -7,9 +7,14 @@ local AF = _G.AbstractFramework
 
 local GameTooltip = _G.GameTooltip
 local GameTooltipStatusBar = _G.GameTooltipStatusBar
+local HIGHLIGHT_FONT_COLOR = _G.HIGHLIGHT_FONT_COLOR
 local InCombatLockdown = _G.InCombatLockdown
+local IsShiftKeyDown = _G.IsShiftKeyDown
+local NORMAL_FONT_COLOR = _G.NORMAL_FONT_COLOR
 
 local NATIVE_STATUS_BAR_HEIGHT = 8
+local MOUSEOVER_UNIT = "mouseover"
+local DUNGEON_SCORE_LABEL = _G.DUNGEON_SCORE or L["Dungeon Score"]
 
 local cursorAnchors = {
     cursor = "ANCHOR_CURSOR",
@@ -30,6 +35,7 @@ local oppositePoints = {
 }
 
 local tooltipAnchor
+local timedRuns = {}
 
 ---------------------------------------------------------------------
 -- anchor
@@ -138,6 +144,141 @@ local function OnUnitTooltipPreCall(tooltip)
     end
 end
 
+---------------------------------------------------------------------
+-- Mythic+
+---------------------------------------------------------------------
+local function GetBestTimedRunLevel(runs)
+    local bestRunLevel = 0
+
+    for _, run in ipairs(runs) do
+        if run.finishedSuccess and run.bestRunLevel > bestRunLevel then
+            bestRunLevel = run.bestRunLevel
+        end
+    end
+
+    return bestRunLevel
+end
+
+local function CollectTimedRuns(runs)
+    wipe(timedRuns)
+
+    for _, run in ipairs(runs) do
+        if run.finishedSuccess and run.bestRunLevel > 0 then
+            local mapName = C_ChallengeMode.GetMapUIInfo(run.challengeModeID)
+            if mapName then
+                timedRuns[#timedRuns + 1] = {
+                    level = run.bestRunLevel,
+                    mapScore = run.mapScore,
+                    name = mapName,
+                }
+            end
+        end
+    end
+
+    table.sort(timedRuns, function(a, b)
+        if a.mapScore == b.mapScore then
+            return a.name < b.name
+        end
+        return a.mapScore > b.mapScore
+    end)
+end
+
+local function OnUnitTooltipPostCall(tooltip)
+    local config = T.config
+    local mythicPlus = config and config.mythicPlus
+    if tooltip ~= GameTooltip
+        or tooltip:IsForbidden()
+        or not config
+        or not config.enabled
+        or not mythicPlus
+        or not mythicPlus.enabled
+        or (config.hideUnitTooltipsInCombat and InCombatLockdown())
+    then
+        return
+    end
+
+    -- Use the literal mouseover token throughout. Reading a displayed unit,
+    -- name, GUID, or comparison result back into Lua is unnecessary. The
+    -- native rating query returning a summary is the player classification.
+    local rating = C_PlayerInfo.GetPlayerMythicPlusRatingSummary(MOUSEOVER_UNIT)
+    if not rating then return end
+
+    local bestRunLevel = GetBestTimedRunLevel(rating.runs)
+    if rating.currentSeasonScore <= 0 and bestRunLevel <= 0 then return end
+
+    local scoreText = tostring(rating.currentSeasonScore)
+    if mythicPlus.showBestRunLevel and bestRunLevel > 0 then
+        scoreText = format("%s (+%d)", scoreText, bestRunLevel)
+    end
+
+    local scoreColor = C_ChallengeMode.GetDungeonScoreRarityColor(rating.currentSeasonScore)
+        or HIGHLIGHT_FONT_COLOR
+    tooltip:AddLine(" ")
+    tooltip:AddDoubleLine(
+        DUNGEON_SCORE_LABEL,
+        scoreText,
+        NORMAL_FONT_COLOR.r,
+        NORMAL_FONT_COLOR.g,
+        NORMAL_FONT_COLOR.b,
+        scoreColor.r,
+        scoreColor.g,
+        scoreColor.b
+    )
+
+    if not mythicPlus.showTimedRunsOnShift or not IsShiftKeyDown() then return end
+
+    CollectTimedRuns(rating.runs)
+    if #timedRuns == 0 then return end
+
+    tooltip:AddLine(
+        L["Timed Mythic+ Runs"],
+        HIGHLIGHT_FONT_COLOR.r,
+        HIGHLIGHT_FONT_COLOR.g,
+        HIGHLIGHT_FONT_COLOR.b
+    )
+    for _, run in ipairs(timedRuns) do
+        tooltip:AddDoubleLine(
+            run.name,
+            format("+%d", run.level),
+            HIGHLIGHT_FONT_COLOR.r,
+            HIGHLIGHT_FONT_COLOR.g,
+            HIGHLIGHT_FONT_COLOR.b,
+            NORMAL_FONT_COLOR.r,
+            NORMAL_FONT_COLOR.g,
+            NORMAL_FONT_COLOR.b
+        )
+    end
+end
+
+local function RefreshActiveUnitTooltip()
+    if unitTooltipActive and GameTooltip:IsShown() and not GameTooltip:IsForbidden() then
+        -- SetUnit is a native secure delegate intended to rebuild standard
+        -- tooltips for addon callers without exposing the displayed unit.
+        GameTooltip:SetUnit(MOUSEOVER_UNIT)
+    end
+end
+
+local function MODIFIER_STATE_CHANGED(_, _, key)
+    if key ~= "LSHIFT" and key ~= "RSHIFT" then return end
+
+    local config = T.config
+    local mythicPlus = config and config.mythicPlus
+    if config and config.enabled and mythicPlus and mythicPlus.enabled and mythicPlus.showTimedRunsOnShift then
+        RefreshActiveUnitTooltip()
+    end
+end
+
+local function CHALLENGE_MODE_MAPS_UPDATE()
+    local config = T.config
+    local mythicPlus = config and config.mythicPlus
+    if config and config.enabled
+        and mythicPlus and mythicPlus.enabled and mythicPlus.showTimedRunsOnShift
+        and IsShiftKeyDown()
+    then
+        RefreshActiveUnitTooltip()
+    end
+end
+
 local function ClearUnitTooltipState()
     unitTooltipActive = nil
 end
@@ -198,7 +339,11 @@ local function Initialize()
     GameTooltip:HookScript("OnHide", ClearUnitTooltipState)
     GameTooltip:HookScript("OnTooltipCleared", ClearUnitTooltipState)
     TooltipDataProcessor.AddTooltipPreCall(Enum.TooltipDataType.Unit, OnUnitTooltipPreCall)
+    TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, OnUnitTooltipPostCall)
     T:RegisterEvent("PLAYER_REGEN_DISABLED", PLAYER_REGEN_DISABLED)
+    T:RegisterEvent("MODIFIER_STATE_CHANGED", MODIFIER_STATE_CHANGED)
+    T:RegisterEvent("CHALLENGE_MODE_MAPS_UPDATE", CHALLENGE_MODE_MAPS_UPDATE)
+    C_MythicPlus.RequestMapInfo()
 end
 
 ---------------------------------------------------------------------

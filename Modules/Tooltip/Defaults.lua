@@ -19,6 +19,11 @@ local defaults = {
         enabled = true,
         height = 4,
     },
+    mythicPlus = {
+        enabled = true,
+        showBestRunLevel = true,
+        showTimedRunsOnShift = true,
+    },
 }
 
 AF.RegisterCallback("BFI_UpdateProfile", function(_, t)
