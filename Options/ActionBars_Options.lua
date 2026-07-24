@@ -718,7 +718,7 @@ builder["tooltip"] = function(parent)
     AF.SetPoint(relativeTo, "TOPLEFT", tooltipDropdown, 185, 0)
     relativeTo:SetItems({
         {text = L["Button"], value = "self"},
-        {text = L["Button (Adaptive)"], value = "self_adaptive"},
+        {text = L["Button (Above)"], value = "self_adaptive"},
         {text = L["Default"], value = "default"},
     })
 

@@ -18,9 +18,8 @@ local defaults = {
         tooltip = {
             enabled = true,
             hideInCombat = false,
-            anchorTo = "self_adaptive", -- self / self_adaptive / default
+            anchorTo = "self_adaptive", -- legacy value; native above-owner anchor
             position = {"BOTTOMLEFT", "TOPLEFT", 0, 1},
-            supportsItemComparison = false, -- not configurable for now
         },
     },
     assistant = {
