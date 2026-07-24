@@ -42,6 +42,58 @@ local function HideTalentTexture(texture)
     hooksecurefunc(texture, "SetAlpha", TalentTexture_SetAlpha)
 end
 
+local function UpdateTalentIconHover(button)
+    local showHover = button._BFITalentIconHovered and true or false
+    local visualState = button:GetVisualState()
+    local alpha = visualState and TalentButtonUtil.GetHoverAlphaForVisualStyle(visualState) or 1
+
+    button.BFITalentSquareHover:SetAlpha(alpha)
+    button.BFITalentCircleHover:SetAlpha(alpha)
+    showHover = showHover and alpha > 0
+
+    button.BFITalentSquareHover:SetShown(showHover and not button._BFITalentIconIsCircular)
+    button.BFITalentCircleHover:SetShown(showHover and button._BFITalentIconIsCircular)
+end
+
+local function TalentButton_OnEnter(button)
+    button._BFITalentIconHovered = true
+    UpdateTalentIconHover(button)
+end
+
+local function TalentButton_OnLeave(button)
+    button._BFITalentIconHovered = nil
+    UpdateTalentIconHover(button)
+end
+
+local function TalentButton_OnHide(button)
+    button._BFITalentIconHovered = nil
+    UpdateTalentIconHover(button)
+end
+
+local function StyleTalentIconHover(button, isCircular)
+    if not button.BFITalentSquareHover then
+        local squareHover = button:CreateTexture(nil, "ARTWORK", nil, 7)
+        squareHover:SetColorTexture(AF.GetColorRGB("white", 0.2))
+        AF.SetOnePixelInside(squareHover, button.Icon)
+        squareHover:Hide()
+        button.BFITalentSquareHover = squareHover
+
+        local circleHover = button:CreateTexture(nil, "ARTWORK", nil, 7)
+        circleHover:SetColorTexture(AF.GetColorRGB("white", 0.2))
+        circleHover:SetAllPoints(button.Icon)
+        circleHover:Hide()
+        button.BFITalentCircleHover = circleHover
+        button.BFITalentCircleHoverMask = AF.CreateCircularMask(circleHover, 1)
+
+        button:HookScript("OnEnter", TalentButton_OnEnter)
+        button:HookScript("OnLeave", TalentButton_OnLeave)
+        button:HookScript("OnHide", TalentButton_OnHide)
+    end
+
+    button._BFITalentIconIsCircular = isCircular
+    UpdateTalentIconHover(button)
+end
+
 local function UpdateTalentIconBorder(button, visualState)
     local color = TALENT_BORDER_COLORS[visualState] or "border"
 
@@ -54,6 +106,9 @@ local function UpdateTalentIconBorder(button, visualState)
     end
     if button.Icon.BFIBackdrop then
         button.Icon.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(color))
+    end
+    if button.BFITalentSquareHover then
+        UpdateTalentIconHover(button)
     end
 end
 
@@ -143,6 +198,8 @@ local function StyleTalentButton(button)
         return
     end
 
+    StyleTalentIconHover(button, isChoice or isCircle)
+
     HideTalentTexture(button.Shadow)
     HideTalentTexture(button.StateBorder)
     HideTalentTexture(button.StateBorderHover)
@@ -161,6 +218,7 @@ end
 local function UpdateTalentSelectionButtonShape(button)
     local isPassive = button.artSet.iconMask == "talents-node-circle-mask"
 
+    StyleTalentIconHover(button, isPassive)
     button.IconMask:SetShown(isPassive)
     button.DisabledOverlayMask:SetShown(isPassive)
     if button.Icon.BFIBackdrop then
@@ -182,17 +240,13 @@ local function StyleTalentSelectionButton(button)
     if not button._BFISelectionIconStyled then
         button._BFISelectionIconStyled = true
 
-        local isPassive = button.artSet.iconMask == "talents-node-circle-mask"
         CaptureTalentSpendTextPoint(button)
-        if isPassive then
-            S.StyleIcon(button.Icon)
-            AF.ApplyCircularIconMask(button.IconMask, button.Icon, 1)
-            AF.ApplyCircularIconMask(button.DisabledOverlayMask, button.DisabledOverlay, 1)
-            button.BFICircleBorder = AF.CreateCircularIconBorder(button, button.Icon, "border", "BACKGROUND", 0)
-        else
-            S.StyleSquareIcon(button.Icon, button.IconMask, true)
-            S.StyleSquareIcon(button.DisabledOverlay, button.DisabledOverlayMask)
-        end
+        S.StyleIcon(button.Icon)
+        S.CreateBackdrop(button.Icon, true, nil, 1)
+        S.StyleIcon(button.DisabledOverlay)
+        AF.ApplyCircularIconMask(button.IconMask, button.Icon, 1)
+        AF.ApplyCircularIconMask(button.DisabledOverlayMask, button.DisabledOverlay, 1)
+        button.BFICircleBorder = AF.CreateCircularIconBorder(button, button.Icon, "border", "BACKGROUND", 0)
 
         HideTalentTexture(button.Shadow)
         HideTalentTexture(button.StateBorder)
@@ -202,15 +256,11 @@ local function StyleTalentSelectionButton(button)
         HideTalentTexture(button.Glow)
         HideTalentTexture(button.Ghost)
 
-        if isPassive then
-            hooksecurefunc(button, "SetAndApplySize", UpdateTalentSelectionButtonShape)
-        end
+        hooksecurefunc(button, "SetAndApplySize", UpdateTalentSelectionButtonShape)
         hooksecurefunc(button, "UpdateStateBorder", UpdateTalentIconBorder)
     end
 
-    if button.BFICircleBorder then
-        UpdateTalentSelectionButtonShape(button)
-    end
+    UpdateTalentSelectionButtonShape(button)
     UpdateTalentIconBorder(button, button:GetVisualState())
 end
 
