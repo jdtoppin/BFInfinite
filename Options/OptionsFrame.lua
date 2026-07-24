@@ -24,7 +24,7 @@ local list = {
     -- "social",
     "SEPARATOR",
     "unitFrames",
-    "-nameplates",
+    "nameplates",
     "actionBars",
     "-buffsDebuffs",
     "-tooltip",

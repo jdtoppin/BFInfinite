@@ -293,6 +293,13 @@ L["Healing"] = "治疗"
 -- nameplates
 ---------------------------------------------------------------------
 L["Nameplates"] = "姓名板"
+L["Enable BFI Nameplates"] = "启用 BFI 姓名板"
+L["BFI nameplates are opt-in and remain inactive until enabled."] = "BFI 姓名板为选择启用功能，只有启用后才会运行。"
+L["Shared Nameplate Settings"] = "共享姓名板设置"
+L["Shared width, height, and feature changes apply to hostile and friendly NPC and player nameplates."] = "共享宽度、高度和功能设置会应用于敌对与友方的 NPC 和玩家姓名板。"
+L["Target Indicator"] = "目标指示器"
+L["Compatibility"] = "兼容性"
+L["Native special and quest widgets remain Blizzard-owned. Changes made during combat may be deferred until combat ends."] = "原生的特殊与任务组件仍由暴雪控制。战斗中进行的更改可能会推迟到战斗结束后应用。"
 
 ---------------------------------------------------------------------
 -- action bars

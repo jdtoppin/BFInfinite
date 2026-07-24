@@ -5,13 +5,12 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local REQUIRED_AF_VERSION = 15
+local REQUIRED_AF_VERSION = 22
 
 local GetCVar = GetCVar
 local SetCVar = SetCVar
 local GetPhysicalScreenSize = GetPhysicalScreenSize
 local InCombatLockdown = InCombatLockdown
-local GetNumSpecializationsForClassID = C_SpecializationInfo.GetNumSpecializationsForClassID
 local eventHandler = AF.CreateSimpleEventHandler("ADDON_LOADED")
 
 ---------------------------------------------------------------------
@@ -264,28 +263,6 @@ local function InitAndBackupCVars()
         "assistedCombatHighlight",
         "lockActionBars",
         "AutoPushSpellToActionBar",
-        -- nameplates
-        "nameplateOccludedAlphaMult",
-        "nameplateShowOnlyNames",
-        "nameplateGlobalScale",
-        "nameplateLargerScale",
-        "NamePlateHorizontalScale",
-        "NamePlateVerticalScale",
-        "NamePlateClassificationScale",
-        "nameplateMaxScale",
-        "nameplateMinScale",
-        "nameplateSelectedScale",
-        "nameplateOverlapH",
-        "nameplateOverlapV",
-        "nameplateMotion",
-        "nameplateMotionSpeed",
-        "nameplateMaxDistance",
-        "nameplateTargetBehindMaxDistance",
-        "nameplateTargetRadialPosition",
-        "nameplateLargeTopInset",
-        "nameplateLargeBottomInset",
-        "nameplateOtherTopInset",
-        "nameplateOtherBottomInset",
         -- chat
         "chatStyle",
         "whisperMode",
