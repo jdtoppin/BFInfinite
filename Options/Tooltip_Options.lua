@@ -20,6 +20,9 @@ local settings = {
     mythicPlus = {
         "mythicPlus",
     },
+    itemLevel = {
+        "itemLevel",
+    },
 }
 
 local function UpdateModule()
@@ -275,6 +278,59 @@ builder.mythicPlus = function(parent)
     pane.enabled = enabled
     pane.showBestRunLevel = showBestRunLevel
     pane.showTimedRunsOnShift = showTimedRunsOnShift
+    return pane
+end
+
+---------------------------------------------------------------------
+-- item level
+---------------------------------------------------------------------
+local function UpdateItemLevelWidgets()
+    local pane = created.itemLevel
+    if not pane then return end
+
+    local enabled = T.config.enabled and T.config.itemLevel.enabled
+    AF.SetEnabled(T.config.enabled, pane.enabled)
+    AF.SetEnabled(enabled, pane.showOnAlt)
+end
+
+builder.itemLevel = function(parent)
+    if created.itemLevel then return created.itemLevel end
+
+    local pane = AF.CreateTitledPane(parent, L["Item Level"], nil, 125)
+    created.itemLevel = pane
+
+    local enabled = AF.CreateCheckButton(pane, L["Show Item Level"])
+    AF.SetPoint(enabled, "TOPLEFT", pane, 10, -35)
+    enabled:SetOnCheck(function(checked)
+        pane.t.cfg.enabled = checked
+        AF.Fire("BFI_UpdateTooltipOptionsList")
+        UpdateItemLevelWidgets()
+        UpdateModule()
+    end)
+
+    local enabledTips = AF.CreateTipsButton(pane)
+    AF.SetPoint(enabledTips, "LEFT", enabled.label, "RIGHT", 5, 0)
+    enabledTips:SetTips(
+        L["Show Item Level"],
+        L["Adds Blizzard's inspected equipped item level for the hovered player. The tooltip remains unchanged while inspection data is unavailable"]
+    )
+
+    local showOnAlt = AF.CreateCheckButton(pane, L["Show Only While Holding Alt"])
+    AF.SetPoint(showOnAlt, "TOPLEFT", enabled, "BOTTOMLEFT", 0, -15)
+    showOnAlt:SetOnCheck(function(checked)
+        pane.t.cfg.showOnAlt = checked
+        UpdateModule()
+    end)
+
+    function pane.Load(t)
+        pane.t = t
+        enabled:SetChecked(t.cfg.enabled)
+        showOnAlt:SetChecked(t.cfg.showOnAlt)
+        UpdateItemLevelWidgets()
+    end
+
+    pane.enabled = enabled
+    pane.showOnAlt = showOnAlt
     return pane
 end
 

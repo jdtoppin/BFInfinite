@@ -24,6 +24,10 @@ local defaults = {
         showBestRunLevel = true,
         showTimedRunsOnShift = true,
     },
+    itemLevel = {
+        enabled = true,
+        showOnAlt = true,
+    },
 }
 
 AF.RegisterCallback("BFI_UpdateProfile", function(_, t)

@@ -8,6 +8,7 @@ local AF = _G.AbstractFramework
 local GameTooltip = _G.GameTooltip
 local GameTooltipStatusBar = _G.GameTooltipStatusBar
 local DISABLED_FONT_COLOR = _G.DISABLED_FONT_COLOR
+local IsAltKeyDown = _G.IsAltKeyDown
 local HIGHLIGHT_FONT_COLOR = _G.HIGHLIGHT_FONT_COLOR
 local InCombatLockdown = _G.InCombatLockdown
 local IsShiftKeyDown = _G.IsShiftKeyDown
@@ -16,8 +17,10 @@ local NORMAL_FONT_COLOR = _G.NORMAL_FONT_COLOR
 local NATIVE_STATUS_BAR_HEIGHT = 8
 local MOUSEOVER_UNIT = "mouseover"
 local DUNGEON_SCORE_LABEL = _G.DUNGEON_SCORE or L["Dungeon Score"]
+local ITEM_LEVEL_LABEL = _G.STAT_AVERAGE_ITEM_LEVEL or _G.ITEM_LEVEL or L["Item Level"]
 local OVERTIME_LABEL = L["OT"]
 local UNKNOWN_MAP_LABEL = _G.UNKNOWN
+local RequestItemLevel = AF.ItemLevel and AF.ItemLevel.Request
 
 local cursorAnchors = {
     cursor = "ANCHOR_CURSOR",
@@ -147,6 +150,14 @@ local function OnUnitTooltipPreCall(tooltip)
     end
 end
 
+local function RefreshActiveUnitTooltip()
+    if unitTooltipActive and GameTooltip:IsShown() and not GameTooltip:IsForbidden() then
+        -- SetUnit is a native secure delegate intended to rebuild standard
+        -- tooltips for addon callers without exposing the displayed unit.
+        GameTooltip:SetUnit(MOUSEOVER_UNIT)
+    end
+end
+
 ---------------------------------------------------------------------
 -- Mythic+
 ---------------------------------------------------------------------
@@ -187,28 +198,17 @@ local function CollectDungeonBests(runs)
     end)
 end
 
-local function OnUnitTooltipPostCall(tooltip)
-    local config = T.config
-    local mythicPlus = config and config.mythicPlus
-    if tooltip ~= GameTooltip
-        or tooltip:IsForbidden()
-        or not config
-        or not config.enabled
-        or not mythicPlus
-        or not mythicPlus.enabled
-        or (config.hideUnitTooltipsInCombat and InCombatLockdown())
-    then
-        return
-    end
+local function AddMythicPlus(tooltip, mythicPlus, extrasAdded)
+    if not mythicPlus or not mythicPlus.enabled then return extrasAdded end
 
     -- Use the literal mouseover token throughout. Reading a displayed unit,
     -- name, GUID, or comparison result back into Lua is unnecessary. The
     -- native rating query returning a summary is the player classification.
     local rating = C_PlayerInfo.GetPlayerMythicPlusRatingSummary(MOUSEOVER_UNIT)
-    if not rating then return end
+    if not rating then return extrasAdded end
 
     local bestRunLevel = GetBestTimedRunLevel(rating.runs)
-    if rating.currentSeasonScore <= 0 and bestRunLevel <= 0 then return end
+    if rating.currentSeasonScore <= 0 and bestRunLevel <= 0 then return extrasAdded end
 
     local scoreText = tostring(rating.currentSeasonScore)
     if mythicPlus.showBestRunLevel and bestRunLevel > 0 then
@@ -217,7 +217,9 @@ local function OnUnitTooltipPostCall(tooltip)
 
     local scoreColor = C_ChallengeMode.GetDungeonScoreRarityColor(rating.currentSeasonScore)
         or HIGHLIGHT_FONT_COLOR
-    tooltip:AddLine(" ")
+    if not extrasAdded then
+        tooltip:AddLine(" ")
+    end
     tooltip:AddDoubleLine(
         DUNGEON_SCORE_LABEL,
         scoreText,
@@ -229,10 +231,10 @@ local function OnUnitTooltipPostCall(tooltip)
         scoreColor.b
     )
 
-    if not mythicPlus.showTimedRunsOnShift or not IsShiftKeyDown() then return end
+    if not mythicPlus.showTimedRunsOnShift or not IsShiftKeyDown() then return true end
 
     CollectDungeonBests(rating.runs)
-    if #dungeonBests == 0 then return end
+    if #dungeonBests == 0 then return true end
 
     tooltip:AddLine(
         L["Mythic+ Dungeon Bests"],
@@ -256,22 +258,68 @@ local function OnUnitTooltipPostCall(tooltip)
             levelColor.b
         )
     end
+    return true
 end
 
-local function RefreshActiveUnitTooltip()
-    if unitTooltipActive and GameTooltip:IsShown() and not GameTooltip:IsForbidden() then
-        -- SetUnit is a native secure delegate intended to rebuild standard
-        -- tooltips for addon callers without exposing the displayed unit.
-        GameTooltip:SetUnit(MOUSEOVER_UNIT)
+---------------------------------------------------------------------
+-- item level
+---------------------------------------------------------------------
+local function AddItemLevel(tooltip, itemLevel, extrasAdded)
+    if not itemLevel or not itemLevel.enabled or (itemLevel.showOnAlt and not IsAltKeyDown()) then
+        return extrasAdded
     end
+
+    if not RequestItemLevel then return extrasAdded end
+
+    -- AbstractFramework passes this literal token through Blizzard's native
+    -- inspection APIs and returns only the documented non-secret item level.
+    -- No unit GUID or equipment tooltip data enters BFI.
+    local equippedItemLevel = RequestItemLevel(MOUSEOVER_UNIT)
+    if not equippedItemLevel then return extrasAdded end
+
+    if not extrasAdded then
+        tooltip:AddLine(" ")
+    end
+    tooltip:AddDoubleLine(
+        ITEM_LEVEL_LABEL,
+        format("%.1f", equippedItemLevel),
+        NORMAL_FONT_COLOR.r,
+        NORMAL_FONT_COLOR.g,
+        NORMAL_FONT_COLOR.b,
+        HIGHLIGHT_FONT_COLOR.r,
+        HIGHLIGHT_FONT_COLOR.g,
+        HIGHLIGHT_FONT_COLOR.b
+    )
+    return true
+end
+
+local function OnUnitTooltipPostCall(tooltip)
+    local config = T.config
+    if tooltip ~= GameTooltip
+        or tooltip:IsForbidden()
+        or not config
+        or not config.enabled
+        or (config.hideUnitTooltipsInCombat and InCombatLockdown())
+    then
+        return
+    end
+
+    local extrasAdded = AddMythicPlus(tooltip, config.mythicPlus)
+    AddItemLevel(tooltip, config.itemLevel, extrasAdded)
 end
 
 local function MODIFIER_STATE_CHANGED(_, _, key)
-    if key ~= "LSHIFT" and key ~= "RSHIFT" then return end
-
     local config = T.config
+    if not config or not config.enabled then return end
+
     local mythicPlus = config and config.mythicPlus
-    if config and config.enabled and mythicPlus and mythicPlus.enabled and mythicPlus.showTimedRunsOnShift then
+    local itemLevel = config and config.itemLevel
+    local refreshMythicPlus = (key == "LSHIFT" or key == "RSHIFT")
+        and mythicPlus and mythicPlus.enabled and mythicPlus.showTimedRunsOnShift
+    local refreshItemLevel = (key == "LALT" or key == "RALT")
+        and itemLevel and itemLevel.enabled and itemLevel.showOnAlt
+
+    if refreshMythicPlus or refreshItemLevel then
         RefreshActiveUnitTooltip()
     end
 end
@@ -282,6 +330,19 @@ local function CHALLENGE_MODE_MAPS_UPDATE()
     if config and config.enabled
         and mythicPlus and mythicPlus.enabled and mythicPlus.showTimedRunsOnShift
         and IsShiftKeyDown()
+    then
+        RefreshActiveUnitTooltip()
+    end
+end
+
+local function AF_UNIT_ITEM_LEVEL_READY(_, unit)
+    if unit ~= MOUSEOVER_UNIT then return end
+
+    local config = T.config
+    local itemLevel = config and config.itemLevel
+    if config and config.enabled
+        and itemLevel and itemLevel.enabled
+        and (not itemLevel.showOnAlt or IsAltKeyDown())
     then
         RefreshActiveUnitTooltip()
     end
@@ -351,6 +412,7 @@ local function Initialize()
     T:RegisterEvent("PLAYER_REGEN_DISABLED", PLAYER_REGEN_DISABLED)
     T:RegisterEvent("MODIFIER_STATE_CHANGED", MODIFIER_STATE_CHANGED)
     T:RegisterEvent("CHALLENGE_MODE_MAPS_UPDATE", CHALLENGE_MODE_MAPS_UPDATE)
+    AF.RegisterCallback("AF_UNIT_ITEM_LEVEL_READY", AF_UNIT_ITEM_LEVEL_READY)
     C_MythicPlus.RequestMapInfo()
 end
 
