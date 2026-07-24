@@ -7,6 +7,7 @@ local AF = _G.AbstractFramework
 
 local GameTooltip = _G.GameTooltip
 local GameTooltipStatusBar = _G.GameTooltipStatusBar
+local DISABLED_FONT_COLOR = _G.DISABLED_FONT_COLOR
 local HIGHLIGHT_FONT_COLOR = _G.HIGHLIGHT_FONT_COLOR
 local InCombatLockdown = _G.InCombatLockdown
 local IsShiftKeyDown = _G.IsShiftKeyDown
@@ -15,6 +16,8 @@ local NORMAL_FONT_COLOR = _G.NORMAL_FONT_COLOR
 local NATIVE_STATUS_BAR_HEIGHT = 8
 local MOUSEOVER_UNIT = "mouseover"
 local DUNGEON_SCORE_LABEL = _G.DUNGEON_SCORE or L["Dungeon Score"]
+local OVERTIME_LABEL = L["OT"]
+local UNKNOWN_MAP_LABEL = _G.UNKNOWN
 
 local cursorAnchors = {
     cursor = "ANCHOR_CURSOR",
@@ -35,7 +38,7 @@ local oppositePoints = {
 }
 
 local tooltipAnchor
-local timedRuns = {}
+local dungeonBests = {}
 
 ---------------------------------------------------------------------
 -- anchor
@@ -159,23 +162,24 @@ local function GetBestTimedRunLevel(runs)
     return bestRunLevel
 end
 
-local function CollectTimedRuns(runs)
-    wipe(timedRuns)
+local function CollectDungeonBests(runs)
+    wipe(dungeonBests)
 
     for _, run in ipairs(runs) do
-        if run.finishedSuccess and run.bestRunLevel > 0 then
-            local mapName = C_ChallengeMode.GetMapUIInfo(run.challengeModeID)
-            if mapName then
-                timedRuns[#timedRuns + 1] = {
-                    level = run.bestRunLevel,
-                    mapScore = run.mapScore,
-                    name = mapName,
-                }
-            end
+        -- The remote summary exposes one score-bearing result per dungeon.
+        -- Keep overtime results because they may hide a lower timed run.
+        if run.bestRunLevel > 0 then
+            local mapName = C_ChallengeMode.GetMapUIInfo(run.challengeModeID) or UNKNOWN_MAP_LABEL
+            dungeonBests[#dungeonBests + 1] = {
+                finishedSuccess = run.finishedSuccess,
+                level = run.bestRunLevel,
+                mapScore = run.mapScore,
+                name = mapName,
+            }
         end
     end
 
-    table.sort(timedRuns, function(a, b)
+    table.sort(dungeonBests, function(a, b)
         if a.mapScore == b.mapScore then
             return a.name < b.name
         end
@@ -227,25 +231,29 @@ local function OnUnitTooltipPostCall(tooltip)
 
     if not mythicPlus.showTimedRunsOnShift or not IsShiftKeyDown() then return end
 
-    CollectTimedRuns(rating.runs)
-    if #timedRuns == 0 then return end
+    CollectDungeonBests(rating.runs)
+    if #dungeonBests == 0 then return end
 
     tooltip:AddLine(
-        L["Timed Mythic+ Runs"],
+        L["Mythic+ Dungeon Bests"],
         HIGHLIGHT_FONT_COLOR.r,
         HIGHLIGHT_FONT_COLOR.g,
         HIGHLIGHT_FONT_COLOR.b
     )
-    for _, run in ipairs(timedRuns) do
+    for _, run in ipairs(dungeonBests) do
+        local levelColor = run.finishedSuccess and NORMAL_FONT_COLOR or DISABLED_FONT_COLOR
+        local levelText = run.finishedSuccess
+            and format("+%d", run.level)
+            or format("+%d (%s)", run.level, OVERTIME_LABEL)
         tooltip:AddDoubleLine(
             run.name,
-            format("+%d", run.level),
+            levelText,
             HIGHLIGHT_FONT_COLOR.r,
             HIGHLIGHT_FONT_COLOR.g,
             HIGHLIGHT_FONT_COLOR.b,
-            NORMAL_FONT_COLOR.r,
-            NORMAL_FONT_COLOR.g,
-            NORMAL_FONT_COLOR.b
+            levelColor.r,
+            levelColor.g,
+            levelColor.b
         )
     end
 end

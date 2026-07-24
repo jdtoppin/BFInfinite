@@ -240,7 +240,7 @@ builder.mythicPlus = function(parent)
     AF.SetPoint(enabledTips, "LEFT", enabled.label, "RIGHT", 5, 0)
     enabledTips:SetTips(
         L["Show Mythic+ Information"],
-        L["Adds the hovered player's current-season Dungeon Score and optional timed-run details without replacing Blizzard's unit tooltip"]
+        L["Adds the hovered player's current-season Dungeon Score and optional per-dungeon best-scoring runs without replacing Blizzard's unit tooltip"]
     )
 
     local showBestRunLevel = AF.CreateCheckButton(pane, L["Show Best Timed Level"])
@@ -250,7 +250,7 @@ builder.mythicPlus = function(parent)
         UpdateModule()
     end)
 
-    local showTimedRunsOnShift = AF.CreateCheckButton(pane, L["Show Timed Runs with Shift"])
+    local showTimedRunsOnShift = AF.CreateCheckButton(pane, L["Show Dungeon Bests with Shift"])
     AF.SetPoint(showTimedRunsOnShift, "TOPLEFT", showBestRunLevel, "BOTTOMLEFT", 0, -15)
     showTimedRunsOnShift:SetOnCheck(function(checked)
         pane.t.cfg.showTimedRunsOnShift = checked
@@ -260,8 +260,8 @@ builder.mythicPlus = function(parent)
     local shiftTips = AF.CreateTipsButton(pane)
     AF.SetPoint(shiftTips, "LEFT", showTimedRunsOnShift.label, "RIGHT", 5, 0)
     shiftTips:SetTips(
-        L["Show Timed Runs with Shift"],
-        L["Hold Shift while hovering a player to expand their current-season timed dungeon runs"]
+        L["Show Dungeon Bests with Shift"],
+        L["Hold Shift while hovering a player to show the best-scoring run reported for each current-season dungeon; overtime runs are marked OT"]
     )
 
     function pane.Load(t)
