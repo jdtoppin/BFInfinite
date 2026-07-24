@@ -41,32 +41,21 @@ local function UpdateTalentIconBorder(button, visualState)
     backdrop:SetBackdropBorderColor(AF.GetColorRGB(TALENT_BORDER_COLORS[visualState] or "border"))
 end
 
-local function StyleTalentSplitIcon(button)
-    if not button.Icon2 then return end
-
-    S.StyleIcon(button.Icon2)
-
-    local iconSplitMask = button.IconSplitMask
-    iconSplitMask:SetTexture(AF.GetPlainTexture())
-    AF.ClearPoints(iconSplitMask)
-    AF.SetPoint(iconSplitMask, "TOPLEFT", button.Icon)
-    AF.SetPoint(iconSplitMask, "BOTTOM", button.Icon)
-
-    local icon2Mask = button.Icon2Mask
-    icon2Mask:SetTexture(AF.GetPlainTexture())
-    icon2Mask:SetRotation(0)
-    AF.ClearPoints(icon2Mask)
-    AF.SetPoint(icon2Mask, "TOP", button.Icon2)
-    AF.SetPoint(icon2Mask, "BOTTOMRIGHT", button.Icon2)
-end
-
 local function StyleTalentButton(button)
     if button._BFIIconStyled then return end
     button._BFIIconStyled = true
 
+    S.StyleIcon(button.Icon)
+    if button.Icon2 then
+        S.StyleIcon(button.Icon2)
+    end
+
+    -- Circle nodes are passive and split-icon nodes open a choice popup.
+    -- Preserve Blizzard's masks and state borders so both remain visually distinct.
+    if button.artSet.iconMask or button.Icon2 then return end
+
     S.StyleSquareIcon(button.Icon, button.IconMask, true)
     S.StyleSquareIcon(button.DisabledOverlay, button.DisabledOverlayMask)
-    StyleTalentSplitIcon(button)
 
     HideTalentTexture(button.Shadow)
     HideTalentTexture(button.StateBorder)
@@ -78,7 +67,24 @@ local function StyleTalentButton(button)
 end
 
 local function StyleSpellBookItem(item)
-    S.StyleSpellItemButton(item.Button)
+    local button = item.Button
+    if not button._BFIIconStyled then
+        button._BFIIconStyled = true
+        S.CreateBackdrop(button, true, nil, 1)
+        S.StyleIcon(button.Icon)
+    end
+
+    local isPassive = item.spellBookItemInfo.isPassive
+    button.IconMask:SetShown(isPassive)
+    button.Border:SetShown(isPassive)
+    button.BFIBackdrop:SetShown(not isPassive)
+
+    if isPassive then
+        button.IconHighlight:SetAllPoints(button)
+    else
+        AF.SetOnePixelInside(button.IconHighlight, button.BFIBackdrop)
+        button.IconHighlight:SetColorTexture(AF.GetColorRGB("white", 0.25))
+    end
 end
 
 ---------------------------------------------------------------------

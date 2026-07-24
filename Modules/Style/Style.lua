@@ -502,7 +502,7 @@ function S.StyleSpellItemButton(button)
 
     local iconTexture = name and _G[name .. "IconTexture"] or button.IconTexture or button.Icon
     if iconTexture then
-        S.StyleSquareIcon(iconTexture, button.IconMask)
+        S.StyleIcon(iconTexture)
         -- AF.SetOnePixelInside(iconTexture, button.BFIBackdrop)
     end
 
