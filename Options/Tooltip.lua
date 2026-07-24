@@ -122,6 +122,13 @@ end)
 
 AF.RegisterCallback("BFI_UpdateTooltipOptionsList", UpdateListColors)
 
+AF.RegisterCallback("BFI_UpdateProfile", function()
+    if not contentPane then return end
+
+    UpdateListColors()
+    ReloadSelected()
+end, "low")
+
 ---------------------------------------------------------------------
 -- show
 ---------------------------------------------------------------------
