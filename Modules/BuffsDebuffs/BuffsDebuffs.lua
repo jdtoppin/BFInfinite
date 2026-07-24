@@ -12,17 +12,20 @@ local InCombatLockdown = InCombatLockdown
 local mainHandSlot = GetInventorySlotInfo("MainHandSlot")
 local secondaryHandSlot = GetInventorySlotInfo("SecondaryHandSlot")
 
+local REQUIRED_AF_VERSION = 21
+
 -- Retail 12.0.7 loads the implementation and template together from
 -- Blizzard_RestrictedAddOnEnvironment/SecureGroupHeaders. Retail 12.1 only
 -- loads the replacement SecureAuraHeader files for Classic clients.
-local hasSecureAuraHeaderBackend = AF.isRetail
-    and type(_G.SecureAuraHeader_Update) == "function"
-    and type(_G.SecureAuraHeader_UpdateEventRegistrations) == "function"
-    and type(GetUnitAuraInstanceIDs) == "function"
-    and type(GetWeaponEnchantInfo) == "function"
-
 function BD.HasSecureAuraHeaderBackend()
-    return hasSecureAuraHeaderBackend
+    return AF.isRetail
+        and (tonumber(AF.versionNum) or 0) >= REQUIRED_AF_VERSION
+        and type(_G.SecureAuraHeader_Update) == "function"
+        and type(_G.SecureAuraHeader_UpdateEventRegistrations) == "function"
+        and type(GetUnitAuraInstanceIDs) == "function"
+        and type(GetWeaponEnchantInfo) == "function"
+        and type(BD.CanSuppressNativePublicAuras) == "function"
+        and type(BD.SetNativePublicAurasSuppressed) == "function"
 end
 
 ---------------------------------------------------------------------
@@ -60,10 +63,12 @@ local buffFrame, debuffFrame
 
 local function CreateBuffHeader()
     buffFrame = CreateHeader("BFIBuffFrame", _G.HUD_EDIT_MODE_BUFF_FRAME_LABEL, "HELPFUL")
+    return buffFrame
 end
 
 local function CreateDebuffHeader()
     debuffFrame = CreateHeader("BFIDebuffFrame", _G.HUD_EDIT_MODE_DEBUFF_FRAME_LABEL, "HARMFUL")
+    return debuffFrame
 end
 
 ---------------------------------------------------------------------
@@ -324,10 +329,46 @@ local function RetryBuffsDebuffsUpdate()
     UpdateBuffsDebuffs(nil, "buffsDebuffs", which)
 end
 
+local function DisableHeader(which, header)
+    if not BD.SetNativePublicAurasSuppressed(which, false) then return end
+    if header then
+        header.enabled = false
+        header:Hide()
+    end
+end
+
+local function EnableHeader(which, header, createHeader, config)
+    -- Restore native visuals before protected reconfiguration. If a later
+    -- operation fails, Blizzard remains the visible fallback.
+    if not BD.SetNativePublicAurasSuppressed(which, false) then return header end
+
+    if not BD.CanSuppressNativePublicAuras(which) then
+        if header then
+            header.enabled = false
+            header:Hide()
+        end
+        return header
+    end
+
+    if not header then
+        header = createHeader()
+    end
+    header.enabled = true
+    SetupHeader(header, config)
+    AF.UpdateMoverSave(header, config.position)
+    AF.LoadPosition(header, config.position)
+
+    if not BD.SetNativePublicAurasSuppressed(which, true) then
+        header.enabled = false
+        header:Hide()
+    end
+    return header
+end
+
 UpdateBuffsDebuffs = function(_, module, which)
     if module and module ~= "buffsDebuffs" then return end
     if which and which ~= "buffs" and which ~= "debuffs" then return end
-    if not hasSecureAuraHeaderBackend then return end
+    if not BD.HasSecureAuraHeaderBackend() then return end
 
     if InCombatLockdown() then
         if not updatePending then
@@ -344,14 +385,9 @@ UpdateBuffsDebuffs = function(_, module, which)
     local config = BD.config.buffs
     if not which or which == "buffs" then
         if config.enabled then
-            if not buffFrame then CreateBuffHeader() end
-            buffFrame.enabled = true
-            SetupHeader(buffFrame, config)
-            AF.UpdateMoverSave(buffFrame, config.position)
-            AF.LoadPosition(buffFrame, config.position)
-        elseif buffFrame then
-            buffFrame.enabled = false
-            buffFrame:Hide()
+            buffFrame = EnableHeader("buffs", buffFrame, CreateBuffHeader, config)
+        else
+            DisableHeader("buffs", buffFrame)
         end
     end
 
@@ -359,14 +395,9 @@ UpdateBuffsDebuffs = function(_, module, which)
     config = BD.config.debuffs
     if not which or which == "debuffs" then
         if config.enabled then
-            if not debuffFrame then CreateDebuffHeader() end
-            debuffFrame.enabled = true
-            SetupHeader(debuffFrame, config)
-            AF.UpdateMoverSave(debuffFrame, config.position)
-            AF.LoadPosition(debuffFrame, config.position)
-        elseif debuffFrame then
-            debuffFrame.enabled = false
-            debuffFrame:Hide()
+            debuffFrame = EnableHeader("debuffs", debuffFrame, CreateDebuffHeader, config)
+        else
+            DisableHeader("debuffs", debuffFrame)
         end
     end
 end
