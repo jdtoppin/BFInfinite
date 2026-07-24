@@ -239,6 +239,12 @@ local function makeHarness(options)
         return copy(value)
     end
 
+    function AF.SetSize(frame, width, height)
+        frame._width = width
+        frame._height = height
+        frame:SetSize(width, height)
+    end
+
     function AF.HasCustomAuraContainer()
         return options.hasBackend ~= false
     end
@@ -743,6 +749,65 @@ local function testTuningContract()
         "tuned slot filter")
 end
 
+local function testHolderConfigQueue()
+    local harness = makeHarness()
+    local controller = harness.UF.CreateNativeAuraContainerController(
+        {},
+        "BFIHolderConfigAuraHolder",
+        completeSpec("target", true)
+    )
+    local holder = controller:GetFrame()
+
+    clearEvents(harness)
+    controller:ApplyHolderConfig(function(configuredHolder)
+        assertEqual(configuredHolder, holder, "configured holder")
+        record(harness, "holder.config", configuredHolder, "initial")
+    end)
+    assertEventNames(harness, {
+        "holder.shown",
+        "holder.config",
+        "holder.shown",
+    })
+    assertEqual(holder.shown, true, "holder config restored visibility")
+
+    clearEvents(harness)
+    harness:SetCombat(true)
+    controller:ApplyHolderConfig(function(configuredHolder)
+        record(harness, "holder.config", configuredHolder, "stale")
+    end)
+    controller:ApplyHolderConfig(function(configuredHolder)
+        record(harness, "holder.config", configuredHolder, "latest")
+    end)
+    assertEventNames(harness, {
+        "holder.shown",
+        "uf.register",
+    })
+    assertEqual(countEvents(harness, "holder.config"), 0,
+        "combat holder configuration")
+
+    harness:SetCombat(false)
+    harness:FireRegen()
+    assertEqual(countEvents(harness, "holder.config"), 1,
+        "coalesced holder configuration")
+    local configEvent = findEvent(harness, "holder.config")
+    assertEqual(configEvent.args[2], "latest", "latest holder configuration")
+    assertEqual(holder.shown, true, "deferred holder config visibility")
+
+    local unbuilt = harness.UF.CreateNativeAuraContainerController(
+        {},
+        "BFIUnbuiltHolderConfigAuraHolder"
+    )
+    local unbuiltHolder = unbuilt:GetFrame()
+    clearEvents(harness)
+    unbuilt:ApplyHolderConfig(function(configuredHolder)
+        record(harness, "holder.config", configuredHolder, "unbuilt")
+    end)
+    assertEventNames(harness, {
+        "holder.config",
+    })
+    assertEqual(unbuiltHolder.shown, false, "unbuilt holder visibility")
+end
+
 local function testSharedCombatQueue()
     local harness = makeHarness()
     local first = harness.UF.CreateNativeAuraContainerController(
@@ -1040,6 +1105,7 @@ end
 testCapabilityGate()
 testBuildContract()
 testTuningContract()
+testHolderConfigQueue()
 testSharedCombatQueue()
 testRegenDispatchIsolation()
 testReplacementIsReadyBeforeSwap()
