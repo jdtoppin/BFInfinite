@@ -22,6 +22,7 @@ local TAB_ART_TEXTURES = {
     "LeftHighlight",
     "MiddleHighlight",
     "RightHighlight",
+    "BottomBorderGlow",
 }
 
 local function HideTexture(texture)
@@ -144,8 +145,8 @@ local function StyleStateTab(tab)
     tab._BFIProfessionStateTabStyled = true
 
     -- Do not use StyleTab here. Profession specialization tabs retain
-    -- StateIcon/StateIconGlow/BottomBorderGlow, while crafting-order tabs
-    -- retain their Glow animation.
+    -- StateIcon/StateIconGlow, while crafting-order tabs retain their
+    -- Glow animation.
     for _, key in ipairs(TAB_ART_TEXTURES) do
         HideTexture(tab[key])
     end
@@ -213,6 +214,24 @@ end
 ---------------------------------------------------------------------
 -- schematic form
 ---------------------------------------------------------------------
+local function StyleCrafterDetails(details)
+    if not details or details._BFIProfessionDetailsStyled then return end
+    details._BFIProfessionDetailsStyled = true
+
+    HideTexture(details.BackgroundTop)
+    HideTexture(details.BackgroundBottom)
+    HideTexture(details.BackgroundMiddle)
+    HideTexture(details.BackgroundMinimized)
+
+    S.CreateBackdrop(details)
+    details.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget_dark"))
+
+    if details.Line then
+        details.Line:SetColorTexture(AF.GetColorRGB("border"))
+        AF.SetHeight(details.Line, 1)
+    end
+end
+
 local function StyleQualityDialog(dialog)
     if not dialog or dialog._BFIProfessionStyled then return end
     dialog._BFIProfessionStyled = true
@@ -243,6 +262,7 @@ local function StyleSchematicForm(form)
         S.StyleCheckButton(form.TrackRecipeCheckbox)
         S.StyleCheckButton(form.AllocateBestQualityCheckbox)
         StyleItemButton(form.Concentrate and form.Concentrate.ConcentrateToggleButton)
+        StyleCrafterDetails(form.Details)
         StyleQualityDialog(form.QualityDialog)
         StyleRecraftSlot(form.recraftSlot)
     end
@@ -265,6 +285,37 @@ end
 ---------------------------------------------------------------------
 -- rank bar
 ---------------------------------------------------------------------
+local function StyleProfessionExpansionRadio(frame)
+    local selectBox = frame.leftTexture1
+    if not selectBox then return end
+
+    local layer, subLevel = selectBox:GetDrawLayer()
+    local border = frame:AttachTexture()
+    border:SetDrawLayer(layer, subLevel - 1)
+    border:SetColorTexture(AF.GetColorRGB("border"))
+    AF.SetSize(border, 15, 15)
+    AF.SetPoint(border, "CENTER", selectBox)
+
+    selectBox:SetColorTexture(AF.GetColorRGB("widget"))
+    AF.SetSize(selectBox, 13, 13)
+
+    local selected = frame.leftTexture2
+    if selected then
+        selected:SetColorTexture(AF.GetColorRGB("BFI", 0.7))
+        AF.ClearPoints(selected)
+        AF.SetPoint(selected, "CENTER", selectBox)
+        AF.SetSize(selected, 7, 7)
+    end
+end
+
+local function StyleProfessionExpansionMenu(_, rootDescription)
+    for _, description in rootDescription:EnumerateElementDescriptions() do
+        if description:IsRadio() then
+            description:AddInitializer(StyleProfessionExpansionRadio)
+        end
+    end
+end
+
 local function StyleRankBar(rankBar)
     if not rankBar or rankBar._BFIProfessionStyled then return end
     rankBar._BFIProfessionStyled = true
@@ -551,5 +602,6 @@ local function StyleBlizzard()
     hooksecurefunc(ProfessionsRecipeSchematicFormMixin, "Init", StyleSchematicForm)
     hooksecurefunc(ProfessionsSpecFrameMixin, "InitializeTabs", StyleSpecializationTabs)
     hooksecurefunc(ProfessionsCraftingOutputLogElementMixin, "Init", StyleOutputLogElement)
+    _G.Menu.ModifyMenu("MENU_PROFESSIONS_RANK_BAR", StyleProfessionExpansionMenu)
 end
 AF.RegisterAddonLoaded("Blizzard_Professions", StyleBlizzard)
