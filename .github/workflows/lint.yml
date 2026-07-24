@@ -18,7 +18,7 @@ jobs:
       - name: Install Lua checks
         run: |
           sudo apt-get update
-          sudo apt-get install --yes lua-check lua5.1 ripgrep
+          sudo apt-get install --yes lua-check lua5.1 luajit ripgrep
 
       - name: Check Lua and policy
         shell: bash
@@ -32,3 +32,6 @@ jobs:
           else
             ./scripts/lint.sh
           fi
+
+      - name: Test 12.1 unit-frame aura controller
+        run: luajit tests/unit_frame_aura_controller_test.lua
