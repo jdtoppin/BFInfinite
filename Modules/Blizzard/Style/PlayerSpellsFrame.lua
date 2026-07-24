@@ -77,7 +77,7 @@ local function StyleChoiceTalentIcon(button)
     AF.SetPoint(arrowRight, "LEFT", button.Icon, "RIGHT", 1, 0)
 end
 
-local function StyleTalentButton(button)
+local function StyleTalentButton(button, forceCircle)
     if button._BFIIconStyled then return end
     button._BFIIconStyled = true
 
@@ -87,7 +87,7 @@ local function StyleTalentButton(button)
     end
 
     local isChoice = button.Icon2 ~= nil
-    local isCircle = button.artSet.iconMask == "talents-node-circle-mask"
+    local isCircle = forceCircle or button.artSet.iconMask == "talents-node-circle-mask"
     if isChoice then
         StyleChoiceTalentIcon(button)
         button.BFICircleBorder = AF.CreateCircularIconBorder(button, button.Icon, "border", "OVERLAY", 4)
@@ -180,6 +180,14 @@ local function StyleTalentsFrame()
     for button in talentsFrame:EnumerateAllTalentButtons() do
         StyleTalentButton(button)
     end
+
+    hooksecurefunc(TalentSelectionChoiceFrameMixin, "SetSelectionOptions", function(selectionFrame)
+        if selectionFrame:GetTalentFrame() ~= talentsFrame then return end
+
+        for _, selectionButton in ipairs(selectionFrame.selectionFrameArray) do
+            StyleTalentButton(selectionButton, true)
+        end
+    end)
 end
 
 ---------------------------------------------------------------------
