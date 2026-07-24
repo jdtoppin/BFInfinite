@@ -1367,43 +1367,38 @@ local function StyleBagSearchBox()
     searchBox.Instructions:SetPoint("BOTTOMRIGHT", -22, 0)
 end
 
-local function SetCleanupTooltipEnabled(enabled)
+local function CleanupButtonOnEnter(button)
+    if not IsEnabled() then return end
+    _G.GameTooltip:Hide()
+    AF.ShowTooltip(button, "TOPLEFT", 0, 2, cleanupTooltipState.lines)
+end
+
+local function CleanupButtonOnLeave()
+    AF.HideTooltip()
+end
+
+local function SetupCleanupTooltip()
     local button = _G.BagItemAutoSortButton
     if not button then return end
 
-    if not cleanupTooltipState.captured then
-        cleanupTooltipState.captured = true
-        cleanupTooltipState.onEnter = button:GetScript("OnEnter")
-        cleanupTooltipState.onLeave = button:GetScript("OnLeave")
-    end
-
-    if not enabled then
-        AF.ClearTooltip(button)
-        AF.HideTooltip()
-        button:SetScript("OnEnter", cleanupTooltipState.onEnter)
-        button:SetScript("OnLeave", cleanupTooltipState.onLeave)
-        return
-    end
-
-    -- Replace Blizzard's GameTooltip scripts with BFI's two-line info style.
-    button:SetScript("OnEnter", nil)
-    button:SetScript("OnLeave", nil)
+    cleanupTooltipState.lines = cleanupTooltipState.lines or {}
+    cleanupTooltipState.lines[1] = _G.BAG_CLEANUP_BAGS
+    cleanupTooltipState.lines[2] = _G.BAG_CLEANUP_BAGS_DESCRIPTION
     button.accentColor = "BFI"
-    AF.SetTooltip(
-        button,
-        "TOPLEFT",
-        0,
-        2,
-        _G.BAG_CLEANUP_BAGS,
-        _G.BAG_CLEANUP_BAGS_DESCRIPTION
-    )
+
+    if not cleanupTooltipState.hooked then
+        -- Preserve Blizzard and BFI scripts; our post-hook swaps the visible tooltip.
+        cleanupTooltipState.hooked = true
+        button:HookScript("OnEnter", CleanupButtonOnEnter)
+        button:HookScript("OnLeave", CleanupButtonOnLeave)
+    end
 end
 
 local function StyleCleanupButton()
     local button = _G.BagItemAutoSortButton
     S.StyleIconButton(button, AF.GetIcon("Refresh"), 16, HEADER_ICON_COLOR, "gray")
     AF.SetSize(button, 24, 22)
-    SetCleanupTooltipEnabled(true)
+    SetupCleanupTooltip()
 end
 
 local function StyleCombinedFrame()
@@ -1510,7 +1505,7 @@ local function EnableModule()
     UpdateBlizzardBagBarVisibility()
 
     if not Initialize() then return end
-    SetCleanupTooltipEnabled(true)
+    SetupCleanupTooltip()
 
     if not hasPreviousCombinedBags then
         previousCombinedBags = GetCVarBool("combinedBags")
@@ -1546,7 +1541,7 @@ local function DisableModule()
     RestoreBlizzardBagBar()
     B:UnregisterAllEvents()
     if not initialized then return end
-    SetCleanupTooltipEnabled(false)
+    AF.HideTooltip()
 
     RestoreReagentFrame()
     wipe(reagentItemButtons)
