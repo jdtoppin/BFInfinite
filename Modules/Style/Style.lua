@@ -871,8 +871,9 @@ function S.StyleTitledFrame(frame)
     else
         -- old style
         AF.SetFrameLevel(frame.BFIHeader, 1, frame)
-        frame.TitleText:ClearAllPoints()
-        frame.TitleText:SetPoint("CENTER", frame.BFIHeader)
+        local title = frame.TitleText or frame.Title
+        title:ClearAllPoints()
+        title:SetPoint("CENTER", frame.BFIHeader)
         frame:DisableDrawLayer("BACKGROUND")
         frame:DisableDrawLayer("BORDER")
     end
@@ -996,19 +997,13 @@ end
 ---------------------------------------------------------------------
 -- side tab - SidePanelTabButtonMixin
 ---------------------------------------------------------------------
-local function SideTab_OnEnter(tab)
-    tab.BFISelectedTexture:Show()
-end
-
-local function SideTab_OnLeave(tab)
-    if not tab._BFIChecked then
-        tab.BFISelectedTexture:Hide()
-    end
-end
-
 local function SideTab_SetChecked(tab, checked)
     tab._BFIChecked = checked and true or false
-    tab.BFISelectedTexture:SetShown(tab._BFIChecked)
+    if tab._BFIChecked then
+        tab.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("BFI", 0.45))
+    else
+        tab.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget"))
+    end
 end
 
 function S.StyleSideTab(tab, width, height)
@@ -1016,6 +1011,14 @@ function S.StyleSideTab(tab, width, height)
 
     if tab._BFIStyled then return end
     tab._BFIStyled = true
+
+    local wasChecked
+    if tab.GetChecked then
+        wasChecked = tab:GetChecked()
+    end
+    if wasChecked == nil and tab.SelectedTexture then
+        wasChecked = tab.SelectedTexture:IsShown()
+    end
 
     -- Keep functional artwork such as SocialUI's pooled icon and counter.
     -- Clearing every texture here also prevents SidePanelTabButtonMixin
@@ -1032,27 +1035,26 @@ function S.StyleSideTab(tab, width, height)
 
     if tab.SetNormalTexture then tab:SetNormalTexture(AF.GetEmptyTexture()) end
     if tab.SetPushedTexture then tab:SetPushedTexture(AF.GetEmptyTexture()) end
-    if tab.SetHighlightTexture then tab:SetHighlightTexture(AF.GetEmptyTexture()) end
     if tab.SetDisabledTexture then tab:SetDisabledTexture(AF.GetEmptyTexture()) end
+    if tab.SetCheckedTexture then tab:SetCheckedTexture(AF.GetEmptyTexture()) end
+    if tab.SetDisabledCheckedTexture then tab:SetDisabledCheckedTexture(AF.GetEmptyTexture()) end
 
     S.CreateBackdrop(tab)
     tab.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget"))
 
     AF.SetSize(tab, width or 35, height or 50)
 
-    tab.BFISelectedTexture = AF.CreateTexture(tab, nil, AF.GetColorTable("BFI", 0.6), "BORDER", -1)
-    tab.BFISelectedTexture:SetAllPoints()
-    tab.BFISelectedTexture:Hide()
+    local hover = AF.CreateTexture(tab, nil, AF.GetColorTable("white", 0.2), "HIGHLIGHT")
+    AF.SetOnePixelInside(hover, tab.BFIBackdrop)
+    if tab.SetHighlightTexture then
+        tab:SetHighlightTexture(hover)
+    end
 
     -- Hook rather than replace Blizzard's scripts. Communities supplies
     -- tooltip/tooltip2, while 12.1 SocialUI adds disabled-reason text.
-    tab:HookScript("OnEnter", SideTab_OnEnter)
-    tab:HookScript("OnLeave", SideTab_OnLeave)
     hooksecurefunc(tab, "SetChecked", SideTab_SetChecked)
 
-    if tab.GetChecked then
-        SideTab_SetChecked(tab, tab:GetChecked())
-    end
+    SideTab_SetChecked(tab, wasChecked)
 end
 
 ---------------------------------------------------------------------
