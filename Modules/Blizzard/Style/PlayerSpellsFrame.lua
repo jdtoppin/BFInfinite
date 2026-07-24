@@ -49,8 +49,8 @@ local function UpdateTalentIconBorder(button, visualState)
 end
 
 local function StyleChoiceTalentIcon(button)
-    button.IconMask:SetTexture(AF.GetTexture("Circle"), "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-    button.DisabledOverlayMask:SetTexture(AF.GetTexture("Circle"), "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    AF.ApplyCircularIconMask(button.IconMask)
+    AF.ApplyCircularIconMask(button.DisabledOverlayMask)
 
     local iconSplitMask = button.IconSplitMask
     iconSplitMask:SetTexture(AF.GetPlainTexture())
@@ -92,6 +92,8 @@ local function StyleTalentButton(button)
         StyleChoiceTalentIcon(button)
         button.BFICircleBorder = AF.CreateCircularIconBorder(button, button.Icon, "border", "OVERLAY", 4)
     elseif isCircle then
+        AF.ApplyCircularIconMask(button.IconMask)
+        AF.ApplyCircularIconMask(button.DisabledOverlayMask)
         button.BFICircleBorder = AF.CreateCircularIconBorder(button, button.Icon, "border", "OVERLAY", 4)
     elseif not button.artSet.iconMask then
         S.StyleSquareIcon(button.Icon, button.IconMask, true)
@@ -120,6 +122,9 @@ local function StyleSpellBookItem(item)
     end
 
     local isPassive = item.spellBookItemInfo.isPassive
+    if isPassive then
+        AF.ApplyCircularIconMask(button.IconMask)
+    end
     button.IconMask:SetShown(isPassive)
     button.Border:Hide()
     button.BFIBackdrop:SetShown(not isPassive)
