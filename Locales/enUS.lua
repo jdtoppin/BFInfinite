@@ -6,6 +6,7 @@ select(2, ...).L = setmetatable({
     ["Bag Slots"] = "Bag Slots",
     ["Categories"] = "Categories",
     ["Columns"] = "Columns",
+    ["Equipment - %s"] = "Equipment - %s",
     ["Preferred Columns"] = "Preferred Columns",
     ["Group Items by Category"] = "Group Items by Category",
     ["Show Bag Slots"] = "Show Bag Slots",

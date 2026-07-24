@@ -11,6 +11,7 @@ local AF = _G.AbstractFramework
 local ceil = math.ceil
 local floor = math.floor
 local sort = table.sort
+local band = _G.bit.band
 local GetCVarBool = _G.GetCVarBool
 local GetInventoryItemTexture = _G.GetInventoryItemTexture
 local GetItemClassInfo = _G.C_Item.GetItemClassInfo
@@ -24,18 +25,86 @@ local CATEGORY_SPACING = 7
 local ITEM_SIZE = 37
 local HORIZONTAL_PADDING = 12
 local FOOTER_PADDING = 12
+local SCROLLBAR_WIDTH = 5
+local SCROLLBAR_GUTTER = 9
 local BACKPACK_ICON = 134400
 local EMPTY_BAG_ICON = 133633
+
+local equipmentSlotAliases = {
+    INVTYPE_ROBE = "INVTYPE_CHEST",
+    INVTYPE_SHIELD = "INVTYPE_WEAPONOFFHAND",
+    INVTYPE_HOLDABLE = "INVTYPE_WEAPONOFFHAND",
+    INVTYPE_RANGEDRIGHT = "INVTYPE_RANGED",
+    INVTYPE_THROWN = "INVTYPE_RANGED",
+}
+local equipmentSlotOrder = {
+    INVTYPE_HEAD = 1,
+    INVTYPE_NECK = 2,
+    INVTYPE_SHOULDER = 3,
+    INVTYPE_CLOAK = 4,
+    INVTYPE_CHEST = 5,
+    INVTYPE_WRIST = 6,
+    INVTYPE_HAND = 7,
+    INVTYPE_WAIST = 8,
+    INVTYPE_LEGS = 9,
+    INVTYPE_FEET = 10,
+    INVTYPE_FINGER = 11,
+    INVTYPE_TRINKET = 12,
+    INVTYPE_WEAPONMAINHAND = 13,
+    INVTYPE_WEAPONOFFHAND = 14,
+    INVTYPE_WEAPON = 15,
+    INVTYPE_2HWEAPON = 16,
+    INVTYPE_RANGED = 17,
+    INVTYPE_BODY = 18,
+    INVTYPE_TABARD = 19,
+    INVTYPE_PROFESSION_TOOL = 20,
+    INVTYPE_PROFESSION_GEAR = 21,
+    INVTYPE_BAG = 22,
+}
 
 local inventoryConstants = _G.Constants.InventoryConstants
 local REAGENT_BAG_ID = inventoryConstants.NumBagSlots + inventoryConstants.NumReagentBagSlots
 
 local combinedFrame
 local categoryButton
+local bagSlotsButton
+local scrollTrack
+local scrollThumb
+local emptyCountOverlay
+local emptyCountText
 local initialized
 local moduleEnabled
 local refreshPending
+local layoutInProgress
 local layoutScale = 1
+local scrollOffset = 0
+local maxScroll = 0
+local scrollStopCount = 0
+local scrollIndex = 1
+local layoutEntryCount = 0
+local layoutHeight = 0
+local layoutTop = 0
+local layoutFooterHeight = 0
+local layoutEmptyRepresentative
+local layoutEmptyEntryIndex
+local layoutEmptyCount = 0
+local emptyButtonCount = 0
+local layoutAddSlotsTarget
+local layoutEpoch = 0
+local snapshotCount = 0
+local snapshotCategories
+local snapshotShowBagSlots
+local snapshotColumns
+local snapshotSpacing
+local snapshotWidth
+local snapshotHeight
+local snapshotFooterHeight
+local hoveredBagID
+local previousMouseWheelEnabled
+local portraitWasShown
+local portraitMouseEnabled
+local portraitAlpha
+local UpdateEmptyRepresentativeForCursor
 local previousCombinedBags
 local hasPreviousCombinedBags
 local suppressedReagentFrame
@@ -49,6 +118,23 @@ local categoryGroupPool = {}
 local categoryGroupByKey = {}
 local reagentItemButtons = {}
 local suppressedMouseStates = {}
+local portraitProxyMouseStates = {}
+local emptyCountsByBag = {}
+local bagFamilies = {}
+local emptyButtons = {}
+local emptyButtonBagIDs = {}
+local emptyButtonFamilies = {}
+local scrollStops = {}
+local layoutObjects = {}
+local layoutObjectIsHeader = {}
+local layoutObjectX = {}
+local layoutObjectY = {}
+local layoutObjectHeight = {}
+local snapshotButtons = {}
+local snapshotBagIDs = {}
+local snapshotSlotIDs = {}
+local snapshotItemIDs = {}
+local snapshotExtended = {}
 
 -- API and lifecycle evidence: Retail 12.0.7
 -- Blizzard_APIDocumentationGenerated/ContainerDocumentation.lua and
@@ -77,24 +163,25 @@ local function GetCategory(itemID)
         return cached[1], cached[2], cached[3]
     end
 
-    local _, _, _, _, _, classID, subclassID = _G.C_Item.GetItemInfoInstant(itemID)
+    local _, _, _, itemEquipLoc, _, classID, subclassID = _G.C_Item.GetItemInfoInstant(itemID)
     local itemClass = _G.Enum.ItemClass
     local key
     local label
     local order
 
-    if classID == itemClass.Weapon or classID == itemClass.Armor then
-        key = "equipment"
-        label = _G.BAG_FILTER_EQUIPMENT or "Equipment"
-        order = 10
+    if itemEquipLoc and itemEquipLoc ~= "" then
+        itemEquipLoc = equipmentSlotAliases[itemEquipLoc] or itemEquipLoc
+        key = "equipment:" .. itemEquipLoc
+        label = L["Equipment - %s"]:format(_G[itemEquipLoc] or itemEquipLoc)
+        order = 100 + (equipmentSlotOrder[itemEquipLoc] or 99)
     elseif classID == itemClass.Consumable then
         key = "consumables"
         label = _G.BAG_FILTER_CONSUMABLES or GetItemClassInfo(classID) or "Consumables"
-        order = 20
+        order = 200
     elseif classID == itemClass.Gem then
         key = "gems"
         label = GetItemClassInfo(classID) or _G.GEMS or "Gems"
-        order = 30
+        order = 300
     elseif classID == itemClass.Tradegoods
         or classID == itemClass.Reagent
         or classID == itemClass.ItemEnhancement
@@ -103,19 +190,19 @@ local function GetCategory(itemID)
         local subclassName = GetItemSubClassInfo(classID, subclassID)
         label = subclassName and (className .. " - " .. subclassName) or className
         key = "profession:" .. (classID or -1) .. ":" .. (subclassID or -1)
-        order = 40
+        order = 400
     elseif classID == itemClass.Recipe then
         key = "recipes"
         label = GetItemClassInfo(classID) or "Recipes"
-        order = 50
+        order = 500
     elseif classID == itemClass.Questitem then
         key = "quest"
         label = _G.BAG_FILTER_QUEST_ITEMS or GetItemClassInfo(classID) or "Quest Items"
-        order = 80
+        order = 800
     else
         key = "class:" .. (classID or -1)
         label = (classID and GetItemClassInfo(classID)) or _G.MISCELLANEOUS or "Miscellaneous"
-        order = 60
+        order = 600
     end
 
     cached = {key, label, order}
@@ -160,9 +247,16 @@ local function CompareCategoryGroups(a, b)
     return a.label < b.label
 end
 
+local function ItemButtonOnEnter(button)
+    if UpdateEmptyRepresentativeForCursor then
+        UpdateEmptyRepresentativeForCursor(button)
+    end
+end
+
 local function StyleItemButton(button)
     if button._BFIBagStyled then return end
     button._BFIBagStyled = true
+    button:HookScript("OnEnter", ItemButtonOnEnter)
 
     local icon = button.Icon or button.icon
     if icon then
@@ -212,8 +306,23 @@ local function UpdateBagButton(button)
     button.count:SetText(_G.C_Container.GetContainerNumSlots(bagID))
 end
 
+local function UpdateAggregateEmptyState()
+    if not layoutEmptyRepresentative then return end
+
+    local hoveredEmptyCount
+    if hoveredBagID ~= nil then
+        hoveredEmptyCount = emptyCountsByBag[hoveredBagID] or 0
+    end
+    emptyCountText:SetText(hoveredEmptyCount ~= nil and hoveredEmptyCount or layoutEmptyCount)
+    if hoveredEmptyCount and hoveredEmptyCount > 0 and layoutEmptyRepresentative:IsShown() then
+        layoutEmptyRepresentative.BagIndicator:SetShown(true)
+    end
+end
+
 local function BagButtonOnEnter(button)
+    hoveredBagID = button.bagID
     combinedFrame:SetItemsMatchingBagHighlighted(button.bagID, true)
+    UpdateAggregateEmptyState()
 
     _G.GameTooltip:SetOwner(button, "ANCHOR_TOP")
     local inventoryID = button.bagID > 0 and _G.C_Container.ContainerIDToInventoryID(button.bagID)
@@ -226,6 +335,8 @@ end
 
 local function BagButtonOnLeave(button)
     combinedFrame:SetItemsMatchingBagHighlighted(button.bagID, false)
+    hoveredBagID = nil
+    UpdateAggregateEmptyState()
     _G.GameTooltip_Hide()
 end
 
@@ -265,12 +376,6 @@ end
 
 local function LayoutControls(width)
     local searchBox = _G.BagItemSearchBox
-    if searchBox and searchBox:GetParent() == combinedFrame then
-        searchBox:ClearAllPoints()
-        searchBox:SetPoint("TOPLEFT", combinedFrame, "TOPLEFT", HORIZONTAL_PADDING, -31)
-        searchBox:SetWidth(width - 94)
-    end
-
     local sortButton = _G.BagItemAutoSortButton
     local sortIsAttached = sortButton and sortButton:GetParent() == combinedFrame
     if sortIsAttached then
@@ -282,11 +387,29 @@ local function LayoutControls(width)
     if sortIsAttached then
         categoryButton:SetPoint("RIGHT", sortButton, "LEFT", -3, 0)
     else
-        categoryButton:SetPoint("TOPRIGHT", combinedFrame, "TOPRIGHT", -39, -29)
+        categoryButton:SetPoint("TOPRIGHT", combinedFrame, "TOPRIGHT", -8, -27)
     end
-    categoryButton:SetText(B.config.categories and "C+" or "C")
-    categoryButton:SetTextColor(B.config.categories and "BFI" or "gray")
     categoryButton:Show()
+    if B.config.categories then
+        categoryButton:LockHighlight()
+    else
+        categoryButton:UnlockHighlight()
+    end
+
+    bagSlotsButton:ClearAllPoints()
+    bagSlotsButton:SetPoint("RIGHT", categoryButton, "LEFT", -3, 0)
+    bagSlotsButton:Show()
+    if B.config.showBagSlots then
+        bagSlotsButton:LockHighlight()
+    else
+        bagSlotsButton:UnlockHighlight()
+    end
+
+    if searchBox and searchBox:GetParent() == combinedFrame then
+        searchBox:ClearAllPoints()
+        searchBox:SetPoint("TOPLEFT", combinedFrame, "TOPLEFT", HORIZONTAL_PADDING, -31)
+        searchBox:SetWidth(math.max(80, width - 121))
+    end
 
     local tokenFrame = _G.BackpackTokenFrame
     if tokenFrame and tokenFrame:GetParent() == combinedFrame and tokenFrame.Border then
@@ -294,37 +417,388 @@ local function LayoutControls(width)
     end
 end
 
-local function LayoutItems()
-    if not IsEnabled() or not combinedFrame or not combinedFrame.Items then return end
+local function SetShownIfChanged(object, shown)
+    if shown then
+        if not object:IsShown() then
+            object:Show()
+        end
+    elseif object:IsShown() then
+        object:Hide()
+    end
+end
+
+local function ClearLayoutEntries()
+    for index = 1, layoutEntryCount do
+        layoutObjects[index] = nil
+        layoutObjectIsHeader[index] = nil
+        layoutObjectX[index] = nil
+        layoutObjectY[index] = nil
+        layoutObjectHeight[index] = nil
+    end
+    layoutEntryCount = 0
+end
+
+local function AddLayoutEntry(object, isHeader, x, y, height)
+    layoutEntryCount = layoutEntryCount + 1
+    layoutObjects[layoutEntryCount] = object
+    layoutObjectIsHeader[layoutEntryCount] = isHeader
+    layoutObjectX[layoutEntryCount] = x
+    layoutObjectY[layoutEntryCount] = y
+    layoutObjectHeight[layoutEntryCount] = height
+    if not isHeader then
+        object._BFIBagLayoutEpoch = layoutEpoch
+    end
+    return layoutEntryCount
+end
+
+local function ClearScrollStops()
+    for index = 1, scrollStopCount do
+        scrollStops[index] = nil
+    end
+    scrollStopCount = 0
+end
+
+local function AddScrollStop(offset)
+    offset = floor(math.max(0, math.min(maxScroll, offset)) + 0.5)
+    if scrollStopCount == 0 or offset > scrollStops[scrollStopCount] then
+        scrollStopCount = scrollStopCount + 1
+        scrollStops[scrollStopCount] = offset
+    end
+end
+
+local function FindNearestScrollStop(offset)
+    local nearestIndex = 1
+    local nearestDistance = math.huge
+    for index = 1, scrollStopCount do
+        local distance = math.abs(scrollStops[index] - offset)
+        if distance < nearestDistance then
+            nearestIndex = index
+            nearestDistance = distance
+        end
+    end
+    return nearestIndex
+end
+
+local function GetBagFamily(bagID)
+    local bagFamily = bagFamilies[bagID]
+    if bagFamily == nil then
+        local _
+        _, bagFamily = _G.C_Container.GetContainerNumFreeSlots(bagID)
+        bagFamily = bagFamily or -1
+        bagFamilies[bagID] = bagFamily
+    end
+    return bagFamily
+end
+
+local function InvalidateLayoutSnapshot()
+    wipe(snapshotButtons)
+    wipe(snapshotBagIDs)
+    wipe(snapshotSlotIDs)
+    wipe(snapshotItemIDs)
+    wipe(snapshotExtended)
+    snapshotCount = 0
+    snapshotCategories = nil
+    snapshotShowBagSlots = nil
+    snapshotColumns = nil
+    snapshotSpacing = nil
+    snapshotWidth = nil
+    snapshotHeight = nil
+    snapshotFooterHeight = nil
+end
+
+local function ClearLayoutState()
+    if layoutEmptyRepresentative and layoutEmptyRepresentative.BagIndicator then
+        layoutEmptyRepresentative.BagIndicator:Hide()
+    end
+    for index = 1, emptyButtonCount do
+        emptyButtons[index] = nil
+        emptyButtonBagIDs[index] = nil
+        emptyButtonFamilies[index] = nil
+    end
+    emptyButtonCount = 0
+    ClearLayoutEntries()
+    ClearScrollStops()
+    InvalidateLayoutSnapshot()
+    wipe(emptyCountsByBag)
+    wipe(bagFamilies)
+    layoutEmptyRepresentative = nil
+    layoutEmptyEntryIndex = nil
+    layoutEmptyCount = 0
+    layoutAddSlotsTarget = nil
+    hoveredBagID = nil
+    layoutHeight = 0
+    layoutTop = 0
+    layoutFooterHeight = 0
+    scrollOffset = 0
+    maxScroll = 0
+    scrollIndex = 1
+end
+
+local function CaptureLayoutSnapshot(force)
+    local footerHeight = combinedFrame:CalculateExtraHeight() + FOOTER_PADDING
+    local screenWidth = floor(_G.UIParent:GetWidth())
+    local screenHeight = floor(_G.UIParent:GetHeight())
+    local itemCount = #combinedFrame.Items
+    local changed = force
+        or itemCount ~= snapshotCount
+        or B.config.categories ~= snapshotCategories
+        or B.config.showBagSlots ~= snapshotShowBagSlots
+        or B.config.columns ~= snapshotColumns
+        or B.config.spacing ~= snapshotSpacing
+        or screenWidth ~= snapshotWidth
+        or screenHeight ~= snapshotHeight
+        or footerHeight ~= snapshotFooterHeight
+
+    for index, itemButton in ipairs(combinedFrame.Items) do
+        local bagID = itemButton:GetBagID()
+        local slotID = itemButton:GetID()
+        local itemID = _G.C_Container.GetContainerItemID(bagID, slotID) or false
+        local isExtended = itemButton:IsExtended()
+
+        if itemButton ~= snapshotButtons[index]
+            or bagID ~= snapshotBagIDs[index]
+            or slotID ~= snapshotSlotIDs[index]
+            or itemID ~= snapshotItemIDs[index]
+            or isExtended ~= snapshotExtended[index] then
+            changed = true
+        end
+
+        snapshotButtons[index] = itemButton
+        snapshotBagIDs[index] = bagID
+        snapshotSlotIDs[index] = slotID
+        snapshotItemIDs[index] = itemID
+        snapshotExtended[index] = isExtended
+    end
+
+    for index = itemCount + 1, snapshotCount do
+        snapshotButtons[index] = nil
+        snapshotBagIDs[index] = nil
+        snapshotSlotIDs[index] = nil
+        snapshotItemIDs[index] = nil
+        snapshotExtended[index] = nil
+    end
+
+    snapshotCount = itemCount
+    snapshotCategories = B.config.categories
+    snapshotShowBagSlots = B.config.showBagSlots
+    snapshotColumns = B.config.columns
+    snapshotSpacing = B.config.spacing
+    snapshotWidth = screenWidth
+    snapshotHeight = screenHeight
+    snapshotFooterHeight = footerHeight
+    return changed, footerHeight, screenWidth, screenHeight
+end
+
+local function RenderViewport()
+    local viewportTop = -layoutTop
+    local viewportBottom = -(layoutHeight - layoutFooterHeight)
+
+    for index = 1, layoutEntryCount do
+        local object = layoutObjects[index]
+        local y = layoutObjectY[index] + scrollOffset
+        local visible = y <= viewportTop and (y - layoutObjectHeight[index]) >= viewportBottom
+
+        if visible then
+            object:ClearAllPoints()
+            if layoutObjectIsHeader[index] then
+                object:SetPoint("TOPLEFT", combinedFrame, "TOPLEFT", HORIZONTAL_PADDING, y)
+                object:SetPoint(
+                    "TOPRIGHT",
+                    combinedFrame,
+                    "TOPRIGHT",
+                    -(HORIZONTAL_PADDING + SCROLLBAR_GUTTER),
+                    y
+                )
+            else
+                object:SetPoint("TOPLEFT", combinedFrame, "TOPLEFT", layoutObjectX[index], y)
+            end
+        end
+        SetShownIfChanged(object, visible)
+    end
+
+    if layoutEmptyRepresentative and layoutEmptyRepresentative:IsShown() then
+        emptyCountOverlay:ClearAllPoints()
+        emptyCountOverlay:SetAllPoints(layoutEmptyRepresentative)
+        emptyCountOverlay:SetFrameLevel(layoutEmptyRepresentative:GetFrameLevel() + 2)
+        emptyCountOverlay:Show()
+        UpdateAggregateEmptyState()
+    else
+        emptyCountOverlay:Hide()
+    end
+
+    local addSlotsButton = combinedFrame.AddSlotsButton
+    if addSlotsButton then
+        local showAddSlots = layoutAddSlotsTarget
+            and layoutAddSlotsTarget:IsShown()
+            and not _G.IsAccountSecured()
+        if showAddSlots then
+            addSlotsButton:ClearAllPoints()
+            addSlotsButton:SetPoint("LEFT", layoutAddSlotsTarget, "LEFT", -14, -2)
+        end
+        SetShownIfChanged(addSlotsButton, showAddSlots)
+    end
+
+    if scrollStopCount > 1 then
+        scrollTrack:SetValue(scrollStopCount - scrollIndex + 1)
+    end
+end
+
+-- Keep one visual empty slot while retaining native drop validation: when
+-- general storage is full, swap its backing button to a compatible bag family.
+UpdateEmptyRepresentativeForCursor = function(button)
+    if button ~= layoutEmptyRepresentative or not layoutEmptyEntryIndex or not _G.CursorHasItem() then return end
+
+    local cursorItemLocation = _G.C_Cursor.GetCursorItem()
+    if not cursorItemLocation then return end
+
+    local itemID = _G.C_Item.GetItemID(cursorItemLocation)
+    if not itemID then return end
+
+    local itemFamily = _G.C_Item.GetItemFamily(itemID) or 0
+    local isCraftingReagent = select(17, _G.C_Item.GetItemInfo(itemID))
+    local compatibleButton
+    local compatiblePriority = math.huge
+
+    for index = 1, emptyButtonCount do
+        local emptyButton = emptyButtons[index]
+        local bagID = emptyButtonBagIDs[index]
+        local bagFamily = emptyButtonFamilies[index]
+        local isStillEmpty = not _G.C_Container.GetContainerItemID(bagID, emptyButton:GetID())
+        local isCompatible
+        local priority
+
+        if bagID == REAGENT_BAG_ID then
+            isCompatible = isCraftingReagent
+            priority = 4
+        elseif bagID == _G.Enum.BagIndex.Backpack then
+            isCompatible = true
+            priority = 1
+        elseif bagFamily == 0 then
+            isCompatible = true
+            priority = 2
+        elseif bagFamily > 0 and itemFamily > 0 then
+            isCompatible = band(bagFamily, itemFamily) ~= 0
+            priority = 3
+        end
+
+        if isStillEmpty and isCompatible and priority < compatiblePriority then
+            compatibleButton = emptyButton
+            compatiblePriority = priority
+        end
+    end
+
+    if not compatibleButton or compatibleButton == layoutEmptyRepresentative then return end
+
+    local previousRepresentative = layoutEmptyRepresentative
+    previousRepresentative._BFIBagLayoutEpoch = nil
+    compatibleButton._BFIBagLayoutEpoch = layoutEpoch
+    layoutObjects[layoutEmptyEntryIndex] = compatibleButton
+    layoutEmptyRepresentative = compatibleButton
+
+    if previousRepresentative.BagIndicator then
+        previousRepresentative.BagIndicator:Hide()
+    end
+    SetShownIfChanged(previousRepresentative, false)
+    AF.SetSize(compatibleButton, ITEM_SIZE, ITEM_SIZE)
+
+    if hoveredBagID then
+        combinedFrame:SetItemsMatchingBagHighlighted(hoveredBagID, true)
+    end
+    RenderViewport()
+end
+
+local function LayoutItemsInternal(force)
+    local changed, footerHeight, screenWidth, screenHeight = CaptureLayoutSnapshot(force)
+    if not changed then return end
 
     local columns = B.config.columns
     local spacing = B.config.spacing
     local top = B.config.showBagSlots and BAG_TOP_WITH_SLOTS or BAG_TOP_WITHOUT_SLOTS
-    local groupCount
+    local emptyRepresentative
+    local emptyRepresentativePriority = math.huge
+    local emptyCount = 0
+    local normalBagLimit = inventoryConstants.NumBagSlots
 
+    layoutEpoch = layoutEpoch + 1
+    layoutAddSlotsTarget = nil
     ResetCategoryGroups()
+    ClearLayoutEntries()
+    ClearScrollStops()
+    wipe(emptyCountsByBag)
+    wipe(bagFamilies)
+    for index = 1, emptyButtonCount do
+        emptyButtons[index] = nil
+        emptyButtonBagIDs[index] = nil
+        emptyButtonFamilies[index] = nil
+    end
+    emptyButtonCount = 0
 
-    if B.config.categories then
-        for _, itemButton in ipairs(combinedFrame.Items) do
-            StyleItemButton(itemButton)
-            local itemID = _G.C_Container.GetContainerItemID(itemButton:GetBagID(), itemButton:GetID())
-            local key, label, order = GetCategory(itemID)
-            local group = AcquireCategoryGroup(key, label, order)
-            group.items[#group.items + 1] = itemButton
-        end
-
-        groupCount = #categoryGroups
-        sort(categoryGroups, CompareCategoryGroups)
-    else
-        local group = AcquireCategoryGroup("all", "", 1)
-        for _, itemButton in ipairs(combinedFrame.Items) do
-            StyleItemButton(itemButton)
-            group.items[#group.items + 1] = itemButton
-        end
-        groupCount = 1
+    local flatGroup
+    if not B.config.categories then
+        flatGroup = AcquireCategoryGroup("all", "", 1)
     end
 
-    local footerHeight = combinedFrame:CalculateExtraHeight() + FOOTER_PADDING
+    for index, itemButton in ipairs(combinedFrame.Items) do
+        StyleItemButton(itemButton)
+
+        local bagID = snapshotBagIDs[index]
+        local itemID = snapshotItemIDs[index]
+        if itemID == false then
+            itemID = nil
+        end
+
+        if itemID then
+            local group = flatGroup
+            if B.config.categories then
+                local key, label, order = GetCategory(itemID)
+                group = AcquireCategoryGroup(key, label, order)
+            end
+            group.items[#group.items + 1] = itemButton
+        elseif snapshotExtended[index] then
+            layoutAddSlotsTarget = layoutAddSlotsTarget or itemButton
+            local group = flatGroup
+            if B.config.categories then
+                group = AcquireCategoryGroup("locked", L["Bag Slots"], 900)
+            end
+            group.items[#group.items + 1] = itemButton
+        else
+            emptyCount = emptyCount + 1
+            emptyCountsByBag[bagID] = (emptyCountsByBag[bagID] or 0) + 1
+            local bagFamily = GetBagFamily(bagID)
+            emptyButtonCount = emptyButtonCount + 1
+            emptyButtons[emptyButtonCount] = itemButton
+            emptyButtonBagIDs[emptyButtonCount] = bagID
+            emptyButtonFamilies[emptyButtonCount] = bagFamily
+
+            local priority
+            if bagID == _G.Enum.BagIndex.Backpack then
+                priority = 1
+            elseif bagID <= normalBagLimit then
+                priority = bagFamily == 0 and 2 or 3
+            else
+                priority = 4
+            end
+
+            if priority < emptyRepresentativePriority then
+                emptyRepresentative = itemButton
+                emptyRepresentativePriority = priority
+            end
+        end
+    end
+
+    if emptyRepresentative then
+        local group = flatGroup
+        if B.config.categories then
+            group = AcquireCategoryGroup("empty", _G.EMPTY or "Empty", 1000)
+        end
+        group.items[#group.items + 1] = emptyRepresentative
+    end
+
+    local groupCount = #categoryGroups
+    if B.config.categories then
+        sort(categoryGroups, CompareCategoryGroups)
+    end
+
     local function CalculateHeight(columnCount)
         local height = top + footerHeight
         for groupIndex = 1, groupCount do
@@ -344,47 +818,75 @@ local function LayoutItems()
         return height
     end
 
-    -- Category headers can make a narrow bag very tall. Treat the configured
-    -- column count as a minimum and widen only as needed to stay on screen.
-    local maxWidth = _G.UIParent:GetWidth() * 0.9
-    local maxHeight = _G.UIParent:GetHeight() * 0.9
+    local maxWidth = floor(screenWidth * 0.9)
+    local maxHeight = floor(screenHeight * 0.9)
     local maxColumns = math.max(
         1,
-        floor((maxWidth - (HORIZONTAL_PADDING * 2) + spacing) / (ITEM_SIZE + spacing))
+        floor(
+            (maxWidth - (HORIZONTAL_PADDING * 2) - SCROLLBAR_GUTTER + spacing)
+            / (ITEM_SIZE + spacing)
+        )
     )
     columns = math.min(columns, maxColumns)
-    while columns < maxColumns and CalculateHeight(columns) > maxHeight do
-        columns = columns + 1
+
+    local width = (HORIZONTAL_PADDING * 2)
+        + (columns * ITEM_SIZE)
+        + ((columns - 1) * spacing)
+        + SCROLLBAR_GUTTER
+    local fullHeight = CalculateHeight(columns)
+    local height = math.min(fullHeight, maxHeight)
+
+    local previousEmptyRepresentative = layoutEmptyRepresentative
+    layoutHeight = height
+    layoutTop = top
+    layoutFooterHeight = footerHeight
+    layoutEmptyRepresentative = emptyRepresentative
+    layoutEmptyEntryIndex = nil
+    layoutEmptyCount = emptyCount
+    maxScroll = math.max(0, fullHeight - height)
+
+    if previousEmptyRepresentative
+        and previousEmptyRepresentative ~= emptyRepresentative
+        and previousEmptyRepresentative.BagIndicator then
+        previousEmptyRepresentative.BagIndicator:Hide()
+    end
+    if hoveredBagID then
+        combinedFrame:SetItemsMatchingBagHighlighted(hoveredBagID, true)
     end
 
-    local width = (HORIZONTAL_PADDING * 2) + (columns * ITEM_SIZE) + ((columns - 1) * spacing)
-    local height = CalculateHeight(columns)
+    combinedFrame:SetSize(width, height)
+
     local cursorY = -top
+    AddScrollStop(0)
 
     for groupIndex = 1, groupCount do
         local group = categoryGroups[groupIndex]
         if B.config.categories then
             local header = GetCategoryHeader(groupIndex)
             header:SetText(group.label)
-            header:ClearAllPoints()
-            header:SetPoint("TOPLEFT", combinedFrame, "TOPLEFT", HORIZONTAL_PADDING, cursorY)
-            header:SetPoint("TOPRIGHT", combinedFrame, "TOPRIGHT", -HORIZONTAL_PADDING, cursorY)
-            header:Show()
+            AddScrollStop(-top - cursorY)
+            AddLayoutEntry(header, true, 0, cursorY, CATEGORY_HEADER_HEIGHT)
             cursorY = cursorY - CATEGORY_HEADER_HEIGHT
         end
 
         for itemIndex, itemButton in ipairs(group.items) do
             local row = floor((itemIndex - 1) / columns)
             local column = (itemIndex - 1) % columns
+            local itemY = cursorY - (row * (ITEM_SIZE + spacing))
+            if column == 0 then
+                AddScrollStop(-top - itemY)
+            end
             AF.SetSize(itemButton, ITEM_SIZE, ITEM_SIZE)
-            itemButton:ClearAllPoints()
-            itemButton:SetPoint(
-                "TOPLEFT",
-                combinedFrame,
-                "TOPLEFT",
+            local entryIndex = AddLayoutEntry(
+                itemButton,
+                false,
                 HORIZONTAL_PADDING + (column * (ITEM_SIZE + spacing)),
-                cursorY - (row * (ITEM_SIZE + spacing))
+                itemY,
+                ITEM_SIZE
             )
+            if itemButton == emptyRepresentative then
+                layoutEmptyEntryIndex = entryIndex
+            end
         end
 
         local rows = ceil(#group.items / columns)
@@ -396,17 +898,52 @@ local function LayoutItems()
         end
     end
 
+    AddScrollStop(maxScroll)
+    scrollIndex = FindNearestScrollStop(scrollOffset)
+    scrollOffset = scrollStops[scrollIndex] or 0
+
+    for _, itemButton in ipairs(combinedFrame.Items) do
+        if itemButton._BFIBagLayoutEpoch ~= layoutEpoch then
+            SetShownIfChanged(itemButton, false)
+        end
+    end
+
     HideUnusedHeaders(B.config.categories and (groupCount + 1) or 1)
     LayoutBagButtons(spacing)
 
-    combinedFrame:SetSize(width, -cursorY + footerHeight)
-    -- The fixed cost of many category headers cannot be reduced by adding
-    -- columns. Scale only as a last-resort overflow fallback, which also
-    -- guarantees the configured width remains usable on narrow displays.
-    layoutScale = math.min(1, maxWidth / width, maxHeight / height)
+    local visibleContentHeight = math.max(1, height - top - footerHeight)
+    if scrollStopCount > 1 then
+        local fullContentHeight = visibleContentHeight + maxScroll
+        local thumbHeight = math.max(20, visibleContentHeight * visibleContentHeight / fullContentHeight)
+        scrollThumb:SetHeight(thumbHeight)
+        scrollTrack:ClearAllPoints()
+        scrollTrack:SetPoint("TOPRIGHT", combinedFrame, "TOPRIGHT", -4, -top)
+        scrollTrack:SetPoint("BOTTOMRIGHT", combinedFrame, "BOTTOMRIGHT", -4, footerHeight)
+        scrollTrack:SetMinMaxValues(1, scrollStopCount)
+        scrollTrack:Show()
+    else
+        scrollTrack:Hide()
+    end
+
+    -- Keep the configured item size identical in flat and category modes.
+    -- Vertical overflow uses cached geometry and discrete row/header stops.
+    layoutScale = 1
     combinedFrame:SetScale(layoutScale)
     LayoutControls(width)
+    RenderViewport()
     ApplyPosition()
+end
+
+local function LayoutItems(force)
+    if layoutInProgress or not IsEnabled() or not combinedFrame or not combinedFrame.Items then return end
+    layoutInProgress = true
+    local success = xpcall(function()
+        LayoutItemsInternal(force)
+    end, _G.geterrorhandler())
+    layoutInProgress = nil
+    if not success then
+        InvalidateLayoutSnapshot()
+    end
 end
 
 local function AppendReagentBagSlots(frame)
@@ -484,8 +1021,10 @@ end
 
 local function OnCombinedFrameShow()
     if not IsEnabled() then return end
+    scrollOffset = 0
     B:RegisterEvent("BAG_UPDATE", B.BAG_UPDATE)
     B:RegisterEvent("ITEM_LOCK_CHANGED", B.ITEM_LOCK_CHANGED)
+    B:RegisterEvent("DISPLAY_SIZE_CHANGED", B.DISPLAY_SIZE_CHANGED)
 
     -- Keep the suppressed reagent container logically open alongside the
     -- combined container so Blizzard's unmodified ToggleAllBags accounting
@@ -503,8 +1042,13 @@ end
 local function OnCombinedFrameHide()
     B:UnregisterEvent("BAG_UPDATE")
     B:UnregisterEvent("ITEM_LOCK_CHANGED")
+    B:UnregisterEvent("DISPLAY_SIZE_CHANGED")
     wipe(categoryCache)
+    ResetCategoryGroups()
+    ClearLayoutState()
     HideUnusedHeaders(1)
+    emptyCountOverlay:Hide()
+    scrollTrack:Hide()
 
     _G.C_Timer.After(0, function()
         if IsEnabled() and not combinedFrame:IsShown() then
@@ -522,30 +1066,50 @@ local function SetCombinedBags()
     end
 end
 
-local function StyleCombinedFrame()
-    S.StyleTitledFrame(combinedFrame)
-    combinedFrame:SetClampedToScreen(true)
-
-    if combinedFrame.PortraitButton then
-        local menuButton = combinedFrame.PortraitButton
-        menuButton:ClearAllPoints()
-        menuButton:SetPoint("TOPLEFT", combinedFrame.BFIHeader, "TOPLEFT", 1, -1)
-        AF.SetSize(menuButton, 20, 18)
-        menuButton:Show()
-        menuButton:EnableMouse(true)
-        AF.SetFrameLevel(menuButton, 1, combinedFrame.BFIHeader)
-        if menuButton.Highlight then
-            menuButton.Highlight:SetAlpha(0)
+local function SuppressCombinedMenu()
+    local portraitButton = combinedFrame.PortraitButton
+    if portraitButton then
+        if portraitWasShown == nil then
+            portraitWasShown = portraitButton:IsShown()
+            portraitMouseEnabled = portraitButton:IsMouseEnabled()
+            portraitAlpha = portraitButton:GetAlpha()
         end
-        S.CreateBackdrop(menuButton, true, nil, -1)
-        menuButton.BFIMenuText = AF.CreateFontString(menuButton, "...", "BFI")
-        menuButton.BFIMenuText:SetPoint("CENTER", 0, 3)
+        portraitButton:Hide()
+        portraitButton:EnableMouse(false)
+        portraitButton:SetAlpha(0)
     end
+
     for _, child in ipairs({combinedFrame:GetChildren()}) do
         if child.routeToSibling == "PortraitButton" then
+            if portraitProxyMouseStates[child] == nil then
+                portraitProxyMouseStates[child] = child:IsMouseEnabled()
+            end
             child:EnableMouse(false)
         end
     end
+end
+
+local function RestoreCombinedMenu()
+    local portraitButton = combinedFrame.PortraitButton
+    if portraitButton and portraitWasShown ~= nil then
+        portraitButton:SetAlpha(portraitAlpha or 1)
+        portraitButton:EnableMouse(portraitMouseEnabled)
+        portraitButton:SetShown(portraitWasShown)
+    end
+    for child, mouseEnabled in next, portraitProxyMouseStates do
+        child:EnableMouse(mouseEnabled)
+    end
+
+    wipe(portraitProxyMouseStates)
+    portraitWasShown = nil
+    portraitMouseEnabled = nil
+    portraitAlpha = nil
+end
+
+local function StyleCombinedFrame()
+    S.StyleTitledFrame(combinedFrame)
+    combinedFrame:SetClampedToScreen(true)
+    SuppressCombinedMenu()
 
     if combinedFrame.MoneyFrame and combinedFrame.MoneyFrame.Border then
         combinedFrame.MoneyFrame.Border:SetAlpha(0)
@@ -554,12 +1118,65 @@ local function StyleCombinedFrame()
     S.StyleEditBox(_G.BagItemSearchBox, -3, -2, 3, 2)
     S.CreateBackdrop(_G.BagItemAutoSortButton, true, -1)
 
-    categoryButton = AF.CreateButton(combinedFrame, "C", nil, 24, 22)
+    categoryButton = AF.CreateButton(combinedFrame, nil, "gray", 24, 22)
+    categoryButton:SetTexture(AF.GetIcon("Layout"), {16, 16}, {"CENTER", 0, 0})
     categoryButton:SetTooltip(L["Group Items by Category"])
     categoryButton:SetOnClick(function()
         B.config.categories = not B.config.categories
-        LayoutItems()
+        scrollOffset = 0
+        LayoutItems(true)
         AF.Fire("BFI_RefreshOptions", "bags")
+    end)
+
+    bagSlotsButton = AF.CreateButton(combinedFrame, nil, "gray", 24, 22)
+    bagSlotsButton:SetTexture(BACKPACK_ICON, {16, 16}, {"CENTER", 0, 0})
+    bagSlotsButton:SetTooltip(L["Show Bag Slots"])
+    bagSlotsButton:SetOnClick(function()
+        B.config.showBagSlots = not B.config.showBagSlots
+        scrollOffset = 0
+        LayoutItems(true)
+        AF.Fire("BFI_RefreshOptions", "bags")
+    end)
+
+    emptyCountOverlay = _G.CreateFrame("Frame", nil, combinedFrame)
+    emptyCountOverlay:EnableMouse(false)
+    AF.SetSize(emptyCountOverlay, ITEM_SIZE, ITEM_SIZE)
+    emptyCountText = AF.CreateFontString(emptyCountOverlay, nil, "white", "AF_FONT_OUTLINE")
+    emptyCountText:SetPoint("CENTER")
+    emptyCountOverlay:Hide()
+
+    scrollTrack = _G.CreateFrame("Slider", nil, combinedFrame, "BackdropTemplate")
+    AF.ApplyDefaultBackdropWithColors(scrollTrack, "widget")
+    scrollTrack:SetOrientation("VERTICAL")
+    scrollTrack:SetValueStep(1)
+    scrollTrack:SetObeyStepOnDrag(true)
+    scrollTrack:SetHitRectInsets(-5, -5, 0, 0)
+    AF.SetSize(scrollTrack, SCROLLBAR_WIDTH, 100)
+    scrollThumb = scrollTrack:CreateTexture(nil, "ARTWORK")
+    scrollThumb:SetColorTexture(AF.GetColorRGB("BFI"))
+    scrollThumb:SetWidth(SCROLLBAR_WIDTH)
+    scrollTrack:SetThumbTexture(scrollThumb)
+    scrollTrack:SetScript("OnValueChanged", function(_, value)
+        if layoutInProgress or scrollStopCount <= 1 then return end
+        local newIndex = scrollStopCount - floor(value + 0.5) + 1
+        newIndex = math.max(1, math.min(scrollStopCount, newIndex))
+        if newIndex == scrollIndex then return end
+        scrollIndex = newIndex
+        scrollOffset = scrollStops[scrollIndex]
+        RenderViewport()
+    end)
+    scrollTrack:Hide()
+
+    previousMouseWheelEnabled = combinedFrame:IsMouseWheelEnabled()
+    combinedFrame:EnableMouseWheel(true)
+    combinedFrame:HookScript("OnMouseWheel", function(_, delta)
+        if not IsEnabled() or scrollStopCount <= 1 then return end
+        local direction = delta > 0 and -1 or 1
+        local newIndex = math.max(1, math.min(scrollStopCount, scrollIndex + direction))
+        if newIndex == scrollIndex then return end
+        scrollIndex = newIndex
+        scrollOffset = scrollStops[scrollIndex]
+        RenderViewport()
     end)
 
     CreateBagButtons()
@@ -584,10 +1201,12 @@ local function Initialize()
     StyleCombinedFrame()
 
     hooksecurefunc(combinedFrame, "UpdateItemSlots", AppendReagentBagSlots)
-    hooksecurefunc(combinedFrame, "UpdateItemLayout", LayoutItems)
+    hooksecurefunc(combinedFrame, "UpdateItemLayout", function()
+        LayoutItems(true)
+    end)
     hooksecurefunc(combinedFrame, "UpdateItems", function()
-        if IsEnabled() and B.config.categories then
-            LayoutItems()
+        if IsEnabled() then
+            LayoutItems(false)
         end
     end)
     hooksecurefunc(combinedFrame, "UpdateSearchBox", function()
@@ -632,6 +1251,8 @@ local function EnableModule()
     end
 
     moduleEnabled = true
+    SuppressCombinedMenu()
+    combinedFrame:EnableMouseWheel(true)
     AF.UpdateMoverSave(combinedFrame, B.config.position)
     B:RegisterEvent("USE_COMBINED_BAGS_CHANGED", B.USE_COMBINED_BAGS_CHANGED)
     SetCombinedBags()
@@ -658,10 +1279,16 @@ local function DisableModule()
 
     RestoreReagentFrame()
     wipe(reagentItemButtons)
+    wipe(categoryCache)
+    ResetCategoryGroups()
+    ClearLayoutState()
     layoutScale = 1
     combinedFrame:SetScale(1)
 
     categoryButton:Hide()
+    bagSlotsButton:Hide()
+    emptyCountOverlay:Hide()
+    scrollTrack:Hide()
     for _, button in ipairs(bagButtons) do
         button:Hide()
     end
@@ -674,6 +1301,9 @@ local function DisableModule()
         combinedFrame:UpdateItemLayout()
         combinedFrame:Update()
     end
+
+    combinedFrame:EnableMouseWheel(previousMouseWheelEnabled)
+    RestoreCombinedMenu()
 
     if hasPreviousCombinedBags then
         SetCVar("combinedBags", previousCombinedBags and 1 or 0)
@@ -711,9 +1341,14 @@ function B:ITEM_LOCK_CHANGED(_, bagID, slotID)
     _G.SetItemButtonDesaturated(itemButton, info and info.isLocked)
 end
 
+function B:DISPLAY_SIZE_CHANGED()
+    LayoutItems(true)
+end
+
 function B.Refresh()
     if IsEnabled() and combinedFrame and combinedFrame:IsShown() then
-        LayoutItems()
+        scrollOffset = 0
+        LayoutItems(true)
     end
 end
 
