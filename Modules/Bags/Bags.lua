@@ -533,7 +533,7 @@ local function UpdateCategoryButtonState()
     end
 end
 
-local function LayoutControls(width)
+local function LayoutControls()
     local searchBox = _G.BagItemSearchBox
     local sortButton = _G.BagItemAutoSortButton
     local sortIsAttached = sortButton and sortButton:GetParent() == combinedFrame
@@ -569,8 +569,8 @@ local function LayoutControls(width)
 
     if searchBox and searchBox:GetParent() == combinedFrame then
         searchBox:ClearAllPoints()
-        searchBox:SetPoint("TOPLEFT", combinedFrame, "TOPLEFT", HORIZONTAL_PADDING, -31)
-        searchBox:SetWidth(math.max(80, width - 121))
+        searchBox:SetPoint("TOPLEFT", combinedFrame, "TOPLEFT", HORIZONTAL_PADDING, -27)
+        searchBox:SetPoint("TOPRIGHT", bagSlotsButton, "TOPLEFT", -3, 0)
     end
 
     local tokenFrame = _G.BackpackTokenFrame
@@ -1145,7 +1145,7 @@ local function LayoutItemsInternal(force)
     -- Category sections shelf-pack side by side instead of using a viewport.
     layoutScale = 1
     combinedFrame:SetScale(layoutScale)
-    LayoutControls(width)
+    LayoutControls()
     RenderLayout()
     ApplyPosition()
 end
@@ -1352,6 +1352,20 @@ local function UpdateCombinedFrameTitle(frame)
     end
 end
 
+local function StyleBagSearchBox()
+    local searchBox = _G.BagItemSearchBox
+    S.StyleEditBox(searchBox)
+    AF.SetHeight(searchBox, 22)
+    searchBox:SetTextInsets(20, 22, 0, 0)
+
+    searchBox.searchIcon:ClearAllPoints()
+    searchBox.searchIcon:SetPoint("LEFT", 5, 0)
+
+    searchBox.Instructions:ClearAllPoints()
+    searchBox.Instructions:SetPoint("TOPLEFT", 20, 0)
+    searchBox.Instructions:SetPoint("BOTTOMRIGHT", -22, 0)
+end
+
 local function StyleCombinedFrame()
     S.StyleTitledFrame(combinedFrame)
     combinedFrame:SetClampedToScreen(true)
@@ -1365,7 +1379,7 @@ local function StyleCombinedFrame()
         combinedFrame.MoneyFrame.Border:SetAlpha(0)
     end
 
-    S.StyleEditBox(_G.BagItemSearchBox, -3, -2, 3, 2)
+    StyleBagSearchBox()
     S.StyleIconButton(_G.BagItemAutoSortButton, AF.GetIcon("Refresh"), 16, HEADER_ICON_COLOR, "gray")
     AF.SetSize(_G.BagItemAutoSortButton, 24, 22)
 
@@ -1421,7 +1435,7 @@ local function Initialize()
     end)
     hooksecurefunc(combinedFrame, "UpdateSearchBox", function()
         if IsEnabled() then
-            LayoutControls(combinedFrame:GetWidth())
+            LayoutControls()
         end
     end)
     hooksecurefunc("OpenBag", function(bagID)
