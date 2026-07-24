@@ -14,10 +14,9 @@ local sort = table.sort
 local band = _G.bit.band
 local GetCVarBool = _G.GetCVarBool
 local GetInventoryItemTexture = _G.GetInventoryItemTexture
-local GetItemClassInfo = _G.C_Item.GetItemClassInfo
-local GetItemSubClassInfo = _G.C_Item.GetItemSubClassInfo
 local SetCVar = _G.SetCVar
 
+local ITEM_CLASS = _G.Enum.ItemClass
 local BAG_TOP_WITH_SLOTS = 100
 local BAG_TOP_WITHOUT_SLOTS = 64
 local CATEGORY_HEADER_HEIGHT = 18
@@ -40,6 +39,7 @@ local BACKPACK_ICON = "Interface\\Icons\\INV_Misc_Bag_08"
 local EMPTY_BAG_ICON = 133633
 local EMPTY_KIND_BAG = 1
 local EMPTY_KIND_REAGENT = 2
+local NON_EQUIPMENT_LOCATION = "INVTYPE_NON_EQUIP_IGNORE"
 
 local equipmentSlotAliases = {
     INVTYPE_ROBE = "INVTYPE_CHEST",
@@ -71,6 +71,16 @@ local equipmentSlotOrder = {
     INVTYPE_PROFESSION_TOOL = 20,
     INVTYPE_PROFESSION_GEAR = 21,
     INVTYPE_BAG = 22,
+}
+local categoryOrderByClass = {
+    [ITEM_CLASS.Consumable] = 200,
+    [ITEM_CLASS.Gem] = 300,
+    [ITEM_CLASS.Tradegoods] = 400,
+    [ITEM_CLASS.Reagent] = 400,
+    [ITEM_CLASS.ItemEnhancement] = 400,
+    [ITEM_CLASS.Profession] = 400,
+    [ITEM_CLASS.Recipe] = 500,
+    [ITEM_CLASS.Questitem] = 800,
 }
 
 local inventoryConstants = _G.Constants.InventoryConstants
@@ -209,6 +219,23 @@ local function ApplyPosition()
     AF.LoadPosition(combinedFrame, B.config.position)
 end
 
+local function GetClassCategory(itemType, itemSubType, classID, subclassID)
+    if classID == ITEM_CLASS.Questitem then
+        return "quest", _G.BAG_FILTER_QUEST_ITEMS or itemType or "Quest Items", 800
+    end
+
+    local label = itemType
+    if not label or label == "" then
+        label = _G.MISCELLANEOUS or "Miscellaneous"
+    end
+    if itemSubType and itemSubType ~= "" and itemSubType ~= label then
+        label = label .. " - " .. itemSubType
+    end
+
+    local key = "class:" .. classID .. ":" .. (subclassID or -1)
+    return key, label, categoryOrderByClass[classID] or 600
+end
+
 local function GetCategory(itemID)
     if not itemID then
         return "empty", _G.EMPTY or "Empty", 1000
@@ -219,46 +246,26 @@ local function GetCategory(itemID)
         return cached[1], cached[2], cached[3]
     end
 
-    local _, _, _, itemEquipLoc, _, classID, subclassID = _G.C_Item.GetItemInfoInstant(itemID)
-    local itemClass = _G.Enum.ItemClass
+    local _, itemType, itemSubType, itemEquipLoc, _, classID, subclassID =
+        _G.C_Item.GetItemInfoInstant(itemID)
+    if classID == nil then
+        return "uncategorized", _G.MISCELLANEOUS or "Miscellaneous", 600
+    end
+
     local key
     local label
     local order
 
-    if itemEquipLoc and itemEquipLoc ~= "" then
+    -- Retail 12.0.7 uses this non-empty sentinel for non-equippable items.
+    if itemEquipLoc
+        and itemEquipLoc ~= ""
+        and itemEquipLoc ~= NON_EQUIPMENT_LOCATION then
         itemEquipLoc = equipmentSlotAliases[itemEquipLoc] or itemEquipLoc
         key = "equipment:" .. itemEquipLoc
         label = L["Equipment - %s"]:format(_G[itemEquipLoc] or itemEquipLoc)
         order = 100 + (equipmentSlotOrder[itemEquipLoc] or 99)
-    elseif classID == itemClass.Consumable then
-        key = "consumables"
-        label = _G.BAG_FILTER_CONSUMABLES or GetItemClassInfo(classID) or "Consumables"
-        order = 200
-    elseif classID == itemClass.Gem then
-        key = "gems"
-        label = GetItemClassInfo(classID) or _G.GEMS or "Gems"
-        order = 300
-    elseif classID == itemClass.Tradegoods
-        or classID == itemClass.Reagent
-        or classID == itemClass.ItemEnhancement
-        or classID == itemClass.Profession then
-        local className = GetItemClassInfo(classID) or "Reagents"
-        local subclassName = GetItemSubClassInfo(classID, subclassID)
-        label = subclassName and (className .. " - " .. subclassName) or className
-        key = "profession:" .. (classID or -1) .. ":" .. (subclassID or -1)
-        order = 400
-    elseif classID == itemClass.Recipe then
-        key = "recipes"
-        label = GetItemClassInfo(classID) or "Recipes"
-        order = 500
-    elseif classID == itemClass.Questitem then
-        key = "quest"
-        label = _G.BAG_FILTER_QUEST_ITEMS or GetItemClassInfo(classID) or "Quest Items"
-        order = 800
     else
-        key = "class:" .. (classID or -1)
-        label = (classID and GetItemClassInfo(classID)) or _G.MISCELLANEOUS or "Miscellaneous"
-        order = 600
+        key, label, order = GetClassCategory(itemType, itemSubType, classID, subclassID)
     end
 
     cached = {key, label, order}
