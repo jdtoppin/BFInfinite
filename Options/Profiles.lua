@@ -8,7 +8,6 @@ local AF = _G.AbstractFramework
 local profilesPanel
 local rolePane, specPane, characterPane, managementPane
 local selectedProfile, selectedHighlight, assignmentFrame
-local profileUpdateTime
 local LoadAll
 
 ---------------------------------------------------------------------
@@ -1157,7 +1156,6 @@ AF.RegisterCallback("BFI_ShowOptionsPanel", function(_, id)
             CreateSpecPane()
             CreateCharacterPane()
             CreateManagementPane()
-            profileUpdateTime = GetTime()
         end
         LoadAll()
         profilesPanel:Show()
