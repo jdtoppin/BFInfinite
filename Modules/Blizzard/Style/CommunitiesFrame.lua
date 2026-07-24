@@ -5,6 +5,12 @@ local S = BFI.modules.Style
 local AF = _G.AbstractFramework
 
 local communitiesHooksInstalled
+local communitiesTabIcons = {
+    "Chat",
+    "Menu1",
+    "Star",
+    "Info_Round",
+}
 
 ---------------------------------------------------------------------
 -- shared
@@ -42,7 +48,7 @@ local function LayoutVerticalTabs(tabs)
     end
 end
 
-local function StyleCommunitiesTab(tab)
+local function StyleCommunitiesTab(tab, iconName)
     if not tab then return end
 
     -- Match the World Map rail's padded 35x50 footprint. The layout below
@@ -56,17 +62,13 @@ local function StyleCommunitiesTab(tab)
 
     local icon = tab.Icon
     if icon then
-        if not tab._BFICommunitiesTabStyled then
-            tab._BFICommunitiesTabStyled = true
-            S.StyleIcon(icon)
-        end
-
-        -- The tabs are initially hidden and Blizzard fills iconTexture during
-        -- OnLoad. Refresh it after selected-club updates so opening the frame
-        -- later does not depend on having reloaded with Communities visible.
-        if tab.iconTexture then
-            icon:SetTexture(tab.iconTexture)
-        end
+        -- Blizzard supplies opaque inventory-style artwork here. AF's
+        -- transparent glyphs read cleanly inside the padded square rail.
+        icon:SetTexture(AF.GetIcon(iconName))
+        icon:SetTexCoord(0, 1, 0, 1)
+        AF.SetSize(icon, 24, 24)
+        AF.ClearPoints(icon)
+        AF.SetPoint(icon, "CENTER")
         icon:SetAlpha(1)
         icon:Show()
     end
@@ -80,8 +82,8 @@ local function LayoutCommunitiesTabs(frame)
         frame.GuildInfoTab,
     }
 
-    for _, tab in ipairs(tabs) do
-        StyleCommunitiesTab(tab)
+    for i, tab in ipairs(tabs) do
+        StyleCommunitiesTab(tab, communitiesTabIcons[i])
     end
 
     LayoutVerticalTabs(tabs)
