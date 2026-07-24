@@ -25,7 +25,7 @@ end
 local function StyleBackdrop()
     F.Hide(map.BorderFrame.Tutorial)
     map.BorderFrame.InsetBorderTop:Hide()
-    S.StyleTitledFrame(map.BorderFrame)
+    S.StyleTitledFrame(map.BorderFrame, map)
     AF.SetFrameLevel(map.BorderFrame.BFIBg, -1, map)
 end
 
