@@ -186,10 +186,16 @@ local function StyleHouseFinder()
     searchBox.RightBorder:SetAlpha(0)
     S.StyleIconButton(searchBox.ClearButton, AF.GetIcon("Close"), 10, nil, "red")
     AF.SetSize(searchBox.ClearButton, 16, 16)
+    -- Preserve the 165px autocomplete field while fitting both controls into
+    -- the 256px list header: 55 + 165 + 5 + 24 + 7.
+    AF.ClearPoints(searchBox)
+    AF.SetPoint(searchBox, "TOPLEFT", list, 55, -12)
 
     local refreshButton = list.RefreshButton
     AF.SetSize(refreshButton, 24, 24)
     S.StyleIconButton(refreshButton, AF.GetIcon("Refresh_Round"), 16, "yellow_text", "widget")
+    AF.ClearPoints(refreshButton)
+    AF.SetPoint(refreshButton, "LEFT", searchBox, "RIGHT", 5, 0)
 
     local mapCanvas = frame.HouseFinderMapCanvasFrame
     mapCanvas.ScrollContainer.Child.TiledBackground:SetAlpha(0)
