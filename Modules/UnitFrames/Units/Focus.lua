@@ -6,6 +6,7 @@ local UF = BFI.modules.UnitFrames
 local AF = _G.AbstractFramework
 
 local focus
+local UnitWatchRegistered = UnitWatchRegistered
 local indicators = {
     "healthBar",
     "powerBar",
@@ -23,7 +24,7 @@ local indicators = {
     "mouseoverHighlight",
     "threatGlow",
     {"auras", "buffs", "HELPFUL"},
-    {"auras", "debuffs", "HARMFUL"},
+    {"nativeAuras", "debuffs", "HARMFUL"},
 }
 
 ---------------------------------------------------------------------
@@ -49,6 +50,14 @@ local function CreateFocus()
     UF.CreateIndicators(focus, indicators)
 end
 
+local function RestoreFocusConfigModeIndicators()
+    for _, indicator in pairs(focus.indicators) do
+        if indicator.EnableConfigMode then
+            indicator:EnableConfigMode()
+        end
+    end
+end
+
 ---------------------------------------------------------------------
 -- update
 ---------------------------------------------------------------------
@@ -61,20 +70,35 @@ local function UpdateFocus(_, module, which, skipIndicatorUpdates)
     if not (UF.config.general.enabled and config.general.enabled) then
         if focus then
             UF.DisableIndicators(focus)
-            UnregisterUnitWatch(focus)
+            if UnitWatchRegistered(focus) then
+                UnregisterUnitWatch(focus)
+            end
             focus:Hide()
         end
         return
     end
 
+    local wasEnabled = focus ~= nil and focus.enabled == true
     if not focus then
         CreateFocus()
     end
 
     -- setup
-    UF.SetupUnitFrame(focus, config, indicators, skipIndicatorUpdates)
+    UF.SetupUnitFrame(
+        focus,
+        config,
+        indicators,
+        skipIndicatorUpdates == true and wasEnabled
+    )
 
-    -- visibility NOTE: show must invoke after settings applied
-    RegisterUnitWatch(focus)
+    if focus.inConfigMode then
+        if not wasEnabled then
+            RestoreFocusConfigModeIndicators()
+        end
+        focus:Show()
+    elseif not UnitWatchRegistered(focus) then
+        -- visibility NOTE: show must invoke after settings applied
+        RegisterUnitWatch(focus)
+    end
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateFocus)
