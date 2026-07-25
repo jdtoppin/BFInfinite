@@ -14,6 +14,7 @@ local allPanes = {}
 local optionGroups = {}
 local CONTROL_WIDTH = 150
 local COLUMN_OFFSET = 185
+local anchorPointItems = AF.GetDropdownItems_AnchorPoint()
 
 local function UpdateModule()
     AF.Fire("BFI_UpdateModule", "cooldownManager")
@@ -125,8 +126,8 @@ local function CreateModulePanes(parent)
     return panes
 end
 
-local function CreateFontPane(parent, configKey, label)
-    local pane = CreateOptionRow(parent, 125)
+local function CreateFontPane(parent, configKey, label, withPosition)
+    local pane = CreateOptionRow(parent, withPosition and 210 or 125)
 
     local title = AF.CreateFontString(pane, label, "BFI")
     AF.SetPoint(title, "TOPLEFT", 15, -10)
@@ -170,8 +171,55 @@ local function CreateFontPane(parent, configKey, label)
         UpdateModule()
     end)
 
+    local anchorPoint
+    local relativePoint
+    local xOffset
+    local yOffset
+    if withPosition then
+        anchorPoint = AF.CreateDropdown(pane, CONTROL_WIDTH)
+        AF.SetPoint(anchorPoint, "TOPLEFT", size, "BOTTOMLEFT", 0, -30)
+        anchorPoint:SetLabel(L["Anchor Point"])
+        anchorPoint:SetItems(anchorPointItems)
+        anchorPoint:SetOnSelect(function(value)
+            CM.config[configKey].position[1] = value
+            UpdateModule()
+        end)
+
+        relativePoint = AF.CreateDropdown(pane, CONTROL_WIDTH)
+        AF.SetPoint(relativePoint, "TOPLEFT", anchorPoint, COLUMN_OFFSET, 0)
+        relativePoint:SetLabel(L["Relative Point"])
+        relativePoint:SetItems(anchorPointItems)
+        relativePoint:SetOnSelect(function(value)
+            CM.config[configKey].position[2] = value
+            UpdateModule()
+        end)
+
+        xOffset = AF.CreateSlider(pane, L["X Offset"], CONTROL_WIDTH, -100, 100, 0.5, nil, true)
+        AF.SetPoint(xOffset, "TOPLEFT", anchorPoint, "BOTTOMLEFT", 0, -25)
+        xOffset:SetAfterValueChanged(function(value)
+            CM.config[configKey].position[3] = value
+            UpdateModule()
+        end)
+
+        yOffset = AF.CreateSlider(pane, L["Y Offset"], CONTROL_WIDTH, -100, 100, 0.5, nil, true)
+        AF.SetPoint(yOffset, "TOPLEFT", xOffset, COLUMN_OFFSET, 0)
+        yOffset:SetAfterValueChanged(function(value)
+            CM.config[configKey].position[4] = value
+            UpdateModule()
+        end)
+    end
+
     function pane.UpdateEnabled()
         AF.SetEnabled(CM.config.enabled, font, outline, size, shadow, color)
+        if withPosition then
+            AF.SetEnabled(
+                CM.config.enabled,
+                anchorPoint,
+                relativePoint,
+                xOffset,
+                yOffset
+            )
+        end
     end
 
     function pane.Load()
@@ -181,6 +229,12 @@ local function CreateFontPane(parent, configKey, label)
         size:SetValue(config.font[2])
         shadow:SetChecked(config.font[4])
         color:SetColor(config.color)
+        if withPosition then
+            anchorPoint:SetSelectedValue(config.position[1])
+            relativePoint:SetSelectedValue(config.position[2])
+            xOffset:SetValue(config.position[3])
+            yOffset:SetValue(config.position[4])
+        end
         pane.UpdateEnabled()
     end
 
@@ -208,8 +262,6 @@ local barContentItems = {
     {text = L["Icon Only"], value = "icon_only"},
     {text = L["Name Only"], value = "name_only"},
 }
-
-local anchorPointItems = AF.GetDropdownItems_AnchorPoint()
 
 local viewerInfo = {
     essential = {
@@ -472,10 +524,21 @@ local function CreateOptionGroups(parent)
     if optionGroups.general then return end
 
     optionGroups.general = CreateModulePanes(parent)
-    optionGroups.general[#optionGroups.general + 1] = CreateFontPane(parent, "cooldownText", L["Cooldown Text"])
+    optionGroups.general[#optionGroups.general + 1] = CreateFontPane(
+        parent,
+        "cooldownText",
+        L["Cooldown Text"],
+        true
+    )
     optionGroups.general[#optionGroups.general + 1] = CreateFontPane(parent, "countText", L["Count Text"])
     optionGroups.general[#optionGroups.general + 1] = CreateFontPane(parent, "hotkeyText", L["Hot Key"])
     optionGroups.general[#optionGroups.general + 1] = CreateFontPane(parent, "barText", L["Bar Text"])
+    optionGroups.general[#optionGroups.general + 1] = CreateFontPane(
+        parent,
+        "durationText",
+        L["Duration Text"],
+        true
+    )
 
     for key in next, viewerInfo do
         optionGroups[key] = CreateViewerPanes(parent, key)

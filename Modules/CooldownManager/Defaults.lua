@@ -13,6 +13,7 @@ local defaults = {
     cooldownText = {
         font = {"BFI", 14, "outline", false},
         color = AF.GetColorTable("white"),
+        position = {"CENTER", "CENTER", 0, 0},
     },
     countText = {
         font = {"BFI", 12, "outline", false},
@@ -25,6 +26,11 @@ local defaults = {
     barText = {
         font = {"BFI", 12, "outline", false},
         color = AF.GetColorTable("white"),
+    },
+    durationText = {
+        font = {"BFI", 12, "outline", false},
+        color = AF.GetColorTable("white"),
+        position = {"RIGHT", "RIGHT", -8, 0},
     },
     viewers = {
         essential = {
@@ -98,8 +104,18 @@ AF.RegisterCallback("BFI_UpdateProfile", function(_, profile)
         if config.assistedHighlight == nil then
             config.assistedHighlight = defaults.assistedHighlight
         end
+        if type(config.cooldownText) ~= "table" then
+            config.cooldownText = AF.Copy(defaults.cooldownText)
+        elseif type(config.cooldownText.position) ~= "table" then
+            config.cooldownText.position = AF.Copy(defaults.cooldownText.position)
+        end
         if type(config.hotkeyText) ~= "table" then
             config.hotkeyText = AF.Copy(defaults.hotkeyText)
+        end
+        if type(config.durationText) ~= "table" then
+            config.durationText = AF.Copy(defaults.durationText)
+        elseif type(config.durationText.position) ~= "table" then
+            config.durationText.position = AF.Copy(defaults.durationText.position)
         end
         if type(config.viewers) == "table" then
             for key, viewerDefaults in next, defaults.viewers do

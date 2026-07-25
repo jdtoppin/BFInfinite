@@ -195,15 +195,30 @@ local TextureSetPoint = methodTexture.SetPoint
 local TextureSetTexCoord = methodTexture.SetTexCoord
 local TextureSetWidth = methodTexture.SetWidth
 local CooldownGetHideCountdownNumbers = methodCooldown.GetHideCountdownNumbers
-local CooldownSetCountdownFont = methodCooldown.SetCountdownFont
 local CooldownSetHideCountdownNumbers = methodCooldown.SetHideCountdownNumbers
 local StatusBarGetStatusBarTexture = methodStatusBar.GetStatusBarTexture
 local StatusBarSetStatusBarTexture = methodStatusBar.SetStatusBarTexture
+-- Both audited builds expose Cooldown:GetCountdownFontString without secret
+-- return annotations. The returned FontString's color and anchor getters can
+-- still yield secret aspects, so their receiver-correct captures are guarded
+-- together and styling fails closed if any part is unsafe.
+local PresentationMethods = {
+    GetCountdownFontString = methodCooldown.GetCountdownFontString,
+    GetFontObject = methodFontString.GetFontObject,
+    GetJustifyH = methodFontString.GetJustifyH,
+    GetJustifyV = methodFontString.GetJustifyV,
+    GetNumPoints = methodFontString.GetNumPoints,
+    GetPoint = methodFontString.GetPoint,
+    GetShadowColor = methodFontString.GetShadowColor,
+    GetShadowOffset = methodFontString.GetShadowOffset,
+    GetTextColor = methodFontString.GetTextColor,
+    SetFontObject = methodFontString.SetFontObject,
+    SetShadowColor = methodFontString.SetShadowColor,
+    SetShadowOffset = methodFontString.SetShadowOffset,
+}
 methodFrame:Hide()
 methodStatusBar:Hide()
 
-local FONT_NAME = "BFI_CooldownManagerCountdownFont"
-local countdownFont = CreateFont(FONT_NAME)
 local nativeSkinBorderColor = {AF.GetColorRGB("border")}
 local nativeSkinBackgroundColor = {AF.GetColorRGB("widget_dark")}
 local viewerStates = {}
@@ -762,32 +777,65 @@ local function EnsureHotkeyOverlay(item, definition)
     return overlay, target
 end
 
-local function GetHotkeyPosition(config)
-    local position = config.hotkeyPosition
+function PresentationMethods.GetTextPosition(
+    position,
+    defaultPoint,
+    defaultRelativePoint,
+    defaultX,
+    defaultY
+)
     if not IsValueNonSecret(position) or type(position) ~= "table" then
-        return "TOPRIGHT", "TOPRIGHT", 0, 0
+        return defaultPoint, defaultRelativePoint, defaultX, defaultY
     end
 
     local point = position[1]
     if not IsSafeString(point) or not anchorPoints[point] then
-        point = "TOPRIGHT"
+        point = defaultPoint
     end
     local relativePoint = position[2]
     if not IsSafeString(relativePoint) or not anchorPoints[relativePoint] then
-        relativePoint = "TOPRIGHT"
+        relativePoint = defaultRelativePoint
     end
-    local x = ClampNumber(position[3], 0, -100, 100)
-    local y = ClampNumber(position[4], 0, -100, 100)
+    local x = ClampNumber(position[3], defaultX, -100, 100)
+    local y = ClampNumber(position[4], defaultY, -100, 100)
     return point, relativePoint, x, y
 end
 
-local function PositionHotkey(text, target, config, scale)
-    local point, relativePoint, x, y = GetHotkeyPosition(config)
+function PresentationMethods.PositionText(
+    text,
+    target,
+    position,
+    defaultPoint,
+    defaultRelativePoint,
+    defaultX,
+    defaultY,
+    scale
+)
+    local point, relativePoint, x, y = PresentationMethods.GetTextPosition(
+        position,
+        defaultPoint,
+        defaultRelativePoint,
+        defaultX,
+        defaultY
+    )
     scale = scale or 1
     FontStringSetJustifyH(text, horizontalJustification[point] or "CENTER")
     FontStringSetJustifyV(text, verticalJustification[point] or "MIDDLE")
     FontStringClearAllPoints(text)
     FontStringSetPoint(text, point, target, relativePoint, x * scale, y * scale)
+end
+
+local function PositionHotkey(text, target, config, scale)
+    PresentationMethods.PositionText(
+        text,
+        target,
+        config.hotkeyPosition,
+        "TOPRIGHT",
+        "TOPRIGHT",
+        0,
+        0,
+        scale
+    )
 end
 
 local function HideItemHotkey(item)
@@ -892,6 +940,36 @@ local function BuildLayout(definition, config, count)
     }
 end
 
+function PresentationMethods.GetPixelSnappedScale(
+    item,
+    itemHeight,
+    configuredScale
+)
+    local currentScale = FrameGetScale(item)
+    local effectiveScale = FrameGetEffectiveScale(item)
+    if not IsSafeNumber(currentScale)
+        or currentScale <= 0
+        or not IsSafeNumber(effectiveScale)
+        or effectiveScale <= 0
+    then
+        return configuredScale
+    end
+
+    local parentScale = effectiveScale / currentScale
+    if parentScale <= 0 then return configuredScale end
+    local renderedHeight = itemHeight * configuredScale
+    local snappedHeight = AF.GetNearestPixelSize(renderedHeight, parentScale, 1)
+    if not IsSafeNumber(snappedHeight) or snappedHeight <= 0 then
+        return configuredScale
+    end
+
+    local snappedScale = snappedHeight / itemHeight
+    if IsSafeNumber(snappedScale) and snappedScale > 0 then
+        return snappedScale
+    end
+    return configuredScale
+end
+
 local function GetLayoutBounds(layout)
     local count = max(1, layout.count)
     local lines = ceil(count / layout.capacity)
@@ -975,9 +1053,13 @@ local function EnsurePreviewFrame(state, index)
     preview:SetBackdropColor(AF.GetColorRGB("widget_dark", 0.65))
     preview:SetBackdropBorderColor(AF.GetColorRGB("BFI", 0.8))
     preview:EnableMouse(false)
+    preview.timer = AF.CreateFontString(preview, nil, nil, nil, "OVERLAY")
+    preview.timer:SetWidth(0)
+    preview.timer:Hide()
     preview.hotkey = AF.CreateFontString(preview, nil, nil, nil, "OVERLAY")
     preview.hotkey:SetWidth(0)
     preview.hotkey:Hide()
+    preview.timerTarget = CreateFrame("Frame", nil, preview)
     if state.definition.isBar then
         preview.hotkeyTarget = CreateFrame("Frame", nil, preview)
     end
@@ -1010,6 +1092,47 @@ local function UpdateHolderPreview(state, layout, firstItem, config)
             )
             FrameClearAllPoints(preview.hotkeyTarget)
             FrameSetPoint(preview.hotkeyTarget, "LEFT", preview, "LEFT", 0, 0)
+            local nameOnly = config.barContent == "name_only"
+            FrameSetSize(
+                preview.timerTarget,
+                (layout.width - (nameOnly and 0 or 32)) * scaleRatio,
+                19 * scaleRatio
+            )
+            FrameClearAllPoints(preview.timerTarget)
+            FrameSetPoint(
+                preview.timerTarget,
+                "LEFT",
+                nameOnly and preview or preview.hotkeyTarget,
+                nameOnly and "LEFT" or "RIGHT",
+                nameOnly and 0 or 2 * scaleRatio,
+                0
+            )
+        else
+            FrameClearAllPoints(preview.timerTarget)
+            local pixel = CM.config.skin
+                and PresentationMethods.GetOnePixelForFrame(
+                    preview.timerTarget
+                )
+            if pixel then
+                FrameSetPoint(
+                    preview.timerTarget,
+                    "TOPLEFT",
+                    preview,
+                    "TOPLEFT",
+                    pixel,
+                    -pixel
+                )
+                FrameSetPoint(
+                    preview.timerTarget,
+                    "BOTTOMRIGHT",
+                    preview,
+                    "BOTTOMRIGHT",
+                    -pixel,
+                    pixel
+                )
+            else
+                FrameSetAllPoints(preview.timerTarget, preview)
+            end
         end
         if config.showHotkeys ~= false then
             ApplyFont(preview.hotkey, CM.config.hotkeyText, scaleRatio)
@@ -1018,6 +1141,28 @@ local function UpdateHolderPreview(state, layout, firstItem, config)
             FontStringShow(preview.hotkey)
         else
             FontStringHide(preview.hotkey)
+        end
+        if config.showTimer ~= false then
+            local timerConfig = state.definition.isBar
+                and CM.config.durationText
+                or CM.config.cooldownText
+            local defaultPoint = state.definition.isBar and "RIGHT" or "CENTER"
+            local defaultX = state.definition.isBar and -8 or 0
+            ApplyFont(preview.timer, timerConfig, scaleRatio)
+            PresentationMethods.PositionText(
+                preview.timer,
+                preview.timerTarget or preview,
+                timerConfig.position,
+                defaultPoint,
+                defaultPoint,
+                defaultX,
+                0,
+                scaleRatio
+            )
+            FontStringSetText(preview.timer, "30")
+            FontStringShow(preview.timer)
+        else
+            FontStringHide(preview.timer)
         end
         FrameShow(preview)
     end
@@ -1056,6 +1201,117 @@ local function RestorePoints(frame, points)
     for _, point in ipairs(points) do
         FrameSetPoint(frame, unpack(point))
     end
+end
+
+function PresentationMethods.CaptureFontStringPoints(fontString)
+    local numPoints = PresentationMethods.GetNumPoints(fontString)
+    if not IsSafeNumber(numPoints) or numPoints < 0 then
+        return nil
+    end
+
+    local points = {}
+    for index = 1, numPoints do
+        local point, relativeTo, relativePoint, x, y = PresentationMethods.GetPoint(
+            fontString,
+            index
+        )
+        if not IsSafeString(point)
+            or not IsValueNonSecret(relativeTo)
+            or not relativeTo
+            or not IsSafeString(relativePoint)
+            or not IsSafeNumber(x)
+            or not IsSafeNumber(y)
+        then
+            return nil
+        end
+        points[index] = {point, relativeTo, relativePoint, x, y}
+    end
+    return points
+end
+
+function PresentationMethods.CaptureFontStringPresentation(fontString)
+    if not IsValueNonSecret(fontString) or not fontString then
+        return nil
+    end
+
+    local fontObject = PresentationMethods.GetFontObject(fontString)
+    local justifyH = PresentationMethods.GetJustifyH(fontString)
+    local justifyV = PresentationMethods.GetJustifyV(fontString)
+    local textR, textG, textB, textA =
+        PresentationMethods.GetTextColor(fontString)
+    local shadowR, shadowG, shadowB, shadowA =
+        PresentationMethods.GetShadowColor(fontString)
+    local shadowX, shadowY = PresentationMethods.GetShadowOffset(fontString)
+    local points = PresentationMethods.CaptureFontStringPoints(fontString)
+    if not IsValueNonSecret(fontObject)
+        or not fontObject
+        or not IsSafeString(justifyH)
+        or not IsSafeString(justifyV)
+        or not IsSafeNumber(textR)
+        or not IsSafeNumber(textG)
+        or not IsSafeNumber(textB)
+        or not IsSafeNumber(textA)
+        or not IsSafeNumber(shadowR)
+        or not IsSafeNumber(shadowG)
+        or not IsSafeNumber(shadowB)
+        or not IsSafeNumber(shadowA)
+        or not IsSafeNumber(shadowX)
+        or not IsSafeNumber(shadowY)
+        or not points
+    then
+        return nil
+    end
+
+    return {
+        fontString = fontString,
+        fontObject = fontObject,
+        justifyH = justifyH,
+        justifyV = justifyV,
+        textColor = {textR, textG, textB, textA},
+        shadowColor = {shadowR, shadowG, shadowB, shadowA},
+        shadowOffset = {shadowX, shadowY},
+        points = points,
+    }
+end
+
+function PresentationMethods.RestoreFontStringPresentation(
+    presentation,
+    fontString
+)
+    local capturedFontString = presentation and presentation.fontString
+    if not IsValueNonSecret(fontString)
+        or not fontString
+        or not IsValueNonSecret(capturedFontString)
+        or fontString ~= capturedFontString
+    then
+        return
+    end
+
+    PresentationMethods.SetFontObject(fontString, presentation.fontObject)
+    FontStringSetTextColor(fontString, unpack(presentation.textColor))
+    PresentationMethods.SetShadowColor(
+        fontString,
+        unpack(presentation.shadowColor)
+    )
+    PresentationMethods.SetShadowOffset(
+        fontString,
+        unpack(presentation.shadowOffset)
+    )
+    FontStringSetJustifyH(fontString, presentation.justifyH)
+    FontStringSetJustifyV(fontString, presentation.justifyV)
+    FontStringClearAllPoints(fontString)
+    for _, point in ipairs(presentation.points) do
+        FontStringSetPoint(fontString, unpack(point))
+    end
+end
+
+function PresentationMethods.GetCooldownCountdownText(cooldown)
+    if not IsValueNonSecret(cooldown) or not cooldown then return nil end
+    local fontString = PresentationMethods.GetCountdownFontString(cooldown)
+    if IsValueNonSecret(fontString) and fontString then
+        return fontString
+    end
+    return nil
 end
 
 local function CaptureNativeGeometry(item, itemState)
@@ -1111,11 +1367,6 @@ local function CapturePresentationDefaults(item, definition, itemState)
         if IsSafeBoolean(hideNumbers) then
             itemState.nativeHideCountdownNumbers = hideNumbers
         end
-
-        local cooldownFont = item.cooldownFont
-        if IsSafeString(cooldownFont) then
-            itemState.nativeCooldownFont = cooldownFont
-        end
     end
 
     if definition.isBar then
@@ -1142,7 +1393,8 @@ local function RecapturePresentationDefaults(item, definition, itemState)
     itemState.nativeAlpha = nil
     itemState.nativeMouseMotion = nil
     itemState.nativeHideCountdownNumbers = nil
-    itemState.nativeCooldownFont = nil
+    itemState.nativeCooldownPoints = nil
+    itemState.nativeCountdownText = nil
     itemState.nativeBarPoints = nil
     itemState.nativeIconShown = nil
     itemState.nativeIconAlpha = nil
@@ -1150,6 +1402,7 @@ local function RecapturePresentationDefaults(item, definition, itemState)
     itemState.nativeNameAlpha = nil
     itemState.nativeDurationShown = nil
     itemState.nativeDurationAlpha = nil
+    itemState.nativeDurationText = nil
     CapturePresentationDefaults(item, definition, itemState)
     itemState.recapturePresentation = nil
 end
@@ -1176,9 +1429,13 @@ local function RestoreItemPresentation(item, definition, itemState)
         if itemState.nativeHideCountdownNumbers ~= nil then
             CooldownSetHideCountdownNumbers(cooldown, itemState.nativeHideCountdownNumbers)
         end
-        if itemState.nativeCooldownFont then
-            CooldownSetCountdownFont(cooldown, itemState.nativeCooldownFont)
+        if itemState.nativeCooldownPoints then
+            RestorePoints(cooldown, itemState.nativeCooldownPoints)
         end
+        PresentationMethods.RestoreFontStringPresentation(
+            itemState.nativeCountdownText,
+            PresentationMethods.GetCooldownCountdownText(cooldown)
+        )
     end
 
     if definition.isBar then
@@ -1201,6 +1458,10 @@ local function RestoreItemPresentation(item, definition, itemState)
             if itemState.nativeDurationAlpha ~= nil then
                 FontStringSetAlpha(duration, itemState.nativeDurationAlpha)
             end
+            PresentationMethods.RestoreFontStringPresentation(
+                itemState.nativeDurationText,
+                duration
+            )
         end
     end
 
@@ -1223,6 +1484,11 @@ local function CanRestoreItemPresentation(item, definition)
 
     local cooldown = GetSafeField(item, "Cooldown")
     if cooldown and not CanChangeGeometry(cooldown) then
+        return false
+    end
+    local countdownText = cooldown
+        and PresentationMethods.GetCooldownCountdownText(cooldown)
+    if countdownText and not CanChangeGeometry(countdownText) then
         return false
     end
 
@@ -1315,6 +1581,44 @@ local function CreateSolidTexture(parent, drawLayer, subLevel, color)
     return texture
 end
 
+function PresentationMethods.GetOnePixelForFrame(frame)
+    local effectiveScale = FrameGetEffectiveScale(frame)
+    if not IsSafeNumber(effectiveScale) or effectiveScale <= 0 then
+        return nil
+    end
+
+    local pixel = AF.GetNearestPixelSize(1, effectiveScale, 1)
+    if IsSafeNumber(pixel) and pixel > 0 then
+        return pixel
+    end
+    return nil
+end
+
+function PresentationMethods.UpdateNativeChildSkinPixels(skin)
+    if not skin
+        or not skin.border
+        or not skin.top
+        or not skin.bottom
+        or not skin.left
+        or not skin.right
+        or not CanChangeGeometry(skin.border)
+        or not CanChangeGeometry(skin.top)
+        or not CanChangeGeometry(skin.bottom)
+        or not CanChangeGeometry(skin.left)
+        or not CanChangeGeometry(skin.right)
+    then
+        return false
+    end
+
+    local pixel = PresentationMethods.GetOnePixelForFrame(skin.border)
+    if not pixel then return false end
+    TextureSetHeight(skin.top, pixel)
+    TextureSetHeight(skin.bottom, pixel)
+    TextureSetWidth(skin.left, pixel)
+    TextureSetWidth(skin.right, pixel)
+    return true
+end
+
 local function CreateNativeChildSkin(parent, target, withBackground)
     local skin = {border = CreateNativeSkinLayer(parent, target, 1)}
     if not skin.border then return nil end
@@ -1328,7 +1632,7 @@ local function CreateNativeChildSkin(parent, target, withBackground)
     if not top then return nil end
     TextureSetPoint(top, "TOPLEFT", skin.border, "TOPLEFT", 0, 0)
     TextureSetPoint(top, "TOPRIGHT", skin.border, "TOPRIGHT", 0, 0)
-    TextureSetHeight(top, 1)
+    skin.top = top
 
     local bottom = CreateSolidTexture(
         skin.border,
@@ -1339,7 +1643,7 @@ local function CreateNativeChildSkin(parent, target, withBackground)
     if not bottom then return nil end
     TextureSetPoint(bottom, "BOTTOMLEFT", skin.border, "BOTTOMLEFT", 0, 0)
     TextureSetPoint(bottom, "BOTTOMRIGHT", skin.border, "BOTTOMRIGHT", 0, 0)
-    TextureSetHeight(bottom, 1)
+    skin.bottom = bottom
 
     local left = CreateSolidTexture(
         skin.border,
@@ -1350,7 +1654,7 @@ local function CreateNativeChildSkin(parent, target, withBackground)
     if not left then return nil end
     TextureSetPoint(left, "TOPLEFT", skin.border, "TOPLEFT", 0, 0)
     TextureSetPoint(left, "BOTTOMLEFT", skin.border, "BOTTOMLEFT", 0, 0)
-    TextureSetWidth(left, 1)
+    skin.left = left
 
     local right = CreateSolidTexture(
         skin.border,
@@ -1361,7 +1665,7 @@ local function CreateNativeChildSkin(parent, target, withBackground)
     if not right then return nil end
     TextureSetPoint(right, "TOPRIGHT", skin.border, "TOPRIGHT", 0, 0)
     TextureSetPoint(right, "BOTTOMRIGHT", skin.border, "BOTTOMRIGHT", 0, 0)
-    TextureSetWidth(right, 1)
+    skin.right = right
 
     if withBackground then
         skin.background = CreateNativeSkinLayer(parent, target, -1)
@@ -1389,6 +1693,7 @@ local function CreateNativeChildSkin(parent, target, withBackground)
         FrameSetAllPoints(skin.background, target)
     end
     FrameSetAllPoints(skin.border, target)
+    PresentationMethods.UpdateNativeChildSkinPixels(skin)
     return skin
 end
 
@@ -1436,6 +1741,7 @@ local function SkinIcon(iconParent, icon)
     TextureSetTexCoord(icon, AF.GetDefaultTexCoord())
     if skin.mask then MaskTextureHide(skin.mask) end
     if skin.overlay then TextureHide(skin.overlay) end
+    PresentationMethods.UpdateNativeChildSkinPixels(skin)
     FrameShow(skin.border)
 end
 
@@ -1461,6 +1767,7 @@ local function SkinBar(bar)
     if skin.background then
         FrameShow(skin.background)
     end
+    PresentationMethods.UpdateNativeChildSkinPixels(skin)
     FrameShow(skin.border)
 end
 
@@ -1536,7 +1843,62 @@ local function GetCountText(item, definition)
     return chargeCount and GetSafeField(chargeCount, "Current")
 end
 
-local function CanApplyStaticPresentation(item, state)
+function PresentationMethods.CaptureStaticPresentationDefaults(
+    item,
+    definition,
+    itemState
+)
+    local cooldown = GetSafeField(item, "Cooldown")
+    if cooldown then
+        if not itemState.nativeCooldownPoints then
+            itemState.nativeCooldownPoints = CapturePoints(cooldown)
+        end
+        if not itemState.nativeCooldownPoints then
+            return false
+        end
+
+        local countdownText =
+            PresentationMethods.GetCooldownCountdownText(cooldown)
+        if countdownText and not itemState.nativeCountdownText then
+            itemState.nativeCountdownText =
+                PresentationMethods.CaptureFontStringPresentation(countdownText)
+        end
+        if countdownText and not itemState.nativeCountdownText then
+            return false
+        end
+    end
+
+    if definition.isBar then
+        local bar = GetSafeField(item, "Bar")
+        local duration = bar and GetSafeField(bar, "Duration")
+        if duration and not itemState.nativeDurationText then
+            itemState.nativeDurationText =
+                PresentationMethods.CaptureFontStringPresentation(duration)
+        end
+        if duration and not itemState.nativeDurationText then
+            return false
+        end
+    end
+    return true
+end
+
+function PresentationMethods.PositionCooldownInside(cooldown, target)
+    local pixel = PresentationMethods.GetOnePixelForFrame(cooldown)
+    if not pixel then return false end
+    FrameClearAllPoints(cooldown)
+    FrameSetPoint(cooldown, "TOPLEFT", target, "TOPLEFT", pixel, -pixel)
+    FrameSetPoint(
+        cooldown,
+        "BOTTOMRIGHT",
+        target,
+        "BOTTOMRIGHT",
+        -pixel,
+        pixel
+    )
+    return true
+end
+
+local function CanApplyStaticPresentation(item, state, itemState)
     if not CanChangeGeometry(item) then
         return false
     end
@@ -1549,10 +1911,13 @@ local function CanApplyStaticPresentation(item, state)
         and GetSafeField(itemIcon, "Icon")
         or itemIcon
     local cooldown = GetSafeField(item, "Cooldown")
+    local countdownText = cooldown
+        and PresentationMethods.GetCooldownCountdownText(cooldown)
     local countText = GetCountText(item, definition)
     if (iconParent and not CanChangeGeometry(iconParent))
         or (icon and not CanChangeGeometry(icon))
         or (cooldown and not CanChangeGeometry(cooldown))
+        or (countdownText and not CanChangeGeometry(countdownText))
         or (countText and not CanChangeGeometry(countText))
     then
         return false
@@ -1585,7 +1950,11 @@ local function CanApplyStaticPresentation(item, state)
             return false
         end
     end
-    return true
+    return PresentationMethods.CaptureStaticPresentationDefaults(
+        item,
+        definition,
+        itemState
+    )
 end
 
 local function ApplyBarContent(item, config, itemState)
@@ -1657,15 +2026,33 @@ local function ApplyStaticPresentation(item, state, config, itemState)
         if bar then
             SkinBar(bar)
         end
+
+        local cooldown = GetSafeField(item, "Cooldown")
+        if cooldown and iconParent then
+            PresentationMethods.PositionCooldownInside(cooldown, iconParent)
+        end
     end
 
     local cooldown = GetSafeField(item, "Cooldown")
-    if cooldown
-        and itemState.nativeHideCountdownNumbers ~= nil
-        and itemState.nativeCooldownFont
-    then
-        CooldownSetCountdownFont(cooldown, FONT_NAME)
+    if cooldown and itemState.nativeHideCountdownNumbers ~= nil then
         CooldownSetHideCountdownNumbers(cooldown, config.showTimer == false)
+    end
+    local countdownText = cooldown
+        and PresentationMethods.GetCooldownCountdownText(cooldown)
+    if countdownText
+        and itemState.nativeCountdownText
+        and countdownText == itemState.nativeCountdownText.fontString
+    then
+        ApplyFont(countdownText, CM.config.cooldownText)
+        PresentationMethods.PositionText(
+            countdownText,
+            cooldown,
+            CM.config.cooldownText.position,
+            "CENTER",
+            "CENTER",
+            0,
+            0
+        )
     end
 
     ApplyFont(GetCountText(item, state.definition), CM.config.countText)
@@ -1673,7 +2060,22 @@ local function ApplyStaticPresentation(item, state, config, itemState)
     local bar = state.definition.isBar and GetSafeField(item, "Bar")
     if bar then
         ApplyFont(GetSafeField(bar, "Name"), CM.config.barText)
-        ApplyFont(GetSafeField(bar, "Duration"), CM.config.barText)
+        local duration = GetSafeField(bar, "Duration")
+        ApplyFont(duration, CM.config.durationText)
+        if duration
+            and itemState.nativeDurationText
+            and duration == itemState.nativeDurationText.fontString
+        then
+            PresentationMethods.PositionText(
+                duration,
+                bar,
+                CM.config.durationText.position,
+                "RIGHT",
+                "RIGHT",
+                -8,
+                0
+            )
+        end
         ApplyBarContent(item, config, itemState)
     end
 
@@ -1918,11 +2320,29 @@ local function ReconcileViewer(state, config)
     local layout = BuildLayout(state.definition, config, displayCount)
 
     if layoutCount == 0 then
+        if CM.config.skin then
+            layout.scale = PresentationMethods.GetPixelSnappedScale(
+                _G.UIParent,
+                layout.height,
+                layout.scale
+            )
+        end
         UpdateHolderPreview(state, layout, nil, config)
         return true
     end
 
     layout.count = layoutCount
+    -- Fractional rendered icon dimensions put opposite border edges between
+    -- physical pixels. Snap the requested scale by the fixed native height so
+    -- all four one-pixel skin edges remain crisp at values such as Essential's
+    -- default 0.75 scale.
+    if CM.config.skin then
+        layout.scale = PresentationMethods.GetPixelSnappedScale(
+            visibleItems[1].item,
+            layout.height,
+            layout.scale
+        )
+    end
     local needsGeometry = false
     for index, entry in ipairs(visibleItems) do
         local x, y = GetLayoutPosition(layout, index)
@@ -1972,7 +2392,11 @@ local function ReconcileViewer(state, config)
             or entry.itemState.presentationGeneration ~= presentationGeneration
         then
             needsStaticPresentation = true
-            if not CanApplyStaticPresentation(entry.item, state) then
+            if not CanApplyStaticPresentation(
+                entry.item,
+                state,
+                entry.itemState
+            ) then
                 needsStaticPresentation = false
                 break
             end
@@ -1980,8 +2404,6 @@ local function ReconcileViewer(state, config)
     end
 
     if needsStaticPresentation then
-        AF.SetFont(countdownFont, CM.config.cooldownText.font)
-        countdownFont:SetTextColor(AF.UnpackColor(CM.config.cooldownText.color))
         for _, entry in ipairs(visibleItems) do
             if entry.needsGeometry
                 or entry.itemState.presentationGeneration ~= presentationGeneration
