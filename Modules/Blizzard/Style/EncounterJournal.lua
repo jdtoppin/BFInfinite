@@ -45,7 +45,7 @@ local function HideTextureWhenShown(texture, shown)
 end
 
 local function KeepTextureHidden(texture)
-    if texture._BFIEncounterHidden then return end
+    if not texture or texture._BFIEncounterHidden then return end
     texture._BFIEncounterHidden = true
 
     texture:Hide()
@@ -68,6 +68,29 @@ local function SetFlatTexture(texture, color, alpha)
     texture:SetTexture(AF.GetPlainTexture())
     texture:SetTexCoord(0, 1, 0, 1)
     texture:SetVertexColor(AF.GetColorRGB(color, alpha))
+end
+
+local function SetTextColor(region, color)
+    if region and region.SetTextColor then
+        region:SetTextColor(AF.GetColorRGB(color))
+    end
+end
+
+local function StyleEncounterRadio(frame)
+    S.StyleMenuSelection(frame, 7)
+end
+
+local function StyleEncounterRadioDescriptions(parentDescription)
+    for _, description in parentDescription:EnumerateElementDescriptions() do
+        if description:IsRadio() then
+            description:AddInitializer(StyleEncounterRadio)
+        end
+        StyleEncounterRadioDescriptions(description)
+    end
+end
+
+local function StyleEncounterRadioMenu(_, rootDescription)
+    StyleEncounterRadioDescriptions(rootDescription)
 end
 
 local function CreateHoverOverlay(frame, alpha)
@@ -153,11 +176,13 @@ local function StyleEncounterTab(tab)
     tab:SetHighlightTexture(AF.GetEmptyTexture())
 
     S.CreateBackdrop(tab)
-    AF.SetSize(tab, 50, 50)
+    AF.SetSize(tab, 35, 50)
     tab.unselected:ClearAllPoints()
     tab.unselected:SetPoint("CENTER")
+    AF.SetSize(tab.unselected, 24, 22)
     tab.selected:ClearAllPoints()
     tab.selected:SetPoint("CENTER")
+    AF.SetSize(tab.selected, 24, 22)
     SetEncounterTabSelected(tab, EncounterJournal.encounter.info.tab == tab:GetID())
 
     tab:HookScript("OnEnter", function(self)
@@ -335,10 +360,33 @@ local function StyleJourneys()
     S.StyleButton(overview.OverviewBtn, "BFI")
 end
 
+local function StyleEncounterHelpButton(button)
+    if not button or button._BFIEncounterHelpStyled then return end
+    button._BFIEncounterHelpStyled = true
+
+    -- Keep Blizzard's contextual HelpPlate click behavior, but use the same
+    -- compact AF title-bar launcher and tooltip as the other BFI journals.
+    button:SetScript("OnEnter", nil)
+    button:SetScript("OnLeave", nil)
+    S.StyleIconButton(button, AF.GetIcon("Info_Square"), 12, "gray", "gray_hover")
+    AF.SetSize(button, 20, 20)
+    button:SetHitRectInsets(0, 0, 0, 0)
+    AF.ClearPoints(button)
+    AF.SetPoint(button, "LEFT", EncounterJournal.BFIHeader, "LEFT", 2, 0)
+    AF.SetFrameLevel(button, 1, EncounterJournal.BFIHeader)
+    AF.SetTooltip(button, "BOTTOMLEFT", 0, -2, _G.MAIN_HELP_BUTTON_TOOLTIP)
+    button:HookScript("OnHide", function()
+        if AF.Tooltip:GetOwner() == button then
+            AF.HideTooltip()
+        end
+    end)
+end
+
 local function StyleMonthlyActivities()
     local frame = EncounterJournal.MonthlyActivitiesFrame
     S.StyleScrollBar(frame.ScrollBar)
     S.StyleScrollBar(frame.FilterList.ScrollBar)
+    StyleEncounterHelpButton(frame.HelpButton)
 
     KeepNamedTexturesHidden(frame, {
         "Bg",
@@ -413,18 +461,94 @@ local function LayoutEncounterTabs()
             if previousTab then
                 AF.SetPoint(tab, "TOPLEFT", previousTab, "BOTTOMLEFT", 0, -1)
             else
-                AF.SetPoint(tab, "TOPLEFT", info, "TOPRIGHT", 4, -35)
+                AF.SetPoint(tab, "TOPLEFT", info, "TOPRIGHT", 4, -28)
             end
             previousTab = tab
         end
     end
 end
 
+local function StyleEncounterBackgrounds()
+    local instanceSelect = EncounterJournal.instanceSelect
+    KeepNamedTexturesHidden(instanceSelect, {
+        "bg",
+        "evergreenBg",
+    })
+
+    local encounter = EncounterJournal.encounter
+    local instance = encounter.instance
+    KeepNamedTexturesHidden(instance, {
+        "loreBG",
+        "titleBG",
+    })
+    SetTextColor(instance.title, "white")
+    local loreFont = instance.LoreScrollingFont
+    if loreFont and loreFont.ScrollBox and loreFont.ScrollBox.FontStringContainer then
+        SetTextColor(loreFont.ScrollBox.FontStringContainer.FontString, "gray")
+    end
+
+    local info = encounter.info
+    KeepTextureHidden(_G.EncounterJournalEncounterFrameInfoBG)
+    KeepNamedTexturesHidden(info, {
+        "leftShadow",
+        "rightShadow",
+    })
+    KeepNamedTexturesHidden(info.model, {
+        "dungeonBG",
+    })
+    KeepTextureHidden(_G.EncounterJournalEncounterFrameInfoModelFrameShadow)
+    KeepTextureHidden(_G.EncounterJournalEncounterFrameInfoModelFrameTitleBG)
+    SetTextColor(info.model.imageTitle, "white")
+
+    local details = info.detailsScroll.child
+    SetTextColor(details.description, "gray")
+
+    local overview = info.overviewScroll.child
+    KeepTextureHidden(overview.header)
+    SetTextColor(overview.loreDescription, "gray")
+    SetTextColor(overview.Title or overview.title or _G[overview:GetName() .. "Title"], "white")
+    if overview.overviewDescription then
+        SetTextColor(overview.overviewDescription.Text, "gray")
+    end
+end
+
+local function StyleInstanceHeaderIcon()
+    local info = EncounterJournal.encounter.info
+    local button = info.instanceButton
+    local icon = button.icon
+
+    button:SetNormalTexture(AF.GetEmptyTexture())
+    button:SetHighlightTexture(AF.GetEmptyTexture())
+    AF.ClearPoints(button)
+    AF.SetPoint(button, "TOPLEFT", info, "TOPLEFT", 8, -8)
+    AF.SetSize(button, 40, 40)
+
+    icon:SetMask("")
+    AF.ClearPoints(icon)
+    AF.SetPoint(icon, "CENTER", button)
+    AF.SetSize(icon, 32, 32)
+    S.StyleIcon(icon, true)
+end
+
+local function UpdateGreatVaultButton(button)
+    if not button.BFIIcon then return end
+
+    local active = button.hasActiveSeason
+    button.BFIIcon:SetDesaturated(not active)
+    button.BFIIcon:SetVertexColor(AF.GetColorRGB(active and "yellow_text" or "disabled"))
+end
+
+local function StyleGreatVaultButton(button)
+    S.StyleIconButton(button, AF.GetIcon("Calendar"), 18, "yellow_text", "widget")
+    button:HookScript("OnShow", UpdateGreatVaultButton)
+    UpdateGreatVaultButton(button)
+end
+
 local function StyleEncounterControls()
     local instanceSelect = EncounterJournal.instanceSelect
     S.StyleDropdownButton(instanceSelect.ExpansionDropdown)
     S.StyleScrollBar(instanceSelect.ScrollBar)
-    StyleArtButton(instanceSelect.GreatVaultButton)
+    StyleGreatVaultButton(instanceSelect.GreatVaultButton)
 
     local info = EncounterJournal.encounter.info
     S.StyleScrollBar(info.BossesScrollBar)
@@ -435,15 +559,16 @@ local function StyleEncounterControls()
     S.StyleDropdownButton(info.difficulty)
     S.StyleDropdownButton(info.LootContainer.filter)
     S.StyleDropdownButton(info.LootContainer.slotFilter)
+    if _G.Menu then
+        _G.Menu.ModifyMenu("MENU_EJ_DIFFICULTY", StyleEncounterRadioMenu)
+    end
     local clearFilter = info.LootContainer.classClearFilter
     local clearFilterButton = _G[clearFilter:GetName() .. "ExitButton"]
     S.StyleIconButton(clearFilterButton, AF.GetIcon("Close"), 12, nil, "red")
     S.StyleIconButton(EncounterJournal.encounter.instance.mapButton, AF.GetIcon("World"), 18)
 
-    local instanceButton = info.instanceButton
-    instanceButton:SetNormalTexture(AF.GetEmptyTexture())
-    instanceButton:SetHighlightTexture(AF.GetEmptyTexture())
-    S.StyleIcon(instanceButton.icon, true)
+    StyleEncounterBackgrounds()
+    StyleInstanceHeaderIcon()
 
     for _, tab in ipairs(GetEncounterTabs()) do
         StyleEncounterTab(tab)
@@ -455,6 +580,8 @@ local function StyleShell()
     S.StyleTitledFrame(EncounterJournal)
     S.RemoveNineSliceAndBackground(EncounterJournal.inset)
     S.StyleNavBar(EncounterJournal.navBar)
+    AF.ClearPoints(EncounterJournal.navBar)
+    AF.SetPoint(EncounterJournal.navBar, "TOPLEFT", EncounterJournal, "TOPLEFT", 10, -25)
 
     S.StyleEditBox(EncounterJournal.searchBox, -4)
     StyleSearchPreview()
@@ -569,6 +696,101 @@ local function StyleCreatureButtons()
     end
 end
 
+local function StyleEncounterBullet(bullet)
+    if bullet.Bullet then
+        SetFlatTexture(bullet.Bullet, "gray")
+        AF.SetSize(bullet.Bullet, 3, 3)
+    end
+    SetTextColor(bullet.Text, "gray")
+end
+
+local function UpdateEncounterInfoHeaderState(button)
+    if not button or not button.BFIBackdrop then return end
+
+    local header = button:GetParent()
+    local expanded = header.expanded
+    button.BFIBackdrop:SetBackdropColor(AF.GetColorRGB(expanded and "BFI" or "widget", expanded and 0.35 or 1))
+    button.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
+    SetTextColor(button.title, "white")
+    SetTextColor(button.expandedIcon, "white")
+
+    if button.abilityIcon and button.abilityIcon.BFIBackdrop then
+        button.abilityIcon.BFIBackdrop:SetShown(button.abilityIcon:IsShown())
+    end
+    if button.portrait and button.portrait.icon and button.portrait.icon.BFIBackdrop then
+        button.portrait.icon.BFIBackdrop:SetShown(button.portrait:IsShown())
+    end
+end
+
+local function StyleEncounterInfoHeader(header)
+    if not header or not header.button then return end
+
+    local button = header.button
+    if not button._BFIEncounterInfoHeaderStyled then
+        button._BFIEncounterInfoHeaderStyled = true
+
+        -- The native expanded/collapsed shell is twelve parchment slices.
+        -- Suppress those layers while preserving the semantic ability,
+        -- creature, role, title, and +/- overlay regions.
+        button:DisableDrawLayer("BACKGROUND")
+        button:DisableDrawLayer("HIGHLIGHT")
+
+        local glow = button:GetName() and _G[button:GetName() .. "Glow"]
+        if glow then
+            glow:Hide()
+            hooksecurefunc(glow, "Show", function(self)
+                self:Hide()
+            end)
+        end
+
+        S.CreateBackdrop(button)
+        local hover = CreateHoverOverlay(button)
+        button:HookScript("OnEnter", function()
+            hover:Show()
+        end)
+        button:HookScript("OnLeave", function(self)
+            hover:Hide()
+            UpdateEncounterInfoHeaderState(self)
+        end)
+
+        if button.abilityIcon then
+            S.StyleIcon(button.abilityIcon, true)
+        end
+        if button.portrait then
+            KeepNamedTexturesHidden(button.portrait, {
+                "frame",
+                "frameHighlight",
+            })
+            S.StyleIcon(button.portrait.icon, true)
+        end
+
+        SetFlatTexture(header.descriptionBG, "widget_dark")
+        KeepTextureHidden(header.descriptionBGBottom)
+    end
+
+    SetTextColor(header.description, "gray")
+    if header.overviewDescription then
+        SetTextColor(header.overviewDescription.Text, "gray")
+    end
+    for _, bullet in ipairs(header.Bullets or {}) do
+        StyleEncounterBullet(bullet)
+    end
+    UpdateEncounterInfoHeaderState(button)
+end
+
+local function StyleEncounterInfoHeaders()
+    local encounter = EncounterJournal.encounter
+    for _, header in ipairs(encounter.usedHeaders or {}) do
+        StyleEncounterInfoHeader(header)
+    end
+    for _, header in ipairs(encounter.overviewFrame.overviews or {}) do
+        StyleEncounterInfoHeader(header)
+    end
+    for _, bullet in ipairs(encounter.overviewFrame.Bullets or {}) do
+        StyleEncounterBullet(bullet)
+    end
+end
+
 ---------------------------------------------------------------------
 -- Monthly Activities pools
 ---------------------------------------------------------------------
@@ -604,6 +826,25 @@ local function UpdateMonthlyActivityState(button)
     end
 end
 
+local function UpdateMonthlyCollapseIndicator(button)
+    local indicator = button.HeaderCollapseIndicator
+    if not indicator then return end
+
+    local data = button:GetData()
+    local node = button:GetElementData()
+    if not data or not data.hasChild or not node then
+        indicator:Hide()
+        return
+    end
+
+    indicator:SetTexture(AF.GetIcon(node:IsCollapsed() and "Plus_Small" or "Minus_Small"))
+    indicator:SetTexCoord(0, 1, 0, 1)
+    AF.ClearPoints(indicator)
+    AF.SetPoint(indicator, "RIGHT", button, "RIGHT", -12, 0)
+    AF.SetSize(indicator, 16, 16)
+    indicator:Show()
+end
+
 local function StyleMonthlyActivityButton(button)
     if not button._BFIMonthlyActivityStyled then
         button._BFIMonthlyActivityStyled = true
@@ -616,6 +857,12 @@ local function StyleMonthlyActivityButton(button)
         if highlightTexture then
             KeepTextureHidden(highlightTexture)
         end
+        KeepNamedTexturesHidden(button, {
+            "Coin",
+            "Mask",
+            "Ribbon",
+            "RibbonStacked",
+        })
 
         S.CreateBackdrop(button)
         local hover = CreateHoverOverlay(button)
@@ -633,6 +880,7 @@ local function StyleMonthlyActivityButton(button)
     end
 
     UpdateMonthlyActivityState(button)
+    UpdateMonthlyCollapseIndicator(button)
 end
 
 local function SetMonthlyFilterState(button, selected)
@@ -882,7 +1130,26 @@ end
 
 local function RegisterHooks()
     hooksecurefunc("EncounterJournal_ListInstances", StyleInstanceList)
-    hooksecurefunc("EncounterJournal_DisplayInstance", LayoutEncounterTabs)
+    hooksecurefunc("EncounterJournal_DisplayInstance", function()
+        StyleEncounterBackgrounds()
+        StyleInstanceHeaderIcon()
+        LayoutEncounterTabs()
+    end)
+    hooksecurefunc("EncounterJournal_DisplayEncounter", function()
+        StyleEncounterInfoHeaders()
+        LayoutEncounterTabs()
+    end)
+    hooksecurefunc("EncounterJournal_UpdateButtonState", function(button)
+        StyleEncounterInfoHeader(button:GetParent())
+    end)
+    hooksecurefunc("EncounterJournal_ToggleHeaders", StyleEncounterInfoHeaders)
+    hooksecurefunc("EncounterJournal_SetUpOverview", StyleEncounterInfoHeaders)
+    hooksecurefunc("EncounterJournal_SetBullets", function(object)
+        local owner = object and object:GetParent()
+        for _, bullet in ipairs(owner and owner.Bullets or {}) do
+            StyleEncounterBullet(bullet)
+        end
+    end)
     hooksecurefunc("EncounterJournal_ShowCreatures", StyleCreatureButtons)
     hooksecurefunc("EncounterJournal_CheckAndDisplaySuggestedContentTab", LayoutBottomTabs)
     hooksecurefunc("EncounterJournal_CheckAndDisplayTradingPostTab", LayoutBottomTabs)
