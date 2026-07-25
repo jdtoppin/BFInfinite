@@ -82,11 +82,47 @@ local function StyleStateTexture(texture, backdrop, color, alpha)
     AF.SetOnePixelInside(texture, backdrop)
 end
 
+local function StyleCollectionRowSurface(button, background, selectedTexture, highlightTexture)
+    if not button._BFICollectionsRowSurfaceStyled then
+        button._BFICollectionsRowSurfaceStyled = true
+        S.CreateBackdrop(button, true)
+        StyleStateTexture(selectedTexture, button.BFIBackdrop, "BFI", 0.35)
+        StyleStateTexture(highlightTexture, button.BFIBackdrop, "white", 0.2)
+    end
+
+    -- Mount initialization reapplies a white/red vertex color. Own the full
+    -- color texture on every pooled refresh so Mounts, Pets, and Sets agree.
+    if background then
+        background:SetColorTexture(AF.GetColorRGB("widget_dark", 0.9))
+        background:SetAlpha(1)
+        AF.SetOnePixelInside(background, button.BFIBackdrop)
+    end
+end
+
+local function StyleLevelPlate(levelBackground, levelText, icon, color)
+    if not levelBackground or not levelText or not icon then return end
+
+    if not levelBackground._BFICollectionsLevelStyled then
+        levelBackground._BFICollectionsLevelStyled = true
+        S.CreateBackdrop(levelBackground, true, nil, 1)
+    end
+
+    levelBackground:SetTexture(AF.GetPlainTexture())
+    levelBackground:SetVertexColor(AF.GetColorRGB(color or "widget"))
+    AF.ClearPoints(levelBackground)
+    AF.SetPoint(levelBackground, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", -2, 2)
+    AF.SetSize(levelBackground, 29, 14)
+
+    AF.ClearPoints(levelText)
+    AF.SetPoint(levelText, "CENTER", levelBackground)
+    levelBackground.BFIBackdrop:SetShown(levelBackground:IsShown())
+end
+
 local function StyleIconButtonStates(button, backdrop)
     if button._BFICollectionsStateStyled then return end
     button._BFICollectionsStateStyled = true
 
-    StyleStateTexture(button.GetHighlightTexture and button:GetHighlightTexture(), backdrop, "white", 0.25)
+    StyleStateTexture(button.GetHighlightTexture and button:GetHighlightTexture(), backdrop, "highlight_add")
     StyleStateTexture(button.GetPushedTexture and button:GetPushedTexture(), backdrop, "yellow", 0.25)
     StyleStateTexture(button.GetCheckedTexture and button:GetCheckedTexture(), backdrop, "BFI", 0.25)
 end
@@ -144,25 +180,25 @@ local function StyleCollectionSpellButton(button)
 end
 
 local function StyleCollectionListButton(button)
-    if not button or button._BFICollectionsRowStyled then return end
-    button._BFICollectionsRowStyled = true
+    if not button then return end
 
     -- Keep Blizzard's pooled Show/Hide and red unusable-state updates, but
     -- replace the rounded list atlases with flat square BFI state textures.
-    S.CreateBackdrop(button, true)
-    if button.background then
-        button.background:SetTexture(AF.GetPlainTexture())
-        button.background:SetAlpha(0.12)
-        AF.SetOnePixelInside(button.background, button.BFIBackdrop)
-    end
-    StyleStateTexture(button.selectedTexture, button.BFIBackdrop, "BFI", 0.35)
-    StyleStateTexture(button:GetHighlightTexture(), button.BFIBackdrop, "white", 0.2)
-    StyleSquareIcon(button.icon, button.iconBorder)
+    StyleCollectionRowSurface(button, button.background, button.selectedTexture, button:GetHighlightTexture())
 
     local dragButton = button.DragButton or button.dragButton
+    if not button._BFICollectionsRowStyled then
+        button._BFICollectionsRowStyled = true
+        StyleSquareIcon(button.icon, button.iconBorder)
+
+        if dragButton then
+            StyleStateTexture(dragButton.ActiveTexture, button.icon.BFIBackdrop, "BFI", 0.25)
+            StyleStateTexture(dragButton:GetHighlightTexture(), button.icon.BFIBackdrop, "white", 0.25)
+        end
+    end
+
     if dragButton then
-        StyleStateTexture(dragButton.ActiveTexture, button.icon.BFIBackdrop, "BFI", 0.25)
-        StyleStateTexture(dragButton:GetHighlightTexture(), button.icon.BFIBackdrop, "white", 0.25)
+        StyleLevelPlate(dragButton.levelBG, dragButton.level, button.icon)
     end
 end
 
@@ -225,6 +261,8 @@ local function StyleMountJournal()
         end
     end
 
+    frame.MountDisplay.YesMountsTex:SetColorTexture(AF.GetColorRGB("widget"))
+    frame.MountDisplay.NoMountsTex:SetColorTexture(AF.GetColorRGB("widget"))
     S.RemoveTextures(frame.MountDisplay.ShadowOverlay, true)
     S.StyleCheckButton(frame.MountDisplay.ModelScene.TogglePlayer)
     StyleSquareIcon(frame.MountDisplay.InfoButton.Icon)
@@ -235,26 +273,39 @@ end
 -- pets
 ---------------------------------------------------------------------
 local function StylePetLoadoutSlot(slot)
-    if not slot or slot._BFICollectionsSlotStyled then return end
-    slot._BFICollectionsSlotStyled = true
+    if not slot then return end
 
-    S.CreateBackdrop(slot, true)
-    S.RemoveTextures(slot.shadows, true)
-    S.RemoveTextures(slot.helpFrame, true)
-    local name = slot:GetName()
-    S.RemoveTextures(name and _G[name .. "BG"], true)
+    if not slot._BFICollectionsSlotStyled then
+        slot._BFICollectionsSlotStyled = true
 
-    StyleSquareIcon(slot.icon, slot.iconBorder, slot.qualityBorder)
-    StyleProgressBar(slot.healthFrame and slot.healthFrame.healthBar)
+        S.CreateBackdrop(slot, true)
+        S.RemoveTextures(slot.shadows, true)
+        S.RemoveTextures(slot.helpFrame, true)
+        local name = slot:GetName()
+        S.RemoveTextures(name and _G[name .. "BG"], true)
 
-    for i = 1, 3 do
-        StyleLowercaseIconButton(slot["spell" .. i])
+        StyleSquareIcon(slot.icon, slot.iconBorder, slot.qualityBorder)
+        StyleProgressBar(slot.healthFrame and slot.healthFrame.healthBar)
+
+        for i = 1, 3 do
+            StyleLowercaseIconButton(slot["spell" .. i])
+        end
     end
+
+    StyleLevelPlate(slot.levelBG, slot.level, slot.icon)
+end
+
+local function StylePetLoadoutSlots()
+    local loadout = _G.PetJournal.Loadout
+    StylePetLoadoutSlot(loadout.Pet1)
+    StylePetLoadoutSlot(loadout.Pet2)
+    StylePetLoadoutSlot(loadout.Pet3)
 end
 
 local function StylePetCard(card)
     S.RemoveTextures(card)
     StyleSquareIcon(card.PetInfo.icon, card.PetInfo.qualityBorder)
+    StyleLevelPlate(card.PetInfo.levelBG, card.PetInfo.level, card.PetInfo.icon)
     StyleProgressBar(card.HealthFrame.healthBar)
     StyleProgressBar(card.xpBar)
 
@@ -280,9 +331,7 @@ local function StylePetJournal()
     StylePanelSpellButton(frame.SummonRandomPetSpellFrame.Button)
 
     S.RemoveTextures(frame.loadoutBorder, true)
-    StylePetLoadoutSlot(frame.Loadout.Pet1)
-    StylePetLoadoutSlot(frame.Loadout.Pet2)
-    StylePetLoadoutSlot(frame.Loadout.Pet3)
+    StylePetLoadoutSlots()
     StylePetCard(frame.PetCard)
 
     StyleCollectionBackground(frame.SpellSelect)
@@ -317,26 +366,29 @@ local function RefreshHeirloomLevel(button)
     if not levelBackground then return end
 
     local isMaxLevel = levelBackground:GetAtlas() == "collections-levelplate-gold"
-
-    if not levelBackground._BFICollectionsLevelStyled then
-        levelBackground._BFICollectionsLevelStyled = true
-        S.CreateBackdrop(levelBackground, true, nil, 1)
-    end
-
-    levelBackground:SetTexture(AF.GetPlainTexture())
-    levelBackground:SetVertexColor(AF.GetColorRGB(isMaxLevel and "yellow" or "widget"))
-    AF.ClearPoints(levelBackground)
-    AF.SetPoint(levelBackground, "BOTTOMRIGHT", button.iconTexture, "BOTTOMRIGHT", -2, 2)
-    AF.SetSize(levelBackground, 29, 14)
-
-    AF.ClearPoints(button.level)
-    AF.SetPoint(button.level, "CENTER", levelBackground)
-    levelBackground.BFIBackdrop:SetShown(levelBackground:IsShown())
+    StyleLevelPlate(levelBackground, button.level, button.iconTexture, isMaxLevel and "yellow" or "widget")
 end
 
 local function StyleHeirloomButton(_, button)
     StyleCollectionSpellButton(button)
     RefreshHeirloomLevel(button)
+end
+
+local function StyleHeirloomClassRadio(frame)
+    S.StyleMenuSelection(frame, 7)
+end
+
+local function StyleHeirloomClassMenuDescriptions(parentDescription)
+    for _, description in parentDescription:EnumerateElementDescriptions() do
+        if description:IsRadio() then
+            description:AddInitializer(StyleHeirloomClassRadio)
+        end
+        StyleHeirloomClassMenuDescriptions(description)
+    end
+end
+
+local function StyleHeirloomClassMenu(_, rootDescription)
+    StyleHeirloomClassMenuDescriptions(rootDescription)
 end
 
 local function StyleHeirlooms()
@@ -348,6 +400,7 @@ local function StyleHeirlooms()
     S.StyleDropdownButton(frame.ClassDropdown)
     StyleCollectionBackground(frame.iconsFrame)
     StylePagingFrame(frame.PagingFrame)
+    _G.Menu.ModifyMenu("MENU_CLASS_FILTER", StyleHeirloomClassMenu)
 
     for _, button in next, frame.heirloomEntryFrames do
         StyleHeirloomButton(nil, button)
@@ -401,7 +454,7 @@ local function StyleWardrobeModel(model)
     elseif not visualInfo.isUsable then
         color = "red"
     else
-        color = "BFI"
+        color = "border"
     end
     model.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(color))
 end
@@ -413,12 +466,13 @@ local function StyleWardrobeModels(frame)
 end
 
 local function StyleWardrobeSetButton(button)
-    if button._BFICollectionsRowStyled then return end
-    button._BFICollectionsRowStyled = true
+    StyleCollectionRowSurface(button, button.Background, button.SelectedTexture, button.HighlightTexture)
 
-    -- Preserve the set progress, selected, favorite, and unavailable visuals.
-    S.CreateBackdrop(button, true)
-    StyleSquareIcon(button.IconFrame.Icon)
+    if not button._BFICollectionsRowStyled then
+        button._BFICollectionsRowStyled = true
+        -- Preserve set progress, favorite, new, and unavailable visuals.
+        StyleSquareIcon(button.IconFrame.Icon)
+    end
 end
 
 local function StyleWardrobeSetItem(item)
@@ -518,11 +572,14 @@ local function StyleBlizzard()
     collectionsJournal._BFICollectionsJournalStyled = true
 
     -- Frame keys and mixin update points verified in Retail 12.0.7.68887
-    -- (Gethe wow-ui-source 4383ced) and PTR 12.1.0.68914
-    -- (Gethe wow-ui-source d3915c7). The Collections XML surface is stable
-    -- between those pinned artifacts.
+    -- (Gethe wow-ui-source 4383ced30106d51b27e3e86d1987f1552f0d259d)
+    -- and PTR 12.1.0.68914
+    -- (Gethe wow-ui-source d3915c78aba77a7a9be76acbfa35c674bbb6abe9).
+    -- The Collections XML surface is stable between those pinned artifacts.
     hooksecurefunc("MountJournal_InitMountButton", StyleCollectionListButton)
     hooksecurefunc("PetJournal_InitPetButton", StyleCollectionListButton)
+    hooksecurefunc("PetJournal_UpdatePetLoadOut", StylePetLoadoutSlots)
+    hooksecurefunc("PetJournal_UpdatePetCard", StylePetCard)
     hooksecurefunc("ToySpellButton_UpdateButton", StyleCollectionSpellButton)
     hooksecurefunc(_G.HeirloomsJournal, "UpdateButton", StyleHeirloomButton)
     hooksecurefunc(_G.WardrobeCollectionFrame.ItemsCollectionFrame, "CreateSlotButtons", StyleWardrobeSlotButtons)
