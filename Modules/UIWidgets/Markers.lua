@@ -6,9 +6,6 @@ local L = BFI.L
 local AF = _G.AbstractFramework
 
 local IsRaidMarkerActive = IsRaidMarkerActive
-local RemoveRaidTargets = RemoveRaidTargets
-local SetRaidTarget = SetRaidTarget
-local GetRaidTargetIndex = GetRaidTargetIndex
 
 local WORLD_MARKER_INDEX_MAP = {5, 6, 3, 2, 7, 1, 4, 8}
 
@@ -16,9 +13,6 @@ local markersFrame
 
 local targetMarkers = {}
 local worldMarkers = {}
-
-local lockedTargetMarkers = {}
-local targetMarkerTicker
 
 ---------------------------------------------------------------------
 -- shared
@@ -38,83 +32,6 @@ local function CreateGradientForMarker(marker, color)
     AF.SetPoint(marker.gradient, "BOTTOMRIGHT", -1, 1)
     marker.gradient:SetDrawLayer("ARTWORK", -1)
     marker.gradient.ShowUp = Gradient_ShowUp
-end
-
-local function LockTargetMarkers()
-    for i, name in next, lockedTargetMarkers do
-        local unit = AF.UnitTokenFromName(name)
-        if unit then
-            if GetRaidTargetIndex(unit) ~= i then
-                SetRaidTarget(unit, i)
-            end
-        else
-            lockedTargetMarkers[i] = nil
-            targetMarkers[i].gradient:ShowUp(false)
-        end
-    end
-end
-
-local function CheckTicker()
-    if targetMarkerTicker then
-        targetMarkerTicker:Cancel()
-        targetMarkerTicker = nil
-    end
-
-    if not AF.IsEmpty(lockedTargetMarkers) then
-        targetMarkerTicker = C_Timer.NewTicker(1, LockTargetMarkers)
-    end
-end
-
-local function TargetMarker_OnClick(self, button)
-    if button == "LeftButton" then
-        if GetRaidTargetIndex("target") == self.index then
-            SetRaidTarget("target", 0)
-        else
-            SetRaidTarget("target", self.index)
-        end
-    else -- RightButtonUp
-        if AF.UnitInGroup("target", true) then
-            local name = AF.UnitFullName("target")
-
-            -- check if locked to another marker
-            for i, n in next, lockedTargetMarkers do
-                if n == name and i ~= self.index then
-                    lockedTargetMarkers[i] = nil
-                    targetMarkers[i].gradient:ShowUp(false)
-                end
-            end
-
-            if lockedTargetMarkers[self.index] == name then
-                SetRaidTarget("target", 0)
-                lockedTargetMarkers[self.index] = nil
-                self.gradient:ShowUp(false)
-            else
-                SetRaidTarget("target", self.index)
-                lockedTargetMarkers[self.index] = name
-                self.gradient:ShowUp(true)
-            end
-        else
-            -- clear this marker (only if it was locked)
-            -- if lockedTargetMarkers[self.index] then
-            --     local unitWithMarker = AF.UnitTokenFromName(lockedTargetMarkers[self.index])
-            --     if unitWithMarker then
-            --         SetRaidTarget(unitWithMarker, 0)
-            --     end
-            -- end
-
-            lockedTargetMarkers[self.index] = nil
-            self.gradient:ShowUp(false)
-
-            -- clear this marker
-            for unit in AF.IterateGroupPlayers() do
-                if GetRaidTargetIndex(unit) == self.index then
-                    SetRaidTarget(unit, 0)
-                    break
-                end
-            end
-        end
-        CheckTicker()
-    end
 end
 
 ---------------------------------------------------------------------
@@ -137,7 +54,10 @@ local function CreateMarkersFrame()
 
     -- target markers
     for i = 1, 9 do
-        local marker = AF.CreateButton(markersFrame.targetMarkerParent, nil, {"none", AF.GetColorTable(i == 9 and "firebrick" or "marker" .. i, 0.4)})
+        local marker = AF.CreateButton(markersFrame.targetMarkerParent, nil,
+            {"none", AF.GetColorTable(i == 9 and "firebrick" or "marker" .. i, 0.4)},
+            nil, nil, "SecureActionButtonTemplate"
+        )
         tinsert(targetMarkers, marker)
 
         marker.bg:SetColorTexture(AF.UnpackColor(bgColor))
@@ -148,13 +68,18 @@ local function CreateMarkersFrame()
         marker:EnablePushEffect(false)
 
         if i == 9 then
-            marker:SetOnClick(RemoveRaidTargets)
+            marker:SetAttribute("type", "raidtarget")
+            marker:SetAttribute("action", "clear-all")
         else
-            CreateGradientForMarker(marker, "marker" .. i)
-
-            marker.index = i
-            marker:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-            marker:SetOnClick(TargetMarker_OnClick)
+            -- Retail 12.0.7.68887 and 12.1.0.68914:
+            -- Blizzard_APIDocumentationGenerated/RaidMarkersDocumentation.lua
+            -- marks GetRaidTargetIndex as secret-returning, while
+            -- Blizzard_FrameXML/SecureTemplates.lua provides this handler.
+            marker:SetAttribute("type", "raidtarget")
+            marker:SetAttribute("unit", "target")
+            marker:SetAttribute("marker", i)
+            marker:SetAttribute("action1", "toggle")
+            marker:SetAttribute("action2", "clear")
         end
     end
 
