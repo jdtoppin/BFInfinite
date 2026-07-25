@@ -209,7 +209,7 @@ local function StyleRecipeList(recipeList)
     StyleInset(recipeList)
     HideTexture(recipeList.Background)
     HideTexture(recipeList.BackgroundNineSlice)
-    S.StyleDropdownButton(recipeList.FilterDropdown)
+    S.StyleFilterDropdownButton(recipeList.FilterDropdown)
     S.StyleEditBox(recipeList.SearchBox, -4)
     S.StyleScrollBar(recipeList.ScrollBar)
 
@@ -308,6 +308,18 @@ local function StyleProfessionExpansionMenu(_, rootDescription)
     StyleProfessionMenuDescriptions(rootDescription)
 end
 
+local function RefreshRankBarProgress(rankBar)
+    if not rankBar._BFIProfessionStyled then return end
+
+    -- Blizzard replaces this texture with a multi-frame profession atlas
+    -- whenever the skill line changes. Keep its native mask interpolation,
+    -- but use a stable class-coloured fill instead of stretching the atlas.
+    rankBar.BarAnimation:Stop()
+    rankBar.FlareFadeOut:Stop()
+    rankBar.Fill:SetColorTexture(AF.GetColorRGB("BFI"))
+    HideTexture(rankBar.Flare)
+end
+
 local function StyleRankBar(rankBar)
     if not rankBar or rankBar._BFIProfessionStyled then return end
     rankBar._BFIProfessionStyled = true
@@ -322,8 +334,12 @@ local function StyleRankBar(rankBar)
     AF.SetPoint(rankBar.Mask, "TOPLEFT", rankBar.Fill, "TOPLEFT")
     AF.SetPoint(rankBar.Mask, "BOTTOMLEFT", rankBar.Fill, "BOTTOMLEFT")
     if rankBar.ratio then
-        AF.SetWidth(rankBar.Mask, rankBar.Fill:GetWidth() * rankBar.ratio)
+        local fillWidth = rankBar.Fill:GetWidth()
+        if fillWidth > 0 then
+            rankBar.Mask:SetWidth(fillWidth * rankBar.ratio)
+        end
     end
+    RefreshRankBarProgress(rankBar)
 
     AF.ClearPoints(rankBar.Rank)
     AF.SetPoint(rankBar.Rank, "CENTER", rankBar, "CENTER")
@@ -386,6 +402,27 @@ end
 ---------------------------------------------------------------------
 -- crafting page
 ---------------------------------------------------------------------
+local function StyleProfessionHelpButton(button)
+    if not button then return end
+
+    -- Use the AF title-bar help treatment while preserving Blizzard's
+    -- contextual ProfessionsCraftingPage HelpPlate on click.
+    button:SetScript("OnEnter", nil)
+    button:SetScript("OnLeave", nil)
+    S.StyleIconButton(button, AF.GetIcon("Info_Square"), 12, "gray", "gray_hover")
+    AF.SetSize(button, 20, 20)
+    button:SetHitRectInsets(0, 0, 0, 0)
+    AF.ClearPoints(button)
+    AF.SetPoint(button, "LEFT", ProfessionsFrame.BFIHeader, "LEFT", 2, 0)
+    AF.SetFrameLevel(button, 1, ProfessionsFrame.BFIHeader)
+    AF.SetTooltip(button, "BOTTOMLEFT", 0, -2, _G.MAIN_HELP_BUTTON_TOOLTIP)
+    button:HookScript("OnHide", function()
+        if AF.Tooltip:GetOwner() == button then
+            AF.HideTooltip()
+        end
+    end)
+end
+
 local function StyleSearchResult(button)
     if button._BFIProfessionStyled then return end
     button._BFIProfessionStyled = true
@@ -421,6 +458,7 @@ end
 local function StyleCraftingPage(page)
     StyleRecipeList(page.RecipeList)
     StyleSchematicForm(page.SchematicForm)
+    StyleProfessionHelpButton(page.TutorialButton)
 
     StyleButtons(page.CreateButton, page.CreateAllButton, page.ViewGuildCraftersButton)
     S.StyleEditBox(page.CreateMultipleInputBox)
@@ -610,6 +648,7 @@ local function StyleBlizzard()
     hooksecurefunc(ProfessionSpecTabMixin, "Init", StyleStateTab)
     hooksecurefunc(ProfessionsFrame.SpecPage, "InitializeTabs", StyleSpecializationTabs)
     hooksecurefunc(ProfessionsCraftingOutputLogElementMixin, "Init", StyleOutputLogElement)
+    hooksecurefunc(ProfessionsRankBarMixin, "Update", RefreshRankBarProgress)
     _G.Menu.ModifyMenu("MENU_PROFESSIONS_RANK_BAR", StyleProfessionExpansionMenu)
     _G.Menu.ModifyMenu("MENU_PROFESSIONS_FILTER", StyleProfessionExpansionMenu)
 end

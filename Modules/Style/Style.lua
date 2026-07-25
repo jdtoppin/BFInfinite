@@ -728,6 +728,69 @@ function S.StyleDropdownButton(button)
     button:HookScript("OnDisable", ClearPointsOffset)
 end
 
+local function LayoutFilterDropdownButton(button)
+    local resetButton = button.ResetButton
+    local arrow = button.BFIArrow
+    local resetShown = resetButton and resetButton:IsShown()
+
+    if resetButton then
+        AF.ClearPoints(resetButton)
+        AF.SetPoint(resetButton, "RIGHT", button, "RIGHT", -2, 0)
+    end
+
+    if arrow then
+        AF.ClearPoints(arrow)
+        AF.SetPoint(arrow, "RIGHT", button, "RIGHT", resetShown and -18 or -5, 0)
+    end
+
+    local text = button.Text
+    if text then
+        AF.ClearPoints(text)
+        AF.SetPoint(text, "LEFT", button, "LEFT", 5, 0)
+        if arrow then
+            AF.SetPoint(text, "RIGHT", arrow, "LEFT", -2, 0)
+        elseif resetShown then
+            AF.SetPoint(text, "RIGHT", resetButton, "LEFT", -2, 0)
+        else
+            AF.SetPoint(text, "RIGHT", button, "RIGHT", -5, 0)
+        end
+        text:SetJustifyH("LEFT")
+    end
+end
+
+function S.StyleFilterDropdownButton(button)
+    assert(button, "StyleFilterDropdownButton: button is nil")
+
+    S.StyleDropdownButton(button)
+    if button._BFIFilterDropdownStyled then return end
+
+    local resetButton = button.ResetButton
+    if not resetButton then return end
+    button._BFIFilterDropdownStyled = true
+
+    S.StyleIconButton(resetButton, AF.GetIcon("Close"), 8, "red", "gray_hover")
+    AF.SetSize(resetButton, 14, 14)
+    resetButton:SetHitRectInsets(0, 0, 0, 0)
+    resetButton.BFIBg:SetAlpha(0)
+    resetButton.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("none"))
+
+    resetButton:HookScript("OnShow", function()
+        LayoutFilterDropdownButton(button)
+    end)
+    resetButton:HookScript("OnHide", function()
+        LayoutFilterDropdownButton(button)
+    end)
+    button:HookScript("OnShow", function()
+        LayoutFilterDropdownButton(button)
+    end)
+    if button.ValidateResetState then
+        hooksecurefunc(button, "ValidateResetState", function()
+            LayoutFilterDropdownButton(button)
+        end)
+    end
+    LayoutFilterDropdownButton(button)
+end
+
 ---------------------------------------------------------------------
 -- dropdown
 ---------------------------------------------------------------------
