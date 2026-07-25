@@ -38,31 +38,34 @@ local function Manager_OpenMenu(manager, ownerRegion, menuDescription)
     menuDescription:AddMenuAcquiredCallback(StyleMenu) -- submenus
 end
 
-local function StyleMenuCheckbox(_, frame)
-    local checkBox = frame.leftTexture1
-    if not checkBox then return end
+function S.StyleMenuSelection(frame, selectedSize)
+    local selectionBox = frame.leftTexture1
+    if not selectionBox then return end
 
-    -- Modern menu checkboxes are compositor textures rather than
-    -- CheckButtons, so give every one the same 15/13 BFI treatment.
-    local layer, subLevel = checkBox:GetDrawLayer()
+    -- Modern menu selections are compositor textures rather than CheckButtons.
+    local layer, subLevel = selectionBox:GetDrawLayer()
     local border = frame:AttachTexture()
     border:SetDrawLayer(layer, subLevel - 1)
     border:SetColorTexture(AF.GetColorRGB("border"))
     AF.SetSize(border, 15, 15)
-    AF.SetPoint(border, "CENTER", checkBox)
+    AF.SetPoint(border, "CENTER", selectionBox)
 
-    checkBox:SetAtlas("")
-    checkBox:SetColorTexture(AF.GetColorRGB("widget"))
-    AF.SetSize(checkBox, 13, 13)
+    selectionBox:SetAtlas("")
+    selectionBox:SetColorTexture(AF.GetColorRGB("widget"))
+    AF.SetSize(selectionBox, 13, 13)
 
-    local checked = frame.leftTexture2
-    if checked then
-        checked:SetAtlas("")
-        checked:SetColorTexture(AF.GetColorRGB("BFI", 0.7))
-        AF.ClearPoints(checked)
-        AF.SetPoint(checked, "CENTER", checkBox)
-        AF.SetSize(checked, 13, 13)
+    local selected = frame.leftTexture2
+    if selected then
+        selected:SetAtlas("")
+        selected:SetColorTexture(AF.GetColorRGB("BFI", 0.7))
+        AF.ClearPoints(selected)
+        AF.SetPoint(selected, "CENTER", selectionBox)
+        AF.SetSize(selected, selectedSize or 13, selectedSize or 13)
     end
+end
+
+local function StyleMenuCheckbox(_, frame)
+    S.StyleMenuSelection(frame)
 end
 
 ---------------------------------------------------------------------

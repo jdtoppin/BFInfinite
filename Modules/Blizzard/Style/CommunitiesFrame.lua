@@ -11,6 +11,11 @@ local communitiesTabIcons = {
     "Star",
     "Info_Round",
 }
+local communitiesRadioMenus = {
+    "MENU_COMMUNITIES_GUILD_MEMBER_LIST",
+    "MENU_COMMUNITIES_STREAM",
+    "MENU_COMMUNITIES_LIST",
+}
 
 ---------------------------------------------------------------------
 -- shared
@@ -24,6 +29,22 @@ end
 local function StyleDropdown(dropdown)
     if dropdown then
         S.StyleDropdownButton(dropdown)
+    end
+end
+
+-- These menu tags and their pooled leftTexture1/leftTexture2 radio contract
+-- are unchanged between Retail 12.0.7.68887 (wow-ui-source
+-- 4383ced30106d51b27e3e86d1987f1552f0d259d) and PTR 12.1.0.68914
+-- (wow-ui-source d3915c78aba77a7a9be76acbfa35c674bbb6abe9).
+local function StyleCommunitiesRadio(frame)
+    S.StyleMenuSelection(frame, 7)
+end
+
+local function StyleCommunitiesRadioMenu(_, rootDescription)
+    for _, description in rootDescription:EnumerateElementDescriptions() do
+        if description:IsRadio() then
+            description:AddInitializer(StyleCommunitiesRadio)
+        end
     end
 end
 
@@ -443,6 +464,10 @@ local function StyleCommunitiesFrame(frame)
         hooksecurefunc(frame, "OpenGuildMemberDetailFrame", function(self)
             StyleGuildMemberDetail(self.GuildMemberDetailFrame)
         end)
+
+        for _, menuTag in ipairs(communitiesRadioMenus) do
+            _G.Menu.ModifyMenu(menuTag, StyleCommunitiesRadioMenu)
+        end
     end
 
     RefreshCommunitiesFrame(frame)
