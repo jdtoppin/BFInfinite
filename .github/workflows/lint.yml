@@ -50,3 +50,6 @@ jobs:
 
       - name: Test secret-safe Pet owner routing
         run: luajit tests/unit_frame_pet_owner_routing_test.lua
+
+      - name: Test 12.1 Pet aura integration
+        run: luajit tests/unit_frame_pet_native_aura_test.lua
