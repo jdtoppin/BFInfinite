@@ -808,7 +808,7 @@ local function StyleLFGDungeonReadyPopup()
     popup._BFIConfirmationStyled = true
     S.CreateBackdrop(popup)
 
-    popup.BFIHeader = CreateConfirmationHeaderFrame(popup, popup, 28)
+    popup.BFIHeader = CreateConfirmationHeaderFrame(popup, popup, 20)
     dialog.BFIHeader = popup.BFIHeader
     status.BFIHeader = popup.BFIHeader
     S.MakeMovable(popup, popup.BFIHeader)
