@@ -637,7 +637,7 @@ function S.StyleSpellItemButton(button)
 
     S.CreateBackdrop(button, true, nil, 1)
 
-    local iconTexture = name and _G[name .. "IconTexture"] or button.IconTexture or button.Icon
+    local iconTexture = name and _G[name .. "IconTexture"] or button.IconTexture or button.Icon or button.icon
     if iconTexture then
         S.StyleIcon(iconTexture)
         -- AF.SetOnePixelInside(iconTexture, button.BFIBackdrop)
@@ -648,7 +648,9 @@ function S.StyleSpellItemButton(button)
         S.StyleIconBorder(iconBorder)
     end
 
-    local normalTexture = name and _G[name .. "NormalTexture"] or button.NormalTexture
+    local normalTexture = name and _G[name .. "NormalTexture"]
+        or button.NormalTexture
+        or (button.GetNormalTexture and button:GetNormalTexture())
     if normalTexture then
         normalTexture:SetAlpha(0)
     end
@@ -1016,7 +1018,7 @@ local function RestoreFramePosition(frame)
     if frame._BFIMoving or not frame:IsShown() then return end
     if frame:IsProtected() and InCombatLockdown() then return end
     if _G.GetUIPanel and _G.GetUIPanel("fullscreen") == frame then return end
-
+    if frame._BFIMovableCanRestore and not frame._BFIMovableCanRestore(frame) then return end
     local position = GetSavedFramePosition(frame)
     if type(position) ~= "table" or not ArePublicNumbers(position.x, position.y) then return end
 
@@ -1038,6 +1040,13 @@ local function RestoreFramePosition(frame)
         position.y * parentHeight / scaleRatio
     )
 end
+
+function S.ClearMovableFramePosition(frame)
+    assert(frame, "ClearMovableFramePosition: frame is nil")
+    SetSavedFramePosition(frame, nil)
+end
+
+S.RestoreMovableFramePosition = RestoreFramePosition
 
 local function RestoreShownMovableFrames()
     for frame in next, movableFrames do
@@ -1154,14 +1163,15 @@ function S.StyleTitledFrame(frame, movableTarget)
     else
         -- old style
         AF.SetFrameLevel(frame.BFIHeader, 1, frame)
-        frame.TitleText:ClearAllPoints()
-        frame.TitleText:SetPoint("CENTER", frame.BFIHeader)
+        local title = frame.TitleText or frame.Title
+        title:ClearAllPoints()
+        title:SetPoint("CENTER", frame.BFIHeader)
         frame:DisableDrawLayer("BACKGROUND")
         frame:DisableDrawLayer("BORDER")
     end
 
     -- close button
-    local closeButton = frame.CloseButton or (name and _G[name .. "CloseButton"])
+    local closeButton = frame.CloseButton or frame.ClosePanelButton or (name and _G[name .. "CloseButton"])
     S.StyleCloseButton(closeButton)
     closeButton:ClearAllPoints()
     closeButton:SetPoint("TOPRIGHT")
@@ -1286,61 +1296,64 @@ end
 ---------------------------------------------------------------------
 -- side tab - SidePanelTabButtonMixin
 ---------------------------------------------------------------------
-local function SideTab_OnMouseDown(tab, button)
-    if button == "LeftButton" then
-        tab.Icon:SetPoint("CENTER", 0, -1)
-    end
-end
-
-local function SideTab_OnMouseUp(tab, button)
-    if button == "LeftButton" then
-        tab.Icon:SetPoint("CENTER")
-    end
-end
-
-local function SideTab_OnEnter(tab)
-    tab.SelectedTexture:Show()
-    if tab.tooltipText then
-        GameTooltip:SetOwner(tab, "ANCHOR_NONE")
-        GameTooltip:SetPoint("TOPLEFT", tab, "TOPRIGHT", 1, 0)
-        GameTooltip:SetText(tab.tooltipText)
-        GameTooltip:Show()
-    end
-end
-
-local function SideTab_OnLeave(tab)
-    if not tab._checked then
-        tab.SelectedTexture:Hide()
-    end
-    GameTooltip:Hide()
-end
-
 local function SideTab_SetChecked(tab, checked)
-    tab._checked = checked
+    tab._BFIChecked = checked and true or false
+    if tab._BFIChecked then
+        tab.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("BFI", 0.45))
+    else
+        tab.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget"))
+    end
 end
 
-function S.StyleSideTab(tab)
+function S.StyleSideTab(tab, width, height)
     assert(tab, "StyleSideTab: tab is nil")
 
     if tab._BFIStyled then return end
     tab._BFIStyled = true
 
-    S.RemoveTextures(tab)
+    local wasChecked
+    if tab.GetChecked then
+        wasChecked = tab:GetChecked()
+    end
+    if wasChecked == nil and tab.SelectedTexture then
+        wasChecked = tab.SelectedTexture:IsShown()
+    end
+
+    -- Keep functional artwork such as SocialUI's pooled icon and counter.
+    -- Clearing every texture here also prevents SidePanelTabButtonMixin
+    -- from swapping its active/inactive icon atlas.
+    for _, region in next, {tab:GetRegions()} do
+        if region:IsObjectType("Texture")
+            and region ~= tab.Icon
+            and region ~= tab.IconOverlay
+            and region ~= tab.TabGlow
+        then
+            S.RemoveTextures(region, true)
+        end
+    end
+
+    if tab.SetNormalTexture then tab:SetNormalTexture(AF.GetEmptyTexture()) end
+    if tab.SetPushedTexture then tab:SetPushedTexture(AF.GetEmptyTexture()) end
+    if tab.SetDisabledTexture then tab:SetDisabledTexture(AF.GetEmptyTexture()) end
+    if tab.SetCheckedTexture then tab:SetCheckedTexture(AF.GetEmptyTexture()) end
+    if tab.SetDisabledCheckedTexture then tab:SetDisabledCheckedTexture(AF.GetEmptyTexture()) end
+
     S.CreateBackdrop(tab)
     tab.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget"))
 
-    AF.SetSize(tab, 35, 50)
-    tab.Icon:SetPoint("CENTER")
+    AF.SetSize(tab, width or 35, height or 50)
 
-    tab.SelectedTexture = AF.CreateTexture(tab, nil, AF.GetColorTable("BFI", 0.6), "BORDER", -1)
-    tab.SelectedTexture:SetAllPoints()
-    tab.SelectedTexture:Hide()
+    local hover = AF.CreateTexture(tab, nil, AF.GetColorTable("white", 0.2), "HIGHLIGHT")
+    AF.SetOnePixelInside(hover, tab.BFIBackdrop)
+    if tab.SetHighlightTexture then
+        tab:SetHighlightTexture(hover)
+    end
 
-    tab:HookScript("OnMouseDown", SideTab_OnMouseDown)
-    tab:HookScript("OnMouseUp", SideTab_OnMouseUp)
-    tab:SetScript("OnEnter", SideTab_OnEnter)
-    tab:SetScript("OnLeave", SideTab_OnLeave)
+    -- Hook rather than replace Blizzard's scripts. Communities supplies
+    -- tooltip/tooltip2, while 12.1 SocialUI adds disabled-reason text.
     hooksecurefunc(tab, "SetChecked", SideTab_SetChecked)
+
+    SideTab_SetChecked(tab, wasChecked)
 end
 
 ---------------------------------------------------------------------
