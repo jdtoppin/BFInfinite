@@ -206,6 +206,10 @@ local function CreateFontPane()
     fontPane = AF.CreateTitledPane(generalPanel, L["Fonts"], 180, 200)
     generalPanel.fontPane = fontPane
     AF.SetPoint(fontPane, "TOPLEFT", generalPanel.bfiPane, "BOTTOMLEFT", 0, -30)
+    fontPane:SetTips(
+        L["Fonts"],
+        L["BFI Font controls BFInfinite text configured to use \"BFI\". Apply BFI Font to Addon Settings also applies it to menus and settings built with AbstractFramework, including Cell. Override Blizzard Fonts changes most Blizzard interface text and enables its font-size adjustment. Combat text and player names are controlled separately below. Font changes require a UI reload."]
+    )
 
     local font = AF.CreateDropdown(fontPane, 150)
     AF.SetPoint(font, "TOPLEFT", fontPane, 10, -45)
@@ -236,14 +240,14 @@ local function CreateFontPane()
         ShowReloadPopup()
     end)
 
-    local overrideAF = AF.CreateCheckButton(fontPane, L["Override AF Font"])
+    local overrideAF = AF.CreateCheckButton(fontPane, L["Apply BFI Font to Addon Settings"])
     AF.SetPoint(overrideAF, "TOPLEFT", font, "BOTTOMLEFT", 0, -15)
     overrideAF:SetOnCheck(function(checked)
         BFIConfig.general.font.common.overrideAF = checked
         ShowReloadPopup()
     end)
 
-    local overrideBlizzard = AF.CreateCheckButton(fontPane, L["Override Blizzard Font"])
+    local overrideBlizzard = AF.CreateCheckButton(fontPane, L["Override Blizzard Fonts"])
     AF.SetPoint(overrideBlizzard, "TOPLEFT", overrideAF, "BOTTOMLEFT", 0, -15)
 
     local blizzardFontSizeDelta = AF.CreateSlider(fontPane, L["Blizzard Font Size"], 150, -5, 5, 1, nil, true)
