@@ -141,30 +141,36 @@ local function UpdateStateTab(tab, isSelected)
 end
 
 local function StyleStateTab(tab)
-    if not tab or tab._BFIProfessionStateTabStyled then return end
-    tab._BFIProfessionStateTabStyled = true
+    if not tab then return end
 
-    -- Do not use StyleTab here. Profession specialization tabs retain
-    -- StateIcon/StateIconGlow, while crafting-order tabs retain their
-    -- Glow animation.
+    -- Do not use StyleTab here. Profession specialization tabs retain their
+    -- meaningful StateIcon/StateIconGlow, while crafting-order tabs retain
+    -- their Glow animation. Reapply this subset after every pooled Init.
     for _, key in ipairs(TAB_ART_TEXTURES) do
-        HideTexture(tab[key])
+        S.RemoveTextures(tab[key], true)
+    end
+    S.RemoveTextures(tab.BottomBorderGlow, true)
+
+    if not tab._BFIProfessionStateTabStyled then
+        tab._BFIProfessionStateTabStyled = true
+
+        tab._BFIProfessionColor = AF.GetButtonNormalColor("BFI_hover")
+        tab._BFIProfessionHoverColor = AF.GetButtonHoverColor("BFI_hover")
+        S.CreateBackdrop(tab)
+
+        tab:HookScript("OnEnter", function(self)
+            if not self.isSelected then
+                self.BFIBackdrop:SetBackdropColor(AF.UnpackColor(self._BFIProfessionHoverColor))
+            end
+        end)
+        tab:HookScript("OnLeave", function(self)
+            UpdateStateTab(self, self.isSelected)
+        end)
+        hooksecurefunc(tab, "SetTabSelected", UpdateStateTab)
     end
 
-    tab._BFIProfessionColor = AF.GetButtonNormalColor("BFI_hover")
-    tab._BFIProfessionHoverColor = AF.GetButtonHoverColor("BFI_hover")
-    S.CreateBackdrop(tab)
+    AF.SetHeight(tab, 27)
     UpdateStateTab(tab, tab.isSelected)
-
-    tab:HookScript("OnEnter", function(self)
-        if not self.isSelected then
-            self.BFIBackdrop:SetBackdropColor(AF.UnpackColor(self._BFIProfessionHoverColor))
-        end
-    end)
-    tab:HookScript("OnLeave", function(self)
-        UpdateStateTab(self, self.isSelected)
-    end)
-    hooksecurefunc(tab, "SetTabSelected", UpdateStateTab)
 end
 
 ---------------------------------------------------------------------
@@ -286,34 +292,20 @@ end
 -- rank bar
 ---------------------------------------------------------------------
 local function StyleProfessionExpansionRadio(frame)
-    local selectBox = frame.leftTexture1
-    if not selectBox then return end
+    S.StyleMenuSelection(frame)
+end
 
-    local layer, subLevel = selectBox:GetDrawLayer()
-    local border = frame:AttachTexture()
-    border:SetDrawLayer(layer, subLevel - 1)
-    border:SetColorTexture(AF.GetColorRGB("border"))
-    AF.SetSize(border, 15, 15)
-    AF.SetPoint(border, "CENTER", selectBox)
-
-    selectBox:SetColorTexture(AF.GetColorRGB("widget"))
-    AF.SetSize(selectBox, 13, 13)
-
-    local selected = frame.leftTexture2
-    if selected then
-        selected:SetColorTexture(AF.GetColorRGB("BFI", 0.7))
-        AF.ClearPoints(selected)
-        AF.SetPoint(selected, "CENTER", selectBox)
-        AF.SetSize(selected, 7, 7)
+local function StyleProfessionMenuDescriptions(parentDescription)
+    for _, description in parentDescription:EnumerateElementDescriptions() do
+        if description:IsRadio() then
+            description:AddInitializer(StyleProfessionExpansionRadio)
+        end
+        StyleProfessionMenuDescriptions(description)
     end
 end
 
 local function StyleProfessionExpansionMenu(_, rootDescription)
-    for _, description in rootDescription:EnumerateElementDescriptions() do
-        if description:IsRadio() then
-            description:AddInitializer(StyleProfessionExpansionRadio)
-        end
-    end
+    StyleProfessionMenuDescriptions(rootDescription)
 end
 
 local function StyleRankBar(rankBar)
@@ -325,8 +317,23 @@ local function StyleRankBar(rankBar)
     S.CreateBackdrop(rankBar)
     rankBar.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget_dark"))
 
-    S.StyleDropdownButton(rankBar.ExpansionDropdownButton)
-    HideTexture(rankBar.ExpansionDropdownButton.Texture)
+    AF.SetOnePixelInside(rankBar.Fill, rankBar.BFIBackdrop)
+    AF.ClearPoints(rankBar.Mask)
+    AF.SetPoint(rankBar.Mask, "TOPLEFT", rankBar.Fill, "TOPLEFT")
+    AF.SetPoint(rankBar.Mask, "BOTTOMLEFT", rankBar.Fill, "BOTTOMLEFT")
+    if rankBar.ratio then
+        AF.SetWidth(rankBar.Mask, rankBar.Fill:GetWidth() * rankBar.ratio)
+    end
+
+    AF.ClearPoints(rankBar.Rank)
+    AF.SetPoint(rankBar.Rank, "CENTER", rankBar, "CENTER")
+
+    local dropdown = rankBar.ExpansionDropdownButton
+    S.StyleDropdownButton(dropdown)
+    HideTexture(dropdown.Texture)
+    AF.ClearPoints(dropdown)
+    AF.SetPoint(dropdown, "RIGHT", rankBar, "RIGHT")
+    AF.SetSize(dropdown, 18, 18)
 end
 
 ---------------------------------------------------------------------
@@ -600,8 +607,10 @@ local function StyleBlizzard()
     StyleSchematicForm(InspectRecipeFrame.SchematicForm)
 
     hooksecurefunc(ProfessionsRecipeSchematicFormMixin, "Init", StyleSchematicForm)
-    hooksecurefunc(ProfessionsSpecFrameMixin, "InitializeTabs", StyleSpecializationTabs)
+    hooksecurefunc(ProfessionSpecTabMixin, "Init", StyleStateTab)
+    hooksecurefunc(ProfessionsFrame.SpecPage, "InitializeTabs", StyleSpecializationTabs)
     hooksecurefunc(ProfessionsCraftingOutputLogElementMixin, "Init", StyleOutputLogElement)
     _G.Menu.ModifyMenu("MENU_PROFESSIONS_RANK_BAR", StyleProfessionExpansionMenu)
+    _G.Menu.ModifyMenu("MENU_PROFESSIONS_FILTER", StyleProfessionExpansionMenu)
 end
 AF.RegisterAddonLoaded("Blizzard_Professions", StyleBlizzard)
