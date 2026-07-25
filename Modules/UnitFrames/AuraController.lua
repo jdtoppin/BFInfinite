@@ -15,6 +15,7 @@ local ipairs, next, pairs, pcall, type = ipairs, next, pairs, pcall, type
 -- This controller owns only configuration-derived state and never reads aura
 -- data, live buttons, native container geometry, or native visibility.
 local REQUIRED_AF_VERSION = 22
+local NATIVE_GROUP_AURA_TEMPLATE = "CustomAuraContainerTemplate"
 local REQUIRED_AF_METHODS = {
     "AddCustomAuraGroup",
     "AddCustomAuraSlot",
@@ -56,6 +57,33 @@ function UF.HasNativeAuraContainerBackend()
     end
 
     return AF.HasCustomAuraContainer()
+end
+
+-- Retail 12.1 SecureGroupHeaderTemplate creates one unconfigured
+-- AuraContainer for each child when this attribute is present before the
+-- child is born. 12.0.7 does not know the attribute, so callers must use
+-- this capability-gated helper instead of setting it unconditionally.
+function UF.PrepareNativeGroupAuraHeader(header)
+    if not UF.HasNativeAuraContainerBackend() then
+        return false
+    end
+
+    header:SetAttribute("auraContainerTemplate", NATIVE_GROUP_AURA_TEMPLATE)
+    return true
+end
+
+-- Group frames can need more than Blizzard's single header-born container
+-- when displays have independent anchors and flow layouts. Create those
+-- bounded extra shells eagerly, before combat and before indicator setup.
+function UF.CreateNativeGroupAuraContainerSeed(parent)
+    if not UF.HasNativeAuraContainerBackend() then
+        return nil
+    end
+
+    local container = AF.CreateCustomAuraContainer(parent)
+    container:Hide()
+    AF.SetCustomAuraContainerEnabled(container, false)
+    return container
 end
 
 local function CopyTable(value)
@@ -354,9 +382,48 @@ local function SetHolderShownSafe(controller, shown)
     return true
 end
 
-local function RestoreHolderVisibility(controller)
+local function SetExternalContainerShownSafe(controller, shown)
+    if not controller._containerIsExternal
+        or not controller._container
+        or controller._containerShown == shown
+    then
+        return true
+    end
+
+    if controller.frame:IsMouseOver() then
+        controller:_QueueHoverRetry()
+        return false
+    end
+
+    if shown then
+        controller._container:Show()
+    else
+        controller._container:Hide()
+    end
+    controller._containerShown = shown
+    return true
+end
+
+local function SetControllerShownSafe(controller, shown)
+    -- A header-born/seeded container is parented to the secure unit button,
+    -- not to BFI's plain holder. Hide it explicitly before hiding the holder;
+    -- show it only after the holder is restored. No native visibility is
+    -- read: _containerShown tracks only BFI's own successful writes.
+    if not shown and not SetExternalContainerShownSafe(controller, false) then
+        return false
+    end
+    if not SetHolderShownSafe(controller, shown) then
+        return false
+    end
+    if shown and not SetExternalContainerShownSafe(controller, true) then
+        return false
+    end
+    return true
+end
+
+local function RestoreControllerVisibility(controller)
     local spec = controller._spec
-    return SetHolderShownSafe(
+    return SetControllerShownSafe(
         controller,
         spec ~= nil and spec.enabled and spec.shown
     )
@@ -365,6 +432,15 @@ end
 local function PositionContainer(container, holder, point)
     container:ClearAllPoints()
     container:SetPoint(point.point, holder, point.relativePoint, point.x, point.y)
+end
+
+local function SyncExternalContainerLayer(controller, container)
+    if not container then return end
+
+    -- A holder-owned container inherits the holder's z-order. A seed remains
+    -- parented to the secure unit button, so reproduce that child level
+    -- explicitly without reading any native container state.
+    AF.SetFrameLevel(container, 1, controller.frame)
 end
 
 local function ApplyNativeTuning(controller)
@@ -414,10 +490,18 @@ function ControllerMixin:_Build()
 
     -- Build a complete hidden replacement before touching the old container.
     -- The public holder is already hidden by the hover-safe lifecycle gate.
-    local container = AF.CreateCustomAuraContainer(holder)
+    local container = self._seedContainer
+    local containerIsExternal = container ~= nil
+    self._seedContainer = nil
+    if not container then
+        container = AF.CreateCustomAuraContainer(holder)
+    end
     container:Hide()
     AF.SetCustomAuraContainerEnabled(container, false)
     PositionContainer(container, holder, spec.containerPoint)
+    if containerIsExternal then
+        SyncExternalContainerLayer(self, container)
+    end
     AF.SetCustomAuraContainerFlowLayout(container, spec.flowLayout)
     AF.SetCustomAuraContainerProcessingPolicy(
         container,
@@ -464,7 +548,30 @@ function ControllerMixin:_Build()
     end
 
     self._container = container
-    container:Show()
+    self._containerIsExternal = containerIsExternal
+    self._containerShown = false
+    if not containerIsExternal then
+        container:Show()
+    end
+end
+
+local function ApplyLiveUnitRetarget(controller)
+    if not controller._liveUnitChanges
+        or controller._destroyRequested
+        or not controller._container
+        or not controller._needsRetarget
+    then
+        return false
+    end
+
+    -- 12.1.0.68914 exposes SetUnit and UpdateAllAuras as inbound,
+    -- combat-live operations on an already-built container. This is the
+    -- only native mutation group controllers may perform before regen.
+    AF.SetCustomAuraContainerUnit(controller._container, controller._spec.unit)
+    AF.UpdateCustomAuraContainer(controller._container)
+    controller._needsRetarget = nil
+    controller._needsRefresh = nil
+    return true
 end
 
 function ControllerMixin:_ApplyPending()
@@ -477,7 +584,7 @@ function ControllerMixin:_ApplyPending()
     -- in combat, but still waits for hover to end before firing tooltip
     -- intrinsics through a native child.
     if not HasNativeMutation(self) then
-        if RestoreHolderVisibility(self) then
+        if RestoreControllerVisibility(self) then
             self._needsVisibility = nil
             pendingControllers[self] = nil
         end
@@ -486,9 +593,20 @@ function ControllerMixin:_ApplyPending()
 
     -- Native configuration and replacement work is OOC-only. Hide the plain
     -- holder first so no hovered restricted child participates in the call.
-    local holderHidden = SetHolderShownSafe(self, false)
+    local holderHidden = SetControllerShownSafe(self, false)
     if InCombatLockdown() then
-        QueueController(self)
+        if holderHidden then
+            ApplyLiveUnitRetarget(self)
+        end
+        if HasNativeMutation(self) then
+            QueueController(self)
+        else
+            self._needsVisibility = true
+            if RestoreControllerVisibility(self) then
+                self._needsVisibility = nil
+                pendingControllers[self] = nil
+            end
+        end
         return
     end
     if not holderHidden then
@@ -501,6 +619,13 @@ function ControllerMixin:_ApplyPending()
             self._container:Hide()
             self._container = nil
         end
+        if self._seedContainer then
+            AF.SetCustomAuraContainerEnabled(self._seedContainer, false)
+            self._seedContainer:Hide()
+            self._seedContainer = nil
+        end
+        self._containerIsExternal = nil
+        self._containerShown = nil
         self._spec = nil
         self._destroyed = true
         pendingControllers[self] = nil
@@ -511,6 +636,9 @@ function ControllerMixin:_ApplyPending()
         local configure = self._holderConfig
         self._holderConfig = nil
         configure(self.frame)
+        if self._containerIsExternal then
+            SyncExternalContainerLayer(self, self._container)
+        end
     end
 
     -- Holder-only placement/configuration is allowed before the first
@@ -519,7 +647,7 @@ function ControllerMixin:_ApplyPending()
     if not HasNativeMutation(self) then
         if self._spec then
             self._needsVisibility = true
-            if RestoreHolderVisibility(self) then
+            if RestoreControllerVisibility(self) then
                 self._needsVisibility = nil
                 pendingControllers[self] = nil
             end
@@ -537,7 +665,7 @@ function ControllerMixin:_ApplyPending()
         self._needsEnabled = nil
         self._needsRefresh = nil
         self._needsVisibility = true
-        if RestoreHolderVisibility(self) then
+        if RestoreControllerVisibility(self) then
             self._needsVisibility = nil
             pendingControllers[self] = nil
         end
@@ -568,7 +696,7 @@ function ControllerMixin:_ApplyPending()
     end
 
     self._needsVisibility = true
-    if RestoreHolderVisibility(self) then
+    if RestoreControllerVisibility(self) then
         self._needsVisibility = nil
         pendingControllers[self] = nil
     end
@@ -618,10 +746,14 @@ function ControllerMixin:Rebuild(completeSpec)
     assert(not self._destroyed and not self._destroyRequested,
         "aura container controller is destroyed")
 
+    local previousUnit = self._spec and self._spec.unit
     self._spec = NormalizeCompleteSpec(completeSpec)
     self._needsRebuild = true
     self._needsTuning = nil
-    self._needsRetarget = nil
+    self._needsRetarget = self._liveUnitChanges
+        and self._container ~= nil
+        and previousUnit ~= self._spec.unit
+        or nil
     self._needsEnabled = nil
     self._needsVisibility = nil
     self._needsRefresh = nil
@@ -649,7 +781,9 @@ function ControllerMixin:SetUnit(unit)
     if self._spec.unit == unit then return end
 
     self._spec.unit = unit
-    if not self._needsRebuild then
+    if not self._needsRebuild
+        or (self._liveUnitChanges and self._container)
+    then
         self._needsRetarget = true
     end
     RequestMutation(self)
@@ -707,17 +841,54 @@ function ControllerMixin:Destroy()
     RequestMutation(self)
 end
 
-function UF.CreateNativeAuraContainerController(parent, name, completeSpec)
+local claimedGroupAuraContainers = {}
+
+local function CreateController(parent, name, completeSpec, options)
     if not UF.HasNativeAuraContainerBackend() then
         return nil
+    end
+
+    options = options or {}
+    if options.seedContainer then
+        assert(not claimedGroupAuraContainers[options.seedContainer],
+            "native group aura container seed is already claimed")
     end
 
     local controller = setmetatable({}, ControllerMixin)
     controller.frame = CreateFrame("Frame", name, parent)
     controller.frame:Hide()
+    controller._seedContainer = options.seedContainer
+    controller._liveUnitChanges = options.liveUnitChanges == true
+
+    if controller._seedContainer then
+        claimedGroupAuraContainers[controller._seedContainer] = true
+        controller._seedContainer:Hide()
+        AF.SetCustomAuraContainerEnabled(controller._seedContainer, false)
+    end
 
     if completeSpec then
         controller:Rebuild(completeSpec)
     end
     return controller
+end
+
+function UF.CreateNativeAuraContainerController(parent, name, completeSpec)
+    return CreateController(parent, name, completeSpec)
+end
+
+function UF.CreateNativeGroupAuraContainerController(
+    parent,
+    name,
+    seedContainer,
+    completeSpec
+)
+    if not UF.HasNativeAuraContainerBackend() then
+        return nil
+    end
+
+    assert(seedContainer, "native group aura container seed is required")
+    return CreateController(parent, name, completeSpec, {
+        seedContainer = seedContainer,
+        liveUnitChanges = true,
+    })
 end

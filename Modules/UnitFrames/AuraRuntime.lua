@@ -20,6 +20,13 @@ local STATE_EMPTY = "EMPTY"
 local STATE_PARTITION_DEFERRED = "PARTITION_DEFERRED"
 local STATE_ERROR = "ERROR"
 local STATE_DESTROYED = "DESTROYED"
+local GROUP_EMPTY_UNIT = "none"
+
+local function IsCleanUnitToken(unit)
+    return F.isValueNonSecret(unit)
+        and type(unit) == "string"
+        and unit ~= ""
+end
 
 local function DeepEqual(left, right, seen)
     if left == right then return true end
@@ -204,10 +211,39 @@ local function ResolveUnit(runtime)
     -- last real token (or oldUnit) and never compile/retarget native auras to
     -- that preview-only identity.
     if runtime._configMode or root.inConfigMode then
-        return runtime._unit or root.oldUnit
+        if runtime._unit then
+            return runtime._unit
+        end
+        if not F.isValueNonSecret(root.oldUnit) then
+            return nil
+        end
+        return root.oldUnit
     end
 
-    return root.effectiveUnit or root.unit or runtime._unit
+    if not F.isValueNonSecret(root.effectiveUnit) then
+        return nil
+    end
+    if root.effectiveUnit ~= nil then
+        return root.effectiveUnit
+    end
+    if not F.isValueNonSecret(root.unit) then
+        return nil
+    end
+    if root.unit ~= nil then
+        return root.unit
+    end
+    return runtime._unit
+end
+
+local function ResolveRuntimeUnit(runtime)
+    local unit = ResolveUnit(runtime)
+    if runtime._groupManaged and not IsCleanUnitToken(unit) then
+        -- Fixed-capacity group children are fully configured before combat,
+        -- even while empty. "none" registers no useful UNIT_AURA stream and
+        -- leaves the first real assignment as a pure live SetUnit/Update.
+        return GROUP_EMPTY_UNIT
+    end
+    return unit
 end
 
 local function ShouldEnableNative(runtime)
@@ -305,15 +341,15 @@ local function SyncLifecycle(runtime)
 end
 
 local function Compile(runtime, unit)
-    runtime._unit = unit
-
-    if type(unit) ~= "string" or unit == "" then
+    if not IsCleanUnitToken(unit) then
+        runtime._unit = nil
         runtime._descriptor = nil
         runtime._error = nil
         runtime._state = STATE_WAITING_FOR_UNIT
         return
     end
 
+    runtime._unit = unit
     local descriptor, compileError = UF.CompileNativeAuraSpec(
         unit,
         runtime.auraFilter,
@@ -381,6 +417,17 @@ Commit = function(runtime)
     -- supersede the pending descriptor without allocating stale restricted
     -- button batches after combat or hover ends.
     if runtime._configDirty and InCombatLockdown() then
+        -- A group child's clean token can still change while an unrelated
+        -- structural config edit waits for regen. Retarget the already-built
+        -- container now; keep it hidden and leave the config commit queued.
+        if runtime._groupManaged
+            and runtime._built
+            and runtime._unitDirty
+        then
+            runtime._controller:SetUnit(runtime._unit)
+            runtime._appliedUnit = runtime._unit
+            runtime._unitDirty = nil
+        end
         QueueCombatCommit(runtime)
         return
     end
@@ -465,6 +512,28 @@ local function ScheduleCommit(runtime, immediate)
 end
 
 local function StageUnit(runtime, unit)
+    local unitIsNonSecret = F.isValueNonSecret(unit)
+    local unitIsEmpty = unitIsNonSecret
+        and (type(unit) ~= "string" or unit == "")
+    if unitIsEmpty
+        and runtime._unit == nil
+        and runtime._state == STATE_WAITING_FOR_UNIT
+    then
+        return false
+    end
+
+    if not unitIsNonSecret or unitIsEmpty then
+        if runtime._built then
+            runtime._controller:SetShown(false)
+        end
+        runtime._unit = nil
+        runtime._descriptor = nil
+        runtime._error = nil
+        runtime._state = STATE_WAITING_FOR_UNIT
+        runtime._unitDirty = true
+        return true
+    end
+
     if unit == runtime._unit then return false end
 
     if runtime._built then
@@ -533,7 +602,7 @@ local function NativeAuras_LoadConfig(self, config)
     self._config = AF.Copy(config)
     self._configDirty = true
 
-    Compile(self, ResolveUnit(self))
+    Compile(self, ResolveRuntimeUnit(self))
     SyncWatcher(self)
 
     if self._built then
@@ -568,7 +637,7 @@ local function NativeAuras_Enable(self)
     self._resumeAfterConfigMode = nil
     self._active = true
 
-    local unitChanged = StageUnit(self, ResolveUnit(self))
+    local unitChanged = StageUnit(self, ResolveRuntimeUnit(self))
     if unitChanged or self._configDirty or self._deferredCommit then
         ScheduleCommit(self, true)
     else
@@ -595,7 +664,7 @@ local function NativeAuras_Disable(self)
 
     if self._resumeAfterConfigMode and not self.root.inConfigMode then
         self._resumeAfterConfigMode = nil
-        StageUnit(self, ResolveUnit(self))
+        StageUnit(self, ResolveRuntimeUnit(self))
         ScheduleCommit(self, true)
     end
 end
@@ -605,7 +674,7 @@ local function NativeAuras_Update(self)
         return
     end
 
-    if StageUnit(self, ResolveUnit(self)) then
+    if StageUnit(self, ResolveRuntimeUnit(self)) then
         ScheduleCommit(self, true)
         return
     end
@@ -730,21 +799,19 @@ end
 ---------------------------------------------------------------------
 -- create
 ---------------------------------------------------------------------
-function UF.CreateNativeAuraIndicator(parent, name, auraFilter, hasSubFrame)
-    if not UF.HasNativeAuraContainerBackend() then
-        return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
-    end
-
-    local controller = UF.CreateNativeAuraContainerController(parent, name)
-    if not controller then
-        return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
-    end
-
+local function CreateNativeAuraRuntime(
+    parent,
+    auraFilter,
+    hasSubFrame,
+    controller,
+    groupManaged
+)
     local frame = controller:GetFrame()
     frame.root = parent
     frame.auraFilter = auraFilter
     frame._hasSubFrame = hasSubFrame == true
     frame._controller = controller
+    frame._groupManaged = groupManaged == true
     frame._state = STATE_NEW
     frame._commitGeneration = 0
 
@@ -761,6 +828,69 @@ function UF.CreateNativeAuraIndicator(parent, name, auraFilter, hasSubFrame)
 
     AF.AddToPixelUpdater_Auto(frame, NativeAuras_UpdatePixels, true)
     return frame
+end
+
+function UF.CreateNativeAuraIndicator(parent, name, auraFilter, hasSubFrame)
+    if not UF.HasNativeAuraContainerBackend() then
+        return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
+    end
+
+    local controller = UF.CreateNativeAuraContainerController(parent, name)
+    if not controller then
+        return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
+    end
+    return CreateNativeAuraRuntime(
+        parent,
+        auraFilter,
+        hasSubFrame,
+        controller
+    )
+end
+
+function UF.CreateNativeGroupAuraIndicator(
+    parent,
+    name,
+    auraFilter,
+    seedContainer
+)
+    if not UF.HasNativeAuraContainerBackend() then
+        return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
+    end
+
+    local controller = UF.CreateNativeGroupAuraContainerController(
+        parent,
+        name,
+        seedContainer
+    )
+    if not controller then
+        return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
+    end
+    return CreateNativeAuraRuntime(
+        parent,
+        auraFilter,
+        false,
+        controller,
+        true
+    )
+end
+
+-- Group-frame integrations provide a per-child map of explicitly allocated
+-- native shells. The backend check comes first so 12.0.7 neither accesses
+-- that map nor sets any 12.1-only header/container state.
+function UF.CreateGroupNativeAuras(parent, name, auraFilter, containerKey)
+    if not UF.HasNativeAuraContainerBackend() then
+        return UF.CreateAuras(parent, name, auraFilter)
+    end
+
+    local containers = parent._nativeAuraContainers
+    local seedContainer = containers and containers[containerKey]
+    assert(seedContainer, "native group aura container seed is missing")
+    return UF.CreateNativeGroupAuraIndicator(
+        parent,
+        name,
+        auraFilter,
+        seedContainer
+    )
 end
 
 -- Keep the 12.0.7 path and Target's complementary subframe exact until a

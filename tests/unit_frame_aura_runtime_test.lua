@@ -152,7 +152,7 @@ local function makeHarness(options)
         return harness.backend
     end
 
-    local function newController(parent, name)
+    local function newController(parent, name, seedContainer)
         local frame = {
             name = name,
             parent = parent,
@@ -168,6 +168,7 @@ local function makeHarness(options)
         local controller = {
             frame = frame,
             shown = false,
+            seedContainer = seedContainer,
         }
         function controller:GetFrame()
             return self.frame
@@ -219,12 +220,27 @@ local function makeHarness(options)
         end
 
         harness.controllers[#harness.controllers + 1] = controller
-        record(harness, "uf.controller", controller, parent, name)
+        record(
+            harness,
+            "uf.controller",
+            controller,
+            parent,
+            name,
+            seedContainer
+        )
         return controller
     end
 
     function UF.CreateNativeAuraContainerController(parent, name)
         return newController(parent, name)
+    end
+
+    function UF.CreateNativeGroupAuraContainerController(
+        parent,
+        name,
+        seedContainer
+    )
+        return newController(parent, name, seedContainer)
     end
 
     function UF.CompileNativeAuraSpec(unit, auraFilter, config)
@@ -497,6 +513,23 @@ local function createRuntime(harness, root, hasSubFrame)
     runtime.enabled = true
     root.indicators.buffs = runtime
     return runtime, harness.controllers[#harness.controllers]
+end
+
+local function createGroupRuntime(harness, root)
+    local seedContainer = {}
+    root._nativeAuraContainers = {
+        buffs = seedContainer,
+    }
+    local runtime = harness.UF.CreateGroupNativeAuras(
+        root,
+        root.name .. "_Auras",
+        "HELPFUL",
+        "buffs"
+    )
+    assertTrue(runtime, "native group runtime was not created")
+    runtime.enabled = true
+    root.indicators.buffs = runtime
+    return runtime, harness.controllers[#harness.controllers], seedContainer
 end
 
 local function testDormancyAndFallback()
@@ -1179,6 +1212,210 @@ local function testPolymorphicGlobalRefreshSource()
         "debuff refresh still calls the legacy implementation")
 end
 
+local function testGroupRuntimeSelectionAndFallback()
+    local unavailable = makeHarness({
+        backend = false,
+    })
+    local fallbackRoot = setmetatable({
+        name = "GroupFallback",
+        unit = "party1",
+        indicators = {},
+        enabled = true,
+        shown = true,
+    }, {
+        __index = function(_, key)
+            if key == "_nativeAuraContainers" then
+                error("12.0.7 accessed native group containers", 2)
+            end
+        end,
+    })
+    function fallbackRoot:GetName()
+        return self.name
+    end
+    function fallbackRoot:IsVisible()
+        return self.shown == true
+    end
+
+    local fallback = unavailable.UF.CreateGroupNativeAuras(
+        fallbackRoot,
+        "GroupFallback_Buffs",
+        "HELPFUL",
+        "buffs"
+    )
+    assertEqual(fallback, unavailable.legacyFrames[1],
+        "group 12.0.7 legacy fallback")
+    assertEqual(#unavailable.controllers, 0,
+        "group 12.0.7 native controller count")
+    assertEqual(fallback.parent, fallbackRoot,
+        "group fallback parent")
+    assertEqual(fallback.name, "GroupFallback_Buffs",
+        "group fallback name")
+    assertEqual(fallback.auraFilter, "HELPFUL",
+        "group fallback filter")
+    assertEqual(fallback.hasSubFrame, nil,
+        "group fallback subframe")
+
+    local harness = makeHarness()
+    local root = newRoot("GroupNative", "party1")
+    local seed = {}
+    root._nativeAuraContainers = {
+        buffs = seed,
+    }
+    local runtime = harness.UF.CreateGroupNativeAuras(
+        root,
+        "GroupNative_Buffs",
+        "HELPFUL",
+        "buffs"
+    )
+    assertTrue(runtime, "group native runtime")
+    assertEqual(#harness.controllers, 1, "group native controller count")
+    assertEqual(harness.controllers[1].seedContainer, seed,
+        "group runtime seed forwarding")
+    assertEqual(runtime.root, root, "group runtime root")
+    assertEqual(runtime.auraFilter, "HELPFUL", "group runtime filter")
+    assertEqual(runtime._hasSubFrame, false, "group runtime subframe")
+
+    local missingRoot = newRoot("MissingGroupSeed", "party1")
+    local accepted, message = pcall(
+        harness.UF.CreateGroupNativeAuras,
+        missingRoot,
+        "MissingGroupSeed_Buffs",
+        "HELPFUL",
+        "buffs"
+    )
+    assertEqual(accepted, false, "missing group seed acceptance")
+    assertTrue(
+        tostring(message):find("seed is missing", 1, true) ~= nil,
+        "missing group seed assertion"
+    )
+end
+
+local function testGroupSeedsPrebuildBeforeCombat()
+    local harness = makeHarness()
+    local root = newRoot("GroupBootstrap", nil)
+    local runtime, controller = createGroupRuntime(harness, root)
+
+    runtime:LoadConfig(validConfig())
+    assertEqual(runtime:GetNativeAuraState().state, "READY",
+        "group prebuild ready state")
+    assertEqual(runtime:GetNativeAuraState().unit, "none",
+        "group prebuild inert unit")
+    assertEqual(controller.built, true, "group prebuild initial build")
+    assertEqual(controller.spec.unit, "none",
+        "group prebuild controller unit")
+    assertEqual(controller.shown, false,
+        "group prebuild inactive visibility")
+
+    harness:SetCombat(true)
+    harness:ClearEvents()
+    root.unit = "party5"
+    root.effectiveUnit = "party5"
+    runtime:Enable()
+
+    local state = runtime:GetNativeAuraState()
+    assertEqual(state.state, "READY", "group bootstrap ready state")
+    assertEqual(state.unit, "party5", "group bootstrap unit")
+    assertEqual(state.built, true, "group bootstrap built state")
+    assertEqual(controller.built, true, "group bootstrap controller build")
+    assertEqual(controller.spec.unit, "party5",
+        "group assignment controller unit")
+    assertEqual(controller.shown, true, "group bootstrap visibility")
+    assertEqual(countEvents(harness, "controller.rebuild"), 0,
+        "group assignment combat rebuild count")
+    assertEqual(countEvents(harness, "controller.unit"), 1,
+        "group assignment combat retarget count")
+    assertEqual(next(harness.registered), nil,
+        "group bootstrap regen registration")
+end
+
+local function testGroupUnitRetargetsBeforePendingCombatConfig()
+    local harness = makeHarness()
+    local root = newRoot("GroupPendingConfig", "party1")
+    local runtime, controller = createGroupRuntime(harness, root)
+
+    runtime:LoadConfig(validConfig())
+    runtime:Enable()
+    harness:SetCombat(true)
+    harness:ClearEvents()
+
+    runtime:LoadConfig(validConfig({
+        tag = "pending-combat-config",
+    }))
+    root.unit = "party4"
+    root.effectiveUnit = "party4"
+    runtime:Update()
+
+    assertEqual(controller.unit, "party4",
+        "pending config live group unit")
+    assertEqual(controller.shown, false,
+        "pending config group visibility")
+    assertEqual(countEvents(harness, "controller.unit"), 1,
+        "pending config live retarget count")
+    assertEqual(countEvents(harness, "controller.tuning"), 0,
+        "pending config combat tuning count")
+    assertTrue(harness.registered.PLAYER_REGEN_ENABLED,
+        "pending config regen registration")
+    assertEqual(runtime:GetNativeAuraState().pending, true,
+        "pending config runtime state")
+
+    harness:SetCombat(false)
+    harness:Fire("PLAYER_REGEN_ENABLED")
+    harness:RunTimers(0)
+    assertEqual(countEvents(harness, "controller.unit"), 1,
+        "pending config duplicate regen retarget")
+    assertEqual(countEvents(harness, "controller.tuning"), 1,
+        "pending config regen tuning count")
+    assertEqual(controller.shown, true,
+        "pending config regen visibility")
+end
+
+local function testSecretUnitTokenFailsClosed()
+    local harness = makeHarness()
+    local root = newRoot("SecretUnit", "party1")
+    local runtime, controller = createRuntime(harness, root)
+
+    runtime:LoadConfig(validConfig())
+    runtime:Enable()
+    harness:ClearEvents()
+
+    root.effectiveUnit = {
+        secret = true,
+    }
+    runtime:Update()
+
+    local state = runtime:GetNativeAuraState()
+    assertEqual(state.state, "WAITING_FOR_UNIT", "secret unit state")
+    assertEqual(state.unit, nil, "secret unit storage")
+    assertEqual(controller.shown, false, "secret unit holder visibility")
+    assertEqual(countEvents(harness, "controller.unit"), 0,
+        "secret unit native retarget")
+    assertTrue(countEvents(harness, "secret.check") > 0,
+        "secret unit predicate")
+
+    root.effectiveUnit = "party4"
+    harness:ClearEvents()
+    runtime:Update()
+    state = runtime:GetNativeAuraState()
+    assertEqual(state.state, "READY", "clean unit recovery state")
+    assertEqual(state.unit, "party4", "clean unit recovery token")
+    assertEqual(countEvents(harness, "controller.unit"), 1,
+        "clean unit recovery retarget")
+    assertEqual(controller.shown, true, "clean unit recovery visibility")
+
+    harness:ClearEvents()
+    runtime:SetUnit({
+        secret = true,
+    })
+    state = runtime:GetNativeAuraState()
+    assertEqual(state.state, "WAITING_FOR_UNIT",
+        "direct secret unit state")
+    assertEqual(state.unit, nil, "direct secret unit storage")
+    assertEqual(controller.shown, false,
+        "direct secret unit holder visibility")
+    assertEqual(countEvents(harness, "controller.unit"), 0,
+        "direct secret native retarget")
+end
+
 testDormancyAndFallback()
 testLifecycleAndUnitRefresh()
 testDebounceAndConstructionReuse()
@@ -1193,5 +1430,9 @@ testConfigModeNeverRetargetsPlayer()
 testDisabledConfigModePreviewCannotEscape()
 testWaitingUnitAndTerminalDestroy()
 testPolymorphicGlobalRefreshSource()
+testGroupRuntimeSelectionAndFallback()
+testGroupSeedsPrebuildBeforeCombat()
+testGroupUnitRetargetsBeforePendingCombatConfig()
+testSecretUnitTokenFailsClosed()
 
 print("unit_frame_aura_runtime_test.lua: ok")

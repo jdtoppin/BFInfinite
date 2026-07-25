@@ -245,6 +245,14 @@ local function makeHarness(options)
         frame:SetSize(width, height)
     end
 
+    function AF.SetFrameLevel(frame, level, relativeTo)
+        assertEqual(harness.inCombat, false,
+            "external container layer mutated in combat")
+        frame.frameLevel = (relativeTo.frameLevel or 0) + level
+        frame.frameStrata = relativeTo.frameStrata
+        record(harness, "af.frame-level", frame, level, relativeTo)
+    end
+
     function AF.HasCustomAuraContainer()
         return options.hasBackend ~= false
     end
@@ -1102,6 +1110,258 @@ local function testRefreshIsDirectDirtyMark()
     assertEqual(harness.regenCallback, nil, "refresh regen handler")
 end
 
+local function testGroupHeaderCapabilityAndSeed()
+    local unavailable = makeHarness({
+        hasBackend = false,
+    })
+    local unavailableHeader = {
+        attributes = {},
+    }
+    function unavailableHeader:SetAttribute(key, value)
+        self.attributes[key] = value
+    end
+
+    assertEqual(
+        unavailable.UF.PrepareNativeGroupAuraHeader(unavailableHeader),
+        false,
+        "unavailable group header capability"
+    )
+    assertEqual(
+        unavailableHeader.attributes.auraContainerTemplate,
+        nil,
+        "12.0.7 group header attribute"
+    )
+    assertEqual(
+        unavailable.UF.CreateNativeGroupAuraContainerSeed({}),
+        nil,
+        "12.0.7 extra group seed"
+    )
+    assertEqual(#unavailable.containers, 0, "12.0.7 native allocation")
+
+    local harness = makeHarness()
+    local header = {
+        attributes = {},
+    }
+    function header:SetAttribute(key, value)
+        self.attributes[key] = value
+        record(harness, "header.attribute", self, key, value)
+    end
+
+    assertEqual(
+        harness.UF.PrepareNativeGroupAuraHeader(header),
+        true,
+        "12.1 group header capability"
+    )
+    assertEqual(
+        header.attributes.auraContainerTemplate,
+        "CustomAuraContainerTemplate",
+        "12.1 group header template"
+    )
+
+    local parent = {}
+    local seed = harness.UF.CreateNativeGroupAuraContainerSeed(parent)
+    assertEqual(seed, harness.containers[1], "created group seed")
+    assertEqual(seed.parent, parent, "group seed parent")
+    assertEqual(seed.shown, false, "group seed initial visibility")
+    assertEqual(seed.enabled, false, "group seed initial enabled state")
+end
+
+local function testGroupSeedAdoptionAndOneShotClaim()
+    local harness = makeHarness()
+    local root = {}
+    local seed = harness.AF.CreateCustomAuraContainer(root)
+    local controller = harness.UF.CreateNativeGroupAuraContainerController(
+        root,
+        "BFIGroupAuraHolder",
+        seed,
+        completeSpec("party1", true)
+    )
+
+    assertEqual(#harness.containers, 1, "seeded build allocation count")
+    assertEqual(controller._container, seed, "adopted group seed")
+    assertEqual(controller._seedContainer, nil, "consumed group seed")
+    assertEqual(controller._containerIsExternal, true,
+        "external group container")
+    assertEqual(seed.parent, root, "adopted seed parent")
+    assertEqual(seed.point[2], controller:GetFrame(),
+        "seed position relative to holder")
+    assertEqual(seed.unit, "party1", "seeded build unit")
+    assertEqual(seed.enabled, true, "seeded build enabled")
+    assertEqual(seed.shown, true, "seeded build visibility")
+    assertEqual(controller:GetFrame().shown, true,
+        "seeded holder visibility")
+    assertEqual(countEvents(harness, "af.frame-level"), 1,
+        "seeded build layer synchronization")
+
+    clearEvents(harness)
+    controller:ApplyHolderConfig(function(holder)
+        holder.frameLevel = 27
+        holder.frameStrata = "HIGH"
+    end)
+    assertEqual(seed.frameLevel, 28, "seeded updated frame level")
+    assertEqual(seed.frameStrata, "HIGH", "seeded updated frame strata")
+    assertEqual(countEvents(harness, "af.frame-level"), 1,
+        "seeded holder update layer synchronization")
+
+    local accepted, message = pcall(
+        harness.UF.CreateNativeGroupAuraContainerController,
+        {},
+        "BFIDuplicateGroupAuraHolder",
+        seed
+    )
+    assertEqual(accepted, false, "duplicate seed claim acceptance")
+    assertTrue(
+        tostring(message):find("already claimed", 1, true) ~= nil,
+        "duplicate seed claim assertion"
+    )
+    assertEqual(#harness.holders, 1, "duplicate claim holder allocation")
+end
+
+local function testGroupSeedBuildQueuesInCombat()
+    local harness = makeHarness()
+    local root = {}
+    local seed = harness.AF.CreateCustomAuraContainer(root)
+    local controller = harness.UF.CreateNativeGroupAuraContainerController(
+        root,
+        "BFICombatBootstrapAuraHolder",
+        seed
+    )
+
+    clearEvents(harness)
+    harness:SetCombat(true)
+    controller:ApplyHolderConfig(function(holder)
+        holder.bootstrapConfigured = true
+        holder.frameLevel = 11
+    end)
+    assertTrue(harness.regenCallback, "bootstrap holder regen registration")
+
+    controller:Rebuild(completeSpec("party3", true))
+    assertEqual(controller._container, nil, "combat bootstrap container")
+    assertEqual(next(seed.groups), nil, "combat bootstrap group declaration")
+    assertEqual(next(seed.slots), nil, "combat bootstrap slot declaration")
+    assertEqual(controller:GetFrame().bootstrapConfigured, nil,
+        "combat bootstrap holder configuration")
+    assertEqual(countEvents(harness, "af.frame-level"), 0,
+        "combat bootstrap external frame level")
+    assertTrue(harness.regenCallback, "combat bootstrap regen registration")
+
+    harness:SetCombat(false)
+    harness:FireRegen()
+    assertEqual(#harness.containers, 1, "bootstrap allocation count")
+    assertEqual(countEvents(harness, "af.create-container"), 0,
+        "bootstrap ordinary container allocation")
+    assertEqual(seed.unit, "party3", "bootstrap unit")
+    assertEqual(seed.enabled, true, "bootstrap enabled")
+    assertEqual(seed.shown, true, "bootstrap visibility")
+    assertEqual(controller:GetFrame().shown, true,
+        "bootstrap holder visibility")
+    assertEqual(controller:GetFrame().bootstrapConfigured, true,
+        "bootstrap holder configuration")
+    assertTrue(seed.groups.helpful, "bootstrap group declaration")
+    assertTrue(seed.slots.priority, "bootstrap slot declaration")
+    assertEqual(seed.frameLevel, 12, "bootstrap external frame level")
+    assertEqual(harness.regenCallback, nil,
+        "bootstrap stale regen registration")
+end
+
+local function testGroupCombatLiveRetarget()
+    local harness = makeHarness()
+    local root = {}
+    local seed = harness.AF.CreateCustomAuraContainer(root)
+    local controller = harness.UF.CreateNativeGroupAuraContainerController(
+        root,
+        "BFILiveGroupAuraHolder",
+        seed,
+        completeSpec("party1", true)
+    )
+
+    clearEvents(harness)
+    harness:SetCombat(true)
+    controller:SetUnit("party4")
+
+    assertEventNames(harness, {
+        "native.hide",
+        "holder.shown",
+        "af.unit",
+        "af.update",
+        "holder.shown",
+        "native.show",
+    })
+    assertEqual(seed.unit, "party4", "combat-live group unit")
+    assertEqual(seed.shown, true, "combat-live group visibility")
+    assertEqual(controller:GetFrame().shown, true,
+        "combat-live holder visibility")
+    assertEqual(harness.regenCallback, nil,
+        "combat-live retarget regen registration")
+end
+
+local function testGroupRetargetPrecedesStructuralRebuild()
+    local harness = makeHarness()
+    local root = {}
+    local seed = harness.AF.CreateCustomAuraContainer(root)
+    local controller = harness.UF.CreateNativeGroupAuraContainerController(
+        root,
+        "BFIStructuralGroupAuraHolder",
+        seed,
+        completeSpec("party1", true)
+    )
+
+    clearEvents(harness)
+    harness:SetCombat(true)
+    controller:Rebuild(completeSpec("party2", true))
+    controller:SetUnit("party2")
+
+    assertEqual(seed.unit, "party2", "pending rebuild live unit")
+    assertEqual(seed.shown, false, "pending rebuild seed visibility")
+    assertEqual(controller:GetFrame().shown, false,
+        "pending rebuild holder visibility")
+    assertTrue(harness.regenCallback, "pending rebuild regen registration")
+    assertEqual(countEvents(harness, "af.create-container"), 0,
+        "combat structural allocation")
+    assertEqual(countEvents(harness, "af.unit"), 1,
+        "combat structural live retarget count")
+
+    harness:SetCombat(false)
+    harness:FireRegen()
+    assertEqual(#harness.containers, 2, "regen replacement allocation")
+    local replacement = harness.containers[2]
+    assertEqual(replacement.unit, "party2", "regen replacement unit")
+    assertEqual(replacement.enabled, true, "regen replacement enabled")
+    assertEqual(replacement.shown, true, "regen replacement visibility")
+    assertEqual(seed.enabled, false, "retired seed enabled")
+    assertEqual(seed.shown, false, "retired seed visibility")
+    assertEqual(controller:GetFrame().shown, true,
+        "regen replacement holder visibility")
+end
+
+local function testGroupVisibilityWaitsForHover()
+    local harness = makeHarness()
+    local root = {}
+    local seed = harness.AF.CreateCustomAuraContainer(root)
+    local controller = harness.UF.CreateNativeGroupAuraContainerController(
+        root,
+        "BFIHoveredGroupAuraHolder",
+        seed,
+        completeSpec("party1", true)
+    )
+
+    clearEvents(harness)
+    controller:GetFrame().mouseOver = true
+    controller:SetShown(false)
+
+    assertEqual(seed.shown, true, "hovered group seed visibility")
+    assertEqual(controller:GetFrame().shown, true,
+        "hovered group holder visibility")
+    assertEqual(countEvents(harness, "native.hide"), 0,
+        "hovered native visibility mutation")
+
+    controller:GetFrame().mouseOver = nil
+    harness:RunTimers(0.25)
+    assertEqual(seed.shown, false, "post-hover group seed visibility")
+    assertEqual(controller:GetFrame().shown, false,
+        "post-hover group holder visibility")
+end
+
 testCapabilityGate()
 testBuildContract()
 testTuningContract()
@@ -1115,5 +1375,11 @@ testMaxFrameCountContract()
 testDestroyPrecedence()
 testOutOfBandOOCFlushUnregisters()
 testRefreshIsDirectDirtyMark()
+testGroupHeaderCapabilityAndSeed()
+testGroupSeedAdoptionAndOneShotClaim()
+testGroupSeedBuildQueuesInCombat()
+testGroupCombatLiveRetarget()
+testGroupRetargetPrecedesStructuralRebuild()
+testGroupVisibilityWaitsForHover()
 
 print("unit_frame_aura_controller_test.lua: ok")
