@@ -399,7 +399,9 @@ local function Button_HookHighlight(button)
     end)
 end
 
-function S.StyleButton(button, color, hoverColor)
+-- preservePressScripts keeps protected or restricted Blizzard controls on
+-- their native mouse-down/up path while retaining BFI's visual treatment.
+function S.StyleButton(button, color, hoverColor, preservePressScripts)
     assert(button, "StyleButton: button is nil")
     if button._BFIStyled then return end
     button._BFIStyled = true
@@ -433,8 +435,10 @@ function S.StyleButton(button, color, hoverColor)
     button.BFI_OnDisable = Button_OnDisable
     button.BFI_HookHighlight = Button_HookHighlight
 
-    button:SetPushedTextOffset(0, -AF.GetOnePixelForRegion(button))
-    RegisterMouseDownUp(button)
+    if not preservePressScripts then
+        button:SetPushedTextOffset(0, -AF.GetOnePixelForRegion(button))
+        RegisterMouseDownUp(button)
+    end
 
     AF.AddToPixelUpdater_CustomGroup("BFIStyled", button)
 end
@@ -661,7 +665,7 @@ end
 ---------------------------------------------------------------------
 -- dropdown button
 ---------------------------------------------------------------------
-function S.StyleDropdownButton(button)
+function S.StyleDropdownButton(button, preservePressScripts)
     assert(button, "StyleDropdownButton: button is nil")
 
     if button._BFIStyled then return end
@@ -683,9 +687,11 @@ function S.StyleDropdownButton(button)
     --     button.Text:ClearAllPoints()
     --     button.Text:SetPoint("CENTER")
     -- end
-    button:SetPushedTextOffset(0, 0)
-    if button.displacedRegions then
-        wipe(button.displacedRegions) -- REVIEW: TAINT?
+    if not preservePressScripts then
+        button:SetPushedTextOffset(0, 0)
+        if button.displacedRegions then
+            wipe(button.displacedRegions) -- REVIEW: TAINT?
+        end
     end
 
     local arrow = AF.CreateTexture(button, AF.GetIcon("ArrowDown_Small"), "darkgray")
@@ -709,23 +715,25 @@ function S.StyleDropdownButton(button)
     --     print("StyleDropdown: OpenMenu")
     --     arrow:SetTexture(AF.GetIcon("ArrowDown_Small"))
     -- end
-    button:HookScript("OnMouseDown", function()
-        arrow:AdjustPointsOffset(0, -AF.GetOnePixelForRegion(button))
-        -- if button.Text then
-        --     button.Text:ClearPointsOffset()
-        -- end
-    end)
+    if not preservePressScripts then
+        button:HookScript("OnMouseDown", function()
+            arrow:AdjustPointsOffset(0, -AF.GetOnePixelForRegion(button))
+            -- if button.Text then
+            --     button.Text:ClearPointsOffset()
+            -- end
+        end)
 
-    local function ClearPointsOffset()
-        AF.RePoint(arrow)
-        -- if button.Text then
-        --     button.Text:ClearPointsOffset()
-        -- end
+        local function ClearPointsOffset()
+            AF.RePoint(arrow)
+            -- if button.Text then
+            --     button.Text:ClearPointsOffset()
+            -- end
+        end
+
+        button:HookScript("OnMouseUp", ClearPointsOffset)
+        button:HookScript("OnHide",ClearPointsOffset)
+        button:HookScript("OnDisable", ClearPointsOffset)
     end
-
-    button:HookScript("OnMouseUp", ClearPointsOffset)
-    button:HookScript("OnHide",ClearPointsOffset)
-    button:HookScript("OnDisable", ClearPointsOffset)
 end
 
 local function LayoutFilterDropdownButton(button)
