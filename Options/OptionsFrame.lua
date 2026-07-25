@@ -28,6 +28,7 @@ local list = {
     "unitFrames",
     "-nameplates",
     "actionBars",
+    "bags",
     buffsDebuffsAvailable and "buffsDebuffs" or "-buffsDebuffs",
     "tooltip",
     "uiWidgets",
