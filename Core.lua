@@ -71,7 +71,7 @@ function eventHandler:ADDON_LOADED(arg)
             BFIConfig.general.font = {
                 common = {
                     font = "Noto_AP",
-                    overrideAF = false,
+                    overrideAF = true,
                     overrideBlizzard = false,
                     blizzardFontSizeDelta = 0,
                 },
