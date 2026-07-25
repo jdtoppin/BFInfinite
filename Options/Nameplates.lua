@@ -592,7 +592,7 @@ local function CreateNameplatesPanel()
 
     local compatibilityNotice = AF.CreateFontString(
         compatibilityPane,
-        L["Native special and quest widgets remain Blizzard-owned. Blizzard's protected click target covers the visible BFI health bar and name with a bounded region; auto-width names use the bar width because restricted name text cannot be measured. Changes made during combat may be deferred until combat ends."],
+        L["Native special and quest widgets remain Blizzard-owned. When a BFI health bar is visible, its protected click target matches the bar exactly: inside text shares the target and outside text is visual-only. Name-only plates use a bounded bar-width target because restricted name text cannot be measured. Changes made during combat may be deferred until combat ends."],
         "sand"
     )
     AF.SetPoint(compatibilityNotice, "TOPLEFT", compatibilityPane, 15, -30)

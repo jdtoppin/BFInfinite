@@ -358,7 +358,7 @@ L["Highlight Color"] = "高亮颜色"
 L["Emphasize Name Text"] = "强调名称文本"
 L["Name Size Increase"] = "名称字号增量"
 L["Compatibility"] = "兼容性"
-L["Native special and quest widgets remain Blizzard-owned. Blizzard's protected click target covers the visible BFI health bar and name with a bounded region; auto-width names use the bar width because restricted name text cannot be measured. Changes made during combat may be deferred until combat ends."] = "原生的特殊与任务组件仍由暴雪控制。暴雪的受保护点击选取区域会通过一个有界区域覆盖可见的 BFI 生命条和名称；由于受限名称文本无法测量，自动宽度名称会使用生命条宽度。战斗中进行的更改可能会推迟到战斗结束后应用。"
+L["Native special and quest widgets remain Blizzard-owned. When a BFI health bar is visible, its protected click target matches the bar exactly: inside text shares the target and outside text is visual-only. Name-only plates use a bounded bar-width target because restricted name text cannot be measured. Changes made during combat may be deferred until combat ends."] = "原生的特殊与任务组件仍由暴雪控制。当 BFI 生命条可见时，受保护点击区域会与生命条精确重合：条内文字共享该区域，条外文字仅用于显示。仅显示名称的姓名版会使用一个以生命条宽度为界的点击区域，因为受限名称文本无法测量。战斗中进行的更改可能会推迟到战斗结束后应用。"
 
 ---------------------------------------------------------------------
 -- action bars

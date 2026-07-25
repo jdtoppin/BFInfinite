@@ -213,6 +213,12 @@ local function CreateNameplate(nameplate)
     end
 
     NP.CreateIndicators(np)
+
+    -- AF's health-bar hover scripts need mouse motion on the custom root, but
+    -- Retail 12.0.7 and 12.1 keep visual nameplate frames click-disabled so
+    -- the native C++ hit-test carrier remains the sole click owner.
+    np:SetMouseClickEnabled(false)
+    np:SetMouseMotionEnabled(true)
     return np
 end
 
@@ -305,23 +311,6 @@ local function MakeBounds(width, height, centerX, centerY)
     }
 end
 
-local function UnionBounds(bounds, addition)
-    if not bounds then
-        return {
-            left = addition.left,
-            right = addition.right,
-            bottom = addition.bottom,
-            top = addition.top,
-        }
-    end
-
-    bounds.left = math.min(bounds.left, addition.left)
-    bounds.right = math.max(bounds.right, addition.right)
-    bounds.bottom = math.min(bounds.bottom, addition.bottom)
-    bounds.top = math.max(bounds.top, addition.top)
-    return bounds
-end
-
 local function GetAnchoredBounds(
     width,
     height,
@@ -410,10 +399,11 @@ local function GetCustomHitBounds(config)
         healthBar.position,
         rootBounds
     )
-    local bounds = false
 
+    -- Match the visible health bar exactly. Text inside the bar naturally
+    -- shares this target; text outside it and the intervening gap do not.
     if healthBar.enabled then
-        bounds = UnionBounds(bounds, healthBounds)
+        return healthBounds
     end
 
     local nameText = config.nameText or {}
@@ -422,50 +412,38 @@ local function GetCustomHitBounds(config)
         and (
             placement == "inside"
             or nameText.parent ~= "healthBar"
-            or healthBar.enabled
         )
-    if nameVisible then
-        local position = nameText.position
-        local anchorBounds = rootBounds
-        local parentWidth = rootWidth
-        local length = nameText.length
-
-        if placement == "inside" then
-            position = {"CENTER", "CENTER", 0, 0}
-            anchorBounds = healthBounds
-            parentWidth = healthBar.enabled
-                and (healthBar.width or rootWidth)
-                or rootWidth
-            length = 0.9
-        else
-            if nameText.anchorTo == "healthBar" then
-                anchorBounds = healthBounds
-            end
-            if nameText.parent == "healthBar" then
-                parentWidth = healthBar.width or rootWidth
-            end
-        end
-
-        -- Auto-width names can contain secret identity text, so their glyph
-        -- width cannot be inspected. A root-width envelope is deterministic
-        -- and bounded; fixed-length names retain their configured precision.
-        local nameWidth = rootWidth
-        if length and length > 0 then
-            nameWidth = parentWidth * length
-        end
-
-        bounds = UnionBounds(
-            bounds,
-            GetAnchoredBounds(
-                nameWidth,
-                GetNameTextHeight(config),
-                position,
-                anchorBounds
-            )
-        )
+    if not nameVisible then
+        return
     end
 
-    return bounds
+    local position = nameText.position
+    local anchorBounds = rootBounds
+    local parentWidth = rootWidth
+    local length = nameText.length
+
+    if placement == "inside" then
+        position = {"CENTER", "CENTER", 0, 0}
+        anchorBounds = healthBounds
+        length = 0.9
+    elseif nameText.anchorTo == "healthBar" then
+        anchorBounds = healthBounds
+    end
+
+    -- Auto-width name-only plates can contain secret identity text, so their
+    -- glyph width cannot be inspected. A root-width carrier is deterministic
+    -- and bounded; fixed-length names retain their configured precision.
+    local nameWidth = rootWidth
+    if length and length > 0 then
+        nameWidth = parentWidth * length
+    end
+
+    return GetAnchoredBounds(
+        nameWidth,
+        GetNameTextHeight(config),
+        position,
+        anchorBounds
+    )
 end
 
 local function ConfigureHitRegion(np, config)
@@ -476,7 +454,37 @@ local function ConfigureHitRegion(np, config)
         return false
     end
 
-    np.hitRegion:ClearAllPoints()
+    local healthBar = config.healthBar or {}
+    if healthBar.enabled then
+        local position = healthBar.position or {
+            "CENTER",
+            "CENTER",
+            0,
+            0,
+        }
+
+        -- Mirror the visible bar's AF pixel rounding and anchor tuple exactly.
+        -- The carrier remains a plain frame with config-only geometry.
+        AF.ClearPoints(np.hitRegion)
+        AF.SetSize(
+            np.hitRegion,
+            healthBar.width or 120,
+            healthBar.height or 13
+        )
+        AF.SetPoint(
+            np.hitRegion,
+            position[1],
+            np,
+            position[2],
+            position[3],
+            position[4]
+        )
+        np.hitRegion:Show()
+        np.hitRegionConfigured = true
+        return true
+    end
+
+    AF.ClearPoints(np.hitRegion)
     np.hitRegion:SetSize(
         math.max(1, bounds.right - bounds.left),
         math.max(1, bounds.top - bounds.bottom)
@@ -748,17 +756,20 @@ local function AttachNameplate(np, unit)
     np.configKey = configKey
     np:SetFrameLevel(np.base:GetFrameLevel() + 100)
     ApplyRootGeometry(np, config)
-    NP.SetupIndicators(np, config)
     ConfigureHitRegion(np, config)
 
-    np:Show()
-    NP.OnNameplateShow(np)
+    -- Preserve the protected unit-assignment window: bind the native carrier
+    -- before secret-backed visual widgets receive their unit.
     np.customActive = true
     ApplyCustomHitTest(np)
 
+    NP.SetupIndicators(np, config)
+    np:Show()
+    NP.OnNameplateShow(np)
+
     -- Keep Blizzard's unit-frame controller alive. AF only suppresses its
     -- visual presentation; Blizzard retains protected click ownership while
-    -- its hit-test points follow BFI's configured health/name envelope.
+    -- its hit-test points follow BFI's bar or name-only carrier.
     AF.SetNativeNamePlateVisualSuppressed(np.unitFrame, true)
 end
 
