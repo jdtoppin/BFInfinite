@@ -94,8 +94,14 @@ local TextureHide = AF.TextureHide
 
 local methodFrame = CreateFrame("Frame")
 local methodTexture = methodFrame:CreateTexture()
+local methodMaskTexture = methodFrame:CreateMaskTexture()
+local methodFontString = methodFrame:CreateFontString()
 local methodCooldown = CreateFrame("Cooldown")
 local methodStatusBar = CreateFrame("StatusBar")
+-- Retail exposes several identically named methods through distinct receiver
+-- families. A closure captured from Texture:GetAlpha, for example, rejects a
+-- Frame even though Frame also implements GetAlpha. Keep every native call
+-- paired with the concrete widget type declared by CooldownViewer.xml.
 local FrameGetAlpha = methodFrame.GetAlpha
 local FrameGetEffectiveScale = methodFrame.GetEffectiveScale
 local FrameGetFrameLevel = methodFrame.GetFrameLevel
@@ -108,15 +114,18 @@ local FrameIsShown = methodFrame.IsShown
 local FrameSetAlpha = methodFrame.SetAlpha
 local FrameSetMouseMotionEnabled = methodFrame.SetMouseMotionEnabled
 local FrameSetScale = methodFrame.SetScale
-local RegionGetAlpha = methodTexture.GetAlpha
-local RegionGetAtlas = methodTexture.GetAtlas
-local RegionIsObjectType = methodTexture.IsObjectType
-local RegionIsShown = methodTexture.IsShown
-local RegionSetAlpha = methodTexture.SetAlpha
-local RegionSetDrawLayer = methodTexture.SetDrawLayer
-local RegionSetTexCoord = methodTexture.SetTexCoord
-local RegionHide = methodTexture.Hide
-local RegionShow = methodTexture.Show
+local FontStringGetAlpha = methodFontString.GetAlpha
+local FontStringIsShown = methodFontString.IsShown
+local FontStringSetAlpha = methodFontString.SetAlpha
+local FontStringSetTextColor = methodFontString.SetTextColor
+local FontStringHide = methodFontString.Hide
+local FontStringShow = methodFontString.Show
+local MaskTextureHide = methodMaskTexture.Hide
+local MaskTextureIsObjectType = methodMaskTexture.IsObjectType
+local TextureGetAtlas = methodTexture.GetAtlas
+local TextureIsObjectType = methodTexture.IsObjectType
+local TextureSetDrawLayer = methodTexture.SetDrawLayer
+local TextureSetTexCoord = methodTexture.SetTexCoord
 local CooldownGetHideCountdownNumbers = methodCooldown.GetHideCountdownNumbers
 local CooldownSetCountdownFont = methodCooldown.SetCountdownFont
 local CooldownSetHideCountdownNumbers = methodCooldown.SetHideCountdownNumbers
@@ -161,6 +170,11 @@ local function GetSafeField(owner, key)
         return nil
     end
     return value
+end
+
+local function IsWidgetObjectType(region, objectType, isObjectType)
+    local matches = isObjectType(region, objectType)
+    return IsSafeBoolean(matches) and matches
 end
 
 local function NearlyEqual(a, b)
@@ -655,18 +669,18 @@ local function CaptureNativeGeometry(item, itemState)
     return true
 end
 
-local function CaptureShown(region)
+local function CaptureShown(region, getShown)
     if not IsValueNonSecret(region) or not region then return nil end
-    local shown = RegionIsShown(region)
+    local shown = getShown(region)
     if IsSafeBoolean(shown) then
         return shown
     end
     return nil
 end
 
-local function CaptureAlpha(region)
+local function CaptureAlpha(region, getAlpha)
     if not IsValueNonSecret(region) or not region then return nil end
-    local alpha = RegionGetAlpha(region)
+    local alpha = getAlpha(region)
     if IsSafeNumber(alpha) then
         return alpha
     end
@@ -677,7 +691,7 @@ local function CapturePresentationDefaults(item, definition, itemState)
     if itemState.presentationCaptured then return end
     itemState.presentationCaptured = true
 
-    itemState.nativeAlpha = CaptureAlpha(item)
+    itemState.nativeAlpha = CaptureAlpha(item, FrameGetAlpha)
     local mouseMotion = FrameIsMouseMotionEnabled(item)
     if IsSafeBoolean(mouseMotion) then
         itemState.nativeMouseMotion = mouseMotion
@@ -700,17 +714,17 @@ local function CapturePresentationDefaults(item, definition, itemState)
         local icon = GetSafeField(item, "Icon")
         local bar = GetSafeField(item, "Bar")
         if icon then
-            itemState.nativeIconShown = CaptureShown(icon)
-            itemState.nativeIconAlpha = CaptureAlpha(icon)
+            itemState.nativeIconShown = CaptureShown(icon, FrameIsShown)
+            itemState.nativeIconAlpha = CaptureAlpha(icon, FrameGetAlpha)
         end
         if bar then
             itemState.nativeBarPoints = CapturePoints(bar)
             local name = GetSafeField(bar, "Name")
             local duration = GetSafeField(bar, "Duration")
-            itemState.nativeNameShown = CaptureShown(name)
-            itemState.nativeNameAlpha = CaptureAlpha(name)
-            itemState.nativeDurationShown = CaptureShown(duration)
-            itemState.nativeDurationAlpha = CaptureAlpha(duration)
+            itemState.nativeNameShown = CaptureShown(name, FontStringIsShown)
+            itemState.nativeNameAlpha = CaptureAlpha(name, FontStringGetAlpha)
+            itemState.nativeDurationShown = CaptureShown(duration, FontStringIsShown)
+            itemState.nativeDurationAlpha = CaptureAlpha(duration, FontStringGetAlpha)
         end
     end
 end
@@ -732,12 +746,12 @@ local function RecapturePresentationDefaults(item, definition, itemState)
     itemState.recapturePresentation = nil
 end
 
-local function SetRegionShown(region, shown)
+local function SetShown(region, shown, show, hide)
     if shown == nil or not IsValueNonSecret(region) or not region then return end
     if shown then
-        RegionShow(region)
+        show(region)
     else
-        RegionHide(region)
+        hide(region)
     end
 end
 
@@ -763,7 +777,7 @@ local function RestoreItemPresentation(item, definition, itemState)
         local icon = GetSafeField(item, "Icon")
         local bar = GetSafeField(item, "Bar")
         if icon then
-            SetRegionShown(icon, itemState.nativeIconShown)
+            SetShown(icon, itemState.nativeIconShown, FrameShow, FrameHide)
             if itemState.nativeIconAlpha ~= nil then
                 FrameSetAlpha(icon, itemState.nativeIconAlpha)
             end
@@ -771,13 +785,13 @@ local function RestoreItemPresentation(item, definition, itemState)
         if bar then
             local name = GetSafeField(bar, "Name")
             local duration = GetSafeField(bar, "Duration")
-            SetRegionShown(name, itemState.nativeNameShown)
-            SetRegionShown(duration, itemState.nativeDurationShown)
+            SetShown(name, itemState.nativeNameShown, FontStringShow, FontStringHide)
+            SetShown(duration, itemState.nativeDurationShown, FontStringShow, FontStringHide)
             if itemState.nativeNameAlpha ~= nil then
-                RegionSetAlpha(name, itemState.nativeNameAlpha)
+                FontStringSetAlpha(name, itemState.nativeNameAlpha)
             end
             if itemState.nativeDurationAlpha ~= nil then
-                RegionSetAlpha(duration, itemState.nativeDurationAlpha)
+                FontStringSetAlpha(duration, itemState.nativeDurationAlpha)
             end
         end
     end
@@ -871,8 +885,7 @@ local function GetIconMaskAndOverlay(iconParent)
     local _, mask, overlay = FrameGetRegions(iconParent)
 
     if IsValueNonSecret(mask) and mask then
-        local isMask = RegionIsObjectType(mask, "MaskTexture")
-        if not IsSafeBoolean(isMask) or not isMask then
+        if not IsWidgetObjectType(mask, "MaskTexture", MaskTextureIsObjectType) then
             mask = nil
         end
     else
@@ -880,11 +893,10 @@ local function GetIconMaskAndOverlay(iconParent)
     end
 
     if IsValueNonSecret(overlay) and overlay then
-        local isTexture = RegionIsObjectType(overlay, "Texture")
-        if not IsSafeBoolean(isTexture) or not isTexture then
+        if not IsWidgetObjectType(overlay, "Texture", TextureIsObjectType) then
             overlay = nil
         else
-            local atlas = RegionGetAtlas(overlay)
+            local atlas = TextureGetAtlas(overlay)
             if not IsSafeString(atlas)
                 or atlas ~= "UI-HUD-CoolDownManager-IconOverlay"
             then
@@ -911,8 +923,8 @@ local function SkinIcon(iconParent, icon)
         iconSkins[icon] = skin
     end
 
-    RegionSetTexCoord(icon, AF.GetDefaultTexCoord())
-    if skin.mask then TextureHide(skin.mask) end
+    TextureSetTexCoord(icon, AF.GetDefaultTexCoord())
+    if skin.mask then MaskTextureHide(skin.mask) end
     if skin.overlay then TextureHide(skin.overlay) end
     FrameShow(skin.border)
 end
@@ -935,7 +947,7 @@ local function SkinBar(bar)
     StatusBarSetStatusBarTexture(bar, BFI.media.bar)
     local fill = StatusBarGetStatusBarTexture(bar)
     if IsValueNonSecret(fill) and fill then
-        RegionSetDrawLayer(fill, "BORDER", -1)
+        TextureSetDrawLayer(fill, "BORDER", -1)
     end
     FrameShow(skin.backdrop)
 end
@@ -943,7 +955,7 @@ end
 local function ApplyFont(fontString, config)
     if not IsValueNonSecret(fontString) or not fontString or not config then return end
     AF.SetFont(fontString, config.font)
-    fontString:SetTextColor(AF.UnpackColor(config.color))
+    FontStringSetTextColor(fontString, AF.UnpackColor(config.color))
 end
 
 local function GetCountText(item, definition)
@@ -1030,19 +1042,19 @@ local function ApplyBarContent(item, config, itemState)
     local content = config.barContent
     if content == "icon_only" then
         FrameShow(icon)
-        RegionHide(name)
+        FontStringHide(name)
     elseif content == "name_only" then
         FrameHide(icon)
-        RegionShow(name)
+        FontStringShow(name)
     else
         FrameShow(icon)
-        RegionShow(name)
+        FontStringShow(name)
     end
 
     if config.showTimer == false then
-        RegionHide(duration)
+        FontStringHide(duration)
     else
-        RegionShow(duration)
+        FontStringShow(duration)
     end
 
     local nameOnly = content == "name_only"
