@@ -308,7 +308,19 @@ local function LoadIndicatorConfig(t)
     end
 end
 
+local function IsAuraIndicator(t)
+    return t.id == "buffs" or t.id == "debuffs"
+end
+
 local function LoadIndicatorPosition(t)
+    -- Aura placement is part of the compiled layout contract. Moving only
+    -- the holder leaves legacy subframe flow and native container flow based
+    -- on the previous anchor, so reload the complete aura configuration.
+    if IsAuraIndicator(t) then
+        LoadIndicatorConfig(t)
+        return
+    end
+
     if t.owner == "party" then
         for i = 1, 5 do
             UF.LoadIndicatorPosition(t.target.header[i].indicators[t.id], t.cfg.position, t.cfg.anchorTo, t.cfg.parent)
@@ -3607,12 +3619,19 @@ builder["tooltip"] = function(parent)
         {text = L["Default"], value = "default"},
     }
 
+    local function ReloadAuraTooltip()
+        if IsAuraIndicator(pane.t) then
+            LoadIndicatorConfig(pane.t)
+        end
+    end
+
     local anchorPoint = AF.CreateDropdown(pane, 150)
     anchorPoint:SetLabel(L["Anchor Point"])
     AF.SetPoint(anchorPoint, "TOPLEFT", enabledCheckButton, 0, -45)
     anchorPoint:SetItems(AF.GetDropdownItems_AnchorPoint())
     anchorPoint:SetOnSelect(function(value)
         pane.t.cfg.tooltip.position[1] = value
+        ReloadAuraTooltip()
     end)
 
     local relativePoint = AF.CreateDropdown(pane, 150)
@@ -3621,18 +3640,21 @@ builder["tooltip"] = function(parent)
     relativePoint:SetItems(AF.GetDropdownItems_AnchorPoint())
     relativePoint:SetOnSelect(function(value)
         pane.t.cfg.tooltip.position[2] = value
+        ReloadAuraTooltip()
     end)
 
     local x = AF.CreateSlider(pane, L["X Offset"], 150, -1000, 1000, 1, nil, true)
     AF.SetPoint(x, "TOPLEFT", anchorPoint, 0, -45)
     x:SetOnValueChanged(function(value)
         pane.t.cfg.tooltip.position[3] = value
+        ReloadAuraTooltip()
     end)
 
     local y = AF.CreateSlider(pane, L["Y Offset"], 150, -1000, 1000, 1, nil, true)
     AF.SetPoint(y, "TOPLEFT", x, 185, 0)
     y:SetOnValueChanged(function(value)
         pane.t.cfg.tooltip.position[4] = value
+        ReloadAuraTooltip()
     end)
 
     local function UpdateWidgets()
@@ -3643,14 +3665,13 @@ builder["tooltip"] = function(parent)
     enabledCheckButton:SetOnCheck(function(checked)
         pane.t.cfg.tooltip.enabled = checked
         UpdateWidgets()
-        if not pane.t.id:find("^general") then
-            LoadIndicatorConfig(pane.t)
-        end
+        ReloadAuraTooltip()
     end)
 
      relativeTo:SetOnSelect(function(value)
         pane.t.cfg.tooltip.anchorTo = value
         UpdateWidgets()
+        ReloadAuraTooltip()
     end)
 
     function pane.Load(t)
