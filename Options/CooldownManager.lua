@@ -80,6 +80,31 @@ local function CreateModulePanes(parent)
         skin:SetEnabled(CM.config.enabled)
     end
 
+    local assistedPane = CreateOptionRow(parent, 55)
+    panes[#panes + 1] = assistedPane
+
+    local assistedHighlight = AF.CreateCheckButton(assistedPane, L["Show Assisted Highlight on Cooldown Icons"])
+    AF.SetPoint(assistedHighlight, "TOPLEFT", 15, -8)
+    assistedHighlight:SetOnCheck(function(checked)
+        CM.config.assistedHighlight = checked
+        UpdateModule()
+    end)
+
+    local assistedTip = AF.CreateFontString(
+        assistedPane,
+        L["Shows Blizzard's current recommendation on Essential and Utility cooldown icons. Follows the global Assisted Highlight setting."],
+        "gray"
+    )
+    AF.SetPoint(assistedTip, "TOPLEFT", assistedHighlight, "BOTTOMLEFT", 0, -3)
+    AF.SetPoint(assistedTip, "RIGHT", -15, 0)
+    assistedTip:SetJustifyH("LEFT")
+    assistedTip:SetWordWrap(true)
+
+    function assistedPane.Load()
+        assistedHighlight:SetChecked(CM.config.assistedHighlight)
+        assistedHighlight:SetEnabled(CM.config.enabled)
+    end
+
     local tipPane = CreateOptionRow(parent, 45)
     panes[#panes + 1] = tipPane
 

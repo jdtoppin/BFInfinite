@@ -9,6 +9,7 @@ local defaults = {
     enabled = false,
     positionVersion = 1,
     skin = true,
+    assistedHighlight = true,
     cooldownText = {
         font = {"BFI", 14, "outline", false},
         color = AF.GetColorTable("white"),
@@ -82,6 +83,8 @@ local defaults = {
 AF.RegisterCallback("BFI_UpdateProfile", function(_, profile)
     if not profile.cooldownManager then
         profile.cooldownManager = AF.Copy(defaults)
+    elseif profile.cooldownManager.assistedHighlight == nil then
+        profile.cooldownManager.assistedHighlight = defaults.assistedHighlight
     end
     CM.config = profile.cooldownManager
 end)
