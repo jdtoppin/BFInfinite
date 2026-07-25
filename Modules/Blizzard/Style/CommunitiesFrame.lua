@@ -37,7 +37,9 @@ end
 -- 4383ced30106d51b27e3e86d1987f1552f0d259d) and PTR 12.1.0.68914
 -- (wow-ui-source d3915c78aba77a7a9be76acbfa35c674bbb6abe9).
 local function StyleCommunitiesRadio(frame)
-    S.StyleMenuSelection(frame, 7)
+    -- Match the full class-color selection used by the Club Finder filter
+    -- checkboxes rather than retaining Blizzard's inset radio-dot treatment.
+    S.StyleMenuSelection(frame)
 end
 
 local function StyleCommunitiesRadioMenu(_, rootDescription)
@@ -56,13 +58,16 @@ local function SetFlatTexture(texture, color, alpha, blendMode)
     texture:SetBlendMode(blendMode or "BLEND")
 end
 
-local function LayoutVerticalTabs(tabs)
+local function LayoutVerticalTabs(tabs, anchorTo, x, y)
     local previous
     for _, tab in ipairs(tabs) do
         if tab:IsShown() then
             if previous then
                 AF.ClearPoints(tab)
                 AF.SetPoint(tab, "TOPLEFT", previous, "BOTTOMLEFT")
+            elseif anchorTo then
+                AF.ClearPoints(tab)
+                AF.SetPoint(tab, "TOPLEFT", anchorTo, "TOPRIGHT", x, y)
             end
             previous = tab
         end
@@ -75,11 +80,6 @@ local function StyleCommunitiesTab(tab, iconName)
     -- Match the World Map rail's padded 35x50 footprint. The layout below
     -- still anchors each visible tab directly to the previous one.
     S.StyleSideTab(tab)
-
-    -- Communities tabs sit directly against the frame edge, where a button
-    -- outline is partially obscured. Keep the World Map selected background
-    -- and hover treatment without restoring that outline.
-    tab.BFIBackdrop:SetBackdropBorderColor(0, 0, 0, 0)
 
     local icon = tab.Icon
     if icon then
@@ -107,7 +107,9 @@ local function LayoutCommunitiesTabs(frame)
         StyleCommunitiesTab(tab, communitiesTabIcons[i])
     end
 
-    LayoutVerticalTabs(tabs)
+    -- World Map offsets its rail from the panel so all four sides of the
+    -- shared tab border remain visible.
+    LayoutVerticalTabs(tabs, frame, 4, -36)
 end
 
 ---------------------------------------------------------------------
