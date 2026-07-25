@@ -768,7 +768,7 @@ function S.StyleFilterDropdownButton(button)
     if not resetButton then return end
     button._BFIFilterDropdownStyled = true
 
-    S.StyleIconButton(resetButton, AF.GetIcon("Close"), 8, "gray", "gray_hover")
+    S.StyleIconButton(resetButton, AF.GetIcon("Close"), 8, "red", "gray_hover")
     AF.SetSize(resetButton, 14, 14)
     resetButton:SetHitRectInsets(0, 0, 0, 0)
     resetButton.BFIBg:SetAlpha(0)

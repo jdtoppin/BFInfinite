@@ -279,6 +279,7 @@ local function StylePetLoadoutSlot(slot)
 
         StyleSquareIcon(slot.icon, slot.iconBorder, slot.qualityBorder)
         StyleProgressBar(slot.healthFrame and slot.healthFrame.healthBar)
+        StyleProgressBar(slot.xpBar)
 
         for i = 1, 3 do
             StyleLowercaseIconButton(slot["spell" .. i])
@@ -307,7 +308,18 @@ local function StylePetCard(card)
     end
 end
 
-local function StylePetJournal()
+local function StyleCollectionsInfoButton(button, collectionsJournal)
+    if not button then return end
+
+    S.StyleIconButton(button, AF.GetIcon("Info_Square"), 12, "gray", "gray_hover")
+    AF.SetSize(button, 20, 20)
+    button:SetHitRectInsets(0, 0, 0, 0)
+    AF.ClearPoints(button)
+    AF.SetPoint(button, "LEFT", collectionsJournal.BFIHeader, "LEFT", 2, 0)
+    AF.SetFrameLevel(button, 1, collectionsJournal.BFIHeader)
+end
+
+local function StylePetJournal(collectionsJournal)
     local frame = _G.PetJournal
 
     StyleInset(frame.LeftInset, "widget_dark")
@@ -319,6 +331,7 @@ local function StylePetJournal()
     S.StyleScrollBar(frame.ScrollBar)
     S.StyleButton(frame.FindBattleButton, "BFI")
     S.StyleButton(frame.SummonButton, "BFI")
+    StyleCollectionsInfoButton(frame.MainHelpButton, collectionsJournal)
 
     StylePanelSpellButton(frame.HealPetSpellFrame.Button)
     StylePanelSpellButton(frame.SummonRandomPetSpellFrame.Button)
@@ -499,12 +512,7 @@ local function StyleWardrobeInfoButton(frame, collectionsJournal)
     -- tooltip while retaining all three localized shortcut strings.
     button:SetScript("OnEnter", nil)
     button:SetScript("OnLeave", nil)
-    S.StyleIconButton(button, AF.GetIcon("Info_Square"), 12, "gray", "gray_hover")
-    AF.SetSize(button, 20, 20)
-    button:SetHitRectInsets(0, 0, 0, 0)
-    AF.ClearPoints(button)
-    AF.SetPoint(button, "LEFT", collectionsJournal.BFIHeader, "LEFT", 2, 0)
-    AF.SetFrameLevel(button, 1, collectionsJournal.BFIHeader)
+    StyleCollectionsInfoButton(button, collectionsJournal)
     AF.SetTooltip(
         button,
         "BOTTOMLEFT",
@@ -625,7 +633,7 @@ local function StyleBlizzard()
     S.StyleTitledFrame(collectionsJournal)
     StyleTabs(collectionsJournal)
     StyleMountJournal()
-    StylePetJournal()
+    StylePetJournal(collectionsJournal)
     StyleToyBox()
     StyleHeirlooms()
     StyleWardrobe(collectionsJournal)

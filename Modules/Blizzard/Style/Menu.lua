@@ -50,9 +50,20 @@ function S.StyleMenuSelection(frame, selectedSize)
     AF.SetSize(border, 15, 15)
     AF.SetPoint(border, "CENTER", selectionBox)
 
+    -- Mainline radios use a -3px icon offset and only a 1px text gap,
+    -- while checkboxes use the roomier alignment adopted by BFI. Normalize
+    -- both compositor variants so mixed menu rows share one text column.
+    AF.ClearPoints(selectionBox)
+    AF.SetPoint(selectionBox, "LEFT")
     selectionBox:SetAtlas("")
     selectionBox:SetColorTexture(AF.GetColorRGB("widget"))
     AF.SetSize(selectionBox, 13, 13)
+
+    local fontString = frame.fontString
+    if fontString then
+        AF.ClearPoints(fontString)
+        AF.SetPoint(fontString, "LEFT", selectionBox, "RIGHT", 7, 1)
+    end
 
     local selected = frame.leftTexture2
     if selected then
