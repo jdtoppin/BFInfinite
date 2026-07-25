@@ -60,7 +60,6 @@ local defaults = {
             visibility = "always",
             showTimer = true,
             showTooltips = true,
-            hideWhenInactive = true,
         },
         buffBar = {
             position = {"BOTTOM", 420, 430},
@@ -73,7 +72,6 @@ local defaults = {
             visibility = "always",
             showTimer = true,
             showTooltips = true,
-            hideWhenInactive = true,
             barContent = "icon_and_name",
             barWidthScale = 1,
         },

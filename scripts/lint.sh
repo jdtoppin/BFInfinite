@@ -13,6 +13,7 @@ command -v luacheck >/dev/null 2>&1 || {
 # supplied changed files so legacy warnings do not hide new regressions.
 luacheck . --only E
 ./scripts/check-policy.sh
+bash ./scripts/check-cooldown-manager-boundary.sh
 
 changed=()
 for file in "$@"; do

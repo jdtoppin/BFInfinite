@@ -105,12 +105,12 @@ local function CreateModulePanes(parent)
         assistedHighlight:SetEnabled(CM.config.enabled)
     end
 
-    local tipPane = CreateOptionRow(parent, 45)
+    local tipPane = CreateOptionRow(parent, 60)
     panes[#panes + 1] = tipPane
 
     local tip = AF.CreateFontString(
         tipPane,
-        L["BFI changes presentation only. Blizzard still controls tracked abilities, cooldown data, and alerts."],
+        L["Use BFI Edit Mode to move and preview these layouts. BFI controls presentation and positioning; Blizzard controls tracked abilities, cooldown data, alerts, and inactive entries."],
         "gray"
     )
     AF.SetPoint(tip, "TOPLEFT", 15, -8)
@@ -198,8 +198,8 @@ local directionItems = {
 }
 
 local visibilityItems = {
-    {text = L["Always"], value = "always"},
-    {text = L["In Combat"], value = "combat"},
+    {text = L["Whenever Available"], value = "always"},
+    {text = L["In Combat Only"], value = "combat"},
     {text = L["Hidden"], value = "hidden"},
 }
 
@@ -223,11 +223,9 @@ local viewerInfo = {
     buffIcon = {
         label = L["Buff Icons"],
         hasOrientation = true,
-        hasHideWhenInactive = true,
     },
     buffBar = {
         label = L["Buff Bars"],
-        hasHideWhenInactive = true,
         hasBarSettings = true,
     },
 }
@@ -352,7 +350,7 @@ local function CreateViewerPanes(parent, viewerKey)
     local visibilityPane = CreateRow(75)
     local visibility = AF.CreateDropdown(visibilityPane, CONTROL_WIDTH)
     AF.SetPoint(visibility, "TOPLEFT", 15, -25)
-    visibility:SetLabel(L["Visibility"])
+    visibility:SetLabel(L["BFI Visibility"])
     visibility:SetItems(visibilityItems)
     visibility:SetOnSelect(function(value)
         CM.config.viewers[viewerKey].visibility = value
@@ -377,19 +375,6 @@ local function CreateViewerPanes(parent, viewerKey)
         showTimer:SetChecked(config.showTimer)
         showTooltips:SetChecked(config.showTooltips)
     end)
-
-    if info.hasHideWhenInactive then
-        local inactivePane = CreateRow(30)
-        local hideWhenInactive = AF.CreateCheckButton(inactivePane, L["Hide When Inactive"])
-        AF.SetPoint(hideWhenInactive, "LEFT", 15, 0)
-        hideWhenInactive:SetOnCheck(function(checked)
-            CM.config.viewers[viewerKey].hideWhenInactive = checked
-            UpdateModule()
-        end)
-        SetRowLifecycle(inactivePane, {hideWhenInactive}, function(config)
-            hideWhenInactive:SetChecked(config.hideWhenInactive)
-        end)
-    end
 
     if info.hasBarSettings then
         local barPane = CreateRow(55)
