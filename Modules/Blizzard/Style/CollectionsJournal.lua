@@ -319,6 +319,191 @@ local function StyleCollectionsInfoButton(button, collectionsJournal)
     AF.SetFrameLevel(button, 1, collectionsJournal.BFIHeader)
 end
 
+local petHelpTipPositions = {
+    UP = "TOP",
+    DOWN = "BOTTOM",
+    LEFT = "LEFT",
+    RIGHT = "RIGHT",
+}
+
+local function GetActiveHelpTip(widget)
+    local tip = widget and widget._helptip
+    if tip and tip.widget == widget and tip:IsShown() then
+        return tip
+    end
+end
+
+local function GetActivePetJournalHelpTip(frame)
+    for _, anchor in ipairs(frame._BFIPetJournalHelpAnchors or {}) do
+        local tip = GetActiveHelpTip(anchor)
+        if tip then return tip end
+    end
+end
+
+local function HidePetJournalHelpTips(frame)
+    local tip = GetActivePetJournalHelpTip(frame)
+    if tip then
+        -- AF only exposes a global hide API; close this tour without
+        -- dismissing unrelated HelpTips owned by other modules.
+        tip:Close()
+    end
+
+    local anchors = frame._BFIPetJournalHelpAnchors
+    if anchors then
+        for _, anchor in ipairs(anchors) do
+            anchor:Hide()
+        end
+    end
+end
+
+local function HideAllPetJournalHelpTips(frame)
+    HidePetJournalHelpTips(frame)
+
+    local prompt = GetActiveHelpTip(frame.MainHelpButton)
+    if prompt then
+        prompt:Close()
+    end
+end
+
+local function CreatePetJournalHelpTips(frame)
+    local helpPlateInfo = _G.PetJournal_HelpPlate
+    if not helpPlateInfo then return {} end
+
+    local anchors = frame._BFIPetJournalHelpAnchors
+    if not anchors then
+        anchors = {}
+        frame._BFIPetJournalHelpAnchors = anchors
+    end
+
+    local framePos = helpPlateInfo.FramePos or {}
+    local tips = {}
+    for _, helpInfo in ipairs(helpPlateInfo) do
+        local buttonPos = helpInfo.ButtonPos
+        local position = petHelpTipPositions[helpInfo.ToolTipDir]
+        if buttonPos and position and helpInfo.ToolTipText then
+            local index = #tips + 1
+            local anchor = anchors[index]
+            if not anchor then
+                anchor = _G.CreateFrame("Frame", nil, frame)
+                anchor:SetSize(46, 46)
+                anchors[index] = anchor
+            end
+
+            anchor:ClearAllPoints()
+            anchor:SetPoint(
+                "TOPLEFT",
+                frame,
+                "TOPLEFT",
+                (framePos.x or 0) + (buttonPos.x or 0),
+                (framePos.y or 0) + (buttonPos.y or 0)
+            )
+            anchor:Show()
+
+            tips[index] = {
+                widget = anchor,
+                position = position,
+                text = helpInfo.ToolTipText,
+                width = 220,
+                closeHoldDuration = 0,
+            }
+        end
+    end
+
+    for i = #tips + 1, #anchors do
+        anchors[i]:Hide()
+    end
+    return tips
+end
+
+local function HideNativePetJournalHelp()
+    local helpPlate = _G.HelpPlate
+    local helpPlateInfo = _G.PetJournal_HelpPlate
+    if not helpPlate then return end
+
+    if helpPlateInfo and helpPlate.IsShowingHelpInfo(helpPlateInfo) then
+        helpPlate.Hide(false)
+    end
+    helpPlate.HideTooltip()
+end
+
+local function TogglePetJournalHelpTips(frame)
+    local prompt = GetActiveHelpTip(frame.MainHelpButton)
+    if prompt then
+        prompt:Close()
+    end
+
+    if GetActivePetJournalHelpTip(frame) then
+        HidePetJournalHelpTips(frame)
+        return
+    end
+
+    -- Clear proxy anchors left behind when a player closes an intermediate
+    -- step, then reopen the tour with the same click.
+    HidePetJournalHelpTips(frame)
+    HideNativePetJournalHelp()
+    if _G.SetCVarBitfield and _G.LE_FRAME_TUTORIAL_PET_JOURNAL then
+        _G.SetCVarBitfield("closedInfoFrames", _G.LE_FRAME_TUTORIAL_PET_JOURNAL, true)
+    end
+    if _G.CollectionsJournal_HideTabHelpTips then
+        _G.CollectionsJournal_HideTabHelpTips()
+    end
+
+    local tips = CreatePetJournalHelpTips(frame)
+    if #tips == 0 then return end
+
+    AF.ShowHelpTipGroup(tips)
+end
+
+local function ReplacePetJournalTutorialPrompt(frame)
+    local helpPlate = _G.HelpPlate
+    local helpPlateInfo = _G.PetJournal_HelpPlate
+    if not helpPlate or not helpPlateInfo then return end
+    if not helpPlate.IsShowingTutorialTooltip(helpPlateInfo) then return end
+
+    helpPlate.HideTooltip()
+    local button = frame.MainHelpButton
+    -- ShowTutorialTooltip leaves Blizzard's private tutorial mode active.
+    -- Complete a non-rendered Show/Hide cycle before replacing the prompt.
+    helpPlate.Show(helpPlateInfo, frame, button)
+    helpPlate.Hide(false)
+    AF.ShowHelpTip({
+        widget = button,
+        position = "RIGHT",
+        text = button.mainHelpPlateButtonTooltipText or _G.MAIN_HELP_BUTTON_TOOLTIP,
+        width = 220,
+        glow = true,
+        closeHoldDuration = 0,
+    })
+end
+
+local function StylePetJournalHelpButton(frame)
+    local button = frame.MainHelpButton
+    button:SetScript("OnEnter", nil)
+    button:SetScript("OnLeave", nil)
+    AF.SetTooltip(
+        button,
+        "BOTTOMLEFT",
+        0,
+        -2,
+        button.mainHelpPlateButtonTooltipText or _G.MAIN_HELP_BUTTON_TOOLTIP
+    )
+    button:HookScript("OnEnter", function(self)
+        if GetActiveHelpTip(self) then
+            AF.HideTooltip()
+        end
+    end)
+    button:SetScript("OnClick", function()
+        AF.HideTooltip()
+        TogglePetJournalHelpTips(frame)
+    end)
+
+    frame:HookScript("OnShow", ReplacePetJournalTutorialPrompt)
+    frame:HookScript("OnHide", HideAllPetJournalHelpTips)
+    if frame:IsShown() then
+        ReplacePetJournalTutorialPrompt(frame)
+    end
+end
+
 local function StylePetJournal(collectionsJournal)
     local frame = _G.PetJournal
 
@@ -332,6 +517,7 @@ local function StylePetJournal(collectionsJournal)
     S.StyleButton(frame.FindBattleButton, "BFI")
     S.StyleButton(frame.SummonButton, "BFI")
     StyleCollectionsInfoButton(frame.MainHelpButton, collectionsJournal)
+    StylePetJournalHelpButton(frame)
 
     StylePanelSpellButton(frame.HealPetSpellFrame.Button)
     StylePanelSpellButton(frame.SummonRandomPetSpellFrame.Button)
@@ -381,7 +567,7 @@ local function StyleHeirloomButton(_, button)
 end
 
 local function StyleCollectionsRadio(frame)
-    S.StyleMenuSelection(frame, 7)
+    S.StyleMenuSelection(frame)
 end
 
 local function StyleCollectionsRadioMenuDescriptions(parentDescription)
@@ -397,6 +583,31 @@ local function StyleCollectionsRadioMenu(_, rootDescription)
     StyleCollectionsRadioMenuDescriptions(rootDescription)
 end
 
+local function StyleHeirloomClassRadioMenu(owner, rootDescription)
+    if owner == _G.HeirloomsJournal.ClassDropdown then
+        StyleCollectionsRadioMenu(owner, rootDescription)
+    end
+end
+
+local collectionsRadioMenuTags = {
+    "MENU_MOUNT_COLLECTION_FILTER",
+    "MENU_PET_COLLECTION_FILTER",
+    "MENU_TOYBOX_FILTER",
+    "MENU_HEIRLOOMS_FILTER",
+    "MENU_WARDROBE_FILTER",
+    "MENU_WARDROBE_BASE_SETS_FILTER",
+    "MENU_WARDROBE_CLASS",
+    "MENU_WARDROBE_WEAPONS_FILTER",
+    "MENU_WARDROBE_VARIANT_SETS",
+}
+
+local function RegisterCollectionsRadioMenus()
+    for _, menuTag in ipairs(collectionsRadioMenuTags) do
+        _G.Menu.ModifyMenu(menuTag, StyleCollectionsRadioMenu)
+    end
+    _G.Menu.ModifyMenu("MENU_CLASS_FILTER", StyleHeirloomClassRadioMenu)
+end
+
 local function StyleHeirlooms()
     local frame = _G.HeirloomsJournal
 
@@ -406,7 +617,6 @@ local function StyleHeirlooms()
     S.StyleDropdownButton(frame.ClassDropdown)
     StyleCollectionBackground(frame.iconsFrame)
     StylePagingFrame(frame.PagingFrame)
-    _G.Menu.ModifyMenu("MENU_CLASS_FILTER", StyleCollectionsRadioMenu)
 
     for _, button in next, frame.heirloomEntryFrames do
         StyleHeirloomButton(nil, button)
@@ -545,8 +755,6 @@ local function StyleWardrobe(collectionsJournal)
     StyleFilterDropdown(frame.FilterButton)
     S.StyleDropdownButton(frame.ClassDropdown)
     StyleWardrobeInfoButton(frame, collectionsJournal)
-    _G.Menu.ModifyMenu("MENU_WARDROBE_CLASS", StyleCollectionsRadioMenu)
-    _G.Menu.ModifyMenu("MENU_WARDROBE_VARIANT_SETS", StyleCollectionsRadioMenu)
 
     StyleCollectionBackground(itemsFrame)
     StylePagingFrame(itemsFrame.PagingFrame)
@@ -638,6 +846,7 @@ local function StyleBlizzard()
     StyleHeirlooms()
     StyleWardrobe(collectionsJournal)
     StyleWarbandScenes()
+    RegisterCollectionsRadioMenus()
 end
 
 AF.RegisterAddonLoaded("Blizzard_Collections", StyleBlizzard)
