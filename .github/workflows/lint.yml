@@ -50,3 +50,6 @@ jobs:
 
       - name: Test unit-frame config-mode lifecycle
         run: luajit tests/unit_frame_config_mode_lifecycle_test.lua
+
+      - name: Test secure group-header unit routing
+        run: luajit tests/unit_frame_group_header_routing_test.lua
