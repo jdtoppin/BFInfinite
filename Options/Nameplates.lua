@@ -123,6 +123,18 @@ local function SetSharedCastFontValue(index, value)
     UpdateNameplates()
 end
 
+local function SetSharedCastArrayValue(
+    section,
+    key,
+    index,
+    value
+)
+    for _, plateType in ipairs(PLATE_TYPES) do
+        NP.config[plateType].castBar[section][key][index] = value
+    end
+    UpdateNameplates()
+end
+
 local function SetSharedIndicatorEnabled(indicator, enabled)
     for _, plateType in ipairs(PLATE_TYPES) do
         NP.config[plateType][indicator].enabled = enabled
@@ -1397,7 +1409,7 @@ local function CreateNameplatesPanel()
 
     local castsNotice = AF.CreateFontString(
         castsPane,
-        L["Cast settings apply to every nameplate. Important casts and player-targeted casts use Blizzard's secret-safe classifications; no custom spell or NPC lists are used."],
+        L["Cast settings apply to every nameplate. Important, uninterruptible, and player-targeted cast indicators use Blizzard's secret-safe classifications; no custom spell or NPC lists are used."],
         "gray"
     )
     AF.SetPoint(castsNotice, "TOPLEFT", castsPane, 15, -30)
@@ -1420,6 +1432,16 @@ local function CreateNameplatesPanel()
         "casts",
         L["Glow"] .. " / " .. L["Highlight Color"],
         110
+    )
+    local uninterruptibleIconPane = CreateSectionPane(
+        "casts",
+        L["Uninterruptible X"],
+        230
+    )
+    local importantIconPane = CreateSectionPane(
+        "casts",
+        L["Important Cast Icon"],
+        230
     )
     local castContentPane = CreateSectionPane(
         "casts",
@@ -1586,25 +1608,6 @@ local function CreateNameplatesPanel()
         UpdateCastWidgets()
     end)
 
-    local uninterruptibleTexture = AF.CreateCheckButton(
-        castInterruptibilityPane,
-        L["Uninterruptible Texture"]
-    )
-    AF.SetPoint(
-        uninterruptibleTexture,
-        "TOPLEFT",
-        castInterruptibilityPane,
-        200,
-        -45
-    )
-    uninterruptibleTexture:SetOnCheck(function(checked)
-        SetSharedCastSectionValue(
-            "interruptibleCheck",
-            "showTexture",
-            checked
-        )
-    end)
-
     local importantGlow = AF.CreateCheckButton(
         castHighlightsPane,
         L["Important Cast Glow"]
@@ -1642,6 +1645,150 @@ local function CreateNameplatesPanel()
         "importantGlow",
         true
     )
+
+    local function CreateCastStateIconWidgets(
+        pane,
+        section,
+        positionHelp
+    )
+        local help = AF.CreateFontString(
+            pane,
+            positionHelp,
+            "gray"
+        )
+        AF.SetPoint(help, "TOPLEFT", pane, 15, -30)
+
+        local enableIcon = AF.CreateCheckButton(
+            pane,
+            L["Enable"]
+        )
+        AF.SetPoint(enableIcon, "TOPLEFT", pane, 15, -65)
+        enableIcon:SetOnCheck(function(checked)
+            SetSharedCastSectionValue(
+                section,
+                "enabled",
+                checked
+            )
+            UpdateCastWidgets()
+        end)
+
+        local size = AF.CreateSlider(
+            pane,
+            L["Size"],
+            165,
+            6,
+            40,
+            1,
+            nil,
+            true
+        )
+        AF.SetPoint(size, "TOPLEFT", pane, 200, -70)
+        size:SetAfterValueChanged(function(value)
+            SetSharedCastSectionValue(section, "size", value)
+        end)
+
+        local anchorPoint = AF.CreateDropdown(pane, 165)
+        anchorPoint:SetLabel(L["Anchor Point"])
+        AF.SetPoint(
+            anchorPoint,
+            "TOPLEFT",
+            pane,
+            15,
+            -125
+        )
+        anchorPoint:SetItems(AF.GetDropdownItems_AnchorPoint())
+        anchorPoint:SetOnSelect(function(value)
+            SetSharedCastArrayValue(
+                section,
+                "position",
+                1,
+                value
+            )
+        end)
+
+        local relativePoint = AF.CreateDropdown(pane, 165)
+        relativePoint:SetLabel(L["Relative Point"])
+        AF.SetPoint(
+            relativePoint,
+            "TOPLEFT",
+            pane,
+            200,
+            -125
+        )
+        relativePoint:SetItems(
+            AF.GetDropdownItems_AnchorPoint()
+        )
+        relativePoint:SetOnSelect(function(value)
+            SetSharedCastArrayValue(
+                section,
+                "position",
+                2,
+                value
+            )
+        end)
+
+        local xOffset = AF.CreateSlider(
+            pane,
+            L["X Offset"],
+            165,
+            -100,
+            100,
+            0.5,
+            nil,
+            true
+        )
+        AF.SetPoint(xOffset, "TOPLEFT", pane, 15, -185)
+        xOffset:SetAfterValueChanged(function(value)
+            SetSharedCastArrayValue(
+                section,
+                "position",
+                3,
+                value
+            )
+        end)
+
+        local yOffset = AF.CreateSlider(
+            pane,
+            L["Y Offset"],
+            165,
+            -100,
+            100,
+            0.5,
+            nil,
+            true
+        )
+        AF.SetPoint(yOffset, "TOPLEFT", pane, 200, -185)
+        yOffset:SetAfterValueChanged(function(value)
+            SetSharedCastArrayValue(
+                section,
+                "position",
+                4,
+                value
+            )
+        end)
+
+        return {
+            enabled = enableIcon,
+            size = size,
+            anchorPoint = anchorPoint,
+            relativePoint = relativePoint,
+            xOffset = xOffset,
+            yOffset = yOffset,
+        }
+    end
+
+    local uninterruptibleIconWidgets =
+        CreateCastStateIconWidgets(
+            uninterruptibleIconPane,
+            "uninterruptibleIcon",
+            L["Position is relative to the cast icon."]
+        )
+    local importantIconWidgets =
+        CreateCastStateIconWidgets(
+            importantIconPane,
+            "importantIcon",
+            L["Position is relative to the cast bar."]
+        )
 
     local playerTargetHighlight = AF.CreateCheckButton(
         castHighlightsPane,
@@ -1809,6 +1956,24 @@ local function CreateNameplatesPanel()
         SetSharedCastFontValue(2, value)
     end)
 
+    local function UpdateCastStateIconWidgets(widgets, config)
+        local position = config.position
+        widgets.enabled:SetChecked(config.enabled)
+        widgets.size:SetValue(config.size)
+        widgets.anchorPoint:SetSelectedValue(position[1])
+        widgets.relativePoint:SetSelectedValue(position[2])
+        widgets.xOffset:SetValue(position[3])
+        widgets.yOffset:SetValue(position[4])
+        AF.SetEnabled(
+            config.enabled,
+            widgets.size,
+            widgets.anchorPoint,
+            widgets.relativePoint,
+            widgets.xOffset,
+            widgets.yOffset
+        )
+    end
+
     UpdateCastWidgets = function()
         local castConfig = NP.config.hostile_npc.castBar
         local checkConfig = castConfig.interruptibleCheck
@@ -1831,7 +1996,10 @@ local function CreateNameplatesPanel()
         end
 
         interruptibility:SetChecked(checkConfig.enabled)
-        uninterruptibleTexture:SetChecked(checkConfig.showTexture)
+        UpdateCastStateIconWidgets(
+            uninterruptibleIconWidgets,
+            castConfig.uninterruptibleIcon
+        )
 
         importantGlow:SetChecked(castConfig.importantGlow.enabled)
         if not AF.IsColorPickerOpen(importantGlowColor) then
@@ -1839,6 +2007,10 @@ local function CreateNameplatesPanel()
                 castConfig.importantGlow.color
             )
         end
+        UpdateCastStateIconWidgets(
+            importantIconWidgets,
+            castConfig.importantIcon
+        )
 
         playerTargetHighlight:SetChecked(
             castConfig.playerTargetHighlight.enabled
@@ -1863,8 +2035,7 @@ local function CreateNameplatesPanel()
         AF.SetEnabled(
             checkConfig.enabled,
             interruptibleCastColor,
-            uninterruptibleCastColor,
-            uninterruptibleTexture
+            uninterruptibleCastColor
         )
         AF.SetEnabled(
             castConfig.importantGlow.enabled,

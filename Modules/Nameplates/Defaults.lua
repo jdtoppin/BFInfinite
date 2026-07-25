@@ -53,7 +53,7 @@ end
 ---------------------------------------------------------------------
 -- defaults
 ---------------------------------------------------------------------
-local SCHEMA_VERSION = 4
+local SCHEMA_VERSION = 5
 NP.SCHEMA_VERSION = SCHEMA_VERSION
 
 local defaults = {
@@ -260,11 +260,20 @@ do
             interruptibleCheck = {
                 enabled = true,
                 requireUsable = true,
-                showTexture = true,
+            },
+            uninterruptibleIcon = {
+                enabled = true,
+                size = 14,
+                position = {"CENTER", "CENTER", 0, 0},
             },
             importantGlow = {
                 enabled = true,
                 color = {AF.ConvertHEXToRGB("#FFE157")},
+            },
+            importantIcon = {
+                enabled = true,
+                size = 16,
+                position = {"LEFT", "RIGHT", 2, 0},
             },
             playerTargetHighlight = {
                 enabled = true,
@@ -930,6 +939,36 @@ function NP.MigrateConfig(config)
             -- Preserve the color and presentation settings, but require the
             -- user to opt back into the continuous Safe state.
             safe.enabled = false
+        end
+    end
+
+    if schemaVersion < 5 then
+        for _, plateType in ipairs({
+            "hostile_npc",
+            "hostile_player",
+            "friendly_npc",
+            "friendly_player",
+        }) do
+            local plateConfig = config[plateType]
+            local castBar = type(plateConfig) == "table"
+                and plateConfig.castBar
+            local interruptibleCheck = type(castBar) == "table"
+                and castBar.interruptibleCheck
+            if type(interruptibleCheck) == "table" then
+                if type(castBar.uninterruptibleIcon) ~= "table" then
+                    local defaultCastBar =
+                        defaults[plateType].castBar
+                    castBar.uninterruptibleIcon = AF.Copy(
+                        defaultCastBar.uninterruptibleIcon
+                    )
+                    if interruptibleCheck.showTexture ~= nil then
+                        castBar.uninterruptibleIcon.enabled =
+                            interruptibleCheck.enabled ~= false
+                            and interruptibleCheck.showTexture == true
+                    end
+                end
+                interruptibleCheck.showTexture = nil
+            end
         end
     end
 

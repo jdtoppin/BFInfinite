@@ -100,15 +100,35 @@ local function CastBar_SetupImportantGlow(self, config)
 
     local enabled = config.enabled == true
     local color = config.color or AF.GetColorTable("gold")
+    self.importantGlowEnabled = enabled
     self.importantGlow:SetBackdropBorderColor(AF.UnpackColor(color))
-    AF.SetFrameLevel(self.importantGlow, 3, self)
     self.importantGlow:SetShown(enabled)
+end
 
-    if enabled then
-        self:SetImportantCastRegion(self.importantGlow)
-    else
-        self:SetImportantCastRegion(nil)
-    end
+local function CastBar_SetupImportantIcon(self, config)
+    config = config or {}
+
+    local enabled = config.enabled == true
+    self.importantIconEnabled = enabled
+    self.importantIcon:SetShown(enabled)
+    local size = config.size or 16
+    AF.SetSize(self.importantIcon, size, size)
+    AF.LoadWidgetPosition(
+        self.importantIcon,
+        config.position or {"LEFT", "RIGHT", 2, 0},
+        self
+    )
+end
+
+local function CastBar_UpdateImportantCastRegion(self)
+    local enabled =
+        self.importantGlowEnabled or self.importantIconEnabled
+    -- AF applies Blizzard's possibly secret Important Cast result to this
+    -- carrier. Its children use only ordinary profile visibility, allowing
+    -- the glow and icon to coexist without inspecting the cast state in Lua.
+    self:SetImportantCastRegion(
+        enabled and self.importantCastCarrier or nil
+    )
 end
 
 local function CastBar_SetupPlayerTargetHighlight(self, config)
@@ -151,32 +171,39 @@ local function CastBar_SetupInterruptibility(self, config)
         )
     end
 
-    local r, g, b, a = AF.UnpackColor(uninterruptibleColor)
-    self.uninterruptible:SetVertexColor(
-        r,
-        g,
-        b,
-        math.min(a, 0.6)
-    )
-
-    local showTexture = self.interruptibleCheckEnabled
-        and interruptibleCheck.showTexture == true
-    self.uninterruptible:SetShown(showTexture)
-    self:SetUninterruptibleCastRegion(
-        showTexture and self.uninterruptible or nil
-    )
     SetDefaultBorderColor(self)
 end
 
+local function CastBar_SetupUninterruptibleIcon(self, config)
+    config = config or {}
+
+    local enabled = config.enabled == true
+    self.uninterruptibleIcon:SetShown(enabled)
+    local size = config.size or 14
+    AF.SetSize(self.uninterruptibleIcon, size, size)
+    AF.LoadWidgetPosition(
+        self.uninterruptibleIcon,
+        config.position or {"CENTER", "CENTER", 0, 0},
+        self.iconBG
+    )
+    -- Keep the X on AF's native boolean sink; never branch on the restricted
+    -- notInterruptible result in BFI.
+    self:SetUninterruptibleCastRegion(
+        enabled and self.uninterruptibleCastCarrier or nil
+    )
+end
+
 local function CastBar_SetupIcon(self, config)
+    -- Keep the spell-icon geometry current even while its texture is hidden;
+    -- the independently configurable uninterruptible X anchors to it.
+    NP.LoadIndicatorPosition(self.iconBG, config.position)
+    AF.SetSize(self.iconBG, config.width, config.height)
+
     if not config.enabled then
         self.icon:Hide()
         self.iconBG:Hide()
         return
     end
-
-    NP.LoadIndicatorPosition(self.iconBG, config.position)
-    AF.SetSize(self.iconBG, config.width, config.height)
 
     self.icon:SetTexCoord(AF.Unpack8(AF.CalcTexCoordPreCrop(0.12, config.width / config.height)))
     self.iconBG:SetVertexColor(AF.UnpackColor(self.borderColor))
@@ -225,12 +252,23 @@ local function CastBar_UpdatePixels(self)
     AF.RePoint(self.spellTargetTextRegion)
     AF.RePoint(self.playerTargetOverlay)
     AF.RePoint(self.importantGlow)
+    AF.ReSize(self.importantIcon)
+    AF.RePoint(self.importantIcon)
+    AF.ReSize(self.uninterruptibleIcon)
+    AF.RePoint(self.uninterruptibleIcon)
 end
 
 local function CastBar_LoadConfig(self, config)
     self.config = config
 
     AF.SetFrameLevel(self, config.frameLevel, self.root)
+    AF.SetFrameLevel(self.importantCastCarrier, 3, self)
+    AF.SetFrameLevel(
+        self.importantGlow,
+        0,
+        self.importantCastCarrier
+    )
+    AF.SetFrameLevel(self.uninterruptibleCastCarrier, 4, self)
     NP.LoadIndicatorPosition(self, config.position, config.anchorTo)
     AF.SetSize(self, config.width, config.height)
 
@@ -246,6 +284,12 @@ local function CastBar_LoadConfig(self, config)
     CastBar_SetupIcon(self, config.icon)
     CastBar_SetupSpark(self, config.spark)
     CastBar_SetupImportantGlow(self, config.importantGlow)
+    CastBar_SetupImportantIcon(self, config.importantIcon)
+    CastBar_UpdateImportantCastRegion(self)
+    CastBar_SetupUninterruptibleIcon(
+        self,
+        config.uninterruptibleIcon
+    )
     CastBar_SetupPlayerTargetHighlight(
         self,
         config.playerTargetHighlight
@@ -269,6 +313,7 @@ AF.RegisterCallback("BFI_UpdateConfig", function(_, module, group)
                 castBar,
                 castBar.config and castBar.config.importantGlow
             )
+            CastBar_UpdateImportantCastRegion(castBar)
             CastBar_SetupPlayerTargetHighlight(
                 castBar,
                 castBar.config
@@ -312,14 +357,6 @@ function NP.CreateCastBar(parent, name)
     local spark = bar:CreateTexture(nil, "ARTWORK", nil, 3)
     frame.spark = spark
 
-    local uninterruptible = bar:CreateTexture(nil, "ARTWORK", nil, 4)
-    frame.uninterruptible = uninterruptible
-    uninterruptible:SetAllPoints()
-    uninterruptible:SetTexture(AF.GetTexture("Uninterruptible1", BFI.name), "REPEAT", "REPEAT")
-    uninterruptible:SetHorizTile(true)
-    uninterruptible:SetVertTile(true)
-    uninterruptible:Hide()
-
     local overlay = CreateFrame("Frame", nil, frame)
     frame.overlay = overlay
     overlay:SetAllPoints()
@@ -345,12 +382,49 @@ function NP.CreateCastBar(parent, name)
         overlay:CreateFontString(nil, "OVERLAY", "AF_FONT_NORMAL")
     frame.spellTargetTextRegion = spellTargetTextRegion
 
-    local importantGlow = AF.CreateGlow(frame, "gold", 3)
+    local importantCastCarrier =
+        CreateFrame("Frame", nil, frame)
+    frame.importantCastCarrier = importantCastCarrier
+    importantCastCarrier:SetAllPoints()
+    importantCastCarrier:EnableMouse(false)
+    importantCastCarrier:SetAlpha(0)
+    AF.SetFrameLevel(importantCastCarrier, 3, frame)
+
+    local importantGlow =
+        AF.CreateGlow(importantCastCarrier, "gold", 3)
     frame.importantGlow = importantGlow
     importantGlow:EnableMouse(false)
     importantGlow:SetBorderBlendMode("ADD")
-    importantGlow:SetAlpha(0)
-    AF.SetFrameLevel(importantGlow, 3, frame)
+    importantGlow:Hide()
+    AF.SetFrameLevel(importantGlow, 0, importantCastCarrier)
+
+    local importantIcon = importantCastCarrier:CreateTexture(
+        nil,
+        "OVERLAY",
+        nil,
+        1
+    )
+    frame.importantIcon = importantIcon
+    importantIcon:SetTexture(AF.GetIcon("Fluent_Notice"))
+    importantIcon:Hide()
+
+    local uninterruptibleCastCarrier =
+        CreateFrame("Frame", nil, frame)
+    frame.uninterruptibleCastCarrier =
+        uninterruptibleCastCarrier
+    uninterruptibleCastCarrier:SetAllPoints()
+    uninterruptibleCastCarrier:EnableMouse(false)
+    uninterruptibleCastCarrier:SetAlpha(0)
+    AF.SetFrameLevel(uninterruptibleCastCarrier, 4, frame)
+
+    local uninterruptibleIcon =
+        uninterruptibleCastCarrier:CreateTexture(
+            nil,
+            "OVERLAY"
+        )
+    frame.uninterruptibleIcon = uninterruptibleIcon
+    uninterruptibleIcon:SetTexture(AF.GetIcon("Close"))
+    uninterruptibleIcon:Hide()
 
     frame:SetStatusBar(bar)
     frame:SetNameText(nameText)
