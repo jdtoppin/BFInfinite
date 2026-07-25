@@ -10,7 +10,8 @@ local EncounterJournal
 -- and PTR 12.1.0.68914, d3915c78aba77a7a9be76acbfa35c674bbb6abe9.
 -- Sources: Blizzard_EncounterJournal/Mainline/{Blizzard_EncounterJournal,
 -- Blizzard_MonthlyActivities,Blizzard_LootJournal,Blizzard_LootJournalItems,
--- Blizzard_Journeys}.{lua,xml} and Blizzard_FrameXML/RewardTrackTemplates.*.
+-- Blizzard_Journeys}.{lua,xml} and Blizzard_FrameXML/{NavigationBar,
+-- RewardTrackTemplates}.*.
 -- PTR adds a circle Mask to RenownLevelCardTemplate; it is guarded below.
 
 ---------------------------------------------------------------------
@@ -21,7 +22,7 @@ local function StyleArtFrame(frame)
     frame._BFIEncounterArtStyled = true
 
     S.CreateBackdrop(frame, true)
-    frame.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("BFI", 0.7))
+    frame.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
 end
 
 local function StyleArtButton(button)
@@ -33,7 +34,7 @@ local function StyleArtButton(button)
         self.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("white", 0.8))
     end)
     button:HookScript("OnLeave", function(self)
-        self.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("BFI", 0.7))
+        self.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
     end)
 end
 
@@ -50,6 +51,88 @@ local function KeepTextureHidden(texture)
     texture:Hide()
     hooksecurefunc(texture, "Show", AF.TextureHide)
     hooksecurefunc(texture, "SetShown", HideTextureWhenShown)
+end
+
+local function KeepNamedTexturesHidden(owner, names)
+    for _, name in ipairs(names) do
+        local texture = owner and owner[name]
+        if texture then
+            KeepTextureHidden(texture)
+        end
+    end
+end
+
+local function SetFlatTexture(texture, color, alpha)
+    if not texture then return end
+
+    texture:SetTexture(AF.GetPlainTexture())
+    texture:SetTexCoord(0, 1, 0, 1)
+    texture:SetVertexColor(AF.GetColorRGB(color, alpha))
+end
+
+local function CreateHoverOverlay(frame, alpha)
+    if frame.BFIEncounterHover then return frame.BFIEncounterHover end
+
+    local overlay = AF.CreateTexture(frame, nil, AF.GetColorTable("white", alpha or 0.08), "OVERLAY", 7)
+    frame.BFIEncounterHover = overlay
+    overlay:Hide()
+    if frame.BFIBackdrop then
+        AF.SetOnePixelInside(overlay, frame.BFIBackdrop)
+    else
+        overlay:SetAllPoints()
+    end
+    return overlay
+end
+
+local function SetFlatCardState(frame)
+    if not frame.BFIBackdrop then return end
+
+    local locked = not frame:IsEnabled()
+        or (frame.majorFactionData and frame.majorFactionData.isUnlocked == false)
+    local color = locked and "widget_dark" or "widget"
+    frame.BFIBackdrop:SetBackdropColor(AF.GetColorRGB(color))
+    frame.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
+end
+
+local function StyleFlatCard(frame)
+    if not frame._BFIEncounterFlatCardStyled then
+        frame._BFIEncounterFlatCardStyled = true
+
+        local normalTexture = frame:GetNormalTexture()
+        local pushedTexture = frame:GetPushedTexture()
+        local highlightTexture = frame:GetHighlightTexture()
+        local disabledTexture = frame:GetDisabledTexture()
+        if normalTexture then
+            KeepTextureHidden(normalTexture)
+        end
+        if pushedTexture then
+            KeepTextureHidden(pushedTexture)
+        end
+        if highlightTexture then
+            KeepTextureHidden(highlightTexture)
+        end
+        if disabledTexture then
+            KeepTextureHidden(disabledTexture)
+        end
+
+        S.CreateBackdrop(frame)
+        local hover = CreateHoverOverlay(frame)
+        frame:HookScript("OnEnter", function(self)
+            if self:IsEnabled() then
+                hover:Show()
+            end
+        end)
+        frame:HookScript("OnLeave", function()
+            hover:Hide()
+        end)
+        frame:HookScript("OnEnable", SetFlatCardState)
+        frame:HookScript("OnDisable", function(self)
+            hover:Hide()
+            SetFlatCardState(self)
+        end)
+    end
+
+    SetFlatCardState(frame)
 end
 
 -- EncounterTabTemplate uses its selected and unselected textures as the
@@ -191,26 +274,112 @@ local function StyleRewardTrackControls(track)
     StyleArtButton(track.JumpRightButton)
 end
 
+local function StyleFlatStatusBarFill(bar, color)
+    if not bar then return end
+
+    if not bar._BFIEncounterFlatFillStyled then
+        bar._BFIEncounterFlatFillStyled = true
+        S.RemoveTextures(bar)
+        bar:SetStatusBarTexture(BFI.media.bar)
+        bar:GetStatusBarTexture():SetDrawLayer("BORDER", -1)
+    end
+    bar:SetStatusBarColor(AF.GetColorRGB(color))
+end
+
 local function StyleJourneys()
     local frame = EncounterJournal.JourneysFrame
     S.StyleScrollBar(frame.ScrollBar)
-    S.RemoveTextures(frame.BorderFrame)
-    StyleArtFrame(frame)
+    frame.BorderFrame:Hide()
 
     local progress = frame.JourneyProgress
     S.StyleButton(progress.OverviewBtn, "BFI")
     S.StyleButton(progress.LevelSkipButton, "BFI")
-    StyleArtButton(progress.DelvesCompanionConfigurationFrame.CompanionConfigBtn)
+    local companionButton = progress.DelvesCompanionConfigurationFrame.CompanionConfigBtn
+    StyleFlatCard(companionButton)
+    S.StyleIcon(companionButton.Icon, true)
+    KeepTextureHidden(companionButton.IconBorder)
     StyleRewardTrackControls(progress.RenownTrackFrame)
     StyleRewardTrackControls(progress.EncounterRewardProgressFrame)
 
-    S.StyleButton(frame.JourneyOverview.OverviewBtn, "BFI")
+    SetFlatTexture(progress.DividerTexture, "border")
+    progress.DividerTexture:SetHeight(1)
+    KeepTextureHidden(progress.DividerGlowTexture)
+
+    local details = progress.ProgressDetailsFrame
+    SetFlatTexture(details.JourneyLevelBar, "widget_dark")
+    details.JourneyLevelBar:SetHeight(20)
+    SetFlatTexture(details.JourneyLevelBg, "BFI", 0.55)
+    AF.SetSize(details.JourneyLevelBg, 30, 20)
+    S.StyleStatusBar(progress.DelveRewardProgressBar)
+    progress.DelveRewardProgressBar:SetStatusBarColor(AF.GetColorRGB("BFI"))
+
+    local overview = frame.JourneyOverview
+    KeepTextureHidden(overview.IconBorder)
+    KeepTextureHidden(overview.ProgressBorder)
+    S.StyleSquareIcon(overview.JourneyIcon, nil, true)
+    overview:HookScript("OnShow", function(self)
+        S.StyleIcon(self.JourneyIcon)
+    end)
+    AF.SetSize(overview.OverviewProgressBar, 50, 50)
+    overview.OverviewProgressBar:SetDrawEdge(false)
+    overview.OverviewProgressBar:SetDrawBling(false)
+    SetFlatTexture(overview.LevelFrame, "BFI", 0.55)
+    AF.SetSize(overview.LevelFrame, 28, 20)
+
+    SetFlatTexture(overview.DividerTexture, "border")
+    overview.DividerTexture:ClearAllPoints()
+    overview.DividerTexture:SetPoint("LEFT", overview, 45, 0)
+    overview.DividerTexture:SetPoint("RIGHT", overview, -45, 0)
+    overview.DividerTexture:SetHeight(1)
+    KeepTextureHidden(overview.DividerGlowTexture)
+    S.StyleButton(overview.OverviewBtn, "BFI")
 end
 
 local function StyleMonthlyActivities()
     local frame = EncounterJournal.MonthlyActivitiesFrame
     S.StyleScrollBar(frame.ScrollBar)
     S.StyleScrollBar(frame.FilterList.ScrollBar)
+
+    KeepNamedTexturesHidden(frame, {
+        "Bg",
+        "DividerVertical",
+        "ShadowLeft",
+        "ShadowRight",
+        "Divider",
+    })
+    KeepNamedTexturesHidden(frame.ThemeContainer, {
+        "Top",
+        "Bottom",
+        "Left",
+        "Right",
+        "FilterList",
+    })
+    KeepTextureHidden(frame.FilterList.Bg)
+
+    S.CreateBackdrop(frame.FilterList)
+    frame.FilterList.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget_dark"))
+    frame.FilterList.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
+
+    local threshold = frame.ThresholdContainer
+    KeepNamedTexturesHidden(threshold, {
+        "BarBackgroundGlow",
+        "BarBackground",
+        "BarBorder",
+        "BarBorderGlow",
+        "BarFillGlow",
+    })
+    if threshold.BarEnd and threshold.BarEnd.line then
+        KeepTextureHidden(threshold.BarEnd.line)
+    end
+
+    S.CreateBackdrop(threshold)
+    threshold.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget_dark"))
+    threshold.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
+    StyleFlatStatusBarFill(threshold.ThresholdBar, "BFI")
+    StyleFlatStatusBarFill(threshold.BonusThresholdBar, "skyblue")
+
+    frame.ScrollBox:GetView():SetPadding(0, 0, 0, 0, 4)
+    frame.FilterList.ScrollBox:GetView():SetPadding(4, 4, 4, 4, 1)
 end
 
 local function StyleLootJournals()
@@ -285,7 +454,7 @@ end
 local function StyleShell()
     S.StyleTitledFrame(EncounterJournal)
     S.RemoveNineSliceAndBackground(EncounterJournal.inset)
-    StyleArtFrame(EncounterJournal.inset)
+    S.StyleNavBar(EncounterJournal.navBar)
 
     S.StyleEditBox(EncounterJournal.searchBox, -4)
     StyleSearchPreview()
@@ -312,9 +481,9 @@ local function StyleInstanceButton(button)
     button:SetDisabledTexture(AF.GetEmptyTexture())
 
     local highlight = button:GetHighlightTexture()
-    highlight:SetColorTexture(AF.GetColorRGB("BFI", 0.25))
+    highlight:SetColorTexture(AF.GetColorRGB("white", 0.12))
     highlight:SetAllPoints()
-    StyleArtButton(button)
+    StyleArtFrame(button)
 end
 
 local function StyleInstanceList()
@@ -403,8 +572,67 @@ end
 ---------------------------------------------------------------------
 -- Monthly Activities pools
 ---------------------------------------------------------------------
+local function UpdateMonthlyActivityState(button)
+    if not button.BFIBackdrop then return end
+
+    local data = button:GetData()
+    if not data then return end
+
+    local normalTexture = button:GetNormalTexture()
+    local atlas = normalTexture and normalTexture:GetAtlas()
+    local selected = atlas == "activities-incomplete-active"
+    local color = "widget_dark"
+    local alpha = 1
+
+    if selected then
+        color = "BFI"
+        alpha = 0.35
+    elseif data.completed then
+        color = "widget"
+    end
+
+    button.BFIBackdrop:SetBackdropColor(AF.GetColorRGB(color, alpha))
+    button.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
+
+    -- Blizzard's completed atlas uses black text. The Achievement-style dark
+    -- card needs the standard light type treatment instead.
+    if data.completed then
+        button.TextContainer.NameText:SetFontObject("GameFontHighlightMedium")
+        button.TextContainer.NameText:SetTextColor(AF.GetColorRGB("white"))
+        button.TextContainer.ConditionsText:SetFontObject("GameFontNormal")
+        button.TextContainer.ConditionsText:SetTextColor(AF.GetColorRGB("gray"))
+    end
+end
+
 local function StyleMonthlyActivityButton(button)
-    StyleArtFrame(button)
+    if not button._BFIMonthlyActivityStyled then
+        button._BFIMonthlyActivityStyled = true
+
+        local normalTexture = button:GetNormalTexture()
+        local highlightTexture = button:GetHighlightTexture()
+        if normalTexture then
+            KeepTextureHidden(normalTexture)
+        end
+        if highlightTexture then
+            KeepTextureHidden(highlightTexture)
+        end
+
+        S.CreateBackdrop(button)
+        local hover = CreateHoverOverlay(button)
+        button:HookScript("OnEnter", function(self)
+            if self:IsEnabled() then
+                hover:Show()
+            end
+        end)
+        button:HookScript("OnLeave", function()
+            hover:Hide()
+        end)
+        button:HookScript("OnDisable", function()
+            hover:Hide()
+        end)
+    end
+
+    UpdateMonthlyActivityState(button)
 end
 
 local function SetMonthlyFilterState(button, selected)
@@ -419,10 +647,12 @@ local function StyleMonthlyFilterButton(button)
         button._BFIMonthlyFilterStyled = true
         local selected = button.Texture:IsShown()
         S.CreateBackdrop(button)
-        button:HookScript("OnEnter", function(self)
-            self.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("BFI", 0.35))
+        local hover = CreateHoverOverlay(button)
+        button:HookScript("OnEnter", function()
+            hover:Show()
         end)
         button:HookScript("OnLeave", function(self)
+            hover:Hide()
             SetMonthlyFilterState(self, self._BFIMonthlyFilterSelected)
         end)
         hooksecurefunc(button, "UpdateStateInternal", SetMonthlyFilterState)
@@ -456,6 +686,12 @@ end
 local function StyleMonthlyThresholds(frame)
     if not frame.thresholdFrames then return end
     for _, threshold in ipairs(frame.thresholdFrames) do
+        SetFlatTexture(threshold.LineComplete, "BFI")
+        AF.SetSize(threshold.LineComplete, 1, 33)
+        if threshold.LineIncomplete and threshold.LineIncomplete.LineIncompleteTexture then
+            SetFlatTexture(threshold.LineIncomplete.LineIncompleteTexture, "border")
+            AF.SetSize(threshold.LineIncomplete.LineIncompleteTexture, 1, 33)
+        end
         StyleMonthlyRewardButton(threshold.RewardItem)
     end
 end
@@ -504,15 +740,34 @@ end
 -- Journeys pools
 ---------------------------------------------------------------------
 local function StyleJourneyListFrame(frame)
+    if frame.CategoryDivider then
+        SetFlatTexture(frame.CategoryDivider, "border")
+        frame.CategoryDivider:SetHeight(1)
+        return
+    end
     if not frame.LockFrame then return end
 
-    StyleArtFrame(frame)
+    StyleFlatCard(frame)
+    if frame.IconFrame then
+        KeepTextureHidden(frame.IconFrame.Border)
+        S.StyleIcon(frame.IconFrame.Icon, true)
+        AF.SetSize(frame.RenownCardProgressBar, 40, 40)
+        frame.RenownCardProgressBar:SetDrawEdge(false)
+        frame.RenownCardProgressBar:SetDrawBling(false)
+    end
+    if frame.JourneyCardProgressBar then
+        S.StyleStatusBar(frame.JourneyCardProgressBar)
+        frame.JourneyCardProgressBar:SetStatusBarColor(AF.GetColorRGB("BFI"))
+    end
     if frame.WatchedFactionToggleFrame then
         S.StyleCheckButton(frame.WatchedFactionToggleFrame.WatchFactionCheckbox)
     end
 end
 
 local function StyleJourneyList(frame)
+    if frame.JourneysList.ClearEdgeFade then
+        frame.JourneysList:ClearEdgeFade()
+    end
     frame.JourneysList:ForEachFrame(StyleJourneyListFrame)
 end
 
@@ -520,8 +775,11 @@ local function StyleJourneyReward(reward)
     if reward._BFIJourneyRewardStyled then return end
     reward._BFIJourneyRewardStyled = true
 
+    SetFlatTexture(reward.RewardCardBG, "widget")
+    SetFlatTexture(reward.RewardCardBGGlow, "BFI", 0.35)
     S.StyleSquareIcon(reward.RewardCardIcon, reward.TextureMask, true)
     S.StyleIconBorder(reward.RewardCardIconBorderDefault, reward.RewardCardIcon.BFIBackdrop)
+    reward.RewardCardIcon.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
 end
 
 local function StyleJourneyRewards(frame)
@@ -531,7 +789,13 @@ local function StyleJourneyRewards(frame)
 end
 
 local function StyleJourneyHighlight(highlight)
-    StyleArtFrame(highlight)
+    if highlight._BFIJourneyHighlightStyled then return end
+    highlight._BFIJourneyHighlightStyled = true
+
+    KeepTextureHidden(highlight.Background)
+    S.CreateBackdrop(highlight)
+    highlight.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget"))
+    highlight.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
 end
 
 local function StyleJourneyHighlights(frame)
@@ -549,16 +813,6 @@ local function IsEncounterJournalDescendant(frame)
     return false
 end
 
-local function UpdateRenownBorderState(border, atlas)
-    local color = "border"
-    if atlas and atlas:find("-yellow", 1, true) then
-        color = "yellow"
-    elseif atlas and atlas:find("-grey", 1, true) then
-        color = "disabled"
-    end
-    border.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(color))
-end
-
 local function StyleRenownLevel(level)
     if level._BFIRenownLevelStyled or not IsEncounterJournalDescendant(level) then return end
     level._BFIRenownLevelStyled = true
@@ -570,8 +824,51 @@ local function StyleRenownLevel(level)
     end
     if level.IconBorder then
         S.StyleIconBorder(level.IconBorder, level.Icon.BFIBackdrop)
-        hooksecurefunc(level.IconBorder, "SetAtlas", UpdateRenownBorderState)
     end
+    if level.RewardCardBG then
+        KeepTextureHidden(level.RewardCardBG)
+        level.BFIRenownBackground = AF.CreateTexture(level, nil, "widget_dark", "BACKGROUND", -8)
+        level.BFIRenownBackground:SetPoint("TOPLEFT", 3, -3)
+        level.BFIRenownBackground:SetPoint("BOTTOMRIGHT", -3, 3)
+        local trackMask = level:GetParent().Mask
+        if trackMask then
+            level.BFIRenownBackground:AddMaskTexture(trackMask)
+        end
+    end
+end
+
+local function UpdateRenownLevel(level, _, displayLevel, selected)
+    if not IsEncounterJournalDescendant(level) then return end
+    StyleRenownLevel(level)
+
+    displayLevel = displayLevel or 0
+    local levelNumber = level:GetLevel()
+    local earned = levelNumber <= displayLevel
+    local lastEarned = levelNumber == displayLevel
+    local color = "widget_dark"
+    local alpha = 1
+
+    if selected then
+        color = "BFI"
+        alpha = 0.3
+    elseif lastEarned then
+        color = "widget_highlight"
+    elseif earned then
+        color = "widget"
+    end
+
+    if level.BFIRenownBackground then
+        level.BFIRenownBackground:SetColorTexture(AF.GetColorRGB(color, alpha))
+    end
+
+    local levelTexture = level.LevelSquare or level.LevelRectangle
+    if levelTexture then
+        SetFlatTexture(levelTexture, selected and "BFI" or color, selected and 0.65 or alpha)
+        AF.SetSize(levelTexture, level.LevelSquare and 30 or 28, level.LevelSquare and 22 or 18)
+    end
+
+    level.Level:SetTextColor(AF.GetColorRGB(earned and "white" or "disabled"))
+    level.Icon.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
 end
 
 ---------------------------------------------------------------------
@@ -601,6 +898,7 @@ local function RegisterHooks()
 
     HookMixin(_G.MonthlyActivitiesButtonMixin, "Init", StyleMonthlyActivityButton)
     HookMixin(_G.MonthlySupersedeActivitiesButtonMixin, "Init", StyleMonthlyActivityButton)
+    HookMixin(_G.MonthlyActivitiesButtonMixin, "UpdateButtonStateShared", StyleMonthlyActivityButton)
     HookMixin(_G.MonthlyActivitiesFilterListButtonMixin, "Init", StyleMonthlyFilterButton)
     HookMixin(_G.MonthlyActivitiesRewardButtonMixin, "OnLoad", StyleMonthlyRewardButton)
     hooksecurefunc(EncounterJournal.MonthlyActivitiesFrame, "SetThresholds", StyleMonthlyThresholds)
@@ -619,6 +917,7 @@ local function RegisterHooks()
     hooksecurefunc(journeys.JourneyProgress, "SetRewards", StyleJourneyRewards)
     hooksecurefunc(journeys.JourneyOverview.Highlights, "DisplayHighlights", StyleJourneyHighlights)
     HookMixin(_G.RenownLevelMixin, "TryInit", StyleRenownLevel)
+    HookMixin(_G.RenownLevelMixin, "Refresh", UpdateRenownLevel)
 end
 
 ---------------------------------------------------------------------
