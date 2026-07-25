@@ -33,11 +33,19 @@ local indicators = {
     "mouseoverHighlight",
     "threatGlow",
     "incDmgHealText",
-    {"auras", "buffs", "HELPFUL"},
-    {"auras", "debuffs", "HARMFUL"},
+    {"nativeAuras", "buffs", "HELPFUL"},
+    {"nativeAuras", "debuffs", "HARMFUL"},
 }
 
-UF.previewIndicators = indicators
+-- Preset cards are ordinary, non-unit preview frames. Keep their aura
+-- widgets on the legacy preview path so opening options cannot allocate
+-- restricted native containers for every preset.
+UF.previewIndicators = AF.Copy(indicators)
+for _, indicator in ipairs(UF.previewIndicators) do
+    if type(indicator) == "table" and indicator[1] == "nativeAuras" then
+        indicator[1] = "auras"
+    end
+end
 
 ---------------------------------------------------------------------
 -- create
