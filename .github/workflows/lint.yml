@@ -47,3 +47,6 @@ jobs:
 
       - name: Test unit-frame config-mode lifecycle
         run: luajit tests/unit_frame_config_mode_lifecycle_test.lua
+
+      - name: Test secret-safe Pet owner routing
+        run: luajit tests/unit_frame_pet_owner_routing_test.lua
