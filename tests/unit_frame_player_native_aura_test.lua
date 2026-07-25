@@ -131,6 +131,30 @@ local function makeHarness()
             indicators = indicators,
         }
         frame.createdIndicators = indicators
+        for _, descriptor in ipairs(indicators) do
+            local name = type(descriptor) == "table"
+                and descriptor[2]
+                or descriptor
+            local indicator = {}
+
+            function indicator:Disable()
+                self.enabled = false
+            end
+
+            function indicator:EnableConfigMode()
+                self.configMode = true
+                self.enableConfigModeCount =
+                    (self.enableConfigModeCount or 0) + 1
+            end
+
+            function indicator:DisableConfigMode()
+                self.configMode = false
+                self.disableConfigModeCount =
+                    (self.disableConfigModeCount or 0) + 1
+            end
+
+            frame.indicators[name] = indicator
+        end
     end
 
     function UF.SetupUnitFrame(frame, config, indicators, skip)
@@ -146,6 +170,12 @@ local function makeHarness()
     function UF.DisableIndicators(frame)
         harness.disableCalls[#harness.disableCalls + 1] = frame
         frame.enabled = false
+        for _, indicator in pairs(frame.indicators) do
+            if UF.configModeEnabled and indicator.DisableConfigMode then
+                indicator:DisableConfigMode()
+            end
+            indicator:Disable()
+        end
     end
 
     local function CreateFrame(frameType, name, parent, template)
@@ -178,6 +208,11 @@ local function makeHarness()
         function frame:Hide()
             self.visible = false
             self.hideCount = (self.hideCount or 0) + 1
+        end
+
+        function frame:Show()
+            self.visible = true
+            self.showCount = (self.showCount or 0) + 1
         end
 
         harness.frames[#harness.frames + 1] = frame
@@ -442,6 +477,67 @@ local function testPlayerDisableAndReenableLifecycle()
         "global disable unit-watch count")
 end
 
+local function testPlayerConfigModeReenableLifecycle()
+    local harness = makeHarness()
+    local update = harness.callbacks.BFI_UpdateModule
+
+    update(nil, "unitFrames", "player")
+    local frame = harness.frames[1]
+    local indicatorCount = 0
+
+    harness.UF.configModeEnabled = true
+    frame.inConfigMode = true
+    for _, indicator in pairs(frame.indicators) do
+        indicator:EnableConfigMode()
+        indicatorCount = indicatorCount + 1
+    end
+
+    harness.UF.config.player.general.enabled = false
+    update(nil, "unitFrames", "player")
+    assertEqual(frame.visible, false,
+        "disabled Player config-mode preview visibility")
+    assertEqual(#harness.unregisterUnitWatchCalls, 1,
+        "disabled Player config-mode unit-watch count")
+    for _, indicator in pairs(frame.indicators) do
+        assertEqual(indicator.configMode, false,
+            "disabled Player indicator preview state")
+        assertEqual(indicator.disableConfigModeCount, 1,
+            "disabled Player indicator preview count")
+    end
+
+    harness.UF.config.player.general.enabled = true
+    update(nil, "unitFrames", "player", true)
+    assertEqual(harness.setupCalls[2].skip, false,
+        "Player config-mode re-enable skipped indicators")
+    assertEqual(frame.visible, true,
+        "Player config-mode re-enable preview visibility")
+    assertEqual(frame.showCount, 1,
+        "Player config-mode re-enable preview show count")
+    assertEqual(#harness.registerUnitWatchCalls, 1,
+        "Player config-mode re-enable unit-watch count")
+
+    local restoredCount = 0
+    for _, indicator in pairs(frame.indicators) do
+        assertEqual(indicator.configMode, true,
+            "re-enabled Player indicator preview state")
+        assertEqual(indicator.enableConfigModeCount, 2,
+            "re-enabled Player indicator preview count")
+        restoredCount = restoredCount + 1
+    end
+    assertEqual(restoredCount, indicatorCount,
+        "re-enabled Player indicator total")
+
+    update(nil, "unitFrames", "player", true)
+    assertEqual(harness.setupCalls[3].skip, true,
+        "enabled Player config-mode skip flag")
+    assertEqual(#harness.registerUnitWatchCalls, 1,
+        "enabled Player config-mode unit-watch count")
+    for _, indicator in pairs(frame.indicators) do
+        assertEqual(indicator.enableConfigModeCount, 2,
+            "enabled Player repeated indicator preview entry")
+    end
+end
+
 local function testShippedPlayerPresetBounds()
     local UF = makePresetCompiler()
 
@@ -515,6 +611,7 @@ end
 
 testPlayerActivationAndPreviewIsolation()
 testPlayerDisableAndReenableLifecycle()
+testPlayerConfigModeReenableLifecycle()
 testShippedPlayerPresetBounds()
 
 print("unit_frame_player_native_aura_test.lua: ok")

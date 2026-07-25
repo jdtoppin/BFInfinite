@@ -70,6 +70,14 @@ local function CreatePlayer()
     UF.CreateIndicators(player, indicators)
 end
 
+local function RestorePlayerConfigModeIndicators()
+    for _, indicator in pairs(player.indicators) do
+        if indicator.EnableConfigMode then
+            indicator:EnableConfigMode()
+        end
+    end
+end
+
 ---------------------------------------------------------------------
 -- update
 ---------------------------------------------------------------------
@@ -88,14 +96,27 @@ local function UpdatePlayer(_, module, which, skipIndicatorUpdates)
         return
     end
 
+    local wasEnabled = player ~= nil and player.enabled == true
     if not player then
         CreatePlayer()
     end
 
     -- setup
-    UF.SetupUnitFrame(player, config, indicators, skipIndicatorUpdates)
+    UF.SetupUnitFrame(
+        player,
+        config,
+        indicators,
+        skipIndicatorUpdates == true and wasEnabled
+    )
 
-    -- visibility NOTE: show must invoke after settings applied
-    RegisterUnitWatch(player)
+    if player.inConfigMode then
+        if not wasEnabled then
+            RestorePlayerConfigModeIndicators()
+        end
+        player:Show()
+    else
+        -- visibility NOTE: show must invoke after settings applied
+        RegisterUnitWatch(player)
+    end
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdatePlayer)
