@@ -104,10 +104,14 @@ local QUEUE_SETTINGS = 3
 local pendingViewers = {}
 local deferredViewers = {}
 local viewerStates = {}
+local assistedHighlights = setmetatable({}, {__mode = "k"})
+local assistedBaseSpellIDs = {}
 local assistedHighlightController = CreateFrame("Frame")
+local visibilityObserver = CreateFrame("Frame")
 local assistedHighlightSpellID
 local assistedHighlightBaseSpellID
 local assistedHighlightUpdateTimeLeft = 0
+local visibilityUpdateTimeLeft = 0
 local flushScheduled
 local applying
 local QueueViewer
@@ -136,75 +140,69 @@ local function GetBaseSpellID(spellID)
     return GetNonSecretSpellID(C_Spell.GetBaseSpell(spellID))
 end
 
-local function UpdateAssistedHighlightSize(item)
-    local highlight = item._BFIAssistedCombatHighlight
-    if not highlight then return end
-
-    local width, height = item:GetSize()
-    if not IsValueNonSecret(width)
-        or not IsValueNonSecret(height)
-        or type(width) ~= "number"
-        or type(height) ~= "number"
-        or width <= 0
-        or height <= 0
-    then
-        return
-    end
-
-    -- The native template is 45x45 with a 66x66 flipbook. Scaling the whole
-    -- template preserves Blizzard's proportions at every CDM icon size.
-    highlight:SetScale(min(width, height) / 45)
-end
-
 local function EnsureAssistedHighlight(item, definition)
     if not definition.assistedHighlight then return nil end
 
-    local highlight = item._BFIAssistedCombatHighlight
+    local highlight = assistedHighlights[item]
     if highlight then return highlight end
 
     highlight = CreateFrame("Frame", nil, item, "ActionBarButtonAssistedCombatHighlightTemplate")
-    item._BFIAssistedCombatHighlight = highlight
+    assistedHighlights[item] = highlight
     highlight:ClearAllPoints()
     highlight:SetPoint("CENTER")
     highlight:SetFrameLevel(item:GetFrameLevel() + 10)
+    -- The native template is 45x45 with a 66x66 flipbook. CDM item extents
+    -- are fixed in both audited builds; viewer scaling is inherited.
+    highlight:SetScale(min(definition.itemWidth, definition.itemHeight) / 45)
     highlight.Flipbook.Anim:Play()
     highlight.Flipbook.Anim:Stop()
     -- Pre-create and retain the ordinary overlay so the combat polling path
     -- only adjusts alpha and animation state.
     highlight:SetAlpha(0)
     highlight:Show()
-
-    item:HookScript("OnSizeChanged", UpdateAssistedHighlightSize)
-    UpdateAssistedHighlightSize(item)
     return highlight
 end
 
-local function MatchesAssistedHighlightSpell(spellID)
-    spellID = GetNonSecretSpellID(spellID)
-    if not spellID then return false end
+local function GetItemBaseSpellID(item)
+    -- Avoid calling Blizzard's item mixins from tainted execution. Their
+    -- RefreshData/GetSpellID paths branch on combat-secret aura and totem
+    -- values in 12.0.7 and 12.1. The cooldown ID itself is static, and the
+    -- documented C API returns its static cooldown definition.
+    local cooldownID = GetNonSecretSpellID(item.cooldownID)
+    if not cooldownID then return nil end
 
-    if spellID == assistedHighlightSpellID or spellID == assistedHighlightBaseSpellID then
-        return true
+    if not C_CooldownViewer
+        or type(C_CooldownViewer.GetCooldownViewerCooldownInfo) ~= "function"
+    then
+        return nil
     end
 
-    local baseSpellID = GetBaseSpellID(spellID)
+    local cached = assistedBaseSpellIDs[cooldownID]
+    if cached then return cached end
+
+    local cooldownInfo = C_CooldownViewer.GetCooldownViewerCooldownInfo(cooldownID)
+    if not IsValueNonSecret(cooldownInfo) or type(cooldownInfo) ~= "table" then
+        return nil
+    end
+
+    local spellID = GetNonSecretSpellID(cooldownInfo.spellID)
+    if not spellID then return nil end
+
+    local baseSpellID = GetBaseSpellID(spellID) or spellID
+    assistedBaseSpellIDs[cooldownID] = baseSpellID
+    return baseSpellID
+end
+
+local function ItemMatchesAssistedHighlight(item)
+    if not assistedHighlightSpellID then return false end
+
+    local baseSpellID = GetItemBaseSpellID(item)
     return baseSpellID ~= nil
         and (baseSpellID == assistedHighlightSpellID or baseSpellID == assistedHighlightBaseSpellID)
 end
 
-local function ItemMatchesAssistedHighlight(item)
-    if not assistedHighlightSpellID or type(item.GetBaseSpellID) ~= "function" then
-        return false
-    end
-
-    -- GetSpellID enters aura-derived branches in Blizzard's 12.1 Lua. The
-    -- cooldown definition's base spell is stable and can be matched safely
-    -- after both sides are normalized through C_Spell.GetBaseSpell.
-    return MatchesAssistedHighlightSpell(item:GetBaseSpellID())
-end
-
 local function UpdateItemAssistedHighlight(item)
-    local highlight = item._BFIAssistedCombatHighlight
+    local highlight = assistedHighlights[item]
     if not highlight then return end
 
     local config = CM.config
@@ -243,7 +241,6 @@ local function SetAssistedHighlightSpell(spellID)
 
     assistedHighlightSpellID = spellID
     assistedHighlightBaseSpellID = baseSpellID
-    RefreshAssistedHighlights()
 end
 
 local function PollAssistedHighlight(_, elapsed)
@@ -253,6 +250,9 @@ local function PollAssistedHighlight(_, elapsed)
     local updateRate = tonumber(GetCVar("assistedCombatIconUpdateRate")) or 0
     assistedHighlightUpdateTimeLeft = max(0, min(updateRate, 1))
     SetAssistedHighlightSpell(C_AssistedCombat.GetNextCastSpell(false))
+    -- Item pools and cooldown definitions can change while the recommendation
+    -- remains the same, so refresh from this independent BFI poll every time.
+    RefreshAssistedHighlights()
 end
 
 local function UpdateAssistedHighlightPolling()
@@ -263,6 +263,8 @@ local function UpdateAssistedHighlightPolling()
         and GetCVarBool("assistedCombatHighlight")
         and C_AssistedCombat
         and type(C_AssistedCombat.GetNextCastSpell) == "function"
+        and C_CooldownViewer
+        and type(C_CooldownViewer.GetCooldownViewerCooldownInfo) == "function"
 
     if enabled then
         assistedHighlightUpdateTimeLeft = 0
@@ -270,17 +272,25 @@ local function UpdateAssistedHighlightPolling()
     else
         assistedHighlightController:SetScript("OnUpdate", nil)
         SetAssistedHighlightSpell(nil)
+        RefreshAssistedHighlights()
     end
 end
 
-local function OnAssistedCombatStateChanged()
+local function OnAssistedHighlightEvent(_, event)
+    if event == "COOLDOWN_VIEWER_DATA_LOADED" or event == "COOLDOWN_VIEWER_TABLE_HOTFIXED" then
+        wipe(assistedBaseSpellIDs)
+    end
     assistedHighlightUpdateTimeLeft = 0
-    RefreshAssistedHighlights()
+    if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
+        RefreshAssistedHighlights()
+    end
 end
 
+assistedHighlightController:RegisterEvent("COOLDOWN_VIEWER_DATA_LOADED")
+assistedHighlightController:RegisterEvent("COOLDOWN_VIEWER_TABLE_HOTFIXED")
 assistedHighlightController:RegisterEvent("PLAYER_REGEN_DISABLED")
 assistedHighlightController:RegisterEvent("PLAYER_REGEN_ENABLED")
-assistedHighlightController:SetScript("OnEvent", OnAssistedCombatStateChanged)
+assistedHighlightController:SetScript("OnEvent", OnAssistedHighlightEvent)
 CVarCallbackRegistry:RegisterCallback(
     "assistedCombatHighlight",
     UpdateAssistedHighlightPolling,
@@ -291,6 +301,96 @@ CVarCallbackRegistry:RegisterCallback(
     UpdateAssistedHighlightPolling,
     assistedHighlightController
 )
+
+---------------------------------------------------------------------
+-- Centered layout visibility observer
+---------------------------------------------------------------------
+-- Item data refreshes branch on secret aura/totem values in combat. Never
+-- hook an item mixin method: a post-hook returns to Blizzard's native loop in
+-- tainted execution. Sample ordinary shown state from BFI's own update stack
+-- instead, and let the existing queue defer protected geometry as needed.
+local function ClearVisibilitySample(state)
+    state.visibilitySample = nil
+    state.visibilitySamplePending = nil
+end
+
+local function SampleViewerVisibility(state)
+    local sample = {}
+    for item in state.viewer.itemFramePool:EnumerateActive() do
+        local shown = item:IsShown()
+        if not IsValueNonSecret(shown) or type(shown) ~= "boolean" then
+            state.visibilitySamplePending = true
+            return
+        end
+        sample[item] = shown
+    end
+
+    local previous = state.visibilitySample
+    local changed = state.visibilitySamplePending or not previous
+    if not changed then
+        for item, shown in next, sample do
+            if previous[item] ~= shown then
+                changed = true
+                break
+            end
+        end
+    end
+    if not changed then
+        for item in next, previous do
+            if sample[item] == nil then
+                changed = true
+                break
+            end
+        end
+    end
+
+    state.visibilitySample = sample
+    state.visibilitySamplePending = nil
+    if changed then
+        QueueViewer(state.viewer, QUEUE_LAYOUT)
+    end
+end
+
+local function PollViewerVisibility(_, elapsed)
+    visibilityUpdateTimeLeft = visibilityUpdateTimeLeft - elapsed
+    if visibilityUpdateTimeLeft > 0 then return end
+    visibilityUpdateTimeLeft = 0.15
+
+    local config = CM.config
+    if not config or not config.enabled or not config.viewers then return end
+
+    for _, state in next, viewerStates do
+        local viewerConfig = config.viewers[state.key]
+        if viewerConfig and viewerConfig.center then
+            SampleViewerVisibility(state)
+        else
+            ClearVisibilitySample(state)
+        end
+    end
+end
+
+local function UpdateVisibilityObserver()
+    local config = CM.config
+    local enabled = false
+    if config and config.enabled and config.viewers then
+        for _, viewerConfig in next, config.viewers do
+            if viewerConfig.center then
+                enabled = true
+                break
+            end
+        end
+    end
+
+    if enabled then
+        visibilityUpdateTimeLeft = 0
+        visibilityObserver:SetScript("OnUpdate", PollViewerVisibility)
+    else
+        visibilityObserver:SetScript("OnUpdate", nil)
+        for _, state in next, viewerStates do
+            ClearVisibilitySample(state)
+        end
+    end
+end
 
 local function ApplyFont(fontString, config)
     if not fontString or not config then return end
@@ -334,10 +434,6 @@ local function StyleItem(item, definition)
     if definition.assistedHighlight then
         EnsureAssistedHighlight(item, definition)
         UpdateItemAssistedHighlight(item)
-        if not item._BFIAssistedCombatDataHooked then
-            item._BFIAssistedCombatDataHooked = true
-            hooksecurefunc(item, "RefreshData", UpdateItemAssistedHighlight)
-        end
     end
 
     if config.skin then
@@ -441,14 +537,6 @@ local function CenterVisibleItems(viewer, definition, config, items)
     end
 end
 
-local function OnItemShownStateUpdated(item)
-    UpdateItemAssistedHighlight(item)
-    local viewer = item:GetViewerFrame()
-    if viewer and not applying then
-        QueueViewer(viewer, QUEUE_LAYOUT)
-    end
-end
-
 local function StyleAndCenterViewer(viewer, definition, config)
     AF.SetFont(countdownFont, CM.config.cooldownText.font)
     countdownFont:SetTextColor(AF.UnpackColor(CM.config.cooldownText.color))
@@ -456,10 +544,6 @@ local function StyleAndCenterViewer(viewer, definition, config)
     local items = GetOrderedItems(viewer)
     for _, item in next, items do
         StyleItem(item, definition)
-        if not item._BFICooldownManagerShownHooked then
-            item._BFICooldownManagerShownHooked = true
-            hooksecurefunc(item, "UpdateShownState", OnItemShownStateUpdated)
-        end
     end
     CenterVisibleItems(viewer, definition, config, items)
     SyncHolderSize(viewer)
@@ -1047,10 +1131,8 @@ local function InitializeViewers(which)
                     EnsureHolder(state)
                 end
 
-                viewer._BFICooldownManagerDefinition = definition
-                viewer._BFICooldownManagerKey = key
-                if not viewer._BFICooldownManagerHooksInstalled then
-                    viewer._BFICooldownManagerHooksInstalled = true
+                if not state.hooksInstalled then
+                    state.hooksInstalled = true
                     hooksecurefunc(viewer, "RefreshLayout", OnViewerLayout)
                     hooksecurefunc(viewer, "Layout", OnViewerLayout)
                     hooksecurefunc(viewer, "ApplySystemAnchor", OnViewerAnchorApplied)
@@ -1077,6 +1159,7 @@ local function UpdateCooldownManager(_, module, which)
         end
     end
     UpdateAssistedHighlightPolling()
+    UpdateVisibilityObserver()
 end
 
 CM:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED", CM.StopEditModePreviews)
@@ -1093,6 +1176,7 @@ AF.RegisterCallback("AF_SCALE_CHANGED", function()
 end)
 AF.RegisterCallback("BFI_UpdateProfile", function()
     UpdateAssistedHighlightPolling()
+    UpdateVisibilityObserver()
     RefreshAssistedHighlights()
     for _, state in next, viewerStates do
         local mover = state.holder and state.holder.mover
