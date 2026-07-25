@@ -312,12 +312,21 @@ local function RefreshRankBarProgress(rankBar)
     if not rankBar._BFIProfessionStyled then return end
 
     -- Blizzard replaces this texture with a multi-frame profession atlas
-    -- whenever the skill line changes. Keep its native mask interpolation,
-    -- but use a stable class-coloured fill instead of stretching the atlas.
+    -- whenever the skill line changes. Stopping its flipbook preserves the
+    -- current frame's cropped UVs, so restore the full texture before using
+    -- a stable class-coloured fill.
     rankBar.BarAnimation:Stop()
     rankBar.FlareFadeOut:Stop()
     rankBar.Fill:SetColorTexture(AF.GetColorRGB("BFI"))
+    rankBar.Fill:SetTexCoord(0, 1, 0, 1)
     HideTexture(rankBar.Flare)
+
+    if rankBar.ratio then
+        local fillWidth = rankBar.Fill:GetWidth()
+        if fillWidth > 0 then
+            rankBar.Mask:SetWidth(fillWidth * rankBar.ratio)
+        end
+    end
 end
 
 local function StyleRankBar(rankBar)
@@ -333,16 +342,19 @@ local function StyleRankBar(rankBar)
     AF.ClearPoints(rankBar.Mask)
     AF.SetPoint(rankBar.Mask, "TOPLEFT", rankBar.Fill, "TOPLEFT")
     AF.SetPoint(rankBar.Mask, "BOTTOMLEFT", rankBar.Fill, "BOTTOMLEFT")
-    if rankBar.ratio then
-        local fillWidth = rankBar.Fill:GetWidth()
-        if fillWidth > 0 then
-            rankBar.Mask:SetWidth(fillWidth * rankBar.ratio)
-        end
-    end
+    rankBar.Mask:SetTexture(
+        AF.GetPlainTexture(),
+        "CLAMPTOBLACKADDITIVE",
+        "CLAMPTOBLACKADDITIVE",
+        "NEAREST"
+    )
     RefreshRankBarProgress(rankBar)
 
     AF.ClearPoints(rankBar.Rank)
     AF.SetPoint(rankBar.Rank, "CENTER", rankBar, "CENTER")
+    rankBar.Rank.Text:SetFontObject("AF_FONT_NORMAL")
+    AF.UpdateFont(rankBar.Rank.Text, nil, 12 + BFI.vars.blizzardFontSizeDelta, "")
+    AF.SetHeight(rankBar.Rank.Text, 18)
 
     local dropdown = rankBar.ExpansionDropdownButton
     S.StyleDropdownButton(dropdown)
@@ -402,25 +414,146 @@ end
 ---------------------------------------------------------------------
 -- crafting page
 ---------------------------------------------------------------------
-local function StyleProfessionHelpButton(button)
-    if not button then return end
+local professionHelpTipPositions = {
+    UP = "TOP",
+    DOWN = "BOTTOM",
+    LEFT = "LEFT",
+    RIGHT = "RIGHT",
+}
 
-    -- Use the AF title-bar help treatment while preserving Blizzard's
-    -- contextual ProfessionsCraftingPage HelpPlate on click.
+local function GetActiveHelpTip(widget)
+    local tip = widget and widget._helptip
+    if tip and tip.widget == widget and tip:IsShown() then
+        return tip
+    end
+end
+
+local function GetActiveProfessionHelpTip(page)
+    for _, anchor in ipairs(page._BFIProfessionHelpAnchors or {}) do
+        local tip = GetActiveHelpTip(anchor)
+        if tip then return tip end
+    end
+end
+
+local function HideProfessionHelpTips(page)
+    local tip = GetActiveProfessionHelpTip(page)
+    if tip then
+        -- AF only exposes a global hide API; close this tour without
+        -- dismissing HelpTips owned by other modules.
+        tip:Close()
+    end
+
+    for _, anchor in ipairs(page._BFIProfessionHelpAnchors or {}) do
+        anchor:Hide()
+    end
+end
+
+local function HideNativeProfessionHelp()
+    local helpPlate = _G.HelpPlate
+    local helpPlateInfo = _G.ProfessionsCraftingPage_HelpPlate
+    if not helpPlate then return end
+
+    if helpPlateInfo and helpPlate.IsShowingHelpInfo(helpPlateInfo) then
+        helpPlate.Hide(false)
+    end
+    helpPlate.HideTooltip()
+end
+
+local function CreateProfessionHelpTips(page)
+    page:UpdateTutorial()
+
+    local helpPlateInfo = _G.ProfessionsCraftingPage_HelpPlate
+    if not helpPlateInfo then return {} end
+
+    local anchors = page._BFIProfessionHelpAnchors
+    if not anchors then
+        anchors = {}
+        page._BFIProfessionHelpAnchors = anchors
+    end
+
+    local framePos = helpPlateInfo.FramePos or {}
+    local tips = {}
+    for _, helpInfo in ipairs(helpPlateInfo) do
+        local buttonPos = helpInfo.ButtonPos
+        local position = professionHelpTipPositions[helpInfo.ToolTipDir]
+        if buttonPos and position and helpInfo.ToolTipText then
+            local index = #tips + 1
+            local anchor = anchors[index]
+            if not anchor then
+                anchor = _G.CreateFrame("Frame", nil, page)
+                anchor:SetSize(46, 46)
+                anchors[index] = anchor
+            end
+
+            anchor:ClearAllPoints()
+            anchor:SetPoint(
+                "TOPLEFT",
+                page,
+                "TOPLEFT",
+                (framePos.x or 0) + (buttonPos.x or 0),
+                (framePos.y or 0) + (buttonPos.y or 0)
+            )
+            anchor:Show()
+
+            tips[index] = {
+                widget = anchor,
+                position = position,
+                text = helpInfo.ToolTipText,
+                width = 240,
+                closeHoldDuration = 0,
+            }
+        end
+    end
+
+    for i = #tips + 1, #anchors do
+        anchors[i]:Hide()
+    end
+    return tips
+end
+
+local function ToggleProfessionHelpTips(page)
+    AF.HideTooltip()
+
+    if GetActiveProfessionHelpTip(page) then
+        HideProfessionHelpTips(page)
+        return
+    end
+
+    -- Clear proxies left behind when a player closes an intermediate step,
+    -- then rebuild Blizzard's dynamic tour for the current profession view.
+    HideProfessionHelpTips(page)
+    HideNativeProfessionHelp()
+
+    local tips = CreateProfessionHelpTips(page)
+    if #tips == 0 then return end
+
+    AF.ShowHelpTipGroup(tips)
+end
+
+local function StyleProfessionHelpButton(page)
+    local button = page and page.TutorialButton
+    if not button or button._BFIProfessionHelpStyled then return end
+    button._BFIProfessionHelpStyled = true
+
     button:SetScript("OnEnter", nil)
     button:SetScript("OnLeave", nil)
     S.StyleIconButton(button, AF.GetIcon("Info_Square"), 12, "gray", "gray_hover")
     AF.SetSize(button, 20, 20)
     button:SetHitRectInsets(0, 0, 0, 0)
     AF.ClearPoints(button)
-    AF.SetPoint(button, "LEFT", ProfessionsFrame.BFIHeader, "LEFT", 2, 0)
+    AF.SetPoint(button, "TOPLEFT", ProfessionsFrame.BFIHeader, "TOPLEFT")
     AF.SetFrameLevel(button, 1, ProfessionsFrame.BFIHeader)
     AF.SetTooltip(button, "BOTTOMLEFT", 0, -2, _G.MAIN_HELP_BUTTON_TOOLTIP)
+    button:SetScript("OnClick", function()
+        ToggleProfessionHelpTips(page)
+    end)
     button:HookScript("OnHide", function()
         if AF.Tooltip:GetOwner() == button then
             AF.HideTooltip()
         end
     end)
+    page:HookScript("OnHide", HideProfessionHelpTips)
+    hooksecurefunc(page, "Init", HideProfessionHelpTips)
 end
 
 local function StyleSearchResult(button)
@@ -458,7 +591,7 @@ end
 local function StyleCraftingPage(page)
     StyleRecipeList(page.RecipeList)
     StyleSchematicForm(page.SchematicForm)
-    StyleProfessionHelpButton(page.TutorialButton)
+    StyleProfessionHelpButton(page)
 
     StyleButtons(page.CreateButton, page.CreateAllButton, page.ViewGuildCraftersButton)
     S.StyleEditBox(page.CreateMultipleInputBox)
@@ -651,5 +784,6 @@ local function StyleBlizzard()
     hooksecurefunc(ProfessionsRankBarMixin, "Update", RefreshRankBarProgress)
     _G.Menu.ModifyMenu("MENU_PROFESSIONS_RANK_BAR", StyleProfessionExpansionMenu)
     _G.Menu.ModifyMenu("MENU_PROFESSIONS_FILTER", StyleProfessionExpansionMenu)
+    _G.Menu.ModifyMenu("MENU_PROFESSIONS_RECIPE_LEVEL", StyleProfessionExpansionMenu)
 end
 AF.RegisterAddonLoaded("Blizzard_Professions", StyleBlizzard)
