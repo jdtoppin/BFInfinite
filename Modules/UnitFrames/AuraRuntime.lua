@@ -89,6 +89,10 @@ local function QueueAllWatchedRuntimes()
     end
 end
 
+local function MatchesStableUnit(runtime, unit)
+    return runtime._unit == unit or runtime.root.unit == unit
+end
+
 local function FlushWatchedRuntimes()
     local pending = watcherPendingRuntimes
     watcherPendingRuntimes = {}
@@ -104,16 +108,20 @@ end
 RuntimeSignal = function(_, event, unit)
     if event == "PLAYER_TARGET_CHANGED" then
         for runtime in pairs(activeRuntimes) do
-            if runtime._unit == "target" then
+            if MatchesStableUnit(runtime, "target") then
                 QueueWatchedRuntime(runtime)
             end
         end
     elseif event == "PLAYER_FOCUS_CHANGED" then
         for runtime in pairs(activeRuntimes) do
-            if runtime._unit == "focus" then
+            if MatchesStableUnit(runtime, "focus") then
                 QueueWatchedRuntime(runtime)
             end
         end
+    elseif event == "UNIT_FACTION" and unit == "player" then
+        -- Player relationship changes can alter visibility/partition policy
+        -- for every watched unit even though their own token did not fire.
+        QueueAllWatchedRuntimes()
     elseif UNIT_ROUTED_EVENTS[event] and type(unit) == "string" then
         for runtime in pairs(activeRuntimes) do
             if runtime._unit == unit or runtime.root.unit == unit then
@@ -264,8 +272,8 @@ local function SyncWatcher(runtime)
             visibility.requiresVisible
             or visibility.requiresAssist
         )
-    local hasDynamicUnit = runtime._unit == "target"
-        or runtime._unit == "focus"
+    local hasDynamicUnit = MatchesStableUnit(runtime, "target")
+        or MatchesStableUnit(runtime, "focus")
     SetRuntimeWatched(
         runtime,
         runtime._active
