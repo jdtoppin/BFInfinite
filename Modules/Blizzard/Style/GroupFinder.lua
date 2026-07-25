@@ -782,8 +782,18 @@ local function UpdateDungeonReadyStyle()
         return
     end
 
+    -- Both Blizzard panels are top-level children, and the initial proposal
+    -- adds its dungeon summary in another child frame. Keep the shared header
+    -- inside the active panel's render tree and above all of that content.
+    if popup.BFIHeader:GetParent() ~= active then
+        popup.BFIHeader:SetParent(active)
+        popup.BFIHeader:ClearAllPoints()
+        popup.BFIHeader:SetPoint("TOPLEFT", active)
+        popup.BFIHeader:SetPoint("TOPRIGHT", active)
+    end
+    AF.SetFrameLevel(popup.BFIHeader, 10, active)
+
     SyncConfirmationTitle(active, source)
-    AF.SetFrameLevel(popup.BFIHeader, 1, active)
     AF.SetFrameLevel(_G.LFGDungeonReadyDialogCloseButton, 1, popup.BFIHeader)
     AF.SetFrameLevel(_G.LFGDungeonReadyStatusCloseButton, 1, popup.BFIHeader)
 end
