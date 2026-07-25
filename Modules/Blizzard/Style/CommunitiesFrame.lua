@@ -1,6 +1,7 @@
 ---@type BFI
 local BFI = select(2, ...)
 local S = BFI.modules.Style
+local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
@@ -13,8 +14,10 @@ local communitiesTabIcons = {
 }
 local communitiesRadioMenus = {
     "MENU_COMMUNITIES_GUILD_MEMBER_LIST",
-    "MENU_COMMUNITIES_STREAM",
+    "MENU_COMMUNITIES_MEMBER_LIST",
     "MENU_COMMUNITIES_LIST",
+    "MENU_CLUB_FINDER_OPTIONS",
+    "MENU_CLUB_SORT_BY",
 }
 
 ---------------------------------------------------------------------
@@ -50,6 +53,48 @@ local function StyleCommunitiesRadioMenu(_, rootDescription)
     end
 end
 
+local function StyleCommunitiesStreamButton(frame)
+    local fontString = frame.fontString
+    if not fontString then return end
+
+    local _, icon = fontString:GetPoint()
+    if not icon or not icon.IsObjectType or not icon:IsObjectType("Texture") then return end
+
+    -- Align icon rows such as Create Channel and Notification Settings with
+    -- the 13px selection controls above them.
+    AF.ClearPoints(icon)
+    AF.SetPoint(icon, "LEFT")
+    AF.SetSize(icon, 13, 13)
+
+    AF.ClearPoints(fontString)
+    AF.SetPoint(fontString, "LEFT", icon, "RIGHT", 7, 1)
+end
+
+local function StyleCommunitiesNotificationButton(frame)
+    local fontString = frame.fontString
+    if not fontString then return end
+
+    local text = fontString:GetText()
+    if not F.isValueNonSecret(text) or text ~= _G.COMMUNITIES_NOTIFICATION_SETTINGS then return end
+
+    local _, icon = fontString:GetPoint()
+    if not icon or not icon.IsObjectType or not icon:IsObjectType("Texture") then return end
+
+    icon:SetTexture(AF.GetIcon("Settings"))
+    icon:SetTexCoord(0, 1, 0, 1)
+end
+
+local function StyleCommunitiesStreamMenu(owner, rootDescription)
+    StyleCommunitiesRadioMenu(owner, rootDescription)
+
+    for _, description in rootDescription:EnumerateElementDescriptions() do
+        if not description:IsRadio() then
+            description:AddInitializer(StyleCommunitiesStreamButton)
+            description:AddInitializer(StyleCommunitiesNotificationButton)
+        end
+    end
+end
+
 local function SetFlatTexture(texture, color, alpha, blendMode)
     if not texture then return end
 
@@ -74,7 +119,14 @@ local function LayoutVerticalTabs(tabs, anchorTo, x, y)
     end
 end
 
-local function StyleCommunitiesTab(tab, iconName)
+local function UpdateCommunitiesTabIcon(tab)
+    local icon = tab.Icon
+    if not icon then return end
+
+    icon:SetVertexColor(AF.GetColorRGB(tab:IsEnabled() and "white" or "disabled"))
+end
+
+local function StyleCommunitiesTab(tab, iconName, iconAddon)
     if not tab then return end
 
     -- Match the World Map rail's padded 35x50 footprint. The layout below
@@ -83,9 +135,9 @@ local function StyleCommunitiesTab(tab, iconName)
 
     local icon = tab.Icon
     if icon then
-        -- Blizzard supplies opaque inventory-style artwork here. AF's
-        -- transparent glyphs read cleanly inside the padded square rail.
-        icon:SetTexture(AF.GetIcon(iconName))
+        -- Blizzard supplies opaque inventory-style artwork here. Transparent
+        -- AF/BFI glyphs read cleanly inside the padded square rail.
+        icon:SetTexture(AF.GetIcon(iconName, iconAddon))
         icon:SetTexCoord(0, 1, 0, 1)
         AF.SetSize(icon, 24, 24)
         AF.ClearPoints(icon)
@@ -93,6 +145,13 @@ local function StyleCommunitiesTab(tab, iconName)
         icon:SetAlpha(1)
         icon:Show()
     end
+
+    if not tab._BFICommunitiesIconStateHooked then
+        tab._BFICommunitiesIconStateHooked = true
+        tab:HookScript("OnEnable", UpdateCommunitiesTabIcon)
+        tab:HookScript("OnDisable", UpdateCommunitiesTabIcon)
+    end
+    UpdateCommunitiesTabIcon(tab)
 end
 
 local function LayoutCommunitiesTabs(frame)
@@ -203,12 +262,14 @@ end
 local function StyleFinderFrame(finder)
     if not finder then return end
 
-    S.StyleSideTab(finder.ClubFinderSearchTab, 32, 32)
-    S.StyleSideTab(finder.ClubFinderPendingTab, 32, 32)
-    LayoutVerticalTabs({
+    local tabs = {
         finder.ClubFinderSearchTab,
         finder.ClubFinderPendingTab,
-    })
+    }
+    StyleCommunitiesTab(tabs[1], "World")
+    StyleCommunitiesTab(tabs[2], "History", BFI.name)
+    LayoutVerticalTabs(tabs, finder:GetParent(), 4, -36)
+
     S.RemoveNineSliceAndBackground(finder.InsetFrame)
     S.RemoveNineSliceAndBackground(finder.DisabledFrame)
     S.RemoveTextures(finder.DisabledFrame)
@@ -470,6 +531,7 @@ local function StyleCommunitiesFrame(frame)
         for _, menuTag in ipairs(communitiesRadioMenus) do
             _G.Menu.ModifyMenu(menuTag, StyleCommunitiesRadioMenu)
         end
+        _G.Menu.ModifyMenu("MENU_COMMUNITIES_STREAM", StyleCommunitiesStreamMenu)
     end
 
     RefreshCommunitiesFrame(frame)
