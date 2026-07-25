@@ -67,12 +67,19 @@ function NP.CreateIndicators(np)
     end
 end
 
-function NP.LoadIndicatorConfig(np, indicatorName, indicatorConfig)
+function NP.LoadIndicatorConfig(
+    np,
+    indicatorName,
+    indicatorConfig,
+    plateConfig
+)
     local indicator = np.indicators[indicatorName]
     if not indicator then return end
 
     if indicatorConfig then
-        indicator:LoadConfig(indicatorConfig)
+        -- Cross-indicator layout derives from the same applied snapshot,
+        -- never from a newer live profile while plates are being rebuilt.
+        indicator:LoadConfig(indicatorConfig, plateConfig)
         indicator.enabled = indicatorConfig.enabled == true
     else
         indicator.enabled = false
@@ -89,7 +96,8 @@ function NP.SetupIndicators(np, config)
         NP.LoadIndicatorConfig(
             np,
             indicatorName,
-            config[indicatorName]
+            config[indicatorName],
+            config
         )
     end
 end
