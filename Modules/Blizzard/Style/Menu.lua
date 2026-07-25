@@ -79,14 +79,6 @@ local function StyleMenuCheckbox(_, frame)
     S.StyleMenuSelection(frame)
 end
 
-local function StyleMenuHighlight(frame)
-    local highlight = frame.highlight
-    if not highlight then return end
-
-    highlight:SetColorTexture(AF.GetColorRGB("BFI", 0.1))
-    highlight:SetBlendMode("ADD")
-end
-
 ---------------------------------------------------------------------
 -- init
 ---------------------------------------------------------------------
@@ -101,6 +93,5 @@ local function StyleBlizzard()
     hooksecurefunc(manager, "OpenMenu", Manager_OpenMenu)
     hooksecurefunc(manager, "OpenContextMenu", Manager_OpenMenu)
     hooksecurefunc(_G.MenuVariants, "CreateCheckbox", StyleMenuCheckbox)
-    hooksecurefunc(_G.MenuVariants, "CreateHighlight", StyleMenuHighlight)
 end
 AF.RegisterCallback("BFI_StyleBlizzard", StyleBlizzard)

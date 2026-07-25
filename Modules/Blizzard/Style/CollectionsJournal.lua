@@ -570,8 +570,18 @@ local function StyleCollectionsRadio(frame)
     S.StyleMenuSelection(frame)
 end
 
+local function StyleCollectionsMenuHighlight(frame)
+    local highlight = frame.highlight
+    if not highlight then return end
+
+    local hoverColor = AF.GetButtonHoverColor("BFI_transparent")
+    highlight:SetColorTexture(AF.UnpackColor(hoverColor))
+    highlight:SetBlendMode("BLEND")
+end
+
 local function StyleCollectionsRadioMenuDescriptions(parentDescription)
     for _, description in parentDescription:EnumerateElementDescriptions() do
+        description:AddInitializer(StyleCollectionsMenuHighlight)
         if description:IsRadio() then
             description:AddInitializer(StyleCollectionsRadio)
         end
