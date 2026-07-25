@@ -179,12 +179,12 @@ local function CastBar_SetupUninterruptibleIcon(self, config)
 
     local enabled = config.enabled == true
     self.uninterruptibleIcon:SetShown(enabled)
-    local size = config.size or 14
+    local size = config.size or 16
     AF.SetSize(self.uninterruptibleIcon, size, size)
     AF.LoadWidgetPosition(
         self.uninterruptibleIcon,
-        config.position or {"CENTER", "CENTER", 0, 0},
-        self.iconBG
+        config.position or {"LEFT", "RIGHT", 2, 0},
+        self
     )
     -- Keep the X on AF's native boolean sink; never branch on the restricted
     -- notInterruptible result in BFI.
@@ -194,16 +194,14 @@ local function CastBar_SetupUninterruptibleIcon(self, config)
 end
 
 local function CastBar_SetupIcon(self, config)
-    -- Keep the spell-icon geometry current even while its texture is hidden;
-    -- the independently configurable uninterruptible X anchors to it.
-    NP.LoadIndicatorPosition(self.iconBG, config.position)
-    AF.SetSize(self.iconBG, config.width, config.height)
-
     if not config.enabled then
         self.icon:Hide()
         self.iconBG:Hide()
         return
     end
+
+    NP.LoadIndicatorPosition(self.iconBG, config.position)
+    AF.SetSize(self.iconBG, config.width, config.height)
 
     self.icon:SetTexCoord(AF.Unpack8(AF.CalcTexCoordPreCrop(0.12, config.width / config.height)))
     self.iconBG:SetVertexColor(AF.UnpackColor(self.borderColor))

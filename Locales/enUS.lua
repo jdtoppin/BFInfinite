@@ -80,7 +80,6 @@ select(2, ...).L = setmetatable({
     ["Cast settings apply to every nameplate. Important, uninterruptible, and player-targeted cast indicators use Blizzard's secret-safe classifications; no custom spell or NPC lists are used."] = "Cast settings apply to every nameplate. Important, uninterruptible, and player-targeted cast indicators use Blizzard's secret-safe classifications; no custom spell or NPC lists are used.",
     ["Color by Interruptibility"] = "Color by Interruptibility",
     ["Uninterruptible X"] = "Uninterruptible X",
-    ["Position is relative to the cast icon."] = "Position is relative to the cast icon.",
     ["Important Cast Glow"] = "Important Cast Glow",
     ["Important Cast Icon"] = "Important Cast Icon",
     ["Position is relative to the cast bar."] = "Position is relative to the cast bar.",

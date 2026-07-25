@@ -53,7 +53,7 @@ end
 ---------------------------------------------------------------------
 -- defaults
 ---------------------------------------------------------------------
-local SCHEMA_VERSION = 5
+local SCHEMA_VERSION = 6
 NP.SCHEMA_VERSION = SCHEMA_VERSION
 
 local defaults = {
@@ -263,8 +263,8 @@ do
             },
             uninterruptibleIcon = {
                 enabled = true,
-                size = 14,
-                position = {"CENTER", "CENTER", 0, 0},
+                size = 16,
+                position = {"LEFT", "RIGHT", 2, 0},
             },
             importantGlow = {
                 enabled = true,
@@ -968,6 +968,34 @@ function NP.MigrateConfig(config)
                     end
                 end
                 interruptibleCheck.showTexture = nil
+            end
+        end
+    end
+
+    if schemaVersion < 6 then
+        for _, plateType in ipairs({
+            "hostile_npc",
+            "hostile_player",
+            "friendly_npc",
+            "friendly_player",
+        }) do
+            local plateConfig = config[plateType]
+            local castBar = type(plateConfig) == "table"
+                and plateConfig.castBar
+            local icon = type(castBar) == "table"
+                and castBar.uninterruptibleIcon
+            local position = type(icon) == "table"
+                and icon.position
+            if type(position) == "table"
+                and position[1] == "CENTER"
+                and position[2] == "CENTER"
+                and position[3] == 0
+                and position[4] == 0
+            then
+                icon.position = {"LEFT", "RIGHT", 2, 0}
+                if icon.size == 14 then
+                    icon.size = 16
+                end
             end
         end
     end

@@ -1781,7 +1781,7 @@ local function CreateNameplatesPanel()
         CreateCastStateIconWidgets(
             uninterruptibleIconPane,
             "uninterruptibleIcon",
-            L["Position is relative to the cast icon."]
+            L["Position is relative to the cast bar."]
         )
     local importantIconWidgets =
         CreateCastStateIconWidgets(
