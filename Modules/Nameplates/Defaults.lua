@@ -53,7 +53,7 @@ end
 ---------------------------------------------------------------------
 -- defaults
 ---------------------------------------------------------------------
-local SCHEMA_VERSION = 1
+local SCHEMA_VERSION = 2
 NP.SCHEMA_VERSION = SCHEMA_VERSION
 
 local defaults = {
@@ -155,12 +155,23 @@ do
                 },
             },
             threatGlow = {
-                enabled = true,
-                style = "both",
+                enabled = false,
+                border = true,
+                glow = true,
+                bar = false,
+                name = false,
                 borderSize = 2,
                 size = 4,
                 outset = 3,
-                alpha = 0.8,
+                borderAlpha = 0.8,
+                glowAlpha = 0.8,
+                barAlpha = 0.65,
+                nameAlpha = 1,
+                useCustomColor = false,
+                color = AF.GetColorTable("orange"),
+                combatOnly = false,
+                instancesOnly = false,
+                tankOnly = false,
             },
         },
         nameText = {
@@ -721,6 +732,7 @@ do
 
     -- hostile
     defaults.hostile_npc = AF.Copy(nameplateDefaults, hostile, hostile_npc)
+    defaults.hostile_npc.healthBar.threatGlow.enabled = true
     -- Semantic classification is evaluated entirely by AF's secret-safe
     -- health-color pipeline. Do not add NPC identities or Lua-side unit
     -- classification here.
@@ -802,10 +814,69 @@ function NP.MigrateConfig(config)
         config = {}
     end
 
-    if tonumber(config.schemaVersion) ~= SCHEMA_VERSION then
+    local schemaVersion = tonumber(config.schemaVersion) or 0
+    if schemaVersion < 1 then
         -- The legacy implementation defaulted to enabled. Require an
         -- explicit opt-in the first time that configuration is migrated.
         config.enabled = false
+    end
+
+    if schemaVersion < 2 then
+        local hostileNPC = config.hostile_npc
+        local healthBar = type(hostileNPC) == "table"
+            and hostileNPC.healthBar
+        local threatGlow = type(healthBar) == "table"
+            and healthBar.threatGlow
+        if type(threatGlow) == "table" then
+            local style = threatGlow.style
+            if threatGlow.border == nil then
+                threatGlow.border = style ~= "glow"
+            end
+            if threatGlow.glow == nil then
+                threatGlow.glow = style ~= "border"
+            end
+            if threatGlow.bar == nil then
+                threatGlow.bar = false
+            end
+            if threatGlow.name == nil then
+                threatGlow.name = false
+            end
+
+            local alpha = tonumber(threatGlow.alpha)
+            if threatGlow.borderAlpha == nil then
+                threatGlow.borderAlpha = alpha or 0.8
+            end
+            if threatGlow.glowAlpha == nil then
+                threatGlow.glowAlpha = alpha or 0.8
+            end
+            if threatGlow.barAlpha == nil then
+                threatGlow.barAlpha = 0.65
+            end
+            if threatGlow.nameAlpha == nil then
+                threatGlow.nameAlpha = 1
+            end
+
+            threatGlow.style = nil
+            threatGlow.alpha = nil
+        end
+    end
+
+    -- Threat presentation is owned exclusively by hostile NPC plates. Older
+    -- profiles shared these settings with hostile players; keep those
+    -- dormant rather than allowing their legacy value to drive the feature.
+    for _, plateType in ipairs({
+        "hostile_player",
+        "friendly_npc",
+        "friendly_player",
+    }) do
+        local plateConfig = config[plateType]
+        local healthBar = type(plateConfig) == "table"
+            and plateConfig.healthBar
+        local threatGlow = type(healthBar) == "table"
+            and healthBar.threatGlow
+        if type(threatGlow) == "table" then
+            threatGlow.enabled = false
+        end
     end
 
     -- Preserve a legacy custom marker size when hydrating the new

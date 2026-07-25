@@ -131,9 +131,14 @@ local function SetSharedNamePlacement(placement)
 end
 
 local function SetHostileThreatValue(key, value)
-    for _, plateType in ipairs(PLATE_TYPE_GROUPS.hostile) do
-        NP.config[plateType].healthBar.threatGlow[key] = value
-    end
+    NP.config.hostile_npc.healthBar.threatGlow[key] = value
+    UpdateNameplates()
+end
+
+local function SetHostileThreatColor(r, g, b)
+    local color =
+        NP.config.hostile_npc.healthBar.threatGlow.color
+    AF.FillColorTable(color, r, g, b, color[4])
     UpdateNameplates()
 end
 
@@ -606,12 +611,12 @@ local function CreateNameplatesPanel()
     local threatPane = CreateSectionPane(
         "threat",
         L["Threat Warning"],
-        145
+        185
     )
 
     local threatNotice = AF.CreateFontString(
         threatPane,
-        L["BFI temporarily enables Blizzard's role-aware Progressive threat signal and restores it when released, without reading restricted threat values. For tanks, a warning color means threat is slipping and red means threat is lost; no warning means secure threat or no active threat."],
+        L["Threat warnings apply only to hostile NPC nameplates. While grouped, Blizzard's role-aware signal warns tanks as their threat lead slips and again when threat is lost; damage dealers and healers are warned as they approach or gain aggro. Blizzard does not provide this Progressive nameplate warning while solo. No warning can also mean secure threat or no active threat. BFI restores the CVar when this feature is released and never reads restricted threat values."],
         "gray"
     )
     AF.SetPoint(threatNotice, "TOPLEFT", threatPane, 15, -30)
@@ -620,25 +625,40 @@ local function CreateNameplatesPanel()
     threatNotice:SetWordWrap(true)
 
     local UpdateThreatWidgets
-    local threatStylePane = CreateSectionPane(
+    local threatPresentationPane = CreateSectionPane(
         "threat",
-        L["Style"],
-        85
+        L["Presentation"],
+        145
     )
     local threatGeometryPane = CreateSectionPane(
         "threat",
         L["Border + Glow"],
         145
     )
+    local threatOpacityPane = CreateSectionPane(
+        "threat",
+        L["Opacity"],
+        145
+    )
+    local threatColorPane = CreateSectionPane(
+        "threat",
+        L["Warning Color"],
+        115
+    )
+    local threatScopePane = CreateSectionPane(
+        "threat",
+        L["Scope"],
+        125
+    )
 
     local threatEnabled = AF.CreateCheckButton(
-        threatStylePane,
+        threatPresentationPane,
         L["Enable Threat Warning"]
     )
     AF.SetPoint(
         threatEnabled,
         "TOPLEFT",
-        threatStylePane,
+        threatPresentationPane,
         15,
         -45
     )
@@ -647,22 +667,67 @@ local function CreateNameplatesPanel()
         UpdateThreatWidgets()
     end)
 
-    local threatStyle = AF.CreateDropdown(threatStylePane, 165)
-    threatStyle:SetLabel(L["Style"])
-    AF.SetPoint(
-        threatStyle,
-        "TOPLEFT",
-        threatStylePane,
-        200,
-        -50
+    local threatBorder = AF.CreateCheckButton(
+        threatPresentationPane,
+        L["Border"]
     )
-    threatStyle:SetItems({
-        {text = L["Border"], value = "border"},
-        {text = L["Glow"], value = "glow"},
-        {text = L["Border + Glow"], value = "both"},
-    })
-    threatStyle:SetOnSelect(function(value)
-        SetHostileThreatValue("style", value)
+    AF.SetPoint(
+        threatBorder,
+        "TOPLEFT",
+        threatPresentationPane,
+        15,
+        -80
+    )
+    threatBorder:SetOnCheck(function(checked)
+        SetHostileThreatValue("border", checked)
+        UpdateThreatWidgets()
+    end)
+
+    local threatGlow = AF.CreateCheckButton(
+        threatPresentationPane,
+        L["Glow"]
+    )
+    AF.SetPoint(
+        threatGlow,
+        "TOPLEFT",
+        threatPresentationPane,
+        200,
+        -80
+    )
+    threatGlow:SetOnCheck(function(checked)
+        SetHostileThreatValue("glow", checked)
+        UpdateThreatWidgets()
+    end)
+
+    local threatBar = AF.CreateCheckButton(
+        threatPresentationPane,
+        L["Full-Bar Warning Overlay"]
+    )
+    AF.SetPoint(
+        threatBar,
+        "TOPLEFT",
+        threatPresentationPane,
+        15,
+        -115
+    )
+    threatBar:SetOnCheck(function(checked)
+        SetHostileThreatValue("bar", checked)
+        UpdateThreatWidgets()
+    end)
+
+    local threatName = AF.CreateCheckButton(
+        threatPresentationPane,
+        L["Name Text"]
+    )
+    AF.SetPoint(
+        threatName,
+        "TOPLEFT",
+        threatPresentationPane,
+        200,
+        -115
+    )
+    threatName:SetOnCheck(function(checked)
+        SetHostileThreatValue("name", checked)
         UpdateThreatWidgets()
     end)
 
@@ -729,9 +794,9 @@ local function CreateNameplatesPanel()
         SetHostileThreatValue("outset", value)
     end)
 
-    local threatAlpha = AF.CreateSlider(
-        threatGeometryPane,
-        L["Opacity"],
+    local threatBorderAlpha = AF.CreateSlider(
+        threatOpacityPane,
+        L["Border Opacity"],
         165,
         0.1,
         1,
@@ -740,44 +805,263 @@ local function CreateNameplatesPanel()
         true
     )
     AF.SetPoint(
-        threatAlpha,
+        threatBorderAlpha,
         "TOPLEFT",
-        threatGeometryPane,
+        threatOpacityPane,
+        15,
+        -50
+    )
+    threatBorderAlpha:SetAfterValueChanged(function(value)
+        SetHostileThreatValue("borderAlpha", value)
+    end)
+
+    local threatGlowAlpha = AF.CreateSlider(
+        threatOpacityPane,
+        L["Glow Opacity"],
+        165,
+        0.1,
+        1,
+        0.05,
+        true,
+        true
+    )
+    AF.SetPoint(
+        threatGlowAlpha,
+        "TOPLEFT",
+        threatOpacityPane,
+        200,
+        -50
+    )
+    threatGlowAlpha:SetAfterValueChanged(function(value)
+        SetHostileThreatValue("glowAlpha", value)
+    end)
+
+    local threatBarAlpha = AF.CreateSlider(
+        threatOpacityPane,
+        L["Bar Overlay Opacity"],
+        165,
+        0.1,
+        1,
+        0.05,
+        true,
+        true
+    )
+    AF.SetPoint(
+        threatBarAlpha,
+        "TOPLEFT",
+        threatOpacityPane,
+        15,
+        -110
+    )
+    threatBarAlpha:SetAfterValueChanged(function(value)
+        SetHostileThreatValue("barAlpha", value)
+    end)
+
+    local threatNameAlpha = AF.CreateSlider(
+        threatOpacityPane,
+        L["Name Opacity"],
+        165,
+        0.1,
+        1,
+        0.05,
+        true,
+        true
+    )
+    AF.SetPoint(
+        threatNameAlpha,
+        "TOPLEFT",
+        threatOpacityPane,
         200,
         -110
     )
-    threatAlpha:SetAfterValueChanged(function(value)
-        SetHostileThreatValue("alpha", value)
+    threatNameAlpha:SetAfterValueChanged(function(value)
+        SetHostileThreatValue("nameAlpha", value)
+    end)
+
+    local threatUseCustomColor = AF.CreateCheckButton(
+        threatColorPane,
+        L["Use One Custom Warning Color"]
+    )
+    AF.SetPoint(
+        threatUseCustomColor,
+        "TOPLEFT",
+        threatColorPane,
+        15,
+        -45
+    )
+
+    local threatColor = AF.CreateColorPicker(
+        threatColorPane,
+        L["Warning Color"]
+    )
+    AF.SetPoint(
+        threatColor,
+        "TOPLEFT",
+        threatColorPane,
+        200,
+        -45
+    )
+
+    local threatColorNotice = AF.CreateFontString(
+        threatColorPane,
+        L["The custom color replaces every active native warning color; it does not classify separate threat states."],
+        "gray"
+    )
+    AF.SetPoint(
+        threatColorNotice,
+        "TOPLEFT",
+        threatColorPane,
+        15,
+        -75
+    )
+    AF.SetPoint(
+        threatColorNotice,
+        "TOPRIGHT",
+        threatColorPane,
+        -15,
+        -75
+    )
+    threatColorNotice:SetJustifyH("LEFT")
+    threatColorNotice:SetWordWrap(true)
+
+    local threatColorPreviewed
+    threatUseCustomColor:SetOnCheck(function(checked)
+        AF.CancelColorPicker(threatColor)
+        SetHostileThreatValue("useCustomColor", checked)
+        UpdateThreatWidgets()
+    end)
+    threatColor:SetOnChange(function(r, g, b, a)
+        local color =
+            NP.config.hostile_npc.healthBar.threatGlow.color
+        threatColorPreviewed = PreviewColorTables(
+            threatColor,
+            {color},
+            r,
+            g,
+            b,
+            a,
+            true
+        ) or threatColorPreviewed
+    end)
+    threatColor:SetOnConfirm(function(r, g, b)
+        SetHostileThreatColor(r, g, b)
+        threatColorPreviewed = nil
+    end)
+    threatColor:SetOnAccept(function()
+        if threatColorPreviewed then
+            UpdateNameplates()
+            threatColorPreviewed = nil
+        end
+    end)
+    local function ResetThreatColorPreview()
+        threatColorPreviewed = nil
+        UpdateNameplates()
+    end
+    threatColor:SetOnCancel(ResetThreatColorPreview)
+    threatColor:SetOnDiscard(ResetThreatColorPreview)
+
+    local threatCombatOnly = AF.CreateCheckButton(
+        threatScopePane,
+        L["Combat Only"]
+    )
+    AF.SetPoint(
+        threatCombatOnly,
+        "TOPLEFT",
+        threatScopePane,
+        15,
+        -45
+    )
+    threatCombatOnly:SetOnCheck(function(checked)
+        SetHostileThreatValue("combatOnly", checked)
+    end)
+
+    local threatInstancesOnly = AF.CreateCheckButton(
+        threatScopePane,
+        L["Instances Only"]
+    )
+    AF.SetPoint(
+        threatInstancesOnly,
+        "TOPLEFT",
+        threatScopePane,
+        200,
+        -45
+    )
+    threatInstancesOnly:SetOnCheck(function(checked)
+        SetHostileThreatValue("instancesOnly", checked)
+    end)
+
+    local threatTankOnly = AF.CreateCheckButton(
+        threatScopePane,
+        L["Tank Role Only"]
+    )
+    AF.SetPoint(
+        threatTankOnly,
+        "TOPLEFT",
+        threatScopePane,
+        15,
+        -80
+    )
+    threatTankOnly:SetOnCheck(function(checked)
+        SetHostileThreatValue("tankOnly", checked)
     end)
 
     UpdateThreatWidgets = function()
         local config =
             NP.config.hostile_npc.healthBar.threatGlow
-        local borderShown = config.style == "border"
-            or config.style == "both"
-        local glowShown = config.style == "glow"
-            or config.style == "both"
 
         threatEnabled:SetChecked(config.enabled)
-        threatStyle:SetSelectedValue(config.style)
+        threatBorder:SetChecked(config.border)
+        threatGlow:SetChecked(config.glow)
+        threatBar:SetChecked(config.bar)
+        threatName:SetChecked(config.name)
         threatBorderSize:SetValue(config.borderSize)
         threatGlowSize:SetValue(config.size)
         threatOutset:SetValue(config.outset)
-        threatAlpha:SetValue(config.alpha)
+        threatBorderAlpha:SetValue(config.borderAlpha)
+        threatGlowAlpha:SetValue(config.glowAlpha)
+        threatBarAlpha:SetValue(config.barAlpha)
+        threatNameAlpha:SetValue(config.nameAlpha)
+        threatUseCustomColor:SetChecked(config.useCustomColor)
+        if not AF.IsColorPickerOpen(threatColor) then
+            threatColor:SetColor(config.color)
+        end
+        threatCombatOnly:SetChecked(config.combatOnly)
+        threatInstancesOnly:SetChecked(config.instancesOnly)
+        threatTankOnly:SetChecked(config.tankOnly)
 
         AF.SetEnabled(
             config.enabled,
-            threatStyle,
-            threatAlpha
+            threatBorder,
+            threatGlow,
+            threatBar,
+            threatName,
+            threatUseCustomColor,
+            threatCombatOnly,
+            threatInstancesOnly,
+            threatTankOnly
         )
         AF.SetEnabled(
-            config.enabled and borderShown,
-            threatBorderSize
+            config.enabled and config.border,
+            threatBorderSize,
+            threatBorderAlpha
         )
         AF.SetEnabled(
-            config.enabled and glowShown,
+            config.enabled and config.glow,
             threatGlowSize,
-            threatOutset
+            threatOutset,
+            threatGlowAlpha
+        )
+        AF.SetEnabled(
+            config.enabled and config.bar,
+            threatBarAlpha
+        )
+        AF.SetEnabled(
+            config.enabled and config.name,
+            threatNameAlpha
+        )
+        AF.SetEnabled(
+            config.enabled and config.useCustomColor,
+            threatColor
         )
     end
 
@@ -2139,6 +2423,7 @@ local function CreateNameplatesPanel()
     local function CancelNameplateColorPickers()
         CancelSemanticColorPickers()
         CancelCastColorPickers()
+        AF.CancelColorPicker(threatColor)
         AF.CancelColorPicker(highlightColor)
         AF.CancelColorPicker(normalColor)
     end
@@ -2146,6 +2431,7 @@ local function CreateNameplatesPanel()
     local function HideNameplateColorPickers()
         HideSemanticColorPickers()
         HideCastColorPickers()
+        AF.HideColorPicker(threatColor)
         AF.HideColorPicker(highlightColor)
         AF.HideColorPicker(normalColor)
     end
@@ -2208,6 +2494,9 @@ local function CreateNameplatesPanel()
     end
     sectionCleanup.colors = CancelSemanticColorPickers
     sectionCleanup.casts = CancelCastColorPickers
+    sectionCleanup.threat = function()
+        AF.CancelColorPicker(threatColor)
+    end
     sectionCleanup.auras = function()
         AF.CancelColorPicker(normalColor)
     end

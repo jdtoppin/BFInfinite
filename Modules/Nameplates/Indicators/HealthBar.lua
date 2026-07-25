@@ -36,12 +36,30 @@ local function HealthBar_LoadConfig(self, config)
 
     local threatGlow = config.threatGlow or {}
     self.threatIndicator:Configure({
-        enabled = threatGlow.enabled,
+        -- Threat is meaningful only for hostile NPC plates. Player plates
+        -- retain their configured reaction/class presentation.
+        enabled = self.root.configKey == "hostile_npc"
+            and threatGlow.enabled,
+        border = threatGlow.border,
+        glow = threatGlow.glow,
+        bar = threatGlow.bar,
         style = threatGlow.style,
         thickness = threatGlow.borderSize,
         glowThickness = threatGlow.size,
         glowOutset = threatGlow.outset,
         alpha = threatGlow.alpha,
+        borderAlpha = threatGlow.borderAlpha,
+        glowAlpha = threatGlow.glowAlpha,
+        barAlpha = threatGlow.barAlpha,
+        name = threatGlow.name,
+        nameAlpha = threatGlow.nameAlpha,
+        combatOnly = threatGlow.combatOnly,
+        instancesOnly = threatGlow.instancesOnly,
+        tankOnly = threatGlow.tankOnly,
+        useCustomColor = threatGlow.useCustomColor,
+        color = threatGlow.useCustomColor
+            and threatGlow.color
+            or nil,
     })
 
     local semanticColor = config.semanticColor

@@ -93,22 +93,38 @@ end
 local function IsThreatWarningConfigured(config)
     if not config then return false end
 
-    for _, configKey in ipairs({
-        "hostile_npc",
-        "hostile_player",
-    }) do
-        local plateConfig = config[configKey]
-        local healthBar = plateConfig and plateConfig.healthBar
-        local threatGlow = healthBar and healthBar.threatGlow
-        if healthBar
-            and healthBar.enabled
-            and threatGlow
-            and threatGlow.enabled
-        then
-            return true
-        end
+    local plateConfig = config.hostile_npc
+    local healthBar = plateConfig and plateConfig.healthBar
+    local threatGlow = healthBar and healthBar.threatGlow
+    if not healthBar
+        or not healthBar.enabled
+        or not threatGlow
+        or not threatGlow.enabled
+    then
+        return false
     end
-    return false
+
+    -- New profiles use independent presentation switches. Retain the legacy
+    -- style fallback so an older profile still acquires the native carrier
+    -- during migration.
+    if threatGlow.border ~= nil
+        or threatGlow.glow ~= nil
+        or threatGlow.bar ~= nil
+        or threatGlow.name ~= nil
+    then
+        return threatGlow.border == true
+            or threatGlow.glow == true
+            or threatGlow.bar == true
+            or (
+                threatGlow.name == true
+                and plateConfig.nameText
+                and plateConfig.nameText.enabled
+            )
+    end
+
+    return threatGlow.style == "border"
+        or threatGlow.style == "glow"
+        or threatGlow.style == "both"
 end
 
 local function ApplyProgressiveThreatDisplay(config)

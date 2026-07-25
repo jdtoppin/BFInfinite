@@ -7,17 +7,49 @@ local NP = BFI.modules.Nameplates
 local INSIDE_POSITION = {"CENTER", "CENTER", 0, 0}
 local INSIDE_LENGTH = 0.9
 
+local function ApplyConfiguredFont(region, font, enabled, config)
+    if enabled and config and config.enabled then
+        local shadow = config.shadow
+        if shadow == nil then
+            shadow = font[4]
+        end
+
+        AF.SetFont(
+            region,
+            font[1],
+            math.max(1, font[2] + (config.sizeDelta or 0)),
+            config.outline or font[3],
+            shadow
+        )
+    else
+        AF.SetFont(
+            region,
+            font[1],
+            font[2],
+            font[3],
+            font[4]
+        )
+    end
+end
+
 local function NameText_Update(self)
     self:UpdateName()
+    self.threatOverlay:UpdateName()
+    self.threatIndicator:Refresh()
 end
 
 local function NameText_Enable(self)
     self:SetUnit(self.root.unit)
+    self.threatOverlay:SetUnit(self.root.unit)
+    self.threatOverlay:Show()
+    self.threatIndicator:Refresh()
     self:Show()
 end
 
 local function NameText_Disable(self)
     self:SetTargetEmphasis(false)
+    self.threatOverlay:ClearUnit()
+    self.threatOverlay:Hide()
     self:ClearUnit()
     self:Hide()
 end
@@ -26,22 +58,13 @@ local function NameText_SetTargetEmphasis(self, enabled, config)
     local font = self.configuredFont
     if not font then return end
 
-    if enabled and config and config.enabled then
-        local shadow = config.shadow
-        if shadow == nil then
-            shadow = font[4]
-        end
-
-        AF.SetFont(
-            self,
-            font[1],
-            math.max(1, font[2] + (config.sizeDelta or 0)),
-            config.outline or font[3],
-            shadow
-        )
-    else
-        AF.SetFont(self, font[1], font[2], font[3], font[4])
-    end
+    ApplyConfiguredFont(self, font, enabled, config)
+    ApplyConfiguredFont(
+        self.threatOverlay,
+        font,
+        enabled,
+        config
+    )
 end
 
 local function NameText_LoadConfig(self, config)
@@ -78,6 +101,18 @@ local function NameText_LoadConfig(self, config)
         parent
     )
     self:SetLength(length)
+    NP.LoadIndicatorPosition(
+        self.threatOverlay,
+        position,
+        anchorTo,
+        parent
+    )
+    self.threatOverlay:SetLength(length)
+    ApplyConfiguredFont(
+        self.threatOverlay,
+        self.configuredFont,
+        false
+    )
 
     if config.color.type == "custom_color" then
         self.color = {
@@ -93,6 +128,23 @@ function NP.CreateNameText(parent, name)
     local text = AF.CreateSecretNameText(parent, name)
     text.root = parent
     text:Hide()
+
+    -- A dedicated duplicate keeps the configured name presentation intact
+    -- underneath it. Its secret unit name remains inside AF's native text
+    -- sink, while the threat carrier controls only color and visibility.
+    local threatOverlay = AF.CreateSecretNameText(
+        parent,
+        name .. "ThreatOverlay"
+    )
+    threatOverlay.root = parent
+    threatOverlay.indicatorName = "nameText"
+    threatOverlay.UpdateColor = AF.noop
+    threatOverlay:Hide()
+    text.threatOverlay = threatOverlay
+
+    local healthBar = parent.indicators.healthBar
+    text.threatIndicator = healthBar.threatIndicator
+    text.threatIndicator:SetNameOverlay(threatOverlay)
 
     text.Update = NameText_Update
     text.Enable = NameText_Enable
