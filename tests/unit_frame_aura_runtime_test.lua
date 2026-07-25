@@ -1081,7 +1081,8 @@ local function testDisabledConfigModePreviewCannotEscape()
         tag = "disabled-preview",
     }))
 
-    -- BFI's config-mode exit deliberately skips disabled indicators.
+    -- Keep stale-preview recovery defensive even if another caller skips
+    -- the normal symmetric config-mode teardown.
     root.unit = "target"
     root.effectiveUnit = "target"
     root.oldUnit = nil
