@@ -217,12 +217,75 @@ end
 ---------------------------------------------------------------------
 -- member list
 ---------------------------------------------------------------------
+local function StyleProfessionHeader(entry)
+    local header = entry and entry.ProfessionHeader
+    if not header then return end
+
+    if not header._BFICommunitiesProfessionStyled then
+        header._BFICommunitiesProfessionStyled = true
+
+        -- CommunitiesMemberListEntryTemplate uses three pieces of the
+        -- CollapsibleHeader texture for profession categories. Replace only
+        -- that shell so the native profession identity and collapse state
+        -- remain intact.
+        S.RemoveTextures(header.Left, true)
+        S.RemoveTextures(header.Middle, true)
+        S.RemoveTextures(header.Right, true)
+        S.CreateBackdrop(header)
+        header.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget"))
+        header.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
+
+        local highlight = header:CreateTexture(nil, "HIGHLIGHT")
+        AF.SetOnePixelInside(highlight, header.BFIBackdrop)
+        SetFlatTexture(highlight, "white", 0.2)
+        header:SetHighlightTexture(highlight)
+
+        header.CollapsedIcon:SetTexture(AF.GetIcon("Plus_Small"))
+        header.CollapsedIcon:SetTexCoord(0, 1, 0, 1)
+        AF.ClearPoints(header.CollapsedIcon)
+        AF.SetPoint(header.CollapsedIcon, "LEFT", header, "LEFT", 7, 0)
+        AF.SetSize(header.CollapsedIcon, 12, 12)
+
+        header.ExpandedIcon:SetTexture(AF.GetIcon("Minus_Small"))
+        header.ExpandedIcon:SetTexCoord(0, 1, 0, 1)
+        AF.ClearPoints(header.ExpandedIcon)
+        AF.SetPoint(header.ExpandedIcon, "LEFT", header, "LEFT", 7, 0)
+        AF.SetSize(header.ExpandedIcon, 12, 12)
+
+        S.StyleIcon(header.Icon, true)
+        AF.ClearPoints(header.Icon)
+        AF.SetPoint(header.Icon, "LEFT", header, "LEFT", 24, 0)
+        AF.SetSize(header.Icon, 16, 16)
+
+        AF.ClearPoints(header.Name)
+        AF.SetPoint(header.Name, "LEFT", header.Icon, "RIGHT", 6, 1)
+        header.Name:SetTextColor(AF.GetColorRGB("white"))
+
+        local allRecipes = header.AllRecipes
+        StyleButton(allRecipes, nil, true)
+        AF.ClearPoints(allRecipes)
+        AF.SetPoint(allRecipes, "RIGHT", header, "RIGHT", -4, 0)
+        local fontString = allRecipes:GetFontString()
+        AF.SetSize(allRecipes, fontString:GetStringWidth() + 10, 18)
+    end
+
+    -- Blizzard updates the profession texture each time a pooled row is
+    -- initialized. Reapply the square crop without replacing that identity.
+    S.StyleIcon(header.Icon, true)
+end
+
 local function StyleMemberListEntry(button, elementData)
     local normalTexture = button:GetNormalTexture()
     local isHeader = elementData and elementData.invitationHeaderCount
 
     SetFlatTexture(normalTexture, isHeader and "BFI" or "widget_dark", isHeader and 0.25 or 0.55)
     SetFlatTexture(button:GetHighlightTexture(), "widget_highlight", 0.75)
+
+    local memberInfo = elementData and elementData.memberInfo
+    local professionHeader = button.ProfessionHeader
+    if professionHeader and (professionHeader:IsShown() or (memberInfo and memberInfo.professionHeaderId)) then
+        StyleProfessionHeader(button)
+    end
 end
 
 local function StyleMemberList(memberList)
