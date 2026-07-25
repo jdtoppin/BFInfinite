@@ -13,6 +13,10 @@ sed -E 's/--.*$//' "$module" > "$code"
 
 patterns=(
     '\bhooksecurefunc[[:space:]]*\('
+    '\bBackdropTemplate\b'
+    '\b(BackdropTemplateMixin|NineSlice)\b'
+    '\bAF[.](ApplyDefaultBackdrop|ApplyDefaultBackdropWithColors|ApplyDefaultBackdrop_NoBackground|ApplyDefaultBackdrop_NoBorder|SetBackdrop)[[:space:]]*\('
+    ':SetBackdrop[[:space:]]*\('
     '\bRegion(GetAlpha|IsShown|SetAlpha|Hide|Show)\b'
     '\b(viewer|item|itemFrame|cooldownItem|state[.]viewer):[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\('
     ':(RefreshLayout|RefreshData|Layout|UpdateShownState|SetIsEditing|SetHideWhenInactive|SetTimerShown|SetTooltipsShown|SetBarContent|SetBarWidthScale|SetCooldownID|ClearCooldownID|SetEditModeData|ClearEditModeData|GetSpellID|GetBaseSpellID|GetCooldownInfo|GetAuraData|RefreshAuraInstance|RefreshTotemData|BreakFromFrameManager|ApplySystemAnchor|ClearFrameSnap|HighlightSystem|ClearHighlight|UpdateSystem|UpdateSystemSetting)[[:space:]]*\('

@@ -103,6 +103,7 @@ local methodStatusBar = CreateFrame("StatusBar")
 -- Frame even though Frame also implements GetAlpha. Keep every native call
 -- paired with the concrete widget type declared by CooldownViewer.xml.
 local FrameGetAlpha = methodFrame.GetAlpha
+local FrameCreateTexture = methodFrame.CreateTexture
 local FrameGetEffectiveScale = methodFrame.GetEffectiveScale
 local FrameGetFrameLevel = methodFrame.GetFrameLevel
 local FrameGetNumPoints = methodFrame.GetNumPoints
@@ -112,6 +113,7 @@ local FrameGetScale = methodFrame.GetScale
 local FrameIsMouseMotionEnabled = methodFrame.IsMouseMotionEnabled
 local FrameIsShown = methodFrame.IsShown
 local FrameSetAlpha = methodFrame.SetAlpha
+local FrameSetAllPoints = methodFrame.SetAllPoints
 local FrameSetMouseMotionEnabled = methodFrame.SetMouseMotionEnabled
 local FrameSetScale = methodFrame.SetScale
 local FontStringGetAlpha = methodFontString.GetAlpha
@@ -124,8 +126,12 @@ local MaskTextureHide = methodMaskTexture.Hide
 local MaskTextureIsObjectType = methodMaskTexture.IsObjectType
 local TextureGetAtlas = methodTexture.GetAtlas
 local TextureIsObjectType = methodTexture.IsObjectType
+local TextureSetColorTexture = methodTexture.SetColorTexture
 local TextureSetDrawLayer = methodTexture.SetDrawLayer
+local TextureSetHeight = methodTexture.SetHeight
+local TextureSetPoint = methodTexture.SetPoint
 local TextureSetTexCoord = methodTexture.SetTexCoord
+local TextureSetWidth = methodTexture.SetWidth
 local CooldownGetHideCountdownNumbers = methodCooldown.GetHideCountdownNumbers
 local CooldownSetCountdownFont = methodCooldown.SetCountdownFont
 local CooldownSetHideCountdownNumbers = methodCooldown.SetHideCountdownNumbers
@@ -136,6 +142,8 @@ methodStatusBar:Hide()
 
 local FONT_NAME = "BFI_CooldownManagerCountdownFont"
 local countdownFont = CreateFont(FONT_NAME)
+local nativeSkinBorderColor = {AF.GetColorRGB("border")}
+local nativeSkinBackgroundColor = {AF.GetColorRGB("widget_dark")}
 local viewerStates = {}
 local viewerStateByKey = {}
 local itemStates = setmetatable({}, {__mode = "k"})
@@ -864,21 +872,115 @@ end
 ---------------------------------------------------------------------
 -- Hook-free skin and direct widget presentation
 ---------------------------------------------------------------------
-local function CreateNativeChildBackdrop(parent, target, withBackground, levelOffset)
-    local backdrop = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    if withBackground then
-        AF.ApplyDefaultBackdropWithColors(backdrop, "widget_dark", "border")
-    else
-        AF.ApplyDefaultBackdrop_NoBackground(backdrop)
+local function CreateNativeSkinLayer(parent, target, levelOffset)
+    -- Do not use BackdropTemplate here. This layer inherits secret dimensions
+    -- from the native cooldown widget; BackdropMixin's Lua OnSizeChanged path
+    -- performs arithmetic on those values and is unsafe in addon execution.
+    if not CanChangeGeometry(parent) or not CanChangeGeometry(target) then
+        return nil
     end
-    backdrop:SetAllPoints(target)
-    backdrop:EnableMouse(false)
 
     local parentLevel = FrameGetFrameLevel(parent)
-    if IsSafeNumber(parentLevel) then
-        FrameSetFrameLevel(backdrop, max(0, min(10000, parentLevel + levelOffset)))
+    if not IsSafeNumber(parentLevel) then
+        return nil
     end
-    return backdrop
+
+    local layer = CreateFrame("Frame", nil, parent)
+    if not CanChangeGeometry(layer) then
+        return nil
+    end
+    FrameSetFrameLevel(layer, max(0, min(10000, parentLevel + levelOffset)))
+    return layer
+end
+
+local function CreateSolidTexture(parent, drawLayer, subLevel, color)
+    if not CanChangeGeometry(parent) then
+        return nil
+    end
+
+    local texture = FrameCreateTexture(parent, nil, drawLayer, nil, subLevel)
+    if not CanChangeGeometry(texture) then
+        return nil
+    end
+    TextureSetColorTexture(texture, unpack(color))
+    return texture
+end
+
+local function CreateNativeChildSkin(parent, target, withBackground)
+    local skin = {border = CreateNativeSkinLayer(parent, target, 1)}
+    if not skin.border then return nil end
+
+    local top = CreateSolidTexture(
+        skin.border,
+        "OVERLAY",
+        7,
+        nativeSkinBorderColor
+    )
+    if not top then return nil end
+    TextureSetPoint(top, "TOPLEFT", skin.border, "TOPLEFT", 0, 0)
+    TextureSetPoint(top, "TOPRIGHT", skin.border, "TOPRIGHT", 0, 0)
+    TextureSetHeight(top, 1)
+
+    local bottom = CreateSolidTexture(
+        skin.border,
+        "OVERLAY",
+        7,
+        nativeSkinBorderColor
+    )
+    if not bottom then return nil end
+    TextureSetPoint(bottom, "BOTTOMLEFT", skin.border, "BOTTOMLEFT", 0, 0)
+    TextureSetPoint(bottom, "BOTTOMRIGHT", skin.border, "BOTTOMRIGHT", 0, 0)
+    TextureSetHeight(bottom, 1)
+
+    local left = CreateSolidTexture(
+        skin.border,
+        "OVERLAY",
+        7,
+        nativeSkinBorderColor
+    )
+    if not left then return nil end
+    TextureSetPoint(left, "TOPLEFT", skin.border, "TOPLEFT", 0, 0)
+    TextureSetPoint(left, "BOTTOMLEFT", skin.border, "BOTTOMLEFT", 0, 0)
+    TextureSetWidth(left, 1)
+
+    local right = CreateSolidTexture(
+        skin.border,
+        "OVERLAY",
+        7,
+        nativeSkinBorderColor
+    )
+    if not right then return nil end
+    TextureSetPoint(right, "TOPRIGHT", skin.border, "TOPRIGHT", 0, 0)
+    TextureSetPoint(right, "BOTTOMRIGHT", skin.border, "BOTTOMRIGHT", 0, 0)
+    TextureSetWidth(right, 1)
+
+    if withBackground then
+        skin.background = CreateNativeSkinLayer(parent, target, -1)
+        if not skin.background then return nil end
+        local background = CreateSolidTexture(
+            skin.background,
+            "BACKGROUND",
+            -8,
+            nativeSkinBackgroundColor
+        )
+        if not background then return nil end
+        TextureSetPoint(background, "TOPLEFT", skin.background, "TOPLEFT", 0, 0)
+        TextureSetPoint(background, "BOTTOMRIGHT", skin.background, "BOTTOMRIGHT", 0, 0)
+    end
+
+    -- The layers are complete while still zero-sized. Commit the native
+    -- anchors last so secret dimensions propagate only through C layout.
+    if not CanChangeGeometry(target)
+        or not CanChangeGeometry(skin.border)
+        or (skin.background and not CanChangeGeometry(skin.background))
+    then
+        return nil
+    end
+    if skin.background then
+        FrameSetAllPoints(skin.background, target)
+    end
+    FrameSetAllPoints(skin.border, target)
+    return skin
 end
 
 local function GetIconMaskAndOverlay(iconParent)
@@ -915,11 +1017,10 @@ local function SkinIcon(iconParent, icon)
     local skin = iconSkins[icon]
     if not skin then
         local mask, overlay = GetIconMaskAndOverlay(iconParent)
-        skin = {
-            mask = mask,
-            overlay = overlay,
-            border = CreateNativeChildBackdrop(iconParent, icon, false, 1),
-        }
+        skin = CreateNativeChildSkin(iconParent, icon, false)
+        if not skin then return end
+        skin.mask = mask
+        skin.overlay = overlay
         iconSkins[icon] = skin
     end
 
@@ -934,9 +1035,8 @@ local function SkinBar(bar)
 
     local skin = barSkins[bar]
     if not skin then
-        skin = {
-            backdrop = CreateNativeChildBackdrop(bar, bar, true, -1),
-        }
+        skin = CreateNativeChildSkin(bar, bar, true)
+        if not skin then return end
         barSkins[bar] = skin
     end
 
@@ -949,7 +1049,10 @@ local function SkinBar(bar)
     if IsValueNonSecret(fill) and fill then
         TextureSetDrawLayer(fill, "BORDER", -1)
     end
-    FrameShow(skin.backdrop)
+    if skin.background then
+        FrameShow(skin.background)
+    end
+    FrameShow(skin.border)
 end
 
 local function ApplyFont(fontString, config)
