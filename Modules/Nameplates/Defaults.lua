@@ -53,7 +53,7 @@ end
 ---------------------------------------------------------------------
 -- defaults
 ---------------------------------------------------------------------
-local SCHEMA_VERSION = 3
+local SCHEMA_VERSION = 4
 NP.SCHEMA_VERSION = SCHEMA_VERSION
 
 local defaults = {
@@ -184,7 +184,10 @@ do
                         },
                     },
                     safe = {
-                        enabled = true,
+                        -- Safe is continuous while a unit is securely held.
+                        -- Keep it opt-in so enabling threat colors does not
+                        -- tint every engaged nameplate by default.
+                        enabled = false,
                         rgb = {
                             AF.ConvertHEXToRGB("#0F96E6"),
                         },
@@ -907,6 +910,26 @@ function NP.MigrateConfig(config)
             if threatGlow.useCustomColor == true then
                 threatGlow.stateColors.enabled = false
             end
+        end
+    end
+
+    if schemaVersion < 4 then
+        local hostileNPC = config.hostile_npc
+        local healthBar = type(hostileNPC) == "table"
+            and hostileNPC.healthBar
+        local threatGlow = type(healthBar) == "table"
+            and healthBar.threatGlow
+        local stateColors = type(threatGlow) == "table"
+            and threatGlow.stateColors
+        local safe = type(stateColors) == "table"
+            and stateColors.safe
+        if type(safe) == "table" then
+            -- Schema 3 enabled Safe automatically. Unlike warning states,
+            -- Safe is present on every securely held/inactive-threat plate,
+            -- so a persisted full-bar carrier could cover all health fills.
+            -- Preserve the color and presentation settings, but require the
+            -- user to opt back into the continuous Safe state.
+            safe.enabled = false
         end
     end
 
