@@ -6,6 +6,9 @@ local F = BFI.funcs
 local AF = _G.AbstractFramework
 
 local communitiesHooksInstalled
+local finderGuildCardsStyled = setmetatable({}, {__mode = "k"})
+local finderCommunityCardsStyled = setmetatable({}, {__mode = "k"})
+local finderCommunityScrollBoxesHooked = setmetatable({}, {__mode = "k"})
 local communitiesTabIcons = {
     "Chat",
     "Menu1",
@@ -23,15 +26,15 @@ local communitiesRadioMenus = {
 ---------------------------------------------------------------------
 -- shared
 ---------------------------------------------------------------------
-local function StyleButton(button, color)
+local function StyleButton(button, color, preservePressScripts)
     if button then
-        S.StyleButton(button, color)
+        S.StyleButton(button, color, nil, preservePressScripts)
     end
 end
 
-local function StyleDropdown(dropdown)
+local function StyleDropdown(dropdown, preservePressScripts)
     if dropdown then
-        S.StyleDropdownButton(dropdown)
+        S.StyleDropdownButton(dropdown, preservePressScripts)
     end
 end
 
@@ -259,6 +262,79 @@ end
 ---------------------------------------------------------------------
 -- finder
 ---------------------------------------------------------------------
+local function StyleFinderGuildCard(card)
+    if not card or finderGuildCardsStyled[card] then return end
+    finderGuildCardsStyled[card] = true
+
+    AF.ClearPoints(card.CardBackground)
+    card.CardBackground:SetAllPoints()
+    SetFlatTexture(card.CardBackground, "widget_dark", 0.85)
+
+    S.CreateBackdrop(card, true)
+    StyleButton(card.RequestJoin, nil, true)
+
+    local highlight = card:CreateTexture(nil, "HIGHLIGHT")
+    AF.SetOnePixelInside(highlight, card.BFIBackdrop)
+    SetFlatTexture(highlight, "white", 0.2)
+    card:SetHighlightTexture(highlight)
+end
+
+local function StyleFinderGuildCards(cards)
+    if not cards or not cards.Cards then return end
+
+    for _, card in next, cards.Cards do
+        StyleFinderGuildCard(card)
+    end
+
+    if cards.PreviousPage and not cards.PreviousPage._BFIStyled then
+        S.StyleIconButton(cards.PreviousPage, AF.GetIcon("ArrowLeft2"), 16)
+    end
+    if cards.NextPage and not cards.NextPage._BFIStyled then
+        S.StyleIconButton(cards.NextPage, AF.GetIcon("ArrowRight2"), 16)
+    end
+end
+
+local function StyleFinderCommunityCard(card)
+    if not card or finderCommunityCardsStyled[card] then return end
+    finderCommunityCardsStyled[card] = true
+
+    -- CommunityLogo is the target of restricted C_Club.SetAvatarTexture.
+    -- Keep the logo, mask, and card initializer untouched; only flatten the
+    -- existing row surfaces after Blizzard has completed UpdateCard. Do not
+    -- add a child backdrop: these pooled buttons are reused by later calls.
+    AF.ClearPoints(card.Background)
+    card.Background:SetAllPoints()
+    SetFlatTexture(card.Background, "widget_dark", 0.85)
+
+    AF.ClearPoints(card.HighlightBackground)
+    AF.SetPoint(card.HighlightBackground, "TOPLEFT", 1, -1)
+    AF.SetPoint(card.HighlightBackground, "BOTTOMRIGHT", -1, 1)
+    SetFlatTexture(card.HighlightBackground, "white", 0.2)
+end
+
+local function StyleFinderCommunityCards(scrollBox)
+    scrollBox:ForEachFrame(StyleFinderCommunityCard)
+end
+
+local function HookFinderCommunityCards(cards)
+    local scrollBox = cards and cards.ScrollBox
+    if not scrollBox then return end
+
+    if not finderCommunityScrollBoxesHooked[scrollBox] then
+        finderCommunityScrollBoxesHooked[scrollBox] = true
+
+        -- Retail 12.0.7.68887 (Gethe 4383ced) and PTR 12.1.0.68914
+        -- (Gethe d3915c7) initialize pooled cards inside ScrollBox:Update.
+        -- ClubFinder.lua:1324-1420 calls the restricted avatar API before
+        -- the initializer finishes, so this post-hook keeps BFI outside it.
+        -- Keep the paired ScrollBar native too: S.StyleScrollBar installs
+        -- addon state/scripts on this Update path before initialization.
+        hooksecurefunc(scrollBox, "Update", StyleFinderCommunityCards)
+    end
+
+    StyleFinderCommunityCards(scrollBox)
+end
+
 local function StyleFinderFrame(finder)
     if not finder then return end
 
@@ -275,25 +351,22 @@ local function StyleFinderFrame(finder)
     S.RemoveTextures(finder.DisabledFrame)
 
     local options = finder.OptionsList
-    StyleDropdown(options.ClubFilterDropdown)
-    StyleDropdown(options.ClubSizeDropdown)
-    StyleDropdown(options.SortByDropdown)
+    -- RequestClubsList and the returned avatar update both accept secret
+    -- arguments only while untainted. Preserve Blizzard's press scripts and
+    -- displaced-region state on every request input.
+    StyleDropdown(options.ClubFilterDropdown, true)
+    StyleDropdown(options.ClubSizeDropdown, true)
+    StyleDropdown(options.SortByDropdown, true)
     S.StyleCheckButton(options.TankRoleFrame.Checkbox)
     S.StyleCheckButton(options.HealerRoleFrame.Checkbox)
     S.StyleCheckButton(options.DpsRoleFrame.Checkbox)
     S.StyleEditBox(options.SearchBox, -4, -7, nil, 7)
-    StyleButton(options.Search)
+    StyleButton(options.Search, nil, true)
 
-    for _, cards in next, {
-        finder.GuildCards,
-        finder.CommunityCards,
-        finder.PendingGuildCards,
-        finder.PendingCommunityCards,
-    } do
-        if cards and cards.ScrollBar then
-            S.StyleScrollBar(cards.ScrollBar)
-        end
-    end
+    StyleFinderGuildCards(finder.GuildCards)
+    StyleFinderGuildCards(finder.PendingGuildCards)
+    HookFinderCommunityCards(finder.CommunityCards)
+    HookFinderCommunityCards(finder.PendingCommunityCards)
 end
 
 ---------------------------------------------------------------------
