@@ -54,7 +54,6 @@ local function UpdateSideTab(tab, checked)
     AF.ClearPoints(tab.Icon)
     AF.SetPoint(tab.Icon, "CENTER")
     AF.SetSize(tab.Icon, 24, 24)
-    tab.SelectedTexture:SetShown(checked or tab:IsMouseOver())
 end
 
 local function StyleSideTab(tab, icon)
@@ -64,6 +63,10 @@ local function StyleSideTab(tab, icon)
         tab._BFIHousingSideTabStyled = true
         tab._BFIHousingIcon = icon
         hooksecurefunc(tab, "SetChecked", UpdateSideTab)
+        tab:HookScript("OnMouseUp", function(self)
+            AF.ClearPoints(self.Icon)
+            AF.SetPoint(self.Icon, "CENTER")
+        end)
     end
 end
 
@@ -96,6 +99,26 @@ end
 ---------------------------------------------------------------------
 -- catalog
 ---------------------------------------------------------------------
+local function StyleCatalogFilterRadio(frame)
+    S.StyleMenuSelection(frame)
+end
+
+local function StyleCatalogFilterMenuDescriptions(parentDescription)
+    for _, description in parentDescription:EnumerateElementDescriptions() do
+        if description:IsRadio() then
+            description:AddInitializer(StyleCatalogFilterRadio)
+        end
+        StyleCatalogFilterMenuDescriptions(description)
+    end
+end
+
+local function StyleCatalogFilterMenu(dropdown)
+    local rootDescription = dropdown:GetMenuDescription()
+    if not rootDescription then return end
+
+    StyleCatalogFilterMenuDescriptions(rootDescription)
+end
+
 local function UpdateCatalogEntry(frame, isPressed)
     local color
     if not frame:IsEnabled() then
@@ -156,19 +179,23 @@ local function UpdateCatalogCategory(frame)
         color = "widget"
     end
 
-    local alpha = frame.isActive and 0.6 or 0.8
+    local alpha = frame.isActive and 0.45 or 0.8
     frame.BFIHousingBackground:SetVertexColor(AF.GetColorRGB(color, alpha))
     frame.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
 
-    -- Blizzard category atlases include their circular chrome. Enlarge the
-    -- inactive identity art behind a square mask so only the central category
-    -- glyph remains, while the BFI background owns hover/selection state.
+    -- Blizzard category atlases include their circular chrome. Keep their
+    -- category identity, but show only the centered glyph through a clipped
+    -- square viewport; the BFI surface owns hover and selection state.
     local inactiveAtlas = frame.atlasNames and frame.atlasNames["_inactive"]
     if inactiveAtlas then
-        frame.Icon:SetAtlas(inactiveAtlas)
+        frame.BFIHousingGlyph:SetAtlas(inactiveAtlas)
+    else
+        frame.BFIHousingGlyph:SetTexture(frame.Icon:GetTexture())
+        frame.BFIHousingGlyph:SetTexCoord(frame.Icon:GetTexCoord())
     end
-    frame.Icon:SetVertexColor(AF.GetColorRGB(frame:IsEnabled() and "white" or "disabled"))
-    AF.SetOutside(frame.Icon, frame.BFIBackdrop, 10)
+    frame.Icon:SetAlpha(0)
+    frame.HoverIcon:SetAlpha(0)
+    frame.BFIHousingGlyph:SetVertexColor(AF.GetColorRGB(frame:IsEnabled() and "white" or "disabled"))
 
     if frame.SelectedBackground then
         frame.SelectedBackground:SetAlpha(0)
@@ -181,21 +208,26 @@ local function StyleCatalogCategory(frame)
     frame._BFIHousingCategoryStyled = true
 
     CreateSquareElement(frame)
+    frame.Icon:SetAlpha(0)
     frame.HoverIcon:SetAlpha(0)
 
-    local mask = frame:CreateMaskTexture(nil, "ARTWORK")
-    mask:SetTexture(AF.GetPlainTexture())
-    AF.SetOnePixelInside(mask, frame.BFIBackdrop)
-    frame.Icon:AddMaskTexture(mask)
-    frame.BFIHousingIconMask = mask
+    local glyphClip = CreateFrame("Frame", nil, frame)
+    glyphClip:SetClipsChildren(true)
+    AF.SetFrameLevel(glyphClip, 1)
+    AF.SetSize(glyphClip, 30, 30)
+    AF.SetPoint(glyphClip, "CENTER")
+    frame.BFIHousingGlyphClip = glyphClip
+
+    local glyph = glyphClip:CreateTexture(nil, "ARTWORK")
+    AF.SetSize(glyph, 48, 48)
+    AF.SetPoint(glyph, "CENTER")
+    frame.BFIHousingGlyph = glyph
 
     frame:HookScript("OnEnter", UpdateCatalogCategory)
     frame:HookScript("OnLeave", UpdateCatalogCategory)
     frame:HookScript("OnEnable", UpdateCatalogCategory)
     frame:HookScript("OnDisable", UpdateCatalogCategory)
-    if frame.UpdateVisuals then
-        hooksecurefunc(frame, "UpdateVisuals", UpdateCatalogCategory)
-    end
+    hooksecurefunc(frame, "UpdateState", UpdateCatalogCategory)
     UpdateCatalogCategory(frame)
 end
 
@@ -219,6 +251,10 @@ local function StyleCatalog(catalog)
     S.StyleDropdownButton(catalog.Filters.FilterDropdown)
     catalog.Filters.FilterDropdown.displacedRegions = nil
     S.StyleEditBox(catalog.SearchBox, -4)
+    AF.SetHeight(catalog.SearchBox, 20)
+
+    hooksecurefunc(catalog.Filters.FilterDropdown, "GenerateMenu", StyleCatalogFilterMenu)
+    StyleCatalogFilterMenu(catalog.Filters.FilterDropdown)
 
     local categories = catalog.Categories
     categories.Background:SetAlpha(0)
@@ -238,6 +274,12 @@ local function StyleCatalog(catalog)
     StyleVisibleCatalogEntries(options.ScrollBox)
 
     local preview = catalog.PreviewFrame
+    preview.PreviewBackground:SetColorTexture(AF.GetColorRGB("widget"))
+    preview.PreviewBackground:SetTexCoord(0, 1, 0, 1)
+    preview.PreviewCornerLeft:SetAlpha(0)
+    preview.PreviewCornerRight:SetAlpha(0)
+    S.CreateBackdrop(preview, true)
+
     S.StyleIconButton(preview.VariantLeftButton, AF.GetIcon("ArrowLeft2"), 16)
     S.StyleIconButton(preview.VariantRightButton, AF.GetIcon("ArrowRight2"), 16)
     AF.SetSize(preview.VariantLeftButton, 27, 27)
