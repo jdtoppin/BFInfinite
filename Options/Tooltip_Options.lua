@@ -10,6 +10,7 @@ local AF = _G.AbstractFramework
 local created = {}
 local builder = {}
 local options = {}
+local UNIT_LEVEL_LINE = Enum.TooltipDataLineType.UnitLevel
 
 local settings = {
     general = {
@@ -25,6 +26,10 @@ local settings = {
     },
 }
 
+if UNIT_LEVEL_LINE then
+    table.insert(settings.general, 3, "unitColors")
+end
+
 local function UpdateModule()
     AF.Fire("BFI_UpdateModule", "tooltip")
 end
@@ -33,6 +38,7 @@ local function UpdateGeneralWidgets()
     local enabled = T.config.enabled
     local behavior = created.customBehavior
     local position = created.position
+    local unitColors = created.unitColors
     local healthBar = created.healthBar
     if not (behavior and position and healthBar) then return end
 
@@ -41,10 +47,17 @@ local function UpdateGeneralWidgets()
     local cursorWithOffsets = enabled and (anchorMode == "cursor_left" or anchorMode == "cursor_right")
 
     AF.SetEnabled(enabled, behavior.hideInCombat, position.anchorMode, healthBar.enabled)
+    if unitColors then
+        AF.SetEnabled(enabled, unitColors.levelDifficultyColor)
+    end
     AF.SetEnabled(fixed, position.anchorPoint)
     position.fixedHint:SetShown(fixed)
     AF.SetEnabled(cursorWithOffsets, position.cursorX, position.cursorY)
-    AF.SetEnabled(enabled and T.config.healthBar.enabled, healthBar.height)
+    AF.SetEnabled(
+        enabled and T.config.healthBar.enabled,
+        healthBar.colorMode,
+        healthBar.height
+    )
 end
 
 ---------------------------------------------------------------------
@@ -177,12 +190,45 @@ builder.position = function(parent)
 end
 
 ---------------------------------------------------------------------
+-- unit colors
+---------------------------------------------------------------------
+builder.unitColors = function(parent)
+    if created.unitColors then return created.unitColors end
+
+    local pane = AF.CreateTitledPane(parent, L["Unit Tooltip Colors"], nil, 85)
+    created.unitColors = pane
+
+    local levelDifficultyColor = AF.CreateCheckButton(pane, L["Color Levels by Difficulty"])
+    AF.SetPoint(levelDifficultyColor, "TOPLEFT", pane, 10, -35)
+    levelDifficultyColor:SetOnCheck(function(checked)
+        pane.t.cfg.levelDifficultyColor = checked
+        UpdateModule()
+    end)
+
+    local levelTips = AF.CreateTipsButton(pane)
+    AF.SetPoint(levelTips, "LEFT", levelDifficultyColor.label, "RIGHT", 5, 0)
+    levelTips:SetTips(
+        L["Color Levels by Difficulty"],
+        L["Uses Blizzard's relative creature difficulty classification: gray, green, yellow, orange, or red"]
+    )
+
+    function pane.Load(t)
+        pane.t = t
+        levelDifficultyColor:SetChecked(t.cfg.levelDifficultyColor)
+        UpdateGeneralWidgets()
+    end
+
+    pane.levelDifficultyColor = levelDifficultyColor
+    return pane
+end
+
+---------------------------------------------------------------------
 -- health bar
 ---------------------------------------------------------------------
 builder.healthBar = function(parent)
     if created.healthBar then return created.healthBar end
 
-    local pane = AF.CreateTitledPane(parent, L["Native Health Bar"], nil, 130)
+    local pane = AF.CreateTitledPane(parent, L["Native Health Bar"], nil, 180)
     created.healthBar = pane
 
     local enabled = AF.CreateCheckButton(pane, L["Show Health Bar"])
@@ -193,8 +239,20 @@ builder.healthBar = function(parent)
         UpdateModule()
     end)
 
+    local colorMode = AF.CreateDropdown(pane, 180)
+    AF.SetPoint(colorMode, "TOPLEFT", enabled, "BOTTOMLEFT", 0, -35)
+    colorMode:SetLabel(L["Health Bar Color"])
+    colorMode:SetItems({
+        {text = L["Class Color"], value = "class"},
+        {text = L["Blizzard Default"], value = "native"},
+    })
+    colorMode:SetOnSelect(function(value)
+        pane.t.cfg.healthBar.colorMode = value
+        UpdateModule()
+    end)
+
     local height = AF.CreateSlider(pane, L["Height"], 150, 1, 20, 1, nil, true)
-    AF.SetPoint(height, "TOPLEFT", enabled, "BOTTOMLEFT", 0, -35)
+    AF.SetPoint(height, "TOPLEFT", colorMode, "BOTTOMLEFT", 0, -35)
     height:SetAfterValueChanged(function(value)
         pane.t.cfg.healthBar.height = value
         UpdateModule()
@@ -203,11 +261,13 @@ builder.healthBar = function(parent)
     function pane.Load(t)
         pane.t = t
         enabled:SetChecked(t.cfg.healthBar.enabled)
+        colorMode:SetSelectedValue(t.cfg.healthBar.colorMode)
         height:SetValue(t.cfg.healthBar.height)
         UpdateGeneralWidgets()
     end
 
     pane.enabled = enabled
+    pane.colorMode = colorMode
     pane.height = height
     return pane
 end
