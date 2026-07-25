@@ -209,6 +209,8 @@ local barContentItems = {
     {text = L["Name Only"], value = "name_only"},
 }
 
+local anchorPointItems = AF.GetDropdownItems_AnchorPoint()
+
 local viewerInfo = {
     essential = {
         label = L["Essential Cooldowns"],
@@ -376,6 +378,70 @@ local function CreateViewerPanes(parent, viewerKey)
         showTooltips:SetChecked(config.showTooltips)
     end)
 
+    local hotkeyPane = CreateRow(130)
+    local showHotkeys = AF.CreateCheckButton(hotkeyPane, L["Show Assigned Hotkeys"])
+    AF.SetPoint(showHotkeys, "TOPLEFT", 15, -8)
+    showHotkeys:SetOnCheck(function(checked)
+        CM.config.viewers[viewerKey].showHotkeys = checked
+        UpdateModule()
+        hotkeyPane.UpdateEnabled()
+    end)
+
+    local anchorPoint = AF.CreateDropdown(hotkeyPane, CONTROL_WIDTH)
+    AF.SetPoint(anchorPoint, "TOPLEFT", showHotkeys, "BOTTOMLEFT", 0, -28)
+    anchorPoint:SetLabel(L["Anchor Point"])
+    anchorPoint:SetItems(anchorPointItems)
+    anchorPoint:SetOnSelect(function(value)
+        CM.config.viewers[viewerKey].hotkeyPosition[1] = value
+        UpdateModule()
+    end)
+
+    local relativePoint = AF.CreateDropdown(hotkeyPane, CONTROL_WIDTH)
+    AF.SetPoint(relativePoint, "TOPLEFT", anchorPoint, COLUMN_OFFSET, 0)
+    relativePoint:SetLabel(L["Relative Point"])
+    relativePoint:SetItems(anchorPointItems)
+    relativePoint:SetOnSelect(function(value)
+        CM.config.viewers[viewerKey].hotkeyPosition[2] = value
+        UpdateModule()
+    end)
+
+    local xOffset = AF.CreateSlider(hotkeyPane, L["X Offset"], CONTROL_WIDTH, -100, 100, 0.5, nil, true)
+    AF.SetPoint(xOffset, "TOPLEFT", anchorPoint, "BOTTOMLEFT", 0, -25)
+    xOffset:SetAfterValueChanged(function(value)
+        CM.config.viewers[viewerKey].hotkeyPosition[3] = value
+        UpdateModule()
+    end)
+
+    local yOffset = AF.CreateSlider(hotkeyPane, L["Y Offset"], CONTROL_WIDTH, -100, 100, 0.5, nil, true)
+    AF.SetPoint(yOffset, "TOPLEFT", xOffset, COLUMN_OFFSET, 0)
+    yOffset:SetAfterValueChanged(function(value)
+        CM.config.viewers[viewerKey].hotkeyPosition[4] = value
+        UpdateModule()
+    end)
+
+    function hotkeyPane.UpdateEnabled()
+        local config = CM.config.viewers[viewerKey]
+        showHotkeys:SetEnabled(CM.config.enabled)
+        AF.SetEnabled(
+            CM.config.enabled and config.showHotkeys,
+            anchorPoint,
+            relativePoint,
+            xOffset,
+            yOffset
+        )
+    end
+
+    function hotkeyPane.Load()
+        local config = CM.config.viewers[viewerKey]
+        local position = config.hotkeyPosition
+        showHotkeys:SetChecked(config.showHotkeys)
+        anchorPoint:SetSelectedValue(position[1])
+        relativePoint:SetSelectedValue(position[2])
+        xOffset:SetValue(position[3])
+        yOffset:SetValue(position[4])
+        hotkeyPane.UpdateEnabled()
+    end
+
     if info.hasBarSettings then
         local barPane = CreateRow(55)
         local barContent = AF.CreateDropdown(barPane, CONTROL_WIDTH)
@@ -408,6 +474,7 @@ local function CreateOptionGroups(parent)
     optionGroups.general = CreateModulePanes(parent)
     optionGroups.general[#optionGroups.general + 1] = CreateFontPane(parent, "cooldownText", L["Cooldown Text"])
     optionGroups.general[#optionGroups.general + 1] = CreateFontPane(parent, "countText", L["Count Text"])
+    optionGroups.general[#optionGroups.general + 1] = CreateFontPane(parent, "hotkeyText", L["Hot Key"])
     optionGroups.general[#optionGroups.general + 1] = CreateFontPane(parent, "barText", L["Bar Text"])
 
     for key in next, viewerInfo do

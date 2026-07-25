@@ -18,6 +18,10 @@ local defaults = {
         font = {"BFI", 12, "outline", false},
         color = AF.GetColorTable("white"),
     },
+    hotkeyText = {
+        font = {"BFI", 10, "outline", false},
+        color = AF.GetColorTable("white"),
+    },
     barText = {
         font = {"BFI", 12, "outline", false},
         color = AF.GetColorTable("white"),
@@ -35,6 +39,8 @@ local defaults = {
             visibility = "always",
             showTimer = true,
             showTooltips = true,
+            showHotkeys = true,
+            hotkeyPosition = {"TOPRIGHT", "TOPRIGHT", 0, 0},
         },
         utility = {
             position = {"BOTTOM", 0, 240},
@@ -48,6 +54,8 @@ local defaults = {
             visibility = "always",
             showTimer = true,
             showTooltips = true,
+            showHotkeys = true,
+            hotkeyPosition = {"TOPRIGHT", "TOPRIGHT", 0, 0},
         },
         buffIcon = {
             position = {"BOTTOM", 0, 370},
@@ -60,6 +68,8 @@ local defaults = {
             visibility = "always",
             showTimer = true,
             showTooltips = true,
+            showHotkeys = true,
+            hotkeyPosition = {"TOPRIGHT", "TOPRIGHT", 0, 0},
         },
         buffBar = {
             position = {"BOTTOM", 420, 430},
@@ -72,6 +82,8 @@ local defaults = {
             visibility = "always",
             showTimer = true,
             showTooltips = true,
+            showHotkeys = true,
+            hotkeyPosition = {"TOPRIGHT", "TOPRIGHT", 0, 0},
             barContent = "icon_and_name",
             barWidthScale = 1,
         },
@@ -81,8 +93,27 @@ local defaults = {
 AF.RegisterCallback("BFI_UpdateProfile", function(_, profile)
     if not profile.cooldownManager then
         profile.cooldownManager = AF.Copy(defaults)
-    elseif profile.cooldownManager.assistedHighlight == nil then
-        profile.cooldownManager.assistedHighlight = defaults.assistedHighlight
+    else
+        local config = profile.cooldownManager
+        if config.assistedHighlight == nil then
+            config.assistedHighlight = defaults.assistedHighlight
+        end
+        if type(config.hotkeyText) ~= "table" then
+            config.hotkeyText = AF.Copy(defaults.hotkeyText)
+        end
+        if type(config.viewers) == "table" then
+            for key, viewerDefaults in next, defaults.viewers do
+                local viewerConfig = config.viewers[key]
+                if type(viewerConfig) == "table" then
+                    if viewerConfig.showHotkeys == nil then
+                        viewerConfig.showHotkeys = viewerDefaults.showHotkeys
+                    end
+                    if type(viewerConfig.hotkeyPosition) ~= "table" then
+                        viewerConfig.hotkeyPosition = AF.Copy(viewerDefaults.hotkeyPosition)
+                    end
+                end
+            end
+        end
     end
     CM.config = profile.cooldownManager
 end)

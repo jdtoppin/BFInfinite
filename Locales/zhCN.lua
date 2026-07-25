@@ -358,6 +358,7 @@ L["Paging"] = "翻页"
 ---------------------------------------------------------------------
 L["Cooldown Manager"] = "冷却管理器"
 L["Skin Cooldown Manager Icons"] = "美化冷却管理器图标"
+L["Show Assigned Hotkeys"] = "显示已分配的快捷键"
 L["Show Assisted Highlight on Cooldown Icons"] = "在冷却图标上显示辅助高亮"
 L["Shows Blizzard's current recommendation on Essential and Utility cooldown icons. Follows the global Assisted Highlight setting."] = "在核心和功能冷却图标上显示暴雪当前的推荐。此选项遵循全局辅助高亮设置。"
 L["Use BFI Edit Mode to move and preview these layouts. BFI controls presentation and positioning; Blizzard controls tracked abilities, cooldown data, alerts, and inactive entries."] = "使用 BFI 编辑模式移动并预览这些布局。BFI 管理外观和位置；追踪项目、冷却数据、提醒和未激活条目仍由暴雪管理。"

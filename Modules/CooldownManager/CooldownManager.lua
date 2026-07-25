@@ -8,6 +8,7 @@ local AF = _G.AbstractFramework
 
 local _G = _G
 local CheckAllowProtectedFunctions = C_RestrictedActions.CheckAllowProtectedFunctions
+local GetBindingKey = GetBindingKey
 local GetCVar = GetCVar
 local GetCVarBool = GetCVarBool
 local InCombatLockdown = InCombatLockdown
@@ -80,6 +81,59 @@ local viewerDefinitions = {
     },
 }
 
+local ACTION_BUTTONS_PER_PAGE = 12
+local directActionPageBindings = {
+    [3] = "MULTIACTIONBAR3BUTTON",
+    [4] = "MULTIACTIONBAR4BUTTON",
+    [5] = "MULTIACTIONBAR2BUTTON",
+    [6] = "MULTIACTIONBAR1BUTTON",
+    [13] = "MULTIACTIONBAR5BUTTON",
+    [14] = "MULTIACTIONBAR6BUTTON",
+    [15] = "MULTIACTIONBAR7BUTTON",
+}
+local bfiActionBarPriority = {
+    "bar1",
+    "bar2",
+    "bar3",
+    "bar4",
+    "bar5",
+    "bar6",
+    "bar7",
+    "bar8",
+    "bar9",
+    "classbar1",
+    "classbar2",
+    "classbar3",
+    "classbar4",
+}
+local anchorPoints = {
+    TOPLEFT = true,
+    TOP = true,
+    TOPRIGHT = true,
+    LEFT = true,
+    CENTER = true,
+    RIGHT = true,
+    BOTTOMLEFT = true,
+    BOTTOM = true,
+    BOTTOMRIGHT = true,
+}
+local horizontalJustification = {
+    TOPLEFT = "LEFT",
+    LEFT = "LEFT",
+    BOTTOMLEFT = "LEFT",
+    TOPRIGHT = "RIGHT",
+    RIGHT = "RIGHT",
+    BOTTOMRIGHT = "RIGHT",
+}
+local verticalJustification = {
+    TOPLEFT = "TOP",
+    TOP = "TOP",
+    TOPRIGHT = "TOP",
+    BOTTOMLEFT = "BOTTOM",
+    BOTTOM = "BOTTOM",
+    BOTTOMRIGHT = "BOTTOM",
+}
+
 -- AbstractFramework captures these methods from plain widgets before any
 -- addon can replace a method on a Blizzard frame. Use the captured closures
 -- instead of method lookup on native Cooldown Viewer objects.
@@ -114,12 +168,20 @@ local FrameIsMouseMotionEnabled = methodFrame.IsMouseMotionEnabled
 local FrameIsShown = methodFrame.IsShown
 local FrameSetAlpha = methodFrame.SetAlpha
 local FrameSetAllPoints = methodFrame.SetAllPoints
+local FrameCreateFontString = methodFrame.CreateFontString
 local FrameSetMouseMotionEnabled = methodFrame.SetMouseMotionEnabled
 local FrameSetScale = methodFrame.SetScale
+local FontStringClearAllPoints = methodFontString.ClearAllPoints
 local FontStringGetAlpha = methodFontString.GetAlpha
 local FontStringIsShown = methodFontString.IsShown
 local FontStringSetAlpha = methodFontString.SetAlpha
+local FontStringSetDrawLayer = methodFontString.SetDrawLayer
+local FontStringSetJustifyH = methodFontString.SetJustifyH
+local FontStringSetJustifyV = methodFontString.SetJustifyV
+local FontStringSetPoint = methodFontString.SetPoint
+local FontStringSetText = methodFontString.SetText
 local FontStringSetTextColor = methodFontString.SetTextColor
+local FontStringSetWidth = methodFontString.SetWidth
 local FontStringHide = methodFontString.Hide
 local FontStringShow = methodFontString.Show
 local MaskTextureHide = methodMaskTexture.Hide
@@ -149,6 +211,8 @@ local viewerStateByKey = {}
 local itemStates = setmetatable({}, {__mode = "k"})
 local iconSkins = setmetatable({}, {__mode = "k"})
 local barSkins = setmetatable({}, {__mode = "k"})
+local hotkeyOverlays = setmetatable({}, {__mode = "k"})
+local bfiActionButtonActions = setmetatable({}, {__mode = "k"})
 local assistedHighlights = setmetatable({}, {__mode = "k"})
 local assistedBaseSpellIDs = {}
 local presentationController = CreateFrame("Frame")
@@ -158,7 +222,9 @@ local assistedHighlightBaseSpellID
 local assistedHighlightUpdateTimeLeft = 0
 local presentationUpdateTimeLeft = 0
 local presentationGeneration = 1
+local hotkeyGeneration = 1
 local fallbackOrder = 0
+local ApplyFont
 
 local function IsSafeBoolean(value)
     return IsValueNonSecret(value) and type(value) == "boolean"
@@ -305,6 +371,9 @@ local function GetItemBaseSpellID(item)
         return nil
     end
 
+    -- Retail 12.1 permits category/equipment/buff records without a spellID.
+    -- Those entries have no safe action-slot lookup and intentionally fail
+    -- closed instead of consulting mutable item mixin state.
     local spellID = GetNonSecretSpellID(cooldownInfo.spellID)
     if not spellID then return nil end
 
@@ -366,6 +435,8 @@ local function SetAssistedHighlightSpell(spellID)
 
     assistedHighlightSpellID = spellID
     assistedHighlightBaseSpellID = baseSpellID
+    hotkeyGeneration = hotkeyGeneration + 1
+    presentationUpdateTimeLeft = 0
 end
 
 local function PollAssistedHighlight(_, elapsed)
@@ -428,10 +499,315 @@ CVarCallbackRegistry:RegisterCallback(
 )
 
 ---------------------------------------------------------------------
+-- Assigned action-bar hotkeys
+---------------------------------------------------------------------
+-- Retail 12.0.7 and 12.1 expose the same FindSpellActionButtons
+-- contract: it accepts a base spell and returns action slots. Resolve those
+-- slots against BFI-owned buttons first so secure paging and custom class
+-- bars remain authoritative. Every returned value is rejected unless it is
+-- non-secret; no GetActionInfo scan or Cooldown Viewer item mixin is used.
+local function GetFormattedBinding(command)
+    if not IsSafeString(command) then return nil end
+
+    local key = GetBindingKey(command)
+    if not IsSafeString(key) or key == "" then
+        return nil
+    end
+
+    -- Cooldown Manager loads before Action Bars, so resolve the canonical
+    -- formatter only when presentation is applied.
+    local actionBars = BFI.modules.ActionBars
+    local formatter = actionBars and actionBars.GetHotkey
+    if IsValueNonSecret(formatter) and type(formatter) == "function" then
+        local hotkey = formatter(key)
+        if IsSafeString(hotkey) and hotkey ~= "" then
+            return hotkey
+        end
+        return nil
+    end
+    return key
+end
+
+local function ValidateActionSlots(slots)
+    if slots == nil then
+        return {}
+    end
+    if not IsValueNonSecret(slots) or type(slots) ~= "table" then
+        return nil
+    end
+
+    local safeSlots = {}
+    for _, slot in ipairs(slots) do
+        if not IsSafeNumber(slot)
+            or slot < 1
+            or slot ~= math.floor(slot)
+        then
+            return nil
+        end
+        safeSlots[#safeSlots + 1] = slot
+    end
+    sort(safeSlots)
+    return safeSlots
+end
+
+local function GetSpellActionSlots(baseSpellID)
+    if not baseSpellID
+        or not C_ActionBar
+        or type(C_ActionBar.FindSpellActionButtons) ~= "function"
+    then
+        return {}
+    end
+    return ValidateActionSlots(C_ActionBar.FindSpellActionButtons(baseSpellID))
+end
+
+local function GetAssistedCombatActionSlots()
+    if not C_ActionBar
+        or type(C_ActionBar.FindAssistedCombatActionButtons) ~= "function"
+    then
+        return {}
+    end
+    return ValidateActionSlots(C_ActionBar.FindAssistedCombatActionButtons())
+end
+
+local function GetBFIActionBarHotkey(slots)
+    local actionBars = BFI.modules.ActionBars
+    local bars = actionBars and actionBars.bars
+    if not IsValueNonSecret(bars) or type(bars) ~= "table" then
+        return nil
+    end
+
+    local wantedSlots = {}
+    for _, slot in ipairs(slots) do
+        wantedSlots[slot] = true
+    end
+
+    for _, barName in ipairs(bfiActionBarPriority) do
+        local bar = bars[barName]
+        if IsValueNonSecret(bar) and bar then
+            local enabled = bar.enabled
+            local buttons = bar.buttons
+            if IsSafeBoolean(enabled)
+                and enabled
+                and IsValueNonSecret(buttons)
+                and type(buttons) == "table"
+            then
+                for _, button in ipairs(buttons) do
+                    if IsValueNonSecret(button) and button then
+                        local action = button.action
+                        local command = button.keyBoundTarget
+                        if IsSafeNumber(action)
+                            and wantedSlots[action]
+                            and IsSafeString(command)
+                        then
+                            local hotkey = GetFormattedBinding(command)
+                            if hotkey then
+                                return hotkey
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function GetStandardActionBarHotkey(slots)
+    local currentPage
+    if C_ActionBar and type(C_ActionBar.GetActionBarPage) == "function" then
+        local page = C_ActionBar.GetActionBarPage()
+        if IsSafeNumber(page) then
+            currentPage = page
+        end
+    end
+
+    for _, slot in ipairs(slots) do
+        local page = math.floor((slot - 1) / ACTION_BUTTONS_PER_PAGE) + 1
+        local buttonIndex = (slot - 1) % ACTION_BUTTONS_PER_PAGE + 1
+        local prefix = directActionPageBindings[page]
+        if prefix then
+            local hotkey = GetFormattedBinding(prefix .. buttonIndex)
+            if hotkey then
+                return hotkey
+            end
+        end
+        if currentPage and page == currentPage then
+            local hotkey = GetFormattedBinding("ACTIONBUTTON" .. buttonIndex)
+            if hotkey then
+                return hotkey
+            end
+        end
+    end
+    return nil
+end
+
+local function ResolveSlotsHotkey(slots)
+    if not slots or #slots == 0 then return nil end
+    return GetBFIActionBarHotkey(slots) or GetStandardActionBarHotkey(slots)
+end
+
+local function ResolveItemHotkey(item)
+    local baseSpellID = GetItemBaseSpellID(item)
+    if not baseSpellID then return nil end
+
+    local slots = GetSpellActionSlots(baseSpellID)
+    if not slots then return nil end
+
+    local hotkey = ResolveSlotsHotkey(slots)
+    if hotkey then return hotkey end
+
+    local matchesAssisted = assistedHighlightSpellID
+        and (baseSpellID == assistedHighlightSpellID
+            or baseSpellID == assistedHighlightBaseSpellID)
+    if matchesAssisted then
+        return ResolveSlotsHotkey(GetAssistedCombatActionSlots())
+    end
+    return nil
+end
+
+local function OnBFIActionButtonUpdate(_event, button)
+    if not IsValueNonSecret(button) or not button then return end
+
+    local action = button.action
+    action = IsSafeNumber(action) and action or false
+    if bfiActionButtonActions[button] == action then return end
+
+    bfiActionButtonActions[button] = action
+    hotkeyGeneration = hotkeyGeneration + 1
+    presentationUpdateTimeLeft = 0
+end
+
+-- BFI bars support arbitrary secure paging conditions that do not always
+-- produce ACTIONBAR_PAGE_CHANGED. LibActionButton reports its guarded active
+-- slot after every state update; caching the slot keeps routine updates cheap.
+local LAB = BFI.libs and BFI.libs.LAB
+if IsValueNonSecret(LAB)
+    and type(LAB) == "table"
+    and type(LAB.RegisterCallback) == "function"
+then
+    LAB.RegisterCallback(CM, "OnButtonUpdate", OnBFIActionButtonUpdate)
+end
+
+local function GetHotkeyTarget(item, definition)
+    if definition.isBar then
+        return GetSafeField(item, "Icon")
+    end
+    return item
+end
+
+local function EnsureHotkeyOverlay(item, definition)
+    local target = GetHotkeyTarget(item, definition)
+    if not target then
+        return nil, target
+    end
+
+    local overlay = hotkeyOverlays[item]
+    if overlay and overlay.frame and overlay.text and overlay.anchored then
+        return overlay, target
+    end
+    if not CanChangeGeometry(item) or not CanChangeGeometry(target) then
+        return nil, target
+    end
+
+    if not overlay then
+        overlay = {}
+        hotkeyOverlays[item] = overlay
+    end
+
+    if not overlay.frame then
+        local itemLevel = FrameGetFrameLevel(item)
+        local targetLevel = FrameGetFrameLevel(target)
+        if not IsSafeNumber(itemLevel) or not IsSafeNumber(targetLevel) then
+            return nil, target
+        end
+
+        local frame = CreateFrame("Frame", nil, item)
+        overlay.frame = frame
+        if not CanChangeGeometry(frame) then
+            return nil, target
+        end
+        FrameSetFrameLevel(frame, min(max(itemLevel, targetLevel) + 20, 10000))
+    end
+
+    if not overlay.text then
+        if not CanChangeGeometry(overlay.frame) then
+            return nil, target
+        end
+        local text = FrameCreateFontString(overlay.frame, nil, "OVERLAY")
+        if not IsValueNonSecret(text) or not text then
+            return nil, target
+        end
+        overlay.text = text
+        if not CanChangeGeometry(text) then
+            return nil, target
+        end
+        FontStringSetDrawLayer(text, "OVERLAY", 7)
+        FontStringSetWidth(text, 0)
+        FontStringHide(text)
+    end
+
+    if not overlay.anchored then
+        if not CanChangeGeometry(overlay.frame)
+            or not CanChangeGeometry(item)
+        then
+            return nil, target
+        end
+        -- Commit the native-size anchor only after the script-free overlay is
+        -- complete, matching the skin primitive's secret-safe layout path.
+        FrameSetAllPoints(overlay.frame, item)
+        FrameShow(overlay.frame)
+        overlay.anchored = true
+    end
+
+    return overlay, target
+end
+
+local function GetHotkeyPosition(config)
+    local position = config.hotkeyPosition
+    if not IsValueNonSecret(position) or type(position) ~= "table" then
+        return "TOPRIGHT", "TOPRIGHT", 0, 0
+    end
+
+    local point = position[1]
+    if not IsSafeString(point) or not anchorPoints[point] then
+        point = "TOPRIGHT"
+    end
+    local relativePoint = position[2]
+    if not IsSafeString(relativePoint) or not anchorPoints[relativePoint] then
+        relativePoint = "TOPRIGHT"
+    end
+    local x = ClampNumber(position[3], 0, -100, 100)
+    local y = ClampNumber(position[4], 0, -100, 100)
+    return point, relativePoint, x, y
+end
+
+local function PositionHotkey(text, target, config, scale)
+    local point, relativePoint, x, y = GetHotkeyPosition(config)
+    scale = scale or 1
+    FontStringSetJustifyH(text, horizontalJustification[point] or "CENTER")
+    FontStringSetJustifyV(text, verticalJustification[point] or "MIDDLE")
+    FontStringClearAllPoints(text)
+    FontStringSetPoint(text, point, target, relativePoint, x * scale, y * scale)
+end
+
+local function HideItemHotkey(item)
+    local overlay = hotkeyOverlays[item]
+    if not overlay or not overlay.text then
+        return true
+    end
+    if not CanChangeGeometry(overlay.text) then
+        return false
+    end
+    FontStringHide(overlay.text)
+    return true
+end
+
+---------------------------------------------------------------------
 -- BFI-owned holders and edit-mode previews
 ---------------------------------------------------------------------
 local function MarkPresentationDirty()
     presentationGeneration = presentationGeneration + 1
+    hotkeyGeneration = hotkeyGeneration + 1
     presentationUpdateTimeLeft = 0
 end
 
@@ -599,11 +975,17 @@ local function EnsurePreviewFrame(state, index)
     preview:SetBackdropColor(AF.GetColorRGB("widget_dark", 0.65))
     preview:SetBackdropBorderColor(AF.GetColorRGB("BFI", 0.8))
     preview:EnableMouse(false)
+    preview.hotkey = AF.CreateFontString(preview, nil, nil, nil, "OVERLAY")
+    preview.hotkey:SetWidth(0)
+    preview.hotkey:Hide()
+    if state.definition.isBar then
+        preview.hotkeyTarget = CreateFrame("Frame", nil, preview)
+    end
     state.previewFrames[index] = preview
     return preview
 end
 
-local function UpdateHolderPreview(state, layout, firstItem)
+local function UpdateHolderPreview(state, layout, firstItem, config)
     local holder = state.holder
     local scaleRatio = GetHolderScaleRatio(holder, firstItem, layout.scale)
     local width, height = GetLayoutBounds(layout)
@@ -619,6 +1001,24 @@ local function UpdateHolderPreview(state, layout, firstItem)
         FrameSetSize(preview, layout.width * scaleRatio, layout.height * scaleRatio)
         FrameClearAllPoints(preview)
         FrameSetPoint(preview, "CENTER", holder, "CENTER", x * scaleRatio, y * scaleRatio)
+        local hotkeyTarget = preview.hotkeyTarget or preview
+        if preview.hotkeyTarget then
+            FrameSetSize(
+                preview.hotkeyTarget,
+                layout.height * scaleRatio,
+                layout.height * scaleRatio
+            )
+            FrameClearAllPoints(preview.hotkeyTarget)
+            FrameSetPoint(preview.hotkeyTarget, "LEFT", preview, "LEFT", 0, 0)
+        end
+        if config.showHotkeys ~= false then
+            ApplyFont(preview.hotkey, CM.config.hotkeyText, scaleRatio)
+            PositionHotkey(preview.hotkey, hotkeyTarget, config, scaleRatio)
+            FontStringSetText(preview.hotkey, "1")
+            FontStringShow(preview.hotkey)
+        else
+            FontStringHide(preview.hotkey)
+        end
         FrameShow(preview)
     end
     for index = previewCount + 1, #state.previewFrames do
@@ -808,10 +1208,19 @@ local function RestoreItemPresentation(item, definition, itemState)
     if highlight then
         highlight:SetAlpha(0)
     end
+    HideItemHotkey(item)
+    itemState.hotkeyGeneration = nil
+    itemState.hotkeyStyleGeneration = nil
+    itemState.hotkeyCooldownID = nil
     itemState.presentationGeneration = nil
 end
 
 local function CanRestoreItemPresentation(item, definition)
+    local hotkey = hotkeyOverlays[item]
+    if hotkey and hotkey.text and not CanChangeGeometry(hotkey.text) then
+        return false
+    end
+
     local cooldown = GetSafeField(item, "Cooldown")
     if cooldown and not CanChangeGeometry(cooldown) then
         return false
@@ -1055,10 +1464,63 @@ local function SkinBar(bar)
     FrameShow(skin.border)
 end
 
-local function ApplyFont(fontString, config)
+ApplyFont = function(fontString, config, scale)
     if not IsValueNonSecret(fontString) or not fontString or not config then return end
-    AF.SetFont(fontString, config.font)
+    local font = config.font
+    if scale and scale ~= 1 then
+        font = {font[1], font[2] * scale, font[3], font[4]}
+    end
+    AF.SetFont(fontString, font)
     FontStringSetTextColor(fontString, AF.UnpackColor(config.color))
+end
+
+local function ApplyHotkeyPresentation(item, definition, config, itemState)
+    local cooldownID = GetNonSecretSpellID(item.cooldownID)
+    local cooldownKey = cooldownID or false
+    if config.showHotkeys == false then
+        local existing = hotkeyOverlays[item]
+        if existing and existing.text then
+            FontStringSetText(existing.text, "")
+        end
+        itemState.hotkeyGeneration = hotkeyGeneration
+        itemState.hotkeyCooldownID = cooldownKey
+        return true
+    end
+
+    local overlay, target = EnsureHotkeyOverlay(item, definition)
+    if not overlay
+        or not overlay.text
+        or not target
+    then
+        return false
+    end
+
+    if itemState.hotkeyStyleGeneration ~= presentationGeneration then
+        if not CanChangeGeometry(overlay.text)
+            or not CanChangeGeometry(target)
+        then
+            return false
+        end
+        ApplyFont(overlay.text, CM.config.hotkeyText)
+        PositionHotkey(overlay.text, target, config)
+        FontStringShow(overlay.text)
+        itemState.hotkeyStyleGeneration = presentationGeneration
+    end
+
+    if itemState.hotkeyGeneration == hotkeyGeneration
+        and itemState.hotkeyCooldownID == cooldownKey
+    then
+        return true
+    end
+
+    local hotkey = cooldownID and ResolveItemHotkey(item)
+    -- SetText accepts tainted execution in both audited clients; unlike
+    -- geometry/visibility methods it is safe here because the resolver only
+    -- returns guarded, non-secret strings. Keep bindings current in combat.
+    FontStringSetText(overlay.text, hotkey or "")
+    itemState.hotkeyGeneration = hotkeyGeneration
+    itemState.hotkeyCooldownID = cooldownKey
+    return true
 end
 
 local function GetCountText(item, definition)
@@ -1256,6 +1718,7 @@ local function ApplyRuntimePresentation(item, config, itemState)
         end
     end
     itemState.presentationRestored = nil
+    ApplyHotkeyPresentation(item, itemState.definition, config, itemState)
     UpdateItemAssistedHighlight(item)
 end
 
@@ -1444,7 +1907,7 @@ local function ReconcileViewer(state, config)
         RestoreMissingItems(state, activeSet)
 
         local previewLayout = BuildLayout(state.definition, config, state.definition.previewCount)
-        UpdateHolderPreview(state, previewLayout)
+        UpdateHolderPreview(state, previewLayout, nil, config)
         return restored
     end
 
@@ -1455,7 +1918,7 @@ local function ReconcileViewer(state, config)
     local layout = BuildLayout(state.definition, config, displayCount)
 
     if layoutCount == 0 then
-        UpdateHolderPreview(state, layout)
+        UpdateHolderPreview(state, layout, nil, config)
         return true
     end
 
@@ -1471,7 +1934,7 @@ local function ReconcileViewer(state, config)
             scale = layout.scale,
         }
         if not PrepareItemGeometry(entry, state, desired) then
-            UpdateHolderPreview(state, layout, visibleItems[1].item)
+            UpdateHolderPreview(state, layout, visibleItems[1].item, config)
             return false
         end
         needsGeometry = needsGeometry or entry.needsGeometry
@@ -1494,7 +1957,7 @@ local function ReconcileViewer(state, config)
             if entry.needsGeometry and (not CanChangeGeometry(entry.item)
                 or (bar and not CanChangeGeometry(bar)))
             then
-                UpdateHolderPreview(state, layout, visibleItems[1].item)
+                UpdateHolderPreview(state, layout, visibleItems[1].item, config)
                 return false
             end
         end
@@ -1528,7 +1991,7 @@ local function ReconcileViewer(state, config)
         end
     end
 
-    UpdateHolderPreview(state, layout, visibleItems[1].item)
+    UpdateHolderPreview(state, layout, visibleItems[1].item, config)
     return true
 end
 
@@ -1602,6 +2065,11 @@ local function StartPresentationPolling()
 end
 
 local function UpdateCooldownManager(_, module)
+    if module == "actionBars" then
+        hotkeyGeneration = hotkeyGeneration + 1
+        StartPresentationPolling()
+        return
+    end
     if module and module ~= "cooldownManager" then return end
 
     MarkPresentationDirty()
@@ -1609,9 +2077,34 @@ local function UpdateCooldownManager(_, module)
     UpdateAssistedHighlightPolling()
 end
 
-presentationController:RegisterEvent("PLAYER_REGEN_ENABLED")
-presentationController:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED")
-presentationController:SetScript("OnEvent", StartPresentationPolling)
+local hotkeyRefreshEvents = {
+    PLAYER_REGEN_ENABLED = true,
+    ADDON_RESTRICTION_STATE_CHANGED = true,
+    UPDATE_BINDINGS = true,
+    ACTIONBAR_SLOT_CHANGED = true,
+    ACTIONBAR_PAGE_CHANGED = true,
+    UPDATE_BONUS_ACTIONBAR = true,
+    UPDATE_OVERRIDE_ACTIONBAR = true,
+    UPDATE_VEHICLE_ACTIONBAR = true,
+    UPDATE_POSSESS_BAR = true,
+    UPDATE_SHAPESHIFT_FORM = true,
+    SPELLS_CHANGED = true,
+    PLAYER_SPECIALIZATION_CHANGED = true,
+    COOLDOWN_VIEWER_DATA_LOADED = true,
+    COOLDOWN_VIEWER_TABLE_HOTFIXED = true,
+}
+
+local function OnPresentationEvent(_, event)
+    if hotkeyRefreshEvents[event] then
+        hotkeyGeneration = hotkeyGeneration + 1
+    end
+    StartPresentationPolling()
+end
+
+for event in next, hotkeyRefreshEvents do
+    presentationController:RegisterEvent(event)
+end
+presentationController:SetScript("OnEvent", OnPresentationEvent)
 
 EventUtil.ContinueOnAddOnLoaded("Blizzard_CooldownViewer", function()
     UpdateCooldownManager(nil, "cooldownManager")
