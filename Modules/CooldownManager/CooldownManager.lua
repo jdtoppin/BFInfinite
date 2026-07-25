@@ -1059,9 +1059,15 @@ local function EnsurePreviewFrame(state, index)
     preview.hotkey = AF.CreateFontString(preview, nil, nil, nil, "OVERLAY")
     preview.hotkey:SetWidth(0)
     preview.hotkey:Hide()
+    preview.count = AF.CreateFontString(preview, nil, nil, nil, "OVERLAY")
+    preview.count:SetWidth(0)
+    preview.count:Hide()
     preview.timerTarget = CreateFrame("Frame", nil, preview)
     if state.definition.isBar then
         preview.hotkeyTarget = CreateFrame("Frame", nil, preview)
+        preview.name = AF.CreateFontString(preview, nil, nil, nil, "OVERLAY")
+        preview.name:SetWidth(0)
+        preview.name:Hide()
     end
     state.previewFrames[index] = preview
     return preview
@@ -1135,17 +1141,58 @@ local function UpdateHolderPreview(state, layout, firstItem, config)
             end
         end
         if config.showHotkeys ~= false then
-            ApplyFont(preview.hotkey, CM.config.hotkeyText, scaleRatio)
+            ApplyFont(preview.hotkey, config.hotkeyText, scaleRatio)
             PositionHotkey(preview.hotkey, hotkeyTarget, config, scaleRatio)
             FontStringSetText(preview.hotkey, "1")
             FontStringShow(preview.hotkey)
         else
             FontStringHide(preview.hotkey)
         end
+        local countTarget = preview.hotkeyTarget or preview
+        local showCount = not state.definition.isBar
+            or config.barContent ~= "name_only"
+        if showCount then
+            local countX = state.definition.isBar and -5 or -2
+            local countY = state.definition.isBar and 5 or 2
+            ApplyFont(preview.count, config.countText, scaleRatio)
+            PresentationMethods.PositionText(
+                preview.count,
+                countTarget,
+                nil,
+                "BOTTOMRIGHT",
+                "BOTTOMRIGHT",
+                countX,
+                countY,
+                scaleRatio
+            )
+            FontStringSetText(preview.count, "2")
+            FontStringShow(preview.count)
+        else
+            FontStringHide(preview.count)
+        end
+        if preview.name then
+            if config.barContent ~= "icon_only" then
+                ApplyFont(preview.name, config.barText, scaleRatio)
+                PresentationMethods.PositionText(
+                    preview.name,
+                    preview.timerTarget,
+                    nil,
+                    "LEFT",
+                    "LEFT",
+                    5,
+                    0,
+                    scaleRatio
+                )
+                FontStringSetText(preview.name, L["Cooldown"])
+                FontStringShow(preview.name)
+            else
+                FontStringHide(preview.name)
+            end
+        end
         if config.showTimer ~= false then
             local timerConfig = state.definition.isBar
-                and CM.config.durationText
-                or CM.config.cooldownText
+                and config.durationText
+                or config.cooldownText
             local defaultPoint = state.definition.isBar and "RIGHT" or "CENTER"
             local defaultX = state.definition.isBar and -8 or 0
             ApplyFont(preview.timer, timerConfig, scaleRatio)
@@ -1351,6 +1398,8 @@ local function CaptureAlpha(region, getAlpha)
     return nil
 end
 
+local GetCountText
+
 local function CapturePresentationDefaults(item, definition, itemState)
     if itemState.presentationCaptured then return end
     itemState.presentationCaptured = true
@@ -1395,11 +1444,13 @@ local function RecapturePresentationDefaults(item, definition, itemState)
     itemState.nativeHideCountdownNumbers = nil
     itemState.nativeCooldownPoints = nil
     itemState.nativeCountdownText = nil
+    itemState.nativeCountText = nil
     itemState.nativeBarPoints = nil
     itemState.nativeIconShown = nil
     itemState.nativeIconAlpha = nil
     itemState.nativeNameShown = nil
     itemState.nativeNameAlpha = nil
+    itemState.nativeNameText = nil
     itemState.nativeDurationShown = nil
     itemState.nativeDurationAlpha = nil
     itemState.nativeDurationText = nil
@@ -1438,6 +1489,11 @@ local function RestoreItemPresentation(item, definition, itemState)
         )
     end
 
+    PresentationMethods.RestoreFontStringPresentation(
+        itemState.nativeCountText,
+        GetCountText(item, definition)
+    )
+
     if definition.isBar then
         local icon = GetSafeField(item, "Icon")
         local bar = GetSafeField(item, "Bar")
@@ -1458,6 +1514,10 @@ local function RestoreItemPresentation(item, definition, itemState)
             if itemState.nativeDurationAlpha ~= nil then
                 FontStringSetAlpha(duration, itemState.nativeDurationAlpha)
             end
+            PresentationMethods.RestoreFontStringPresentation(
+                itemState.nativeNameText,
+                name
+            )
             PresentationMethods.RestoreFontStringPresentation(
                 itemState.nativeDurationText,
                 duration
@@ -1489,6 +1549,10 @@ local function CanRestoreItemPresentation(item, definition)
     local countdownText = cooldown
         and PresentationMethods.GetCooldownCountdownText(cooldown)
     if countdownText and not CanChangeGeometry(countdownText) then
+        return false
+    end
+    local countText = GetCountText(item, definition)
+    if countText and not CanChangeGeometry(countText) then
         return false
     end
 
@@ -1808,7 +1872,7 @@ local function ApplyHotkeyPresentation(item, definition, config, itemState)
         then
             return false
         end
-        ApplyFont(overlay.text, CM.config.hotkeyText)
+        ApplyFont(overlay.text, config.hotkeyText)
         PositionHotkey(overlay.text, target, config)
         FontStringShow(overlay.text)
         itemState.hotkeyStyleGeneration = presentationGeneration
@@ -1830,7 +1894,7 @@ local function ApplyHotkeyPresentation(item, definition, config, itemState)
     return true
 end
 
-local function GetCountText(item, definition)
+GetCountText = function(item, definition)
     if definition.isBar then
         local icon = GetSafeField(item, "Icon")
         return icon and GetSafeField(icon, "Applications")
@@ -1848,6 +1912,15 @@ function PresentationMethods.CaptureStaticPresentationDefaults(
     definition,
     itemState
 )
+    local countText = GetCountText(item, definition)
+    if countText and not itemState.nativeCountText then
+        itemState.nativeCountText =
+            PresentationMethods.CaptureFontStringPresentation(countText)
+    end
+    if countText and not itemState.nativeCountText then
+        return false
+    end
+
     local cooldown = GetSafeField(item, "Cooldown")
     if cooldown then
         if not itemState.nativeCooldownPoints then
@@ -1870,6 +1943,14 @@ function PresentationMethods.CaptureStaticPresentationDefaults(
 
     if definition.isBar then
         local bar = GetSafeField(item, "Bar")
+        local name = bar and GetSafeField(bar, "Name")
+        if name and not itemState.nativeNameText then
+            itemState.nativeNameText =
+                PresentationMethods.CaptureFontStringPresentation(name)
+        end
+        if name and not itemState.nativeNameText then
+            return false
+        end
         local duration = bar and GetSafeField(bar, "Duration")
         if duration and not itemState.nativeDurationText then
             itemState.nativeDurationText =
@@ -2043,11 +2124,11 @@ local function ApplyStaticPresentation(item, state, config, itemState)
         and itemState.nativeCountdownText
         and countdownText == itemState.nativeCountdownText.fontString
     then
-        ApplyFont(countdownText, CM.config.cooldownText)
+        ApplyFont(countdownText, config.cooldownText)
         PresentationMethods.PositionText(
             countdownText,
             cooldown,
-            CM.config.cooldownText.position,
+            config.cooldownText.position,
             "CENTER",
             "CENTER",
             0,
@@ -2055,13 +2136,13 @@ local function ApplyStaticPresentation(item, state, config, itemState)
         )
     end
 
-    ApplyFont(GetCountText(item, state.definition), CM.config.countText)
+    ApplyFont(GetCountText(item, state.definition), config.countText)
 
     local bar = state.definition.isBar and GetSafeField(item, "Bar")
     if bar then
-        ApplyFont(GetSafeField(bar, "Name"), CM.config.barText)
+        ApplyFont(GetSafeField(bar, "Name"), config.barText)
         local duration = GetSafeField(bar, "Duration")
-        ApplyFont(duration, CM.config.durationText)
+        ApplyFont(duration, config.durationText)
         if duration
             and itemState.nativeDurationText
             and duration == itemState.nativeDurationText.fontString
@@ -2069,7 +2150,7 @@ local function ApplyStaticPresentation(item, state, config, itemState)
             PresentationMethods.PositionText(
                 duration,
                 bar,
-                CM.config.durationText.position,
+                config.durationText.position,
                 "RIGHT",
                 "RIGHT",
                 -8,
