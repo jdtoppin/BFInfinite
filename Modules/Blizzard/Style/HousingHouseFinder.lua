@@ -5,6 +5,29 @@ local S = BFI.modules.Style
 local AF = _G.AbstractFramework
 
 ---------------------------------------------------------------------
+-- subdivision menu
+---------------------------------------------------------------------
+local function StyleSubdivisionRadio(frame)
+    S.StyleMenuSelection(frame)
+end
+
+local function StyleSubdivisionMenuDescriptions(parentDescription)
+    for _, description in parentDescription:EnumerateElementDescriptions() do
+        if description:IsRadio() then
+            description:AddInitializer(StyleSubdivisionRadio)
+        end
+        StyleSubdivisionMenuDescriptions(description)
+    end
+end
+
+local function StyleSubdivisionMenu(dropdown)
+    local rootDescription = dropdown:GetMenuDescription()
+    if not rootDescription then return end
+
+    StyleSubdivisionMenuDescriptions(rootDescription)
+end
+
+---------------------------------------------------------------------
 -- neighborhood cards
 ---------------------------------------------------------------------
 local function UpdateNeighborhoodButton(button, selected)
@@ -168,11 +191,18 @@ local function StyleHouseFinder()
     AF.SetSize(refreshButton, 24, 24)
     S.StyleIconButton(refreshButton, AF.GetIcon("Refresh_Round"), 16, "yellow_text", "widget")
 
+    local mapCanvas = frame.HouseFinderMapCanvasFrame
+    mapCanvas.ScrollContainer.Child.TiledBackground:SetAlpha(0)
+
     frame.WoodBorderFrame.Border:SetAlpha(0)
     S.CreateBackdrop(frame.WoodBorderFrame, true)
 
     StyleNotificationBanner(frame.HouseFinderNotificationBanner)
-    S.StyleDropdownButton(frame.GuildSubdivisionDropdown)
+    local subdivisionDropdown = frame.GuildSubdivisionDropdown
+    S.StyleDropdownButton(subdivisionDropdown)
+    hooksecurefunc(subdivisionDropdown, "GenerateMenu", StyleSubdivisionMenu)
+    StyleSubdivisionMenu(subdivisionDropdown)
+
     StylePlotInfo(frame.PlotInfoFrame)
     StylePlotTooltip(frame.SelectedPlotTooltip)
     StylePlotTooltip(_G.HouseFinderHighlightedPlotTooltip)
