@@ -52,14 +52,7 @@ end
 local function StyleFilterDropdown(dropdown)
     if not dropdown then return end
 
-    S.StyleDropdownButton(dropdown)
-
-    local resetButton = dropdown.ResetButton
-    if resetButton and not resetButton._BFICollectionsResetStyled then
-        resetButton._BFICollectionsResetStyled = true
-        S.StyleIconButton(resetButton, AF.GetIcon("Close"), 10, nil, "red")
-        AF.SetSize(resetButton, 20, 20)
-    end
+    S.StyleFilterDropdownButton(dropdown)
 end
 
 local function StyleSquareIcon(icon, ...)
@@ -374,21 +367,21 @@ local function StyleHeirloomButton(_, button)
     RefreshHeirloomLevel(button)
 end
 
-local function StyleHeirloomClassRadio(frame)
+local function StyleCollectionsRadio(frame)
     S.StyleMenuSelection(frame, 7)
 end
 
-local function StyleHeirloomClassMenuDescriptions(parentDescription)
+local function StyleCollectionsRadioMenuDescriptions(parentDescription)
     for _, description in parentDescription:EnumerateElementDescriptions() do
         if description:IsRadio() then
-            description:AddInitializer(StyleHeirloomClassRadio)
+            description:AddInitializer(StyleCollectionsRadio)
         end
-        StyleHeirloomClassMenuDescriptions(description)
+        StyleCollectionsRadioMenuDescriptions(description)
     end
 end
 
-local function StyleHeirloomClassMenu(_, rootDescription)
-    StyleHeirloomClassMenuDescriptions(rootDescription)
+local function StyleCollectionsRadioMenu(_, rootDescription)
+    StyleCollectionsRadioMenuDescriptions(rootDescription)
 end
 
 local function StyleHeirlooms()
@@ -400,7 +393,7 @@ local function StyleHeirlooms()
     S.StyleDropdownButton(frame.ClassDropdown)
     StyleCollectionBackground(frame.iconsFrame)
     StylePagingFrame(frame.PagingFrame)
-    _G.Menu.ModifyMenu("MENU_CLASS_FILTER", StyleHeirloomClassMenu)
+    _G.Menu.ModifyMenu("MENU_CLASS_FILTER", StyleCollectionsRadioMenu)
 
     for _, button in next, frame.heirloomEntryFrames do
         StyleHeirloomButton(nil, button)
@@ -434,7 +427,6 @@ local function StyleWardrobeModel(model)
         model._BFICollectionsCardStyled = true
 
         S.CreateBackdrop(model, true)
-        S.RemoveTextures(model.Border, true)
         for _, region in next, {model:GetRegions()} do
             if region:IsObjectType("Texture") and region:GetAtlas() == "transmog-wardrobe-border-highlighted" then
                 StyleStateTexture(region, model.BFIBackdrop, "white", 0.2)
@@ -445,6 +437,9 @@ local function StyleWardrobeModel(model)
         StyleStateTexture(model.TransmogStateTexture, model.BFIBackdrop, "BFI", 0.35)
     end
 
+    -- UpdateItems reapplies the native collected border atlas on every pass.
+    S.RemoveTextures(model.Border, true)
+
     local visualInfo = model.visualInfo
     if not visualInfo then return end
 
@@ -454,7 +449,7 @@ local function StyleWardrobeModel(model)
     elseif not visualInfo.isUsable then
         color = "red"
     else
-        color = "border"
+        color = "darkgray"
     end
     model.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(color))
 end
@@ -476,10 +471,14 @@ local function StyleWardrobeSetButton(button)
 end
 
 local function StyleWardrobeSetItem(item)
-    if item._BFICollectionsIconStyled then return end
-    item._BFICollectionsIconStyled = true
+    if not item._BFICollectionsIconStyled then
+        item._BFICollectionsIconStyled = true
+        StyleSquareIcon(item.Icon, item.IconBorder)
+    end
 
-    StyleSquareIcon(item.Icon, item.IconBorder)
+    -- SetItemFrameQuality reapplies a pure-white vertex color whenever the
+    -- pooled detail icon is refreshed. Keep the BFI outline neutral.
+    item.Icon.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("darkgray"))
 end
 
 local function StyleWardrobeSetButtons(scrollBox)
@@ -492,7 +491,37 @@ local function StyleWardrobeSetItems(frame)
     end
 end
 
-local function StyleWardrobe()
+local function StyleWardrobeInfoButton(frame, collectionsJournal)
+    local button = frame.InfoButton
+    if not button then return end
+
+    -- Blizzard's HelpTip can be globally suppressed. Use AF's transient hover
+    -- tooltip while retaining all three localized shortcut strings.
+    button:SetScript("OnEnter", nil)
+    button:SetScript("OnLeave", nil)
+    S.StyleIconButton(button, AF.GetIcon("Info_Square"), 12, "gray", "gray_hover")
+    AF.SetSize(button, 20, 20)
+    button:SetHitRectInsets(0, 0, 0, 0)
+    AF.ClearPoints(button)
+    AF.SetPoint(button, "LEFT", collectionsJournal.BFIHeader, "LEFT", 2, 0)
+    AF.SetFrameLevel(button, 1, collectionsJournal.BFIHeader)
+    AF.SetTooltip(
+        button,
+        "BOTTOMLEFT",
+        0,
+        -2,
+        _G.WARDROBE_SHORTCUTS_TUTORIAL_1,
+        _G.WARDROBE_SHORTCUTS_TUTORIAL_2,
+        _G.WARDROBE_SHORTCUTS_TUTORIAL_3
+    )
+    button:HookScript("OnHide", function()
+        if AF.Tooltip:GetOwner() == button then
+            AF.HideTooltip()
+        end
+    end)
+end
+
+local function StyleWardrobe(collectionsJournal)
     local frame = _G.WardrobeCollectionFrame
     local itemsFrame = frame.ItemsCollectionFrame
     local setsFrame = frame.SetsCollectionFrame
@@ -507,6 +536,9 @@ local function StyleWardrobe()
     StyleProgressBar(frame.progressBar, "lime")
     StyleFilterDropdown(frame.FilterButton)
     S.StyleDropdownButton(frame.ClassDropdown)
+    StyleWardrobeInfoButton(frame, collectionsJournal)
+    _G.Menu.ModifyMenu("MENU_WARDROBE_CLASS", StyleCollectionsRadioMenu)
+    _G.Menu.ModifyMenu("MENU_WARDROBE_VARIANT_SETS", StyleCollectionsRadioMenu)
 
     StyleCollectionBackground(itemsFrame)
     StylePagingFrame(itemsFrame.PagingFrame)
@@ -585,6 +617,9 @@ local function StyleBlizzard()
     hooksecurefunc(_G.WardrobeCollectionFrame.ItemsCollectionFrame, "CreateSlotButtons", StyleWardrobeSlotButtons)
     hooksecurefunc(_G.WardrobeSetsScrollFrameButtonMixin, "Init", StyleWardrobeSetButton)
     hooksecurefunc(_G.WardrobeSetsDetailsItemMixin, "OnShow", StyleWardrobeSetItem)
+    hooksecurefunc(_G.WardrobeSetsCollectionMixin, "SetItemFrameQuality", function(_, item)
+        StyleWardrobeSetItem(item)
+    end)
     hooksecurefunc(_G.WarbandSceneEntryMixin, "Init", StyleWarbandSceneEntry)
 
     S.StyleTitledFrame(collectionsJournal)
@@ -593,7 +628,7 @@ local function StyleBlizzard()
     StylePetJournal()
     StyleToyBox()
     StyleHeirlooms()
-    StyleWardrobe()
+    StyleWardrobe(collectionsJournal)
     StyleWarbandScenes()
 end
 
