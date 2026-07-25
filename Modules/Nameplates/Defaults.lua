@@ -53,7 +53,7 @@ end
 ---------------------------------------------------------------------
 -- defaults
 ---------------------------------------------------------------------
-local SCHEMA_VERSION = 2
+local SCHEMA_VERSION = 3
 NP.SCHEMA_VERSION = SCHEMA_VERSION
 
 local defaults = {
@@ -169,6 +169,33 @@ do
                 nameAlpha = 1,
                 useCustomColor = false,
                 color = AF.GetColorTable("orange"),
+                stateColors = {
+                    enabled = true,
+                    warning = {
+                        enabled = true,
+                        rgb = {
+                            AF.ConvertHEXToRGB("#CC0000"),
+                        },
+                    },
+                    transition = {
+                        enabled = true,
+                        rgb = {
+                            AF.ConvertHEXToRGB("#FFA000"),
+                        },
+                    },
+                    safe = {
+                        enabled = true,
+                        rgb = {
+                            AF.ConvertHEXToRGB("#0F96E6"),
+                        },
+                    },
+                    offTank = {
+                        enabled = true,
+                        rgb = {
+                            AF.ConvertHEXToRGB("#0FAAC8"),
+                        },
+                    },
+                },
                 combatOnly = false,
                 instancesOnly = false,
                 tankOnly = false,
@@ -858,6 +885,28 @@ function NP.MigrateConfig(config)
 
             threatGlow.style = nil
             threatGlow.alpha = nil
+        end
+    end
+
+    if schemaVersion < 3 then
+        local hostileNPC = config.hostile_npc
+        local healthBar = type(hostileNPC) == "table"
+            and hostileNPC.healthBar
+        local threatGlow = type(healthBar) == "table"
+            and healthBar.threatGlow
+        if type(threatGlow) == "table"
+            and threatGlow.stateColors == nil
+        then
+            -- Existing default/native-color profiles gain the qualitative
+            -- palette. Preserve an explicitly selected legacy single color
+            -- by leaving that profile on the native fallback until the user
+            -- opts into separate state colors.
+            threatGlow.stateColors = AF.Copy(
+                defaults.hostile_npc.healthBar.threatGlow.stateColors
+            )
+            if threatGlow.useCustomColor == true then
+                threatGlow.stateColors.enabled = false
+            end
         end
     end
 

@@ -31,6 +31,13 @@ local SEMANTIC_COLOR_CATEGORIES = {
     {key = "default", label = "Default / Melee"},
 }
 
+local THREAT_STATE_COLOR_CATEGORIES = {
+    {key = "warning", label = "Warning / Aggro"},
+    {key = "transition", label = "Transition"},
+    {key = "safe", label = "Safe"},
+    {key = "offTank", label = "Off-Tank"},
+}
+
 local nameplatesPanel
 
 local function UpdateNameplates()
@@ -139,6 +146,30 @@ local function SetHostileThreatColor(r, g, b)
     local color =
         NP.config.hostile_npc.healthBar.threatGlow.color
     AF.FillColorTable(color, r, g, b, color[4])
+    UpdateNameplates()
+end
+
+local function GetThreatStateColorConfig()
+    return NP.config.hostile_npc.healthBar.threatGlow.stateColors
+end
+
+local function SetThreatStateColorsEnabled(enabled)
+    GetThreatStateColorConfig().enabled = enabled
+    UpdateNameplates()
+end
+
+local function SetThreatStateColorEnabled(key, enabled)
+    GetThreatStateColorConfig()[key].enabled = enabled
+    UpdateNameplates()
+end
+
+local function SetThreatStateColor(key, r, g, b)
+    AF.FillColorTable(
+        GetThreatStateColorConfig()[key].rgb,
+        r,
+        g,
+        b
+    )
     UpdateNameplates()
 end
 
@@ -610,13 +641,13 @@ local function CreateNameplatesPanel()
     --------------------------------------------------
     local threatPane = CreateSectionPane(
         "threat",
-        L["Threat Warning"],
-        185
+        L["Threat Colors"],
+        165
     )
 
     local threatNotice = AF.CreateFontString(
         threatPane,
-        L["Threat warnings apply only to hostile NPC nameplates. While grouped, Blizzard's role-aware signal warns tanks as their threat lead slips and again when threat is lost; damage dealers and healers are warned as they approach or gain aggro. Blizzard does not provide this Progressive nameplate warning while solo. No warning can also mean secure threat or no active threat. BFI restores the CVar when this feature is released and never reads restricted threat values."],
+        L["Threat colors apply only to hostile NPC nameplates. BFI classifies the public qualitative states for your role and can distinguish another tank holding the unit. Whenever Retail restricts a query, AbstractFramework falls back to Blizzard's native carrier without inspecting the protected value."],
         "gray"
     )
     AF.SetPoint(threatNotice, "TOPLEFT", threatPane, 15, -30)
@@ -625,6 +656,7 @@ local function CreateNameplatesPanel()
     threatNotice:SetWordWrap(true)
 
     local UpdateThreatWidgets
+    local CancelThreatColorPickers
     local threatPresentationPane = CreateSectionPane(
         "threat",
         L["Presentation"],
@@ -640,10 +672,15 @@ local function CreateNameplatesPanel()
         L["Opacity"],
         145
     )
-    local threatColorPane = CreateSectionPane(
+    local threatFallbackPane = CreateSectionPane(
         "threat",
-        L["Warning Color"],
-        115
+        L["Native / Restricted Fallback"],
+        125
+    )
+    local threatStateColorPane = CreateSectionPane(
+        "threat",
+        L["Role-Aware State Colors"],
+        310
     )
     local threatScopePane = CreateSectionPane(
         "threat",
@@ -653,7 +690,7 @@ local function CreateNameplatesPanel()
 
     local threatEnabled = AF.CreateCheckButton(
         threatPresentationPane,
-        L["Enable Threat Warning"]
+        L["Enable Threat Colors"]
     )
     AF.SetPoint(
         threatEnabled,
@@ -663,6 +700,9 @@ local function CreateNameplatesPanel()
         -45
     )
     threatEnabled:SetOnCheck(function(checked)
+        if not checked and CancelThreatColorPickers then
+            CancelThreatColorPickers()
+        end
         SetHostileThreatValue("enabled", checked)
         UpdateThreatWidgets()
     end)
@@ -701,7 +741,7 @@ local function CreateNameplatesPanel()
 
     local threatBar = AF.CreateCheckButton(
         threatPresentationPane,
-        L["Full-Bar Warning Overlay"]
+        L["Full-Bar Overlay"]
     )
     AF.SetPoint(
         threatBar,
@@ -879,45 +919,45 @@ local function CreateNameplatesPanel()
     end)
 
     local threatUseCustomColor = AF.CreateCheckButton(
-        threatColorPane,
-        L["Use One Custom Warning Color"]
+        threatFallbackPane,
+        L["Use Custom Fallback Color"]
     )
     AF.SetPoint(
         threatUseCustomColor,
         "TOPLEFT",
-        threatColorPane,
+        threatFallbackPane,
         15,
         -45
     )
 
     local threatColor = AF.CreateColorPicker(
-        threatColorPane,
-        L["Warning Color"]
+        threatFallbackPane,
+        L["Fallback Color"]
     )
     AF.SetPoint(
         threatColor,
         "TOPLEFT",
-        threatColorPane,
+        threatFallbackPane,
         200,
         -45
     )
 
     local threatColorNotice = AF.CreateFontString(
-        threatColorPane,
-        L["The custom color replaces every active native warning color; it does not classify separate threat states."],
+        threatFallbackPane,
+        L["Used when role-aware classification is unavailable or disabled. Blizzard's native signal controls visibility."],
         "gray"
     )
     AF.SetPoint(
         threatColorNotice,
         "TOPLEFT",
-        threatColorPane,
+        threatFallbackPane,
         15,
         -75
     )
     AF.SetPoint(
         threatColorNotice,
         "TOPRIGHT",
-        threatColorPane,
+        threatFallbackPane,
         -15,
         -75
     )
@@ -959,6 +999,130 @@ local function CreateNameplatesPanel()
     end
     threatColor:SetOnCancel(ResetThreatColorPreview)
     threatColor:SetOnDiscard(ResetThreatColorPreview)
+
+    local threatStateWidgets = {}
+    local threatStateColorsEnabled = AF.CreateCheckButton(
+        threatStateColorPane,
+        L["Use Role-Aware State Colors"]
+    )
+    AF.SetPoint(
+        threatStateColorsEnabled,
+        "TOPLEFT",
+        threatStateColorPane,
+        15,
+        -45
+    )
+
+    local threatStateNotice = AF.CreateFontString(
+        threatStateColorPane,
+        L["Tank: Safe means you hold aggro; Off-Tank means another tank or group pet does. Damage / Healing: Safe means you do not have aggro. Transition marks intermediate threat."],
+        "gray"
+    )
+    AF.SetPoint(
+        threatStateNotice,
+        "TOPLEFT",
+        threatStateColorPane,
+        15,
+        -75
+    )
+    AF.SetPoint(
+        threatStateNotice,
+        "TOPRIGHT",
+        threatStateColorPane,
+        -15,
+        -75
+    )
+    threatStateNotice:SetJustifyH("LEFT")
+    threatStateNotice:SetWordWrap(true)
+
+    local function CreateThreatStateColorRow(info, index)
+        local key = info.key
+        local y = -130 - (index - 1) * 45
+        local enabledButton = AF.CreateCheckButton(
+            threatStateColorPane,
+            L[info.label]
+        )
+        AF.SetPoint(
+            enabledButton,
+            "TOPLEFT",
+            threatStateColorPane,
+            15,
+            y
+        )
+
+        local picker = AF.CreateColorPicker(
+            threatStateColorPane,
+            L["Color"]
+        )
+        AF.SetPoint(
+            picker,
+            "TOPLEFT",
+            threatStateColorPane,
+            200,
+            y
+        )
+
+        local colorPreviewed
+        enabledButton:SetOnCheck(function(checked)
+            AF.CancelColorPicker(picker)
+            SetThreatStateColorEnabled(key, checked)
+            UpdateThreatWidgets()
+        end)
+        picker:SetOnChange(function(r, g, b, a)
+            local color = GetThreatStateColorConfig()[key].rgb
+            colorPreviewed = PreviewColorTables(
+                picker,
+                {color},
+                r,
+                g,
+                b,
+                a,
+                true
+            ) or colorPreviewed
+        end)
+        picker:SetOnConfirm(function(r, g, b)
+            SetThreatStateColor(key, r, g, b)
+            colorPreviewed = nil
+        end)
+        picker:SetOnAccept(function()
+            if colorPreviewed then
+                UpdateNameplates()
+                colorPreviewed = nil
+            end
+        end)
+
+        local function ResetStateColorPreview()
+            colorPreviewed = nil
+            UpdateNameplates()
+        end
+        picker:SetOnCancel(ResetStateColorPreview)
+        picker:SetOnDiscard(ResetStateColorPreview)
+
+        threatStateWidgets[#threatStateWidgets + 1] = {
+            key = key,
+            enabledButton = enabledButton,
+            picker = picker,
+        }
+    end
+
+    for index, info in ipairs(THREAT_STATE_COLOR_CATEGORIES) do
+        CreateThreatStateColorRow(info, index)
+    end
+
+    threatStateColorsEnabled:SetOnCheck(function(checked)
+        for _, widgets in ipairs(threatStateWidgets) do
+            AF.CancelColorPicker(widgets.picker)
+        end
+        SetThreatStateColorsEnabled(checked)
+        UpdateThreatWidgets()
+    end)
+
+    CancelThreatColorPickers = function()
+        AF.CancelColorPicker(threatColor)
+        for _, widgets in ipairs(threatStateWidgets) do
+            AF.CancelColorPicker(widgets.picker)
+        end
+    end
 
     local threatCombatOnly = AF.CreateCheckButton(
         threatScopePane,
@@ -1008,6 +1172,7 @@ local function CreateNameplatesPanel()
     UpdateThreatWidgets = function()
         local config =
             NP.config.hostile_npc.healthBar.threatGlow
+        local stateColors = config.stateColors
 
         threatEnabled:SetChecked(config.enabled)
         threatBorder:SetChecked(config.border)
@@ -1025,6 +1190,24 @@ local function CreateNameplatesPanel()
         if not AF.IsColorPickerOpen(threatColor) then
             threatColor:SetColor(config.color)
         end
+        threatStateColorsEnabled:SetChecked(stateColors.enabled)
+        for _, widgets in ipairs(threatStateWidgets) do
+            local state = stateColors[widgets.key]
+            widgets.enabledButton:SetChecked(state.enabled)
+            if not AF.IsColorPickerOpen(widgets.picker) then
+                widgets.picker:SetColor(state.rgb)
+            end
+            AF.SetEnabled(
+                config.enabled and stateColors.enabled,
+                widgets.enabledButton
+            )
+            AF.SetEnabled(
+                config.enabled
+                    and stateColors.enabled
+                    and state.enabled,
+                widgets.picker
+            )
+        end
         threatCombatOnly:SetChecked(config.combatOnly)
         threatInstancesOnly:SetChecked(config.instancesOnly)
         threatTankOnly:SetChecked(config.tankOnly)
@@ -1036,6 +1219,7 @@ local function CreateNameplatesPanel()
             threatBar,
             threatName,
             threatUseCustomColor,
+            threatStateColorsEnabled,
             threatCombatOnly,
             threatInstancesOnly,
             threatTankOnly
@@ -2408,6 +2592,12 @@ local function CreateNameplatesPanel()
         end
     end
 
+    local function HideThreatStateColorPickers()
+        for _, widgets in ipairs(threatStateWidgets) do
+            AF.HideColorPicker(widgets.picker)
+        end
+    end
+
     local function CancelCastColorPickers()
         for _, picker in ipairs(castColorPickers) do
             AF.CancelColorPicker(picker)
@@ -2422,14 +2612,15 @@ local function CreateNameplatesPanel()
 
     local function CancelNameplateColorPickers()
         CancelSemanticColorPickers()
+        CancelThreatColorPickers()
         CancelCastColorPickers()
-        AF.CancelColorPicker(threatColor)
         AF.CancelColorPicker(highlightColor)
         AF.CancelColorPicker(normalColor)
     end
 
     local function HideNameplateColorPickers()
         HideSemanticColorPickers()
+        HideThreatStateColorPickers()
         HideCastColorPickers()
         AF.HideColorPicker(threatColor)
         AF.HideColorPicker(highlightColor)
@@ -2494,9 +2685,7 @@ local function CreateNameplatesPanel()
     end
     sectionCleanup.colors = CancelSemanticColorPickers
     sectionCleanup.casts = CancelCastColorPickers
-    sectionCleanup.threat = function()
-        AF.CancelColorPicker(threatColor)
-    end
+    sectionCleanup.threat = CancelThreatColorPickers
     sectionCleanup.auras = function()
         AF.CancelColorPicker(normalColor)
     end

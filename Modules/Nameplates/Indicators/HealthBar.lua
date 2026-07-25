@@ -11,7 +11,10 @@ end
 
 local function HealthBar_Enable(self)
     self:SetUnit(self.root.unit)
-    self.threatIndicator:SetNativeUnitFrame(self.root.unitFrame)
+    self.threatIndicator:SetNativeUnitFrame(
+        self.root.unitFrame,
+        self.root.unit
+    )
     self:Show()
 end
 
@@ -60,6 +63,7 @@ local function HealthBar_LoadConfig(self, config)
         color = threatGlow.useCustomColor
             and threatGlow.color
             or nil,
+        stateColors = threatGlow.stateColors,
     })
 
     local semanticColor = config.semanticColor
