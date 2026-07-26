@@ -22,6 +22,14 @@ local function assertContains(value, expected, message)
     )
 end
 
+local function assertNotContains(value, expected, message)
+    assertTrue(
+        type(value) ~= "string"
+            or value:find(expected, 1, true) == nil,
+        message
+    )
+end
+
 local CANONICAL_FIELDS = {
     "all",
     "player",
@@ -356,6 +364,11 @@ local function makeHarness(isRetail, hasNativeBackend)
         widget.points = {}
     end
 
+    function AF.ClearTooltip(widget)
+        widget.tooltipTitle = nil
+        widget.tooltipBody = nil
+    end
+
     function AF.CreateBorderedFrame(
         parent,
         name,
@@ -605,16 +618,29 @@ local function makeHarness(isRetail, hasNativeBackend)
     return harness
 end
 
-local function newFrame()
-    return {
+local function newFrame(id, runtimeKind)
+    local frame = {
         indicators = {
             buffs = {},
             debuffs = {},
         },
     }
+    if runtimeKind then
+        local indicator = {
+            LoadConfig = function()
+            end,
+        }
+        if runtimeKind == "native" then
+            indicator.GetNativeAuraState = function()
+                return {}
+            end
+        end
+        frame.indicators[id] = indicator
+    end
+    return frame
 end
 
-local function newInfo(id, owner, filters)
+local function newInfo(id, owner, filters, runtimeKind)
     owner = owner or "target"
     local target
     if owner == "party" or owner == "raid" then
@@ -623,15 +649,15 @@ local function newInfo(id, owner, filters)
             header = {},
         }
         for index = 1, count do
-            target.header[index] = newFrame()
+            target.header[index] = newFrame(id, runtimeKind)
         end
     elseif owner == "boss" then
         target = {}
         for index = 1, 8 do
-            target[index] = newFrame()
+            target[index] = newFrame(id, runtimeKind)
         end
     else
-        target = newFrame()
+        target = newFrame(id, runtimeKind)
     end
 
     return {
@@ -955,7 +981,10 @@ local function testRetailSpellLists(hasNativeBackend)
     local pane = harness.builders.auraBlackListWhitelist(
         makeParent()
     )
-    local info = newInfo("buffs", "target")
+    local info = newInfo(
+        hasNativeBackend and "debuffs" or "buffs",
+        "target"
+    )
 
     pane.Load(info)
     local mode = findWidget(pane, "dropdown", "kind", "dropdown")
@@ -1015,6 +1044,169 @@ local function testRetailSpellLists(hasNativeBackend)
             version .. " spell-list read-only warning"
         )
     end
+end
+
+local ALL_AURA_OWNERS = {
+    "player",
+    "target",
+    "focus",
+    "pet",
+    "targettarget",
+    "focustarget",
+    "pettarget",
+    "party",
+    "raid",
+    "boss",
+}
+
+local NATIVE_BUFF_OWNERS = {
+    "player",
+    "pet",
+    "party",
+    "raid",
+}
+
+local LEGACY_BUFF_OWNERS = {
+    "target",
+    "focus",
+    "targettarget",
+    "focustarget",
+    "pettarget",
+    "boss",
+}
+
+local function testRetailIndicatorAwareNativeWording()
+    local harness = makeHarness(true, true)
+    local spellPane =
+        harness.builders.auraBlackListWhitelist(makeParent())
+    local arrangementPane =
+        harness.builders.auraArrangement(makeParent())
+    local mode = findWidget(
+        spellPane,
+        "dropdown",
+        "kind",
+        "dropdown"
+    )
+    local tip = findWidget(
+        spellPane,
+        "fontString",
+        "kind",
+        "fontString"
+    )
+    local maximum = findWidget(
+        arrangementPane,
+        "slider",
+        "initialText",
+        "Max Displayed"
+    )
+
+    local function assertNativePresentation(
+        id,
+        owner,
+        runtimeKind
+    )
+        local label = owner .. " " .. id
+        local info = newInfo(id, owner, nil, runtimeKind)
+
+        spellPane.Load(info)
+        assertEqual(
+            mode.items[1].text,
+            "Exclude Spell IDs (Reaction-Limited)",
+            label .. " native spell-list label"
+        )
+        assertContains(
+            tip.text,
+            "can apply saved spell-ID lists",
+            label .. " native spell-list message"
+        )
+        assertNotContains(
+            tip.text,
+            "not applied here",
+            label .. " inactive spell-list message"
+        )
+
+        arrangementPane.Load(info)
+        assertEqual(
+            maximum.label,
+            "Max Per Enabled Category",
+            label .. " native maximum label"
+        )
+        assertContains(
+            maximum.tooltipBody,
+            "maximum combined capacity",
+            label .. " native maximum warning"
+        )
+    end
+
+    local function assertLegacyBuffPresentation(owner, runtimeKind)
+        local label = owner .. " buffs"
+        local info = newInfo(
+            "buffs",
+            owner,
+            nil,
+            runtimeKind
+        )
+
+        spellPane.Load(info)
+        assertEqual(
+            mode.items[1].text,
+            "Saved Blacklist (Not Applied Here)",
+            label .. " inactive blacklist label"
+        )
+        assertEqual(
+            mode.items[2].text,
+            "Saved Whitelist (Not Applied Here)",
+            label .. " inactive whitelist label"
+        )
+        assertContains(
+            tip.text,
+            "legacy Retail aura list",
+            label .. " legacy implementation message"
+        )
+        assertContains(
+            tip.text,
+            "not applied here",
+            label .. " inactive spell-list message"
+        )
+        assertNotContains(
+            tip.text,
+            "can apply saved spell-ID lists",
+            label .. " native spell-list message"
+        )
+
+        arrangementPane.Load(info)
+        assertEqual(
+            maximum.label,
+            "Max Displayed",
+            label .. " legacy maximum label"
+        )
+        assertEqual(
+            maximum.tooltipTitle,
+            nil,
+            label .. " stale native maximum tooltip"
+        )
+        assertEqual(
+            maximum.tooltipBody,
+            nil,
+            label .. " stale native maximum warning"
+        )
+    end
+
+    for _, owner in ipairs(NATIVE_BUFF_OWNERS) do
+        assertNativePresentation("buffs", owner)
+    end
+    for _, owner in ipairs(ALL_AURA_OWNERS) do
+        assertNativePresentation("debuffs", owner)
+    end
+    for _, owner in ipairs(LEGACY_BUFF_OWNERS) do
+        assertLegacyBuffPresentation(owner)
+    end
+
+    -- An instantiated runtime is authoritative over the fallback integration
+    -- map. This keeps the wording honest while branches are tested alone or
+    -- if a later integration changes which aura factory owns a row.
+    assertLegacyBuffPresentation("player", "legacy")
+    assertNativePresentation("buffs", "target", "native")
 end
 
 local COOLDOWN_STYLES = {
@@ -1325,6 +1517,7 @@ for _, hasNativeBackend in ipairs({false, true}) do
     testRetailSpellLists(hasNativeBackend)
     testRetailPresentation(hasNativeBackend)
 end
+testRetailIndicatorAwareNativeWording()
 testNonRetailSemantics()
 
 print("unit_frame_aura_filter_options_test.lua: ok")

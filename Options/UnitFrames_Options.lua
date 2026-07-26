@@ -293,6 +293,19 @@ local function IsAuraIndicator(t)
     return t.id == "buffs" or t.id == "debuffs"
 end
 
+local nativeHelpfulOwners = {
+    player = true,
+    pet = true,
+    party = true,
+    raid = true,
+}
+
+local function HasNativeAuraContainerBackend()
+    return AF.isRetail
+        and type(UF.HasNativeAuraContainerBackend) == "function"
+        and UF.HasNativeAuraContainerBackend()
+end
+
 local nativeAuraReloadDialog
 local nativeAuraReloadConfirm
 local nativeAuraReloadCancel
@@ -317,12 +330,59 @@ local function GetIndicatorFrameCount(t)
 end
 
 local function GetIndicatorFrame(t, index)
+    if not t.target then return nil end
+
     if t.owner == "party" or t.owner == "raid" then
-        return t.target.header[index]
+        return t.target.header and t.target.header[index]
     elseif t.owner == "boss" then
         return t.target[index]
     end
     return t.target
+end
+
+local function GetAuraIndicatorRuntimeKind(t)
+    local legacyFound
+    local count = GetIndicatorFrameCount(t)
+
+    for i = 1, count do
+        local frame = GetIndicatorFrame(t, i)
+        local indicator = frame
+            and frame.indicators
+            and frame.indicators[t.id]
+        if indicator then
+            if type(indicator.GetNativeAuraState) == "function" then
+                return "native"
+            elseif type(indicator.LoadConfig) == "function" then
+                legacyFound = true
+            end
+        end
+    end
+
+    if legacyFound then
+        return "legacy"
+    end
+end
+
+local function UsesNativeAuraContainer(t)
+    if not HasNativeAuraContainerBackend()
+        or not IsAuraIndicator(t)
+    then
+        return false
+    end
+
+    local runtimeKind = GetAuraIndicatorRuntimeKind(t)
+    if runtimeKind then
+        return runtimeKind == "native"
+    end
+
+    -- Disabled frames may not have an indicator runtime yet. Mirror the
+    -- integration contract until the frame exists, then prefer the actual
+    -- runtime above so option wording cannot drift from implementation.
+    return t.id == "debuffs"
+        or (
+            t.id == "buffs"
+            and nativeHelpfulOwners[t.owner] == true
+        )
 end
 
 local function RequiresNativeAuraReload(t, count)
@@ -3509,6 +3569,16 @@ builder["auraBlackListWhitelist"] = function(parent)
             value = "whitelist",
         },
     }
+    local inactiveRetailModeItems = {
+        {
+            text = L["Saved Blacklist (Not Applied Here)"],
+            value = "blacklist",
+        },
+        {
+            text = L["Saved Whitelist (Not Applied Here)"],
+            value = "whitelist",
+        },
+    }
     mode:SetItems(legacyModeItems)
 
     local tip = AF.CreateFontString(pane, AF.GetIconString("MouseLeftClick") .. L["Edit"] .. "  " .. AF.GetIconString("MouseRightClick") .. L["Delete"])
@@ -3617,14 +3687,18 @@ builder["auraBlackListWhitelist"] = function(parent)
         pane.t = t
         if AF.isRetail then
             HideEditBox()
-            mode:SetItems(retailModeItems)
-            if type(UF.HasNativeAuraContainerBackend) == "function"
-                and UF.HasNativeAuraContainerBackend()
-            then
+            if UsesNativeAuraContainer(t) then
+                mode:SetItems(retailModeItems)
                 tip:SetText(
                     L["12.1 can apply saved spell-ID lists to friendly buffs and enemy debuffs; other reactions require a Never Secret aura. Editing stays disabled pending live reaction and secret validation"]
                 )
+            elseif HasNativeAuraContainerBackend() then
+                mode:SetItems(inactiveRetailModeItems)
+                tip:SetText(
+                    L["This buff indicator uses the legacy Retail aura list; saved spell-ID lists are not applied here. Editing is unavailable"]
+                )
             else
+                mode:SetItems(retailModeItems)
                 tip:SetText(
                     L["Spell-ID aura lists require the Retail 12.1 native aura container; editing is unavailable"]
                 )
@@ -3912,10 +3986,7 @@ builder["auraArrangement"] = function(parent)
 
     function pane.Load(t)
         pane.t = t
-        if AF.isRetail
-            and type(UF.HasNativeAuraContainerBackend) == "function"
-            and UF.HasNativeAuraContainerBackend()
-        then
+        if UsesNativeAuraContainer(t) then
             numTotal:SetLabel(L["Max Per Enabled Category"])
             numTotal:SetTooltip(
                 L["Max Per Enabled Category"],
@@ -3923,6 +3994,7 @@ builder["auraArrangement"] = function(parent)
             )
         else
             numTotal:SetLabel(L["Max Displayed"])
+            AF.ClearTooltip(numTotal)
         end
         arrangement:SetSelectedValue(t.cfg.orientation)
         width:SetValue(t.cfg.width)
