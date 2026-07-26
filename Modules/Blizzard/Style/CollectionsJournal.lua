@@ -317,12 +317,7 @@ end
 local function StyleCollectionsInfoButton(button, collectionsJournal)
     if not button then return end
 
-    S.StyleIconButton(button, AF.GetIcon("Info_Square"), 12, "gray", "gray_hover")
-    AF.SetSize(button, 20, 20)
-    button:SetHitRectInsets(0, 0, 0, 0)
-    AF.ClearPoints(button)
-    AF.SetPoint(button, "LEFT", collectionsJournal.BFIHeader, "LEFT", 2, 0)
-    AF.SetFrameLevel(button, 1, collectionsJournal.BFIHeader)
+    S.StyleTitleBarInfoButton(collectionsJournal, button)
 end
 
 local petHelpTipPositions = {
