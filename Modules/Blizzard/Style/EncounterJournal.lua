@@ -368,12 +368,7 @@ local function StyleEncounterHelpButton(button)
     -- compact AF title-bar launcher and tooltip as the other BFI journals.
     button:SetScript("OnEnter", nil)
     button:SetScript("OnLeave", nil)
-    S.StyleIconButton(button, AF.GetIcon("Info_Square"), 12, "gray", "gray_hover")
-    AF.SetSize(button, 20, 20)
-    button:SetHitRectInsets(0, 0, 0, 0)
-    AF.ClearPoints(button)
-    AF.SetPoint(button, "LEFT", EncounterJournal.BFIHeader, "LEFT", 2, 0)
-    AF.SetFrameLevel(button, 1, EncounterJournal.BFIHeader)
+    S.StyleTitleBarInfoButton(EncounterJournal, button)
     AF.SetTooltip(button, "BOTTOMLEFT", 0, -2, _G.MAIN_HELP_BUTTON_TOOLTIP)
     button:HookScript("OnHide", function()
         if AF.Tooltip:GetOwner() == button then

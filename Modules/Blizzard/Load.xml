@@ -20,8 +20,10 @@
     <Script file="Style\Menu.lua"/>
     <Script file="Style\Misc.lua"/>
     <Script file="Style\PlayerSpellsFrame.lua"/>
+    <Script file="Style\ProfessionsFrame.lua"/>
     <Script file="Style\ProfessionsBookFrame.lua"/>
     <Script file="Style\GroupFinder.lua"/>
+    <Script file="Style\HousingHouseFinder.lua"/>
     <Script file="Style\LootFrame.lua"/>
     <Script file="Style\ChallengesUI.lua"/>
     <Script file="Style\StaticPopups.lua"/>
