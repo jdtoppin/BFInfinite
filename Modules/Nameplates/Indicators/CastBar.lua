@@ -421,7 +421,7 @@ function NP.CreateCastBar(parent, name)
             "OVERLAY"
         )
     frame.uninterruptibleIcon = uninterruptibleIcon
-    uninterruptibleIcon:SetTexture(AF.GetIcon("Close"))
+    uninterruptibleIcon:SetTexture(AF.GetIcon("Fluent_Color_No"))
     uninterruptibleIcon:Hide()
 
     frame:SetStatusBar(bar)
