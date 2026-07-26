@@ -13,9 +13,73 @@ local function CreateSquareElement(frame)
 
     S.CreateBackdrop(frame, true)
 
-    local background = AF.CreateTexture(frame, nil, "widget", "BACKGROUND", -8)
+    -- State updates use SetVertexColor, so the source must remain white.
+    -- Starting with the dark widget color multiplies every later hover/class
+    -- color and makes those states appear almost black.
+    local background = AF.CreateTexture(frame, nil, "white", "BACKGROUND", -8)
     frame.BFIHousingBackground = background
     background:SetAllPoints()
+end
+
+-- Mirror the Profession Book rows: a narrow class-colour accent at the
+-- leading edge, followed by a quiet gray surface that fades into the panel.
+-- A second class-colour gradient supplies hover and selected state without
+-- bringing back Blizzard's heavy orange card borders.
+local function CreateFadeSurface(frame)
+    if frame._BFIHousingFadeSurface then return end
+    frame._BFIHousingFadeSurface = true
+
+    S.CreateBackdrop(frame, true)
+    if frame.BFIHousingBackground then
+        frame.BFIHousingBackground:SetAlpha(0)
+    end
+
+    local background = AF.CreateGradientTexture(
+        frame,
+        "HORIZONTAL",
+        AF.GetColorTable("background_lighter", 0.5),
+        AF.GetColorTable("background_lighter", 0),
+        nil,
+        "BACKGROUND",
+        -8
+    )
+    background:SetAllPoints()
+    frame.BFIHousingFadeBackground = background
+
+    local state = AF.CreateGradientTexture(
+        frame,
+        "HORIZONTAL",
+        AF.GetColorTable("BFI", 0.45),
+        AF.GetColorTable("BFI", 0),
+        nil,
+        "OVERLAY",
+        -8
+    )
+    state:SetAllPoints()
+    state:SetBlendMode("ADD")
+    frame.BFIHousingFadeState = state
+
+    local accent = AF.CreateTexture(frame, nil, "BFI", "BORDER", -8)
+    AF.SetPoint(accent, "TOPLEFT", 1, -1)
+    AF.SetPoint(accent, "BOTTOMLEFT", 1, 1)
+    AF.SetWidth(accent, 2)
+    frame.BFIHousingFadeAccent = accent
+end
+
+local function SetFadeSurfaceState(frame, state)
+    local strength = 0
+    if state == "pressed" then
+        strength = 1
+    elseif state == "selected" then
+        strength = 0.9
+    elseif state == "hovered" then
+        strength = 0.55
+    end
+
+    frame.BFIHousingFadeBackground:SetAlpha(state == "disabled" and 0.3 or 1)
+    frame.BFIHousingFadeState:SetAlpha(strength)
+    frame.BFIHousingFadeAccent:SetAlpha(strength)
+    frame.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(state == "disabled" and "disabled" or "border"))
 end
 
 local function UpdateActionButton(button)
@@ -119,69 +183,94 @@ local function StyleCatalogFilterMenu(dropdown)
     StyleCatalogFilterMenuDescriptions(rootDescription)
 end
 
+local function IsCatalogEntryPreviewed(frame)
+    local catalog = frame._BFIHousingCatalog
+    local entryVariantID = frame.entryVariantID
+    if not catalog or not entryVariantID then return false end
+
+    return catalog._BFIPreviewedRecordID ~= nil
+        and entryVariantID.recordID == catalog._BFIPreviewedRecordID
+        and entryVariantID.entryType == catalog._BFIPreviewedEntryType
+end
+
 local function UpdateCatalogEntry(frame, isPressed)
-    local color
+    local state = "normal"
     if not frame:IsEnabled() then
-        color = "widget_dark"
-    elseif isPressed or frame.isSelected then
-        color = "BFI"
-    elseif frame:IsMouseMotionFocus() then
-        color = "widget_highlight"
-    else
-        color = "widget"
+        state = "disabled"
+    elseif isPressed then
+        state = "pressed"
+    elseif frame.isSelected or IsCatalogEntryPreviewed(frame) then
+        state = "selected"
+    elseif frame._BFIHousingHovered or frame:IsMouseMotionFocus() then
+        state = "hovered"
     end
 
-    local alpha = frame.isSelected and 0.35 or 0.8
-    frame.BFIHousingBackground:SetVertexColor(AF.GetColorRGB(color, alpha))
-    frame.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
+    SetFadeSurfaceState(frame, state)
 end
 
 local function StyleCatalogEntry(frame)
-    if frame._BFIHousingCatalogStyled then return end
-    frame._BFIHousingCatalogStyled = true
-
-    CreateSquareElement(frame)
-
-    -- Keep the decor icon/model, special-room marker, quantities, and dye
-    -- state. Only the ornamental card chrome is replaced.
-    frame.Background:SetAlpha(0)
-    frame.HoverBackground:SetAlpha(0)
-    if frame.SpecialRoomFrame then
-        frame.SpecialRoomFrame:SetAlpha(0)
+    if not frame.Background
+        or not frame.HoverBackground
+        or not frame.UpdateVisuals
+        or not frame.UpdateBackground
+    then
+        return
     end
 
-    hooksecurefunc(frame, "UpdateVisuals", UpdateCatalogEntry)
-    hooksecurefunc(frame, "UpdateBackground", UpdateCatalogEntry)
-    frame:HookScript("OnEnter", function(self)
-        UpdateCatalogEntry(self)
-    end)
-    frame:HookScript("OnLeave", function(self)
-        UpdateCatalogEntry(self)
-    end)
-    frame:HookScript("OnEnable", UpdateCatalogEntry)
-    frame:HookScript("OnDisable", UpdateCatalogEntry)
+    if not frame._BFIHousingCatalogStyled then
+        frame._BFIHousingCatalogStyled = true
+
+        CreateFadeSurface(frame)
+
+        -- Keep the decor icon/model, quantities, and dye state. Only the
+        -- ornamental card chrome is replaced.
+        frame.Background:SetAlpha(0)
+        frame.HoverBackground:SetAlpha(0)
+        if frame.SpecialRoomFrame then
+            frame.SpecialRoomFrame:SetAlpha(0)
+        end
+
+        hooksecurefunc(frame, "UpdateVisuals", UpdateCatalogEntry)
+        hooksecurefunc(frame, "UpdateBackground", UpdateCatalogEntry)
+        frame:HookScript("OnEnter", function(self)
+            self._BFIHousingHovered = true
+            UpdateCatalogEntry(self)
+        end)
+        frame:HookScript("OnLeave", function(self)
+            self._BFIHousingHovered = nil
+            UpdateCatalogEntry(self)
+        end)
+        frame:HookScript("OnHide", function(self)
+            self._BFIHousingHovered = nil
+        end)
+        frame:HookScript("OnEnable", UpdateCatalogEntry)
+        frame:HookScript("OnDisable", UpdateCatalogEntry)
+    end
+
     UpdateCatalogEntry(frame)
 end
 
 local function StyleVisibleCatalogEntries(scrollBox)
-    scrollBox:ForEachFrame(StyleCatalogEntry)
+    scrollBox:ForEachFrame(function(frame)
+        frame._BFIHousingCatalog = scrollBox._BFIHousingCatalog
+        StyleCatalogEntry(frame)
+    end)
 end
 
-local function UpdateCatalogCategory(frame)
-    local color
+local function UpdateCatalogCategory(frame, isPressed)
+    local isActive = frame.IsActive and frame:IsActive() or frame.isActive
+    local state = "normal"
     if not frame:IsEnabled() then
-        color = "widget_dark"
-    elseif frame.isActive then
-        color = "BFI"
-    elseif frame:IsMouseMotionFocus() then
-        color = "widget_highlight"
-    else
-        color = "widget"
+        state = "disabled"
+    elseif isPressed then
+        state = "pressed"
+    elseif isActive then
+        state = "selected"
+    elseif frame._BFIHousingHovered or frame:IsMouseMotionFocus() then
+        state = "hovered"
     end
 
-    local alpha = frame.isActive and 0.45 or 0.8
-    frame.BFIHousingBackground:SetVertexColor(AF.GetColorRGB(color, alpha))
-    frame.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
+    SetFadeSurfaceState(frame, state)
 
     -- Blizzard category atlases include their circular chrome. Keep their
     -- category identity, but show only the centered glyph through a clipped
@@ -204,35 +293,93 @@ local function UpdateCatalogCategory(frame)
 end
 
 local function StyleCatalogCategory(frame)
-    if frame._BFIHousingCategoryStyled then return end
-    frame._BFIHousingCategoryStyled = true
+    -- Let VerticalLayoutFrame expand every category surface across the full
+    -- rail while the clipped identity glyph remains centered within it.
+    frame.expand = true
+    frame.align = nil
 
-    CreateSquareElement(frame)
-    frame.Icon:SetAlpha(0)
-    frame.HoverIcon:SetAlpha(0)
+    if not frame._BFIHousingCategoryStyled then
+        frame._BFIHousingCategoryStyled = true
 
-    local glyphClip = CreateFrame("Frame", nil, frame)
-    glyphClip:SetClipsChildren(true)
-    AF.SetFrameLevel(glyphClip, 1)
-    AF.SetSize(glyphClip, 30, 30)
-    AF.SetPoint(glyphClip, "CENTER")
-    frame.BFIHousingGlyphClip = glyphClip
+        CreateFadeSurface(frame)
+        frame.Icon:SetAlpha(0)
+        frame.HoverIcon:SetAlpha(0)
 
-    local glyph = glyphClip:CreateTexture(nil, "ARTWORK")
-    AF.SetSize(glyph, 48, 48)
-    AF.SetPoint(glyph, "CENTER")
-    frame.BFIHousingGlyph = glyph
+        local glyphClip = CreateFrame("Frame", nil, frame)
+        glyphClip:SetClipsChildren(true)
+        AF.SetFrameLevel(glyphClip, 1)
+        AF.SetSize(glyphClip, 30, 30)
+        AF.SetPoint(glyphClip, "CENTER")
+        frame.BFIHousingGlyphClip = glyphClip
 
-    frame:HookScript("OnEnter", UpdateCatalogCategory)
-    frame:HookScript("OnLeave", UpdateCatalogCategory)
-    frame:HookScript("OnEnable", UpdateCatalogCategory)
-    frame:HookScript("OnDisable", UpdateCatalogCategory)
-    hooksecurefunc(frame, "UpdateState", UpdateCatalogCategory)
+        local glyph = glyphClip:CreateTexture(nil, "ARTWORK")
+        AF.SetSize(glyph, 48, 48)
+        AF.SetPoint(glyph, "CENTER")
+        frame.BFIHousingGlyph = glyph
+
+        frame:HookScript("OnEnter", function(self)
+            self._BFIHousingHovered = true
+            UpdateCatalogCategory(self)
+        end)
+        frame:HookScript("OnLeave", function(self)
+            self._BFIHousingHovered = nil
+            UpdateCatalogCategory(self)
+        end)
+        frame:HookScript("OnHide", function(self)
+            self._BFIHousingHovered = nil
+        end)
+        frame:HookScript("OnEnable", UpdateCatalogCategory)
+        frame:HookScript("OnDisable", UpdateCatalogCategory)
+        hooksecurefunc(frame, "UpdateVisuals", UpdateCatalogCategory)
+    end
+
     UpdateCatalogCategory(frame)
 end
 
+local function UpdateCatalogBackButton(button, isPressed)
+    local state = "normal"
+    if not button:IsEnabled() then
+        state = "disabled"
+    elseif isPressed then
+        state = "pressed"
+    elseif button._BFIHousingHovered or button:IsMouseMotionFocus() then
+        state = "hovered"
+    end
+    SetFadeSurfaceState(button, state)
+end
+
+local function StyleCatalogBackButton(button)
+    button.expand = true
+    button.align = nil
+
+    if not button._BFIHousingBackStyled then
+        button._BFIHousingBackStyled = true
+        StyleActionButton(button)
+        CreateFadeSurface(button)
+        button:HookScript("OnEnter", function(self)
+            self._BFIHousingHovered = true
+            UpdateCatalogBackButton(self)
+        end)
+        button:HookScript("OnLeave", function(self)
+            self._BFIHousingHovered = nil
+            UpdateCatalogBackButton(self)
+        end)
+        button:HookScript("OnHide", function(self)
+            self._BFIHousingHovered = nil
+        end)
+        button:HookScript("OnEnable", UpdateCatalogBackButton)
+        button:HookScript("OnDisable", UpdateCatalogBackButton)
+        hooksecurefunc(button, "UpdateVisuals", UpdateCatalogBackButton)
+    end
+
+    UpdateCatalogBackButton(button)
+end
+
 local function StyleCatalogCategories(categories)
-    StyleActionButton(categories.BackButton)
+    categories.topPadding = 0
+    categories.spacing = 0
+
+    StyleCatalogBackButton(categories.BackButton)
     StyleCatalogCategory(categories.AllSubcategoriesStandIn)
 
     for frame in categories.categoryPool:EnumerateActive() do
@@ -241,6 +388,17 @@ local function StyleCatalogCategories(categories)
     for frame in categories.subcategoryPool:EnumerateActive() do
         StyleCatalogCategory(frame)
     end
+
+    categories:Layout()
+end
+
+local function UpdatePreviewedCatalogEntry(preview, entryInfo)
+    local catalog = preview._BFIHousingCatalog
+    if not catalog then return end
+
+    catalog._BFIPreviewedRecordID = entryInfo and entryInfo.recordID or nil
+    catalog._BFIPreviewedEntryType = entryInfo and entryInfo.entryType or nil
+    StyleVisibleCatalogEntries(catalog.OptionsContainer.ScrollBox)
 end
 
 local function StyleCatalog(catalog)
@@ -260,8 +418,7 @@ local function StyleCatalog(catalog)
     categories.Background:SetAlpha(0)
     categories.TopBorder:SetAlpha(0)
     categories.SubcategoriesDivider:SetAlpha(0)
-    CreateSquareElement(categories)
-    categories.BFIHousingBackground:SetVertexColor(AF.GetColorRGB("background"))
+    categories.SubcategoriesDivider.ignoreInLayout = true
 
     StyleCatalogCategories(categories)
     hooksecurefunc(categories, "DisplayTopLevelCategories", StyleCatalogCategories)
@@ -270,15 +427,21 @@ local function StyleCatalog(catalog)
     local options = catalog.OptionsContainer
     S.StyleScrollBar(options.ScrollBar)
     options.ScrollBox:ClearEdgeFade()
+    options.ScrollBox._BFIHousingCatalog = catalog
     hooksecurefunc(options.ScrollBox, "Update", StyleVisibleCatalogEntries)
     StyleVisibleCatalogEntries(options.ScrollBox)
 
     local preview = catalog.PreviewFrame
-    preview.PreviewBackground:SetColorTexture(AF.GetColorRGB("widget"))
-    preview.PreviewBackground:SetTexCoord(0, 1, 0, 1)
+    preview.PreviewBackground:SetAlpha(0)
     preview.PreviewCornerLeft:SetAlpha(0)
     preview.PreviewCornerRight:SetAlpha(0)
-    S.CreateBackdrop(preview, true)
+    CreateFadeSurface(preview)
+    SetFadeSurfaceState(preview, "selected")
+
+    preview._BFIHousingCatalog = catalog
+    hooksecurefunc(preview, "ClearPreviewData", UpdatePreviewedCatalogEntry)
+    hooksecurefunc(preview, "PreviewCatalogEntryInfo", UpdatePreviewedCatalogEntry)
+    UpdatePreviewedCatalogEntry(preview, preview.catalogEntryInfo)
 
     S.StyleIconButton(preview.VariantLeftButton, AF.GetIcon("ArrowLeft2"), 16)
     S.StyleIconButton(preview.VariantRightButton, AF.GetIcon("ArrowRight2"), 16)
