@@ -83,8 +83,11 @@ local function StyleMenuHighlight(frame)
     local highlight = frame.highlight
     if not highlight then return end
 
-    highlight:SetColorTexture(AF.GetColorRGB("BFI", 0.1))
-    highlight:SetBlendMode("ADD")
+    -- Match AF Normal Dropdown 1: transparent at rest, then the configured
+    -- addon accent hover color through ordinary alpha blending.
+    local hoverColor = AF.GetButtonHoverColor("BFI_transparent")
+    highlight:SetColorTexture(AF.UnpackColor(hoverColor))
+    highlight:SetBlendMode("BLEND")
 end
 
 ---------------------------------------------------------------------
