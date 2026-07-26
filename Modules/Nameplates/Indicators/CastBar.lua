@@ -124,11 +124,22 @@ local function CastBar_UpdateImportantCastRegion(self)
     local enabled =
         self.importantGlowEnabled or self.importantIconEnabled
     -- AF applies Blizzard's possibly secret Important Cast result to this
-    -- carrier. Its children use only ordinary profile visibility, allowing
-    -- the glow and icon to coexist without inspecting the cast state in Lua.
+    -- carrier. The icon also receives AF's inverse interruptibility sink, so
+    -- an enabled not-kickable X takes precedence in the shared icon slot while
+    -- the important glow remains visible. The interruptibility state does not
+    -- imply immunity to crowd-control stops. Neither state is inspected in Lua.
     self:SetImportantCastRegion(
         enabled and self.importantCastCarrier or nil
     )
+    local useSharedSlotPrecedence =
+        self.importantIconEnabled
+        and self.uninterruptibleIconEnabled
+    self:SetInterruptibleCastRegion(
+        useSharedSlotPrecedence and self.importantIcon or nil
+    )
+    if self.importantIconEnabled and not useSharedSlotPrecedence then
+        self.importantIcon:SetAlpha(1)
+    end
 end
 
 local function CastBar_SetupPlayerTargetHighlight(self, config)
@@ -178,6 +189,7 @@ local function CastBar_SetupUninterruptibleIcon(self, config)
     config = config or {}
 
     local enabled = config.enabled == true
+    self.uninterruptibleIconEnabled = enabled
     self.uninterruptibleIcon:SetShown(enabled)
     local size = config.size or 16
     AF.SetSize(self.uninterruptibleIcon, size, size)
@@ -283,11 +295,11 @@ local function CastBar_LoadConfig(self, config)
     CastBar_SetupSpark(self, config.spark)
     CastBar_SetupImportantGlow(self, config.importantGlow)
     CastBar_SetupImportantIcon(self, config.importantIcon)
-    CastBar_UpdateImportantCastRegion(self)
     CastBar_SetupUninterruptibleIcon(
         self,
         config.uninterruptibleIcon
     )
+    CastBar_UpdateImportantCastRegion(self)
     CastBar_SetupPlayerTargetHighlight(
         self,
         config.playerTargetHighlight

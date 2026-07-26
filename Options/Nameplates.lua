@@ -1409,7 +1409,7 @@ local function CreateNameplatesPanel()
 
     local castsNotice = AF.CreateFontString(
         castsPane,
-        L["Cast settings apply to every nameplate. Important, uninterruptible, and player-targeted cast indicators use Blizzard's secret-safe classifications; no custom spell or NPC lists are used."],
+        L["Cast settings apply to every nameplate. Important, not-kickable, and player-targeted indicators use separate Blizzard secret-safe classifications; no custom spell or NPC lists are used."],
         "gray"
     )
     AF.SetPoint(castsNotice, "TOPLEFT", castsPane, 15, -30)
@@ -1435,7 +1435,7 @@ local function CreateNameplatesPanel()
     )
     local uninterruptibleIconPane = CreateSectionPane(
         "casts",
-        L["Uninterruptible X"],
+        L["Not Kickable X"],
         230
     )
     local importantIconPane = CreateSectionPane(
@@ -1510,7 +1510,7 @@ local function CreateNameplatesPanel()
 
     local uninterruptibleCastColor = AF.CreateColorPicker(
         castBasePane,
-        L["Uninterruptible"]
+        L["Not Kickable"]
     )
     AF.SetPoint(
         uninterruptibleCastColor,
@@ -1657,6 +1657,9 @@ local function CreateNameplatesPanel()
             "gray"
         )
         AF.SetPoint(help, "TOPLEFT", pane, 15, -30)
+        AF.SetPoint(help, "TOPRIGHT", pane, -15, -30)
+        help:SetJustifyH("LEFT")
+        help:SetWordWrap(true)
 
         local enableIcon = AF.CreateCheckButton(
             pane,
@@ -1781,13 +1784,13 @@ local function CreateNameplatesPanel()
         CreateCastStateIconWidgets(
             uninterruptibleIconPane,
             "uninterruptibleIcon",
-            L["Position is relative to the cast bar."]
+            L["X means a normal kick cannot interrupt the cast; stops may still work."]
         )
     local importantIconWidgets =
         CreateCastStateIconWidgets(
             importantIconPane,
             "importantIcon",
-            L["Position is relative to the cast bar."]
+            L["On dual-state casts, X uses this slot; the important glow remains."]
         )
 
     local playerTargetHighlight = AF.CreateCheckButton(
