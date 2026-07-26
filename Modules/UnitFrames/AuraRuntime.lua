@@ -251,6 +251,7 @@ local function ShouldEnableNative(runtime)
         and runtime._config ~= nil
         and runtime._config.enabled ~= false
         and runtime.root.enabled ~= false
+        and not runtime._reloadRequired
         and not runtime._configMode
         and not runtime.root.inConfigMode
 end
@@ -320,7 +321,32 @@ local function Quiesce(runtime)
     SyncWatcher(runtime)
 end
 
+local function QuiesceForReload(runtime)
+    SetRuntimeWatched(runtime, false)
+    if not runtime._built then return end
+
+    -- The plain holder can be hidden immediately through the controller's
+    -- hover-safe visibility path. Disabling the native container remains
+    -- runtime-owned OOC work so a topology change cannot smuggle a protected
+    -- mutation through an enable/disable or config-mode lifecycle call.
+    runtime._controller:SetShown(false)
+    if InCombatLockdown() then
+        runtime._reloadQuiescePending = true
+        QueueCombatCommit(runtime)
+        return
+    end
+
+    runtime._reloadQuiescePending = nil
+    RemoveCombatCommit(runtime)
+    runtime._controller:SetEnabled(false)
+end
+
 local function SyncLifecycle(runtime)
+    if runtime._reloadRequired then
+        QuiesceForReload(runtime)
+        return
+    end
+
     if not runtime._built then
         SyncWatcher(runtime)
         return
@@ -369,6 +395,66 @@ local function Compile(runtime, unit)
     end
 end
 
+local function RequiresReloadForDescriptor(runtime, descriptor)
+    return runtime._built == true
+        and descriptor ~= nil
+        and descriptor.migrationReady == true
+        and descriptor.empty ~= true
+        and descriptor.constructionKey ~= nil
+        and not DeepEqual(
+            runtime._constructionKey,
+            descriptor.constructionKey
+        )
+end
+
+local function CompileComparisonDescriptor(runtime, config)
+    local unit = ResolveRuntimeUnit(runtime)
+    if not IsCleanUnitToken(unit) then
+        unit = runtime._appliedUnit
+    end
+    if not IsCleanUnitToken(unit) then return nil end
+
+    local descriptor = UF.CompileNativeAuraSpec(
+        unit,
+        runtime.auraFilter,
+        AF.Copy(config)
+    )
+    return descriptor
+end
+
+local function CancelPendingCommitWork(runtime)
+    runtime._commitGeneration = runtime._commitGeneration + 1
+    runtime._commitScheduled = nil
+    runtime._configDirty = nil
+    runtime._unitDirty = nil
+    runtime._deferredCommit = nil
+    runtime._reloadQuiescePending = nil
+    RemoveCombatCommit(runtime)
+end
+
+local function SetReloadRequired(runtime, required)
+    if not required then
+        if runtime._reloadRequired or runtime._reloadQuiescePending then
+            runtime._reloadRequired = nil
+            runtime._reloadQuiescePending = nil
+            -- A same-topology config that supersedes the reload state in
+            -- combat still needs the already-owned regen turn for its latest
+            -- tuning. Preserve that queue; only cancel a reload quiesce when
+            -- the replacement config can be committed immediately.
+            if not InCombatLockdown() or not runtime._configDirty then
+                runtime._commitScheduled = nil
+                RemoveCombatCommit(runtime)
+            end
+        end
+        return false
+    end
+
+    runtime._reloadRequired = true
+    CancelPendingCommitWork(runtime)
+    QuiesceForReload(runtime)
+    return true
+end
+
 local function ApplyPlacement(runtime, descriptor)
     local placement = AF.Copy(descriptor.placement)
     local root = runtime.root
@@ -390,6 +476,19 @@ Commit = function(runtime)
         return
     end
 
+    if runtime._reloadRequired then
+        runtime._configDirty = nil
+        runtime._unitDirty = nil
+        runtime._deferredCommit = nil
+        QuiesceForReload(runtime)
+        return
+    end
+
+    if RequiresReloadForDescriptor(runtime, runtime._descriptor) then
+        SetReloadRequired(runtime, true)
+        return
+    end
+
     if runtime._configMode or runtime.root.inConfigMode then
         RemoveCombatCommit(runtime)
         runtime._deferredCommit = true
@@ -398,7 +497,17 @@ Commit = function(runtime)
 
     if runtime._state ~= STATE_READY then
         RemoveCombatCommit(runtime)
-        runtime._configDirty = nil
+        -- A secret/temporarily unavailable unit prevents compilation against
+        -- the latest config. Keep that config dirty for an existing native
+        -- container so the first clean-unit recovery applies its tuning and
+        -- placement instead of performing only a retarget. There is no
+        -- reschedule here, so WAITING remains dormant until a unit signal.
+        -- Terminal compiler results still supersede and quiesce pending work.
+        if runtime._state ~= STATE_WAITING_FOR_UNIT
+            or not runtime._built
+        then
+            runtime._configDirty = nil
+        end
         runtime._unitDirty = nil
         runtime._deferredCommit = nil
         Quiesce(runtime)
@@ -453,16 +562,11 @@ Commit = function(runtime)
     RemoveCombatCommit(runtime)
 
     local descriptor = runtime._descriptor
-    local constructionChanged = not runtime._built
-        or not DeepEqual(
-            runtime._constructionKey,
-            descriptor.constructionKey
-        )
 
     if runtime._configDirty then
         ApplyPlacement(runtime, descriptor)
 
-        if constructionChanged then
+        if not runtime._built then
             local completeSpec = AF.Copy(descriptor.completeSpec)
             completeSpec.unit = runtime._unit
             completeSpec.enabled = true
@@ -476,7 +580,11 @@ Commit = function(runtime)
             end
         end
 
-        runtime._constructionKey = AF.Copy(descriptor.constructionKey)
+        if not runtime._constructionKey then
+            runtime._constructionKey = AF.Copy(
+                descriptor.constructionKey
+            )
+        end
     elseif runtime._unitDirty and runtime._built then
         runtime._controller:SetShown(false)
         runtime._controller:SetUnit(runtime._unit)
@@ -499,9 +607,10 @@ local function ScheduleCommit(runtime, immediate)
         return
     end
 
-    -- Trailing-edge generation checks avoid creating a replacement native
-    -- container for every intermediate slider/filter edit. Old timer
-    -- callbacks are harmless and cannot apply stale configuration.
+    -- Trailing-edge generation checks coalesce tuning and the initial native
+    -- build across intermediate slider/filter edits. Construction changes
+    -- after that build are reload-only. Old callbacks cannot apply stale
+    -- configuration.
     C_Timer.After(CONFIG_COMMIT_DELAY, function()
         if not runtime._destroyed
             and generation == runtime._commitGeneration
@@ -603,6 +712,27 @@ local function NativeAuras_LoadConfig(self, config)
     self._configDirty = true
 
     Compile(self, ResolveRuntimeUnit(self))
+
+    local comparisonDescriptor = self._descriptor
+    if self._built and not comparisonDescriptor then
+        comparisonDescriptor = CompileComparisonDescriptor(
+            self,
+            self._config
+        )
+    end
+    local reloadRequired = RequiresReloadForDescriptor(
+        self,
+        comparisonDescriptor
+    )
+    SetReloadRequired(self, reloadRequired)
+
+    if reloadRequired then
+        if self._configMode or self.root.inConfigMode then
+            SyncPreview(self)
+        end
+        return
+    end
+
     SyncWatcher(self)
 
     if self._built then
@@ -653,7 +783,9 @@ local function NativeAuras_Disable(self)
 
     self._active = nil
     SetRuntimeWatched(self, false)
-    if self._built then
+    if self._reloadRequired then
+        QuiesceForReload(self)
+    elseif self._built then
         self._controller:SetShown(false)
         if self.root.inConfigMode or self._configMode then
             self._controller:SetEnabled(false)
@@ -680,7 +812,10 @@ local function NativeAuras_Update(self)
     end
 
     SyncLifecycle(self)
-    if self._built and self._state == STATE_READY then
+    if self._built
+        and self._state == STATE_READY
+        and not self._reloadRequired
+    then
         -- Stable tokens such as target/focus can change entity without their
         -- text changing. The native dirty mark remains aura-data opaque.
         self._controller:Refresh()
@@ -710,7 +845,9 @@ local function NativeAuras_EnableConfigMode(self)
     self._active = nil
     self._configMode = true
     SetRuntimeWatched(self, false)
-    if self._built then
+    if self._reloadRequired then
+        QuiesceForReload(self)
+    elseif self._built then
         self._controller:SetShown(false)
         self._controller:SetEnabled(false)
     end
@@ -726,11 +863,25 @@ local function NativeAuras_DisableConfigMode(self)
 
     self._configMode = nil
     self._resumeAfterConfigMode = true
-    self._deferredCommit = true
-    if self._built then
+    self._deferredCommit = not self._reloadRequired or nil
+    if self._reloadRequired then
+        QuiesceForReload(self)
+    elseif self._built then
         self._controller:SetShown(false)
         self._controller:SetEnabled(false)
     end
+end
+
+local function NativeAuras_RequiresReloadForConfig(self, config)
+    if self._destroyed
+        or not self._built
+        or type(config) ~= "table"
+    then
+        return false
+    end
+
+    local descriptor = CompileComparisonDescriptor(self, config)
+    return RequiresReloadForDescriptor(self, descriptor)
 end
 
 local function NativeAuras_GetState(self)
@@ -744,8 +895,10 @@ local function NativeAuras_GetState(self)
         pending = self._commitScheduled == true
             or self._configDirty == true
             or self._unitDirty == true
-            or self._deferredCommit == true,
+            or self._deferredCommit == true
+            or self._reloadQuiescePending == true,
         configMode = self._configMode == true,
+        reloadRequired = self._reloadRequired == true,
         migrationReady = descriptor and descriptor.migrationReady or false,
         empty = descriptor and descriptor.empty or false,
         visibility = descriptor and AF.Copy(descriptor.visibility) or nil,
@@ -769,6 +922,8 @@ local function NativeAuras_Destroy(self)
     self._resumeAfterConfigMode = nil
     self._active = nil
     self._configMode = nil
+    self._reloadRequired = nil
+    self._reloadQuiescePending = nil
     self._holderRetryScheduled = nil
     SetRuntimeWatched(self, false)
     RemoveCombatCommit(self)
@@ -788,7 +943,7 @@ local function NativeAuras_Destroy(self)
 end
 
 local function NativeAuras_UpdatePixels(self)
-    if self._destroyed then return end
+    if self._destroyed or self._reloadRequired then return end
 
     self._controller:ApplyHolderConfig(function(holder)
         AF.ReSize(holder)
@@ -823,6 +978,7 @@ local function CreateNativeAuraRuntime(
     frame.RefreshVisibility = NativeAuras_RefreshVisibility
     frame.EnableConfigMode = NativeAuras_EnableConfigMode
     frame.DisableConfigMode = NativeAuras_DisableConfigMode
+    frame.RequiresReloadForConfig = NativeAuras_RequiresReloadForConfig
     frame.GetNativeAuraState = NativeAuras_GetState
     frame.Destroy = NativeAuras_Destroy
 

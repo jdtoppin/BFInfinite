@@ -140,6 +140,7 @@ local function makeHarness(withNativeSchema)
         UnitExists = forbidden("UnitExists"),
         UnitIsVisible = forbidden("UnitIsVisible"),
         C_UnitAuras = forbiddenTable("C_UnitAuras"),
+        C_Secrets = forbiddenTable("C_Secrets"),
         AuraData = forbiddenTable("AuraData"),
     }
     environment["is" .. "secretvalue"] = forbidden("secret-value API")
@@ -486,6 +487,7 @@ local function testCompleteSpecContract()
         defaultSortPriority = true,
         fixedHolderExtent = true,
         spellIDListsIgnored = false,
+        spellIDFiltersRestrictedByUnitReaction = false,
         auraTypeColorSourceRulesIgnored = true,
         tooltipPlacementApproximate = false,
         partitionDeferred = false,
@@ -969,6 +971,7 @@ local function testEmptyPolicies()
         defaultSortPriority = false,
         fixedHolderExtent = false,
         spellIDListsIgnored = false,
+        spellIDFiltersRestrictedByUnitReaction = false,
         auraTypeColorSourceRulesIgnored = false,
         tooltipPlacementApproximate = false,
         partitionDeferred = false,
@@ -1110,20 +1113,187 @@ local function testCapacityMetrics()
         "five-group sort degradation"
     )
 
-    local spellLists = baseConfig()
-    spellLists.blacklist = {12345}
-    spellLists.whitelist = {67890}
-    local spellDescriptor = compile("target", "HARMFUL", spellLists)
+    local spellFilter = baseConfig()
+    spellFilter.blacklist = {12345}
+    spellFilter.whitelist = {67890}
+    local spellDescriptor = compile("target", "HARMFUL", spellFilter)
     assertDeepEqual(spellDescriptor.diagnostics, {
         "NATIVE_DEFAULT_SORT_ADDS_PRIORITY",
         "NATIVE_HOLDER_USES_MAXIMUM_EXTENT",
-        "SPELL_ID_LISTS_IGNORED",
+        "SPELL_ID_FILTERS_RESTRICTED_BY_UNIT_REACTION",
         "AURA_TYPE_COLOR_SOURCE_RULES_IGNORED",
-    }, "spell-list diagnostics")
+    }, "spell-filter diagnostics")
     assertEqual(
         spellDescriptor.degradations.spellIDListsIgnored,
+        false,
+        "spell IDs are not ignored"
+    )
+    assertEqual(
+        spellDescriptor.degradations
+            .spellIDFiltersRestrictedByUnitReaction,
         true,
-        "spell-list degradation"
+        "spell-filter reaction degradation"
+    )
+end
+
+local function testSpellIDCandidateFilters()
+    local whitelist = baseConfig()
+    whitelist.mode = "whitelist"
+    whitelist.whitelist = {101, 202}
+    whitelist.blacklist = "inactive blacklist is ignored"
+    local whitelistSnapshot = copy(whitelist)
+    local whitelistDescriptor = compile("target", "HELPFUL", whitelist)
+    local completeGroups = whitelistDescriptor.completeSpec.groups
+    local tuningGroups = whitelistDescriptor.tuningSpec.groups
+
+    assertEqual(#completeGroups, 2, "whitelist complete group count")
+    assertEqual(#tuningGroups, 2, "whitelist tuning group count")
+    local projectedGroups = {
+        completeGroups[1],
+        completeGroups[2],
+        tuningGroups[1],
+        tuningGroups[2],
+    }
+    for index, group in ipairs(projectedGroups) do
+        assertDeepEqual(group.candidateFilters, {
+            includeSpellIDs = {
+                [101] = true,
+                [202] = true,
+            },
+        }, "whitelist candidate map " .. index)
+        for earlier = 1, index - 1 do
+            assertTrue(
+                group.candidateFilters
+                    ~= projectedGroups[earlier].candidateFilters,
+                "whitelist candidate tables are shared"
+            )
+            assertTrue(
+                group.candidateFilters.includeSpellIDs
+                    ~= projectedGroups[earlier].candidateFilters
+                        .includeSpellIDs,
+                "whitelist spell-ID maps are shared"
+            )
+        end
+    end
+    assertEqual(
+        whitelistDescriptor.visibility.requiresAssist,
+        true,
+        "helpful identity filter assist gate"
+    )
+    assertEqual(
+        whitelistDescriptor.degradations.spellIDListsIgnored,
+        false,
+        "whitelist is not ignored"
+    )
+    assertEqual(
+        whitelistDescriptor.degradations
+            .spellIDFiltersRestrictedByUnitReaction,
+        true,
+        "whitelist reaction degradation"
+    )
+    assertDeepEqual(whitelistDescriptor.diagnostics, {
+        "NATIVE_DEFAULT_SORT_ADDS_PRIORITY",
+        "NATIVE_HOLDER_USES_MAXIMUM_EXTENT",
+        "SPELL_ID_FILTERS_RESTRICTED_BY_UNIT_REACTION",
+        "AURA_TYPE_COLOR_SOURCE_RULES_IGNORED",
+    }, "whitelist diagnostics")
+    assertDeepEqual(whitelist, whitelistSnapshot, "whitelist input mutation")
+
+    completeGroups[1].candidateFilters.includeSpellIDs[101] = nil
+    assertEqual(
+        completeGroups[2].candidateFilters.includeSpellIDs[101],
+        true,
+        "complete whitelist map isolation"
+    )
+    assertEqual(
+        tuningGroups[1].candidateFilters.includeSpellIDs[101],
+        true,
+        "complete/tuning whitelist map isolation"
+    )
+
+    local emptyWhitelist = baseConfig()
+    emptyWhitelist.mode = "whitelist"
+    emptyWhitelist.whitelist = {}
+    emptyWhitelist.blacklist = false
+    local emptyWhitelistDescriptor =
+        compile("focus", "HELPFUL", emptyWhitelist)
+    for index, group in ipairs(emptyWhitelistDescriptor.completeSpec.groups) do
+        assertTrue(
+            type(group.candidateFilters) == "table",
+            "empty whitelist candidates " .. index
+        )
+        assertTrue(
+            type(group.candidateFilters.includeSpellIDs) == "table",
+            "empty whitelist include map " .. index
+        )
+        assertEqual(
+            next(group.candidateFilters.includeSpellIDs),
+            nil,
+            "empty whitelist remains active " .. index
+        )
+    end
+    assertEqual(
+        emptyWhitelistDescriptor.visibility.requiresAssist,
+        true,
+        "empty helpful whitelist assist gate"
+    )
+    assertEqual(
+        emptyWhitelistDescriptor.degradations
+            .spellIDFiltersRestrictedByUnitReaction,
+        true,
+        "empty whitelist reaction degradation"
+    )
+
+    local blacklist = baseConfig()
+    blacklist.blacklist = {303, 404, 303}
+    blacklist.whitelist = "inactive whitelist is ignored"
+    local blacklistDescriptor = compile("target", "HARMFUL", blacklist)
+    for index, group in ipairs(blacklistDescriptor.completeSpec.groups) do
+        assertDeepEqual(group.candidateFilters, {
+            excludeSpellIDs = {
+                [303] = true,
+                [404] = true,
+            },
+        }, "blacklist candidate map " .. index)
+    end
+    assertEqual(
+        blacklistDescriptor.visibility.requiresAssist,
+        false,
+        "harmful identity filter assist gate"
+    )
+
+    local emptyBlacklist = baseConfig()
+    emptyBlacklist.blacklist = {}
+    emptyBlacklist.whitelist = {
+        [2] = "inactive malformed whitelist",
+    }
+    local emptyBlacklistDescriptor =
+        compile("target", "HARMFUL", emptyBlacklist)
+    for index, group in ipairs(emptyBlacklistDescriptor.completeSpec.groups) do
+        assertEqual(
+            group.candidateFilters,
+            nil,
+            "empty blacklist candidates " .. index
+        )
+    end
+    assertEqual(
+        emptyBlacklistDescriptor.degradations
+            .spellIDFiltersRestrictedByUnitReaction,
+        false,
+        "empty blacklist reaction degradation"
+    )
+    assertEqual(
+        #emptyBlacklistDescriptor.diagnostics,
+        3,
+        "empty blacklist ignores inactive list"
+    )
+
+    local constructionBaseline =
+        compile("target", "HELPFUL", baseConfig())
+    assertDeepEqual(
+        whitelistDescriptor.constructionKey,
+        constructionBaseline.constructionKey,
+        "spell candidate filters stay out of construction key"
     )
 end
 
@@ -1289,6 +1459,68 @@ local function testInvalidInputs()
         invalid,
         "INVALID_FILTER_SCHEMA"
     )
+
+    invalid = baseConfig()
+    invalid.mode = nil
+    assertCompileError(
+        "target",
+        "HARMFUL",
+        invalid,
+        "INVALID_SPELL_ID_FILTER_MODE",
+        "missing spell-ID filter mode"
+    )
+
+    for _, mode in ipairs({"allowlist", "BLACKLIST", true, 0 / 0, {}}) do
+        invalid = baseConfig()
+        invalid.mode = mode
+        assertCompileError(
+            "target",
+            "HARMFUL",
+            invalid,
+            "INVALID_SPELL_ID_FILTER_MODE",
+            "invalid spell-ID filter mode"
+        )
+    end
+
+    local invalidSpellIDLists = {
+        "not a list",
+        {
+            [1] = 101,
+            [3] = 303,
+        },
+        {
+            [0] = 101,
+        },
+        {
+            [1.5] = 101,
+        },
+        {
+            label = 101,
+        },
+        {0},
+        {-1},
+        {1.5},
+        {math.huge},
+        {0 / 0},
+        {"101"},
+    }
+    for _, mode in ipairs({"blacklist", "whitelist"}) do
+        local expectedError = mode == "blacklist"
+            and "INVALID_SPELL_ID_BLACKLIST"
+            or "INVALID_SPELL_ID_WHITELIST"
+        for index, list in ipairs(invalidSpellIDLists) do
+            invalid = baseConfig()
+            invalid.mode = mode
+            invalid[mode] = list
+            assertCompileError(
+                "target",
+                "HARMFUL",
+                invalid,
+                expectedError,
+                ("invalid %s list %d"):format(mode, index)
+            )
+        end
+    end
 
     invalid = baseConfig()
     invalid.subFrame = "partition"
@@ -1521,6 +1753,7 @@ testTooltipProjection()
 testEmptyPolicies()
 testPartitionMetadata()
 testCapacityMetrics()
+testSpellIDCandidateFilters()
 testInvalidInputs()
 testConstructionBoundary()
 testFreshDeterministicOutput()

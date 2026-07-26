@@ -483,18 +483,41 @@ local function ApplyNativeTuning(controller)
 end
 
 function ControllerMixin:_Build()
+    assert(not self._buildAttempted and not self._container,
+        "aura container controller initial build already attempted")
+    -- Claim this controller's only native construction attempt before any
+    -- fallible holder or native setup. Groups/slots are add-only, so a
+    -- partially configured container can never be completed by retrying the
+    -- same spec or safely replaced by adopting/allocating another shell.
+    self._buildAttempted = true
+
     local spec = self._spec
     local holder = self.frame
 
-    AF.SetSize(holder, spec.holder.width, spec.holder.height)
-
-    -- Build a complete hidden replacement before touching the old container.
-    -- The public holder is already hidden by the hover-safe lifecycle gate.
+    -- Build the complete container while the public holder is hidden by the
+    -- hover-safe lifecycle gate. Native groups/slots are add-only, so this
+    -- controller deliberately has no replacement/rebuild path after this.
     local container = self._seedContainer
     local containerIsExternal = container ~= nil
     self._seedContainer = nil
+    if container then
+        -- Record a consumed seed before even plain-holder setup can fail so
+        -- Destroy can still retire it and no later build can adopt a second
+        -- container.
+        self._container = container
+        self._containerIsExternal = true
+        self._containerShown = false
+    end
+
+    AF.SetSize(holder, spec.holder.width, spec.holder.height)
+
     if not container then
         container = AF.CreateCustomAuraContainer(holder)
+        -- Claim a newly created shell immediately, before its first native
+        -- mutation, for the same one-shot and cleanup guarantees as a seed.
+        self._container = container
+        self._containerIsExternal = false
+        self._containerShown = false
     end
     container:Hide()
     AF.SetCustomAuraContainerEnabled(container, false)
@@ -541,15 +564,6 @@ function ControllerMixin:_Build()
     AF.UpdateCustomAuraContainer(container)
     AF.SetCustomAuraContainerEnabled(container, spec.enabled)
 
-    local oldContainer = self._container
-    if oldContainer then
-        AF.SetCustomAuraContainerEnabled(oldContainer, false)
-        oldContainer:Hide()
-    end
-
-    self._container = container
-    self._containerIsExternal = containerIsExternal
-    self._containerShown = false
     if not containerIsExternal then
         container:Show()
     end
@@ -591,8 +605,8 @@ function ControllerMixin:_ApplyPending()
         return
     end
 
-    -- Native configuration and replacement work is OOC-only. Hide the plain
-    -- holder first so no hovered restricted child participates in the call.
+    -- Native configuration and initial-build work is OOC-only. Hide the
+    -- plain holder first so no hovered restricted child participates.
     local holderHidden = SetControllerShownSafe(self, false)
     if InCombatLockdown() then
         if holderHidden then
@@ -745,6 +759,8 @@ end
 function ControllerMixin:Rebuild(completeSpec)
     assert(not self._destroyed and not self._destroyRequested,
         "aura container controller is destroyed")
+    assert(not self._buildAttempted and not self._container,
+        "aura container controller initial build already attempted")
 
     local previousUnit = self._spec and self._spec.unit
     self._spec = NormalizeCompleteSpec(completeSpec)
