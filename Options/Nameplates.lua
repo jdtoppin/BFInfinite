@@ -39,9 +39,11 @@ local THREAT_STATE_COLOR_CATEGORIES = {
 }
 
 local nameplatesPanel
+local RefreshNameplatePreviews = AF.noop
 
 local function UpdateNameplates()
     AF.Fire("BFI_UpdateModule", "nameplates")
+    RefreshNameplatePreviews()
 end
 
 local function SetSharedHealthBarValue(key, value)
@@ -500,6 +502,7 @@ local function CreateNameplatesPanel()
         C_Timer.After(0, function()
             AF.RePoint(scrollSettings)
         end)
+        RefreshNameplatePreviews()
     end
 
     local sectionItems = {
@@ -666,6 +669,14 @@ local function CreateNameplatesPanel()
     AF.SetPoint(threatNotice, "TOPRIGHT", threatPane, -15, -30)
     threatNotice:SetJustifyH("LEFT")
     threatNotice:SetWordWrap(true)
+
+    local threatPreviewPane = CreateSectionPane(
+        "threat",
+        L["Quick Reference"],
+        300
+    )
+    local threatPreview =
+        NP.CreateThreatOptionsPreview(threatPreviewPane)
 
     local UpdateThreatWidgets
     local CancelThreatColorPickers
@@ -1259,6 +1270,11 @@ local function CreateNameplatesPanel()
             config.enabled and config.useCustomColor,
             threatColor
         )
+
+        threatPreview:Refresh(
+            NP.config.hostile_npc.healthBar,
+            NP.config.hostile_npc.nameText.enabled
+        )
     end
 
     --------------------------------------------------
@@ -1303,6 +1319,16 @@ local function CreateNameplatesPanel()
     )
     fallbackNotice:SetJustifyH("LEFT")
     fallbackNotice:SetWordWrap(true)
+
+    local semanticPreviewPane = CreateSectionPane(
+        "colors",
+        L["Quick Reference"],
+        185
+    )
+    local semanticPreview =
+        NP.CreateSemanticColorOptionsPreview(
+            semanticPreviewPane
+        )
 
     local colorSettingsPane = CreateSectionPane(
         "colors",
@@ -1396,6 +1422,10 @@ local function CreateNameplatesPanel()
             end
             AF.SetEnabled(category.enabled, widgets.picker)
         end
+
+        semanticPreview:Refresh(
+            NP.config.hostile_npc.healthBar
+        )
     end
 
     --------------------------------------------------
@@ -1416,6 +1446,14 @@ local function CreateNameplatesPanel()
     AF.SetPoint(castsNotice, "TOPRIGHT", castsPane, -15, -30)
     castsNotice:SetJustifyH("LEFT")
     castsNotice:SetWordWrap(true)
+
+    local castPreviewPane = CreateSectionPane(
+        "casts",
+        L["Quick Reference"],
+        315
+    )
+    local castPreview =
+        NP.CreateCastOptionsPreview(castPreviewPane)
 
     local UpdateCastWidgets
     local castBasePane = CreateSectionPane(
@@ -2158,6 +2196,11 @@ local function CreateNameplatesPanel()
             spellTargetOutline,
             spellTargetSize
         )
+
+        castPreview:Refresh(
+            castConfig,
+            IsIndicatorEnabledForAnyPlateType("castBar")
+        )
     end
 
     --------------------------------------------------
@@ -2203,6 +2246,14 @@ local function CreateNameplatesPanel()
         {text = L["Target"], value = "target"},
         {text = L["Focus"], value = "focus"},
     })
+
+    local targetPreviewPane = CreateSectionPane(
+        "target",
+        L["Quick Reference"],
+        245
+    )
+    local targetPreview =
+        NP.CreateTargetOptionsPreview(targetPreviewPane)
 
     local markerPane = CreateSectionPane(
         "target",
@@ -2374,6 +2425,31 @@ local function CreateNameplatesPanel()
         -130
     )
 
+    local function UpdateTargetPreview(
+        config,
+        healthBarEnabled,
+        nameTextEnabled
+    )
+        local plateType =
+            PLATE_TYPE_GROUPS[selectedTargetScope][1]
+        targetPreview:Refresh(
+            NP.config[plateType],
+            config,
+            selectedTargetScope == "hostile"
+                and L["Hostile"]
+                or L["Friendly"],
+            selectedTargetState == "target"
+                and L["Target"]
+                or L["Focus"],
+            IsIndicatorEnabledForScope(
+                selectedTargetScope,
+                "targetIndicator"
+            ),
+            healthBarEnabled,
+            nameTextEnabled
+        )
+    end
+
     local function UpdateTargetWidgets()
         local config = GetTargetStateConfig(
             selectedTargetScope,
@@ -2430,6 +2506,12 @@ local function CreateNameplatesPanel()
             nameSizeIncrease,
             nameOutline,
             nameShadow
+        )
+
+        UpdateTargetPreview(
+            config,
+            healthBarEnabled,
+            nameTextEnabled
         )
     end
 
@@ -2615,6 +2697,14 @@ local function CreateNameplatesPanel()
     AF.SetPoint(auraNotice, "TOPRIGHT", auraPane, -15, -30)
     auraNotice:SetJustifyH("LEFT")
     auraNotice:SetWordWrap(true)
+
+    local auraPreviewPane = CreateSectionPane(
+        "auras",
+        L["Quick Reference"],
+        205
+    )
+    local auraPreview =
+        NP.CreateAuraOptionsPreview(auraPreviewPane)
 
     local cooldownPane = CreateSectionPane(
         "auras",
@@ -2850,6 +2940,11 @@ local function CreateNameplatesPanel()
     local function UpdateDurationWidgets()
         AF.SetEnabled(durationEnabled:GetChecked(), normalColor, font, outline, size, shadow,
             anchorPoint, relativePoint, xOffset, yOffset)
+        auraPreview:Refresh(
+            NP.config.hostile_npc,
+            IsIndicatorEnabledForAnyPlateType("debuffs"),
+            IsDebuffDurationEnabledForAnyPlateType()
+        )
     end
 
     durationEnabled:SetOnCheck(function(checked)
@@ -2902,6 +2997,43 @@ local function CreateNameplatesPanel()
         AF.HideColorPicker(threatColor)
         AF.HideColorPicker(highlightColor)
         AF.HideColorPicker(normalColor)
+    end
+
+    RefreshNameplatePreviews = function()
+        if not nameplatesPanel then return end
+
+        semanticPreview:Refresh(
+            NP.config.hostile_npc.healthBar
+        )
+        castPreview:Refresh(
+            NP.config.hostile_npc.castBar,
+            IsIndicatorEnabledForAnyPlateType("castBar")
+        )
+        threatPreview:Refresh(
+            NP.config.hostile_npc.healthBar,
+            NP.config.hostile_npc.nameText.enabled
+        )
+
+        local targetConfig = GetTargetStateConfig(
+            selectedTargetScope,
+            selectedTargetState
+        )
+        UpdateTargetPreview(
+            targetConfig,
+            IsHealthBarEnabledForScope(
+                selectedTargetScope
+            ),
+            IsIndicatorEnabledForScope(
+                selectedTargetScope,
+                "nameText"
+            )
+        )
+
+        auraPreview:Refresh(
+            NP.config.hostile_npc,
+            IsIndicatorEnabledForAnyPlateType("debuffs"),
+            IsDebuffDurationEnabledForAnyPlateType()
+        )
     end
 
     function nameplatesPanel.Load(discardColorPreview)
@@ -2965,8 +3097,13 @@ local function CreateNameplatesPanel()
     sectionCleanup.threat = CancelThreatColorPickers
     sectionCleanup.auras = function()
         AF.CancelColorPicker(normalColor)
+        auraPreview:Stop()
     end
     nameplatesPanel:HookOnHide(CancelNameplateColorPickers)
+    nameplatesPanel:HookOnHide(function()
+        auraPreview:Stop()
+    end)
+    nameplatesPanel:HookOnShow(RefreshNameplatePreviews)
 
     sectionButtons[1]:SilentClick()
 end
