@@ -196,6 +196,7 @@ local TextureSetTexCoord = methodTexture.SetTexCoord
 local TextureSetWidth = methodTexture.SetWidth
 local CooldownGetHideCountdownNumbers = methodCooldown.GetHideCountdownNumbers
 local CooldownSetHideCountdownNumbers = methodCooldown.SetHideCountdownNumbers
+local CooldownSetSwipeTexture = methodCooldown.SetSwipeTexture
 local StatusBarGetStatusBarTexture = methodStatusBar.GetStatusBarTexture
 local StatusBarSetStatusBarTexture = methodStatusBar.SetStatusBarTexture
 -- Both audited builds expose Cooldown:GetCountdownFontString without secret
@@ -221,6 +222,11 @@ methodStatusBar:Hide()
 
 local nativeSkinBorderColor = {AF.GetColorRGB("border")}
 local nativeSkinBackgroundColor = {AF.GetColorRGB("widget_dark")}
+-- Blizzard's CDM swipe has rounded alpha corners. Swap only its texture so
+-- Blizzard remains authoritative for each cooldown's live swipe color.
+local nativeCooldownSwipeTexture =
+    "Interface\\HUD\\UI-HUD-CoolDownManager-Icon-Swipe"
+local squareCooldownSwipeTexture = AF.GetPlainTexture()
 local viewerStates = {}
 local viewerStateByKey = {}
 local itemStates = setmetatable({}, {__mode = "k"})
@@ -1537,6 +1543,10 @@ local function RestoreItemPresentation(item, definition, itemState)
 
     local cooldown = GetSafeField(item, "Cooldown")
     if cooldown then
+        if itemState.cooldownSwipeStyled then
+            CooldownSetSwipeTexture(cooldown, nativeCooldownSwipeTexture)
+            itemState.cooldownSwipeStyled = nil
+        end
         if itemState.nativeHideCountdownNumbers ~= nil then
             CooldownSetHideCountdownNumbers(cooldown, itemState.nativeHideCountdownNumbers)
         end
@@ -2153,6 +2163,7 @@ local function ApplyStaticPresentation(item, state, config, itemState)
         EnsureAssistedHighlight(item, state.definition)
     end
 
+    local cooldown = GetSafeField(item, "Cooldown")
     if CM.config.skin then
         local itemIcon = GetSafeField(item, "Icon")
         local iconParent = state.definition.isBar and itemIcon or item
@@ -2168,13 +2179,18 @@ local function ApplyStaticPresentation(item, state, config, itemState)
             SkinBar(bar)
         end
 
-        local cooldown = GetSafeField(item, "Cooldown")
         if cooldown and iconParent then
             PresentationMethods.PositionCooldownInside(cooldown, iconParent)
+            CooldownSetSwipeTexture(cooldown, squareCooldownSwipeTexture)
+            itemState.cooldownSwipeStyled = true
+        end
+    else
+        if cooldown and itemState.cooldownSwipeStyled then
+            CooldownSetSwipeTexture(cooldown, nativeCooldownSwipeTexture)
+            itemState.cooldownSwipeStyled = nil
         end
     end
 
-    local cooldown = GetSafeField(item, "Cooldown")
     if cooldown and itemState.nativeHideCountdownNumbers ~= nil then
         CooldownSetHideCountdownNumbers(cooldown, config.showTimer == false)
     end
