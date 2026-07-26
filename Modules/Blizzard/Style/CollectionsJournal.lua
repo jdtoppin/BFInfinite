@@ -75,6 +75,16 @@ local function StyleStateTexture(texture, backdrop, color, alpha)
     AF.SetOnePixelInside(texture, backdrop)
 end
 
+local function StyleCollectionListBackground(texture, backdrop)
+    if not texture then return end
+
+    texture:SetColorTexture(AF.GetColorRGB("widget_dark", 0.9))
+    texture:SetAlpha(1)
+    if backdrop then
+        AF.SetOnePixelInside(texture, backdrop)
+    end
+end
+
 local function StyleCollectionRowSurface(button, background, selectedTexture, highlightTexture)
     if not button._BFICollectionsRowSurfaceStyled then
         button._BFICollectionsRowSurfaceStyled = true
@@ -85,11 +95,7 @@ local function StyleCollectionRowSurface(button, background, selectedTexture, hi
 
     -- Mount initialization reapplies a white/red vertex color. Own the full
     -- color texture on every pooled refresh so Mounts, Pets, and Sets agree.
-    if background then
-        background:SetColorTexture(AF.GetColorRGB("widget_dark", 0.9))
-        background:SetAlpha(1)
-        AF.SetOnePixelInside(background, button.BFIBackdrop)
-    end
+    StyleCollectionListBackground(background, button.BFIBackdrop)
 end
 
 local function StyleLevelPlate(levelBackground, levelText, icon, color)
@@ -254,8 +260,8 @@ local function StyleMountJournal()
         end
     end
 
-    frame.MountDisplay.YesMountsTex:SetColorTexture(AF.GetColorRGB("widget"))
-    frame.MountDisplay.NoMountsTex:SetColorTexture(AF.GetColorRGB("widget"))
+    StyleCollectionListBackground(frame.MountDisplay.YesMountsTex)
+    StyleCollectionListBackground(frame.MountDisplay.NoMountsTex)
     S.RemoveTextures(frame.MountDisplay.ShadowOverlay, true)
     S.StyleCheckButton(frame.MountDisplay.ModelScene.TogglePlayer)
     StyleSquareIcon(frame.MountDisplay.InfoButton.Icon)
