@@ -118,6 +118,11 @@ local function testEmptyPoliciesStayEmpty()
         false,
         "empty helpful private source"
     )
+    assertEqual(
+        helpful.degradations.bossAuraUsesCuratedRaidInCombat,
+        false,
+        "empty helpful boss approximation"
+    )
 
     local harmful = compile("HARMFUL", {
         castByOthers = true,
@@ -138,7 +143,7 @@ local function testLegacyTruthTable()
         isBossAura = true,
     }), {
         {"raidInCombat", "HARMFUL|RAID_IN_COMBAT"},
-    }, "boss aura")
+    }, "legacy boss choice uses curated encounter filter")
 
     assertGroups(compile("HELPFUL", {
         dispellable = true,
@@ -223,6 +228,11 @@ local function testCanonicalDisjointOrder()
         true,
         "canonical private source"
     )
+    assertEqual(
+        policy.degradations.bossAuraUsesCuratedRaidInCombat,
+        true,
+        "canonical boss approximation"
+    )
 end
 
 local function testGateAndDegradationMetadata()
@@ -238,6 +248,11 @@ local function testGateAndDegradationMetadata()
         true,
         "single group private source"
     )
+    assertEqual(
+        player.degradations.bossAuraUsesCuratedRaidInCombat,
+        false,
+        "single player group boss approximation"
+    )
 
     local defensive = compile("HELPFUL", {
         castByOthers = true,
@@ -247,11 +262,31 @@ local function testGateAndDegradationMetadata()
     assertEqual(defensive.degradations.perGroupLimit, true, "defensive limit")
     assertEqual(defensive.degradations.perGroupSort, true, "defensive sort")
 
+    -- Blizzard's 68914 Edit Mode fixture treats RAID_IN_COMBAT as a RAID
+    -- substring and therefore selects its raid Bleed sample, not its
+    -- non-raid isBossAura Poison sample. This test records BFI's existing
+    -- curated contract; exact native boss-candidate coverage lives in AF and
+    -- the user-facing semantic decision remains step #6.
     local raid = compile("HARMFUL", {
         isBossAura = true,
     })
     assertEqual(raid.requiresVisible, false, "raid visible gate")
     assertEqual(raid.requiresAssist, false, "raid assist gate")
+    assertEqual(
+        raid.degradations.privateAuraSourceUnseparable,
+        true,
+        "real provider includes inseparable private auras"
+    )
+    assertEqual(
+        raid.degradations.bossAuraUsesCuratedRaidInCombat,
+        true,
+        "legacy boss choice is not an exact boss candidate filter"
+    )
+    assertEqual(
+        raid.groups[1].candidateFilters,
+        nil,
+        "legacy boss choice emitted an exact native boss predicate"
+    )
 end
 
 local function testFreshDeterministicOutput()
