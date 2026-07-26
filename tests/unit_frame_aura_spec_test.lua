@@ -471,7 +471,7 @@ local function testCompleteSpecContract()
         frameLevel = 7,
     }, "placement")
     assertDeepEqual(descriptor.visibility, {
-        requiresVisible = true,
+        requiresVisible = false,
         requiresAssist = false,
     }, "visibility")
     assertEqual(descriptor.partition, nil, "partition")
@@ -494,6 +494,7 @@ local function testCompleteSpecContract()
         perGroupSort = true,
         privateAuraSourceUnseparable = true,
         bossAuraUsesCuratedRaidInCombat = true,
+        legacySourceFilterUsesSuperset = false,
         defaultSortPriority = true,
         fixedHolderExtent = true,
         spellIDListsIgnored = false,
@@ -979,6 +980,7 @@ local function testEmptyPolicies()
         perGroupSort = false,
         privateAuraSourceUnseparable = false,
         bossAuraUsesCuratedRaidInCombat = false,
+        legacySourceFilterUsesSuperset = false,
         defaultSortPriority = false,
         fixedHolderExtent = false,
         spellIDListsIgnored = false,
@@ -1014,9 +1016,43 @@ local function testEmptyPolicies()
         castByOthers = true,
         castByUnit = true,
     }
-    local unsupported = compile("target", "HARMFUL", config)
-    assertEqual(unsupported.empty, true, "unsupported harmful state")
-    assertEqual(unsupported.completeSpec, nil, "unsupported harmful spec")
+    local widened = compile("target", "HARMFUL", config)
+    assertEqual(widened.empty, false, "widened harmful state")
+    assertEqual(
+        widened.completeSpec.groups[1].key,
+        "all",
+        "cast-by-unit all group"
+    )
+    assertEqual(
+        widened.completeSpec.groups[1].filterString,
+        "HARMFUL",
+        "cast-by-unit base filter"
+    )
+    assertEqual(
+        widened.degradations.legacySourceFilterUsesSuperset,
+        true,
+        "cast-by-unit widening metadata"
+    )
+
+    config.filters = {
+        castByOthers = true,
+    }
+    local notPlayer = compile("target", "HARMFUL", config)
+    assertEqual(notPlayer.empty, false, "source-only harmful state")
+    assertEqual(
+        notPlayer.completeSpec.groups[1].key,
+        "notPlayer",
+        "source-only not-player group"
+    )
+    assertEqual(
+        notPlayer.completeSpec.groups[1].filterString,
+        "HARMFUL|!PLAYER",
+        "source-only not-player filter"
+    )
+    assertDeepEqual(notPlayer.visibility, {
+        requiresVisible = true,
+        requiresAssist = false,
+    }, "source-only visibility")
 
     config = baseConfig()
     config.enabled = false
@@ -1093,16 +1129,74 @@ local function testCapacityMetrics()
         "single-group sort degradation"
     )
 
-    local five = baseConfig()
-    five.numPerLine = 11
-    five.numTotal = 22
-    five.filters = {
+    local legacyAll = baseConfig()
+    legacyAll.numPerLine = 11
+    legacyAll.numTotal = 22
+    legacyAll.filters = {
         castByMe = true,
         castByOthers = true,
         castByUnit = true,
         castByNPC = true,
         isBossAura = true,
         dispellable = true,
+    }
+    local allDescriptor =
+        compile("target", "HELPFUL", legacyAll)
+    assertEqual(
+        allDescriptor.completeSpec.groups[1].filterString,
+        "HELPFUL",
+        "legacy all base filter"
+    )
+    assertDeepEqual(allDescriptor.metrics, {
+        groupCount = 1,
+        legacyMaxFrameCount = 22,
+        nativeVisibleCapacity = 22,
+        nativeBatchSize = 10,
+        initialRestrictedButtonCount = 10,
+        freshContainerRestrictedButtonCountCeiling = 30,
+    }, "legacy all metrics")
+    assertEqual(
+        allDescriptor.degradations.perGroupLimit,
+        false,
+        "legacy all limit degradation"
+    )
+    assertEqual(
+        allDescriptor.degradations.perGroupSort,
+        false,
+        "legacy all sort degradation"
+    )
+    assertDeepEqual(allDescriptor.visibility, {
+        requiresVisible = false,
+        requiresAssist = false,
+    }, "legacy all visibility")
+
+    local canonicalAll = copy(legacyAll)
+    canonicalAll.filters = {
+        all = true,
+    }
+    local canonicalAllDescriptor =
+        compile("target", "HELPFUL", canonicalAll)
+    assertDeepEqual(
+        canonicalAllDescriptor.completeSpec.groups,
+        allDescriptor.completeSpec.groups,
+        "legacy and canonical all groups"
+    )
+    assertDeepEqual(
+        canonicalAllDescriptor.constructionKey,
+        allDescriptor.constructionKey,
+        "legacy and canonical all construction keys"
+    )
+
+    local five = baseConfig()
+    five.numPerLine = 11
+    five.numTotal = 22
+    five.filters = {
+        player = true,
+        notPlayer = false,
+        raidInCombat = true,
+        raidPlayerDispellable = true,
+        bigDefensive = true,
+        externalDefensive = true,
     }
     local fiveDescriptor = compile("target", "HELPFUL", five)
     assertDeepEqual(fiveDescriptor.metrics, {
@@ -1112,16 +1206,16 @@ local function testCapacityMetrics()
         nativeBatchSize = 10,
         initialRestrictedButtonCount = 50,
         freshContainerRestrictedButtonCountCeiling = 150,
-    }, "five-group metrics")
+    }, "five-category metrics")
     assertEqual(
         fiveDescriptor.degradations.perGroupLimit,
         true,
-        "five-group limit degradation"
+        "five-category limit degradation"
     )
     assertEqual(
         fiveDescriptor.degradations.perGroupSort,
         true,
-        "five-group sort degradation"
+        "five-category sort degradation"
     )
 
     local splitDefensive = baseConfig()

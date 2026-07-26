@@ -3170,15 +3170,27 @@ end
 builder["auraBaseFilters"] = function(parent)
     if created["auraBaseFilters"] then return created["auraBaseFilters"] end
 
-    local pane = AF.CreateBorderedFrame(parent, "BFI_UnitFrameOption_AuraBaseFilters", nil, 94)
+    local pane = AF.CreateBorderedFrame(parent, "BFI_UnitFrameOption_AuraBaseFilters", nil, 117)
     created["auraBaseFilters"] = pane
 
     local tip = AF.CreateFontString(pane, L["The aura will show if any enabled filter is met"])
     tip:SetColor("tip")
     AF.SetPoint(tip, "TOPLEFT", 15, -8)
 
+    local allAuras = AF.CreateCheckButton(pane, L["All Auras"])
+    allAuras:SetOnCheck(function(checked)
+        if not F.SetUnitFrameAuraFilter(
+            pane.t.id == "buffs" and "HELPFUL" or "HARMFUL",
+            pane.t.cfg.filters,
+            "all",
+            checked
+        ) then
+            return
+        end
+        LoadIndicatorConfig(pane.t)
+    end)
+
     local castByMe = AF.CreateCheckButton(pane, L["Cast By Me"])
-    AF.SetPoint(castByMe, "TOPLEFT", 15, -30)
     castByMe:SetOnCheck(function(checked)
         if AF.isRetail then
             local baseFilter =
@@ -3197,8 +3209,23 @@ builder["auraBaseFilters"] = function(parent)
         LoadIndicatorConfig(pane.t)
     end)
 
+    local notPlayer = AF.CreateCheckButton(
+        pane,
+        L["Not Player, Pet, or Vehicle"]
+    )
+    notPlayer:SetOnCheck(function(checked)
+        if not F.SetUnitFrameAuraFilter(
+            pane.t.id == "buffs" and "HELPFUL" or "HARMFUL",
+            pane.t.cfg.filters,
+            "notPlayer",
+            checked
+        ) then
+            return
+        end
+        LoadIndicatorConfig(pane.t)
+    end)
+
     local castByOthers = AF.CreateCheckButton(pane, L["Cast By Others"])
-    AF.SetPoint(castByOthers, "TOPLEFT", castByMe, 185, 0)
     castByOthers:SetOnCheck(function(checked)
         if AF.isRetail then
             if not F.SetUnitFrameAuraFilter(
@@ -3216,7 +3243,6 @@ builder["auraBaseFilters"] = function(parent)
     end)
 
     local castByUnit = AF.CreateCheckButton(pane, L["Cast By Unit"])
-    AF.SetPoint(castByUnit, "TOPLEFT", castByMe, "BOTTOMLEFT", 0, -7)
     castByUnit:SetOnCheck(function(checked)
         if AF.isRetail then
             if not F.SetUnitFrameAuraFilter(
@@ -3234,7 +3260,6 @@ builder["auraBaseFilters"] = function(parent)
     end)
 
     local castByNPC = AF.CreateCheckButton(pane, L["Cast By NPC"])
-    AF.SetPoint(castByNPC, "TOPLEFT", castByUnit, 185, 0)
     castByNPC:SetOnCheck(function(checked)
         if AF.isRetail then
             local baseFilter =
@@ -3254,7 +3279,6 @@ builder["auraBaseFilters"] = function(parent)
     end)
 
     local castByBoss = AF.CreateCheckButton(pane, L["Cast By Boss"])
-    AF.SetPoint(castByBoss, "TOPLEFT", castByUnit, "BOTTOMLEFT", 0, -7)
     castByBoss:SetOnCheck(function(checked)
         if AF.isRetail then
             local baseFilter =
@@ -3274,7 +3298,6 @@ builder["auraBaseFilters"] = function(parent)
     end)
 
     local dispellable = AF.CreateCheckButton(pane, L["Dispellable"])
-    AF.SetPoint(dispellable, "TOPLEFT", castByBoss, 185, 0)
     dispellable:SetOnCheck(function(checked)
         if AF.isRetail then
             local baseFilter =
@@ -3293,15 +3316,83 @@ builder["auraBaseFilters"] = function(parent)
         LoadIndicatorConfig(pane.t)
     end)
 
+    local function ClearFilterPoints()
+        AF.ClearPoints(allAuras)
+        AF.ClearPoints(castByMe)
+        AF.ClearPoints(notPlayer)
+        AF.ClearPoints(castByOthers)
+        AF.ClearPoints(castByUnit)
+        AF.ClearPoints(castByNPC)
+        AF.ClearPoints(castByBoss)
+        AF.ClearPoints(dispellable)
+    end
+
+    local function LayoutRetailFilters()
+        ClearFilterPoints()
+        AF.SetPoint(allAuras, "TOPLEFT", 15, -30)
+        AF.SetPoint(castByMe, "TOPLEFT", allAuras, 185, 0)
+        AF.SetPoint(
+            notPlayer,
+            "TOPLEFT",
+            allAuras,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        AF.SetPoint(castByNPC, "TOPLEFT", notPlayer, 185, 0)
+        AF.SetPoint(
+            castByBoss,
+            "TOPLEFT",
+            notPlayer,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        AF.SetPoint(castByOthers, "TOPLEFT", castByBoss, 185, 0)
+        AF.SetPoint(
+            castByUnit,
+            "TOPLEFT",
+            castByBoss,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+    end
+
+    local function LayoutLegacyFilters()
+        ClearFilterPoints()
+        AF.SetPoint(castByMe, "TOPLEFT", 15, -30)
+        AF.SetPoint(castByOthers, "TOPLEFT", castByMe, 185, 0)
+        AF.SetPoint(
+            castByUnit,
+            "TOPLEFT",
+            castByMe,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        AF.SetPoint(castByNPC, "TOPLEFT", castByUnit, 185, 0)
+        AF.SetPoint(
+            castByBoss,
+            "TOPLEFT",
+            castByUnit,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        AF.SetPoint(dispellable, "TOPLEFT", castByBoss, 185, 0)
+    end
+
     function pane.Load(t)
         pane.t = t
 
         if AF.isRetail then
             local baseFilter =
                 t.id == "buffs" and "HELPFUL" or "HARMFUL"
-            local filters =
+            local filters, migration =
                 F.ResolveUnitFrameAuraFilters(baseFilter, t.cfg.filters)
-                or {}
+            filters = filters or {}
+            migration = migration or {}
             local friendlyHelpful =
                 t.id == "buffs"
                 and (
@@ -3311,23 +3402,56 @@ builder["auraBaseFilters"] = function(parent)
                     or t.owner == "raid"
                 )
 
+            LayoutRetailFilters()
             tip:SetText(
-                L["Retail uses Blizzard-defined categories; an aura is shown when it matches any enabled category"]
+                L["Retail uses Blizzard-defined categories; All Auras overrides narrower categories"]
             )
+            allAuras:Show()
+            notPlayer:Show()
             castByMe:SetText(L["Player, Pet, or Vehicle"])
+            notPlayer:SetText(L["Not Player, Pet, or Vehicle"])
             castByOthers:SetText(L["Big Defensive"])
             castByUnit:SetText(L["External Defensive"])
             castByNPC:SetText(L["Raid In Combat"])
-            castByBoss:SetText(L["Raid-Dispellable"])
+            castByBoss:SetText(L["Raid Player-Dispellable"])
             dispellable:Hide()
 
+            allAuras:SetTooltip(
+                L["All Auras"],
+                L["Shows every aura of this type. Legacy Cast By Unit selections widen to All because exact unit-source matching is unavailable across both Retail versions"]
+            )
+            notPlayer:SetTooltip(
+                L["Not Player, Pet, or Vehicle"],
+                L["Uses the C-side complement of Blizzard's PLAYER category. A single legacy Cast By Others or Cast By NPC selection widens to this safe superset"]
+            )
+            castByNPC:SetTooltip(
+                L["Raid In Combat"],
+                L["Legacy Cast By Boss is approximated by Blizzard's curated RAID_IN_COMBAT category; it is not an exact boss-aura predicate"]
+            )
+            if migration.legacySourceFilterUsesSuperset then
+                allAuras:SetTooltip(
+                    L["Conservative Legacy Migration"],
+                    L["This legacy source selection was widened so requested auras are not silently lost"]
+                )
+            end
+            if migration.bossAuraUsesCuratedRaidInCombat then
+                castByNPC:SetTooltip(
+                    L["Conservative Legacy Migration"],
+                    L["Legacy Cast By Boss is shown through Blizzard's curated RAID_IN_COMBAT category, not an exact boss-aura predicate"]
+                )
+            end
+
+            allAuras:SetChecked(filters.all)
             castByMe:SetChecked(filters.player)
+            notPlayer:SetChecked(filters.notPlayer)
             castByOthers:SetChecked(filters.bigDefensive)
             castByUnit:SetChecked(filters.externalDefensive)
             castByNPC:SetChecked(filters.raidInCombat)
             castByBoss:SetChecked(filters.raidPlayerDispellable)
 
+            allAuras:SetEnabled(true)
             castByMe:SetEnabled(true)
+            notPlayer:SetEnabled(true)
             castByOthers:SetEnabled(t.id == "buffs")
             castByUnit:SetEnabled(t.id == "buffs")
             castByNPC:SetEnabled(true)
@@ -3335,6 +3459,9 @@ builder["auraBaseFilters"] = function(parent)
             return
         end
 
+        LayoutLegacyFilters()
+        allAuras:Hide()
+        notPlayer:Hide()
         dispellable:Show()
         castByMe:SetChecked(t.cfg.filters.castByMe)
         castByOthers:SetChecked(t.cfg.filters.castByOthers)
@@ -3495,7 +3622,7 @@ builder["auraBlackListWhitelist"] = function(parent)
                 and UF.HasNativeAuraContainerBackend()
             then
                 tip:SetText(
-                    L["12.1 applies saved spell-ID lists to friendly buffs and enemy debuffs; other reactions require a Never Secret aura. Editing remains retired"]
+                    L["12.1 can apply saved spell-ID lists to friendly buffs and enemy debuffs; other reactions require a Never Secret aura. Editing stays disabled pending live reaction and secret validation"]
                 )
             else
                 tip:SetText(

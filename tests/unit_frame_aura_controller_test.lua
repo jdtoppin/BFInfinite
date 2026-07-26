@@ -233,7 +233,7 @@ local function makeHarness(options)
     }
     local AF = {
         isRetail = options.isRetail ~= false,
-        versionNum = options.versionNum or 23,
+        versionNum = options.versionNum or 24,
     }
     local UF = {}
     local afConstructionTotals = {
@@ -781,7 +781,7 @@ local function testConstructionStatsContract()
 end
 
 local function testCapabilityGate()
-    local oldAF = makeHarness({versionNum = 22})
+    local oldAF = makeHarness({versionNum = 23})
     assertEqual(oldAF.UF.HasNativeAuraContainerBackend(), false, "old AF gate")
     assertEqual(
         oldAF.UF.CreateNativeAuraContainerController({}, "OldAF"),
@@ -810,6 +810,54 @@ local function testCapabilityGate()
     )
     assertEqual(#missingConstructionMethod.holders, 0,
         "missing-construction-method holder count")
+end
+
+local function testGlobalFrameworkRequirement()
+    local requiredVersion
+    local stopAfterVersionCheck = {}
+    local eventHandler = {}
+
+    function eventHandler:UnregisterEvent() end
+
+    local AF = {
+        CreateSimpleEventHandler = function()
+            return eventHandler
+        end,
+        GetAddOnVersion = function()
+            return "test", 1
+        end,
+        GetColorTable = function()
+            return {}
+        end,
+        RegisterCallback = function() end,
+        RequireVersion = function(version)
+            requiredVersion = version
+            error(stopAfterVersionCheck)
+        end,
+        SetAddonAccentColor = function() end,
+    }
+    local BFI = {
+        funcs = {},
+        name = "BFInfinite",
+        vars = {},
+    }
+    local environment = setmetatable({
+        AbstractFramework = AF,
+        C_SpecializationInfo = {
+            GetNumSpecializationsForClassID = function() return 0 end,
+        },
+    }, {__index = _G})
+    environment._G = environment
+
+    local chunk, loadError = loadfile("Core.lua")
+    assertTrue(chunk, loadError)
+    setfenv(chunk, environment)
+    chunk("BFInfinite", BFI)
+
+    local ok, versionError = pcall(eventHandler.ADDON_LOADED, eventHandler, BFI.name)
+    assertEqual(ok, false, "global AF version check stops harness")
+    assertEqual(versionError, stopAfterVersionCheck, "global AF version check sentinel")
+    assertEqual(requiredVersion, 24, "global AF minimum")
 end
 
 local function testBuildContract()
@@ -1962,6 +2010,7 @@ local function testGroupVisibilityWaitsForHover()
 end
 
 testConstructionStatsContract()
+testGlobalFrameworkRequirement()
 testCapabilityGate()
 testBuildContract()
 testTuningContract()

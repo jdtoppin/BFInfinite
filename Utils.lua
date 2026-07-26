@@ -116,7 +116,9 @@ end
 -- aura filters
 ---------------------------------------------------------------------
 local unitFrameAuraFilterFields = {
+    "all",
     "player",
+    "notPlayer",
     "raidInCombat",
     "raidPlayerDispellable",
     "bigDefensive",
@@ -148,10 +150,19 @@ local function HasValidAuraFilterFields(config, fields)
     return true
 end
 
--- Retail 12.0.7 and 12.1 share these five Blizzard-defined C-side
--- categories. Legacy source-oriented saved keys are accepted only as a
--- compatibility input; once a Retail control is changed, the full canonical
--- state is materialized so retired aliases cannot silently affect the result.
+local function NewUnitFrameAuraFilterMigration()
+    return {
+        legacy = false,
+        legacySourceFilterUsesSuperset = false,
+        bossAuraUsesCuratedRaidInCombat = false,
+    }
+end
+
+-- Retail 12.0.7 and 12.1 can both express the base aura set, PLAYER, the
+-- C-side complement of PLAYER, and these five curated categories. Legacy
+-- source-oriented saved keys are accepted only as a compatibility input; once
+-- a Retail control is changed, the full canonical state is materialized so
+-- retired aliases cannot silently affect the result.
 function F.ResolveUnitFrameAuraFilters(baseFilter, config)
     if baseFilter ~= "HELPFUL" and baseFilter ~= "HARMFUL" then return nil end
     if type(config) ~= "table" then return nil end
@@ -173,38 +184,73 @@ function F.ResolveUnitFrameAuraFilters(baseFilter, config)
     end
 
     if hasCanonicalField then
+        local all = config.all == true
+        local player = config.player == true
+        local notPlayer = config.notPlayer == true
+        if player and notPlayer then
+            all = true
+        end
+
         return {
-            player = config.player == true,
-            raidInCombat = config.raidInCombat == true,
+            all = all,
+            player = not all and player,
+            notPlayer = not all and notPlayer,
+            raidInCombat =
+                not all and config.raidInCombat == true,
             raidPlayerDispellable =
-                config.raidPlayerDispellable == true,
+                not all
+                and config.raidPlayerDispellable == true,
             bigDefensive =
-                baseFilter == "HELPFUL"
+                not all
+                and baseFilter == "HELPFUL"
                 and config.bigDefensive == true,
             externalDefensive =
-                baseFilter == "HELPFUL"
+                not all
+                and baseFilter == "HELPFUL"
                 and config.externalDefensive == true,
-        }
+        }, NewUnitFrameAuraFilterMigration()
     end
 
-    local defensive = baseFilter == "HELPFUL"
-        and (
-            config.castByOthers == true
-            or config.castByUnit == true
-            or config.castByNPC == true
-        )
-        or false
+    local castByMe = config.castByMe == true
+    local castByOthers = config.castByOthers == true
+    local castByUnit = config.castByUnit == true
+    local castByNPC = config.castByNPC == true
+    local exactNotPlayer = castByOthers and castByNPC
+    local notPlayer = castByOthers or castByNPC
+    local exactAll = castByMe and exactNotPlayer
+    local all = castByUnit or (castByMe and notPlayer)
+    local migration = {
+        legacy = true,
+        legacySourceFilterUsesSuperset =
+            (notPlayer and not exactNotPlayer)
+            or (all and not exactAll),
+        bossAuraUsesCuratedRaidInCombat =
+            not all and config.isBossAura == true,
+    }
+
+    if all then
+        return {
+            all = true,
+            player = false,
+            notPlayer = false,
+            raidInCombat = false,
+            raidPlayerDispellable = false,
+            bigDefensive = false,
+            externalDefensive = false,
+        }, migration
+    end
+
     return {
-        player = config.castByMe == true,
-        raidInCombat =
-            config.isBossAura == true
-            or config.castByNPC == true,
+        all = false,
+        player = castByMe,
+        notPlayer = notPlayer,
+        raidInCombat = config.isBossAura == true,
         raidPlayerDispellable =
             config.dispellable == true
             or config.canBeDispelled == true,
-        bigDefensive = defensive,
-        externalDefensive = defensive,
-    }
+        bigDefensive = false,
+        externalDefensive = false,
+    }, migration
 end
 
 function F.SetUnitFrameAuraFilter(baseFilter, config, field, value)
@@ -219,6 +265,20 @@ function F.SetUnitFrameAuraFilter(baseFilter, config, field, value)
     local resolved = F.ResolveUnitFrameAuraFilters(baseFilter, config)
     if not resolved then return false end
     resolved[field] = value
+    if field == "all" and value then
+        for _, canonicalField in ipairs(unitFrameAuraFilterFields) do
+            if canonicalField ~= "all" then
+                resolved[canonicalField] = false
+            end
+        end
+    elseif field ~= "all" and value then
+        resolved.all = false
+        if resolved.player and resolved.notPlayer then
+            resolved.all = true
+            resolved.player = false
+            resolved.notPlayer = false
+        end
+    end
 
     for _, canonicalField in ipairs(unitFrameAuraFilterFields) do
         config[canonicalField] = resolved[canonicalField]
@@ -237,15 +297,65 @@ local function AddAuraMatchFilter(filters, seen, baseFilter, suffix)
     end
 end
 
+-- Nameplates retain their existing compatibility projection. Unit frames use
+-- the explicit cross-version policy below so step #6 does not silently change
+-- nameplate presets or imports.
 function F.GetSecretSafeAuraMatchFilters(baseFilter, config)
+    if not config then return nil end
+    local filters = {}
+    local seen = {}
+
+    if config.castByMe then
+        AddAuraMatchFilter(filters, seen, baseFilter, "PLAYER")
+    end
+
+    if config.isBossAura or config.castByNPC then
+        AddAuraMatchFilter(filters, seen, baseFilter, "RAID_IN_COMBAT")
+    end
+
+    if config.dispellable or config.canBeDispelled then
+        AddAuraMatchFilter(filters, seen, baseFilter, "RAID_PLAYER_DISPELLABLE")
+    end
+
+    if baseFilter == "HELPFUL"
+        and (
+            config.castByOthers
+            or config.castByUnit
+            or config.castByNPC
+        )
+    then
+        AddAuraMatchFilter(filters, seen, baseFilter, "BIG_DEFENSIVE")
+        AddAuraMatchFilter(filters, seen, baseFilter, "EXTERNAL_DEFENSIVE")
+    end
+
+    return filters
+end
+
+function F.GetSecretSafeUnitFrameAuraMatchFilters(baseFilter, config)
     local resolved = F.ResolveUnitFrameAuraFilters(baseFilter, config)
     if not resolved then return nil end
+
+    if resolved.all then
+        return {baseFilter}
+    end
 
     local filters = {}
     local seen = {}
 
     if resolved.player then
         AddAuraMatchFilter(filters, seen, baseFilter, "PLAYER")
+    end
+
+    if resolved.notPlayer then
+        local filterString = baseFilter .. "|PLAYER"
+        local seenKey = "FILTERED_OUT:" .. filterString
+        if not seen[seenKey] then
+            seen[seenKey] = true
+            filters[#filters + 1] = {
+                filterString = filterString,
+                matchWhenFilteredOut = true,
+            }
+        end
     end
 
     if resolved.raidInCombat then

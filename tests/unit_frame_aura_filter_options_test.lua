@@ -23,7 +23,9 @@ local function assertContains(value, expected, message)
 end
 
 local CANONICAL_FIELDS = {
+    "all",
     "player",
+    "notPlayer",
     "raidInCombat",
     "raidPlayerDispellable",
     "bigDefensive",
@@ -222,38 +224,75 @@ local function makeHarness(isRetail, hasNativeBackend)
         end
 
         if hasCanonical then
+            local all = config.all == true
+            local player = config.player == true
+            local notPlayer = config.notPlayer == true
+            if player and notPlayer then
+                all = true
+            end
             return {
-                player = config.player == true,
-                raidInCombat = config.raidInCombat == true,
+                all = all,
+                player = not all and player,
+                notPlayer = not all and notPlayer,
+                raidInCombat =
+                    not all and config.raidInCombat == true,
                 raidPlayerDispellable =
-                    config.raidPlayerDispellable == true,
+                    not all
+                    and config.raidPlayerDispellable == true,
                 bigDefensive =
-                    baseFilter == "HELPFUL"
+                    not all
+                    and baseFilter == "HELPFUL"
                     and config.bigDefensive == true,
                 externalDefensive =
-                    baseFilter == "HELPFUL"
+                    not all
+                    and baseFilter == "HELPFUL"
                     and config.externalDefensive == true,
+            }, {
+                legacy = false,
+                legacySourceFilterUsesSuperset = false,
+                bossAuraUsesCuratedRaidInCombat = false,
             }
         end
 
-        local defensive = baseFilter == "HELPFUL"
-            and (
-                config.castByOthers == true
-                or config.castByUnit == true
-                or config.castByNPC == true
-            )
-            or false
+        local castByMe = config.castByMe == true
+        local castByOthers = config.castByOthers == true
+        local castByUnit = config.castByUnit == true
+        local castByNPC = config.castByNPC == true
+        local exactNotPlayer = castByOthers and castByNPC
+        local notPlayer = castByOthers or castByNPC
+        local exactAll = castByMe and exactNotPlayer
+        local all = castByUnit or (castByMe and notPlayer)
+        local migration = {
+            legacy = true,
+            legacySourceFilterUsesSuperset =
+                (notPlayer and not exactNotPlayer)
+                or (all and not exactAll),
+            bossAuraUsesCuratedRaidInCombat =
+                not all and config.isBossAura == true,
+        }
+        if all then
+            return {
+                all = true,
+                player = false,
+                notPlayer = false,
+                raidInCombat = false,
+                raidPlayerDispellable = false,
+                bigDefensive = false,
+                externalDefensive = false,
+            }, migration
+        end
+
         return {
-            player = config.castByMe == true,
-            raidInCombat =
-                config.isBossAura == true
-                or config.castByNPC == true,
+            all = false,
+            player = castByMe,
+            notPlayer = notPlayer,
+            raidInCombat = config.isBossAura == true,
             raidPlayerDispellable =
                 config.dispellable == true
                 or config.canBeDispelled == true,
-            bigDefensive = defensive,
-            externalDefensive = defensive,
-        }
+            bigDefensive = false,
+            externalDefensive = false,
+        }, migration
     end
 
     function F.SetUnitFrameAuraFilter(
@@ -285,6 +324,20 @@ local function makeHarness(isRetail, hasNativeBackend)
             F.ResolveUnitFrameAuraFilters(baseFilter, config)
         if not resolved then return false end
         resolved[field] = value
+        if field == "all" and value then
+            for _, canonical in ipairs(CANONICAL_FIELDS) do
+                if canonical ~= "all" then
+                    resolved[canonical] = false
+                end
+            end
+        elseif field ~= "all" and value then
+            resolved.all = false
+            if resolved.player and resolved.notPlayer then
+                resolved.all = true
+                resolved.player = false
+                resolved.notPlayer = false
+            end
+        end
         for _, canonical in ipairs(CANONICAL_FIELDS) do
             config[canonical] = resolved[canonical]
         end
@@ -670,11 +723,23 @@ local function testRetailCanonicalFilters(hasNativeBackend)
     })
 
     pane.Load(info)
+    local allAuras = findWidget(
+        pane,
+        "checkButton",
+        "text",
+        "All Auras"
+    )
     local player = findWidget(
         pane,
         "checkButton",
         "text",
         "Player, Pet, or Vehicle"
+    )
+    local notPlayer = findWidget(
+        pane,
+        "checkButton",
+        "text",
+        "Not Player, Pet, or Vehicle"
     )
     local bigDefensive = findWidget(
         pane,
@@ -698,7 +763,7 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         pane,
         "checkButton",
         "text",
-        "Raid-Dispellable"
+        "Raid Player-Dispellable"
     )
     local retiredDispellable = findWidget(
         pane,
@@ -713,7 +778,9 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         "The aura will show if any enabled filter is met"
     )
 
-    assertTrue(player and bigDefensive and externalDefensive,
+    assertTrue(allAuras and player and notPlayer,
+        version .. " base and source-partition controls")
+    assertTrue(bigDefensive and externalDefensive,
         version .. " defensive category controls")
     assertTrue(raidInCombat,
         version .. " raid-in-combat category control")
@@ -721,39 +788,60 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         version .. " raid-dispellable category control")
     assertContains(
         tip.text,
-        "Blizzard-defined categories",
+        "All Auras overrides",
         version .. " category explanation"
     )
     assertEqual(retiredDispellable.shown, false,
         version .. " legacy dispellable visibility")
-    assertEqual(player.checked, true,
+    assertEqual(allAuras.checked, true,
+        version .. " migrated all state")
+    assertEqual(player.checked, false,
         version .. " migrated player state")
-    assertEqual(bigDefensive.checked, true,
+    assertEqual(notPlayer.checked, false,
+        version .. " migrated not-player state")
+    assertEqual(bigDefensive.checked, false,
         version .. " migrated big defensive state")
-    assertEqual(externalDefensive.checked, true,
+    assertEqual(externalDefensive.checked, false,
         version .. " migrated external defensive state")
-    assertEqual(raidInCombat.checked, true,
+    assertEqual(raidInCombat.checked, false,
         version .. " migrated raid-in-combat state")
     assertEqual(raidDispellable.checked, false,
         version .. " migrated raid-dispellable state")
+    assertEqual(
+        allAuras.tooltipTitle,
+        "Conservative Legacy Migration",
+        version .. " widened source migration warning"
+    )
+    assertContains(
+        allAuras.tooltipBody,
+        "not silently lost",
+        version .. " widened source migration explanation"
+    )
 
     harness:ClearLoads()
     local actions = {
-        {widget = player, field = "player", value = false},
+        {widget = allAuras, field = "all", value = false},
+        {widget = player, field = "player", value = true},
+        {
+            widget = notPlayer,
+            field = "notPlayer",
+            value = true,
+        },
+        {widget = allAuras, field = "all", value = false},
         {
             widget = bigDefensive,
             field = "bigDefensive",
-            value = false,
+            value = true,
         },
         {
             widget = externalDefensive,
             field = "externalDefensive",
-            value = false,
+            value = true,
         },
         {
             widget = raidInCombat,
             field = "raidInCombat",
-            value = false,
+            value = true,
         },
         {
             widget = raidDispellable,
@@ -782,15 +870,17 @@ local function testRetailCanonicalFilters(hasNativeBackend)
     assertFanout(
         harness,
         info,
-        40,
+        64,
         version .. " canonical callback fan-out"
     )
     assertCanonical(info.cfg.filters, {
+        all = false,
         player = false,
-        raidInCombat = false,
+        notPlayer = false,
+        raidInCombat = true,
         raidPlayerDispellable = true,
-        bigDefensive = false,
-        externalDefensive = false,
+        bigDefensive = true,
+        externalDefensive = true,
     }, version .. " canonical materialization")
 
     local harmful = newInfo("debuffs", "target", {
@@ -811,6 +901,10 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         version .. " harmful external defensive enabled state")
     assertEqual(raidDispellable.enabled, true,
         version .. " hostile raid-dispellable enabled state")
+    assertEqual(allAuras.enabled, true,
+        version .. " harmful all enabled state")
+    assertEqual(notPlayer.enabled, true,
+        version .. " harmful not-player enabled state")
 
     local friendly = newInfo("buffs", "party", {
         player = true,
@@ -822,6 +916,37 @@ local function testRetailCanonicalFilters(hasNativeBackend)
     pane.Load(friendly)
     assertEqual(raidDispellable.enabled, false,
         version .. " friendly raid-dispellable enabled state")
+
+    local sourceOnly = newInfo("debuffs", "target", {
+        castByMe = false,
+        castByOthers = true,
+        castByUnit = false,
+        castByNPC = false,
+        isBossAura = false,
+        dispellable = false,
+    })
+    pane.Load(sourceOnly)
+    assertEqual(allAuras.checked, false,
+        version .. " source-only all state")
+    assertEqual(notPlayer.checked, true,
+        version .. " source-only not-player state")
+
+    local bossOnly = newInfo("debuffs", "target", {
+        castByMe = false,
+        castByOthers = false,
+        castByUnit = false,
+        castByNPC = false,
+        isBossAura = true,
+        dispellable = false,
+    })
+    pane.Load(bossOnly)
+    assertEqual(raidInCombat.checked, true,
+        version .. " legacy boss curated state")
+    assertEqual(
+        raidInCombat.tooltipTitle,
+        "Conservative Legacy Migration",
+        version .. " legacy boss approximation warning"
+    )
 end
 
 local function testRetailSpellLists(hasNativeBackend)
@@ -875,7 +1000,7 @@ local function testRetailSpellLists(hasNativeBackend)
         )
         assertContains(
             tip.text,
-            "Editing remains retired",
+            "disabled pending live reaction and secret validation",
             version .. " spell-list read-only warning"
         )
     else

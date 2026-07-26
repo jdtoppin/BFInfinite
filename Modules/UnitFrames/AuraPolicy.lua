@@ -12,11 +12,40 @@ local ipairs = ipairs
 -- aura sources. This compiler records those limitations without reading any
 -- unit, aura, frame, or native-container state.
 local RULES = {
-    {key = "player", token = "PLAYER"},
-    {key = "raidInCombat", token = "RAID_IN_COMBAT"},
-    {key = "raidPlayerDispellable", token = "RAID_PLAYER_DISPELLABLE"},
-    {key = "bigDefensive", token = "BIG_DEFENSIVE"},
-    {key = "externalDefensive", token = "EXTERNAL_DEFENSIVE"},
+    {
+        key = "player",
+        token = "PLAYER",
+        exclusionToken = "!PLAYER",
+        requiresVisible = true,
+    },
+    {
+        key = "notPlayer",
+        token = "!PLAYER",
+        exclusionToken = "PLAYER",
+        requiresVisible = true,
+    },
+    {
+        key = "raidInCombat",
+        token = "RAID_IN_COMBAT",
+        exclusionToken = "!RAID_IN_COMBAT",
+    },
+    {
+        key = "raidPlayerDispellable",
+        token = "RAID_PLAYER_DISPELLABLE",
+        exclusionToken = "!RAID_PLAYER_DISPELLABLE",
+    },
+    {
+        key = "bigDefensive",
+        token = "BIG_DEFENSIVE",
+        exclusionToken = "!BIG_DEFENSIVE",
+        requiresAssist = true,
+    },
+    {
+        key = "externalDefensive",
+        token = "EXTERNAL_DEFENSIVE",
+        exclusionToken = "!EXTERNAL_DEFENSIVE",
+        requiresAssist = true,
+    },
 }
 
 function UF.CompileNativeAuraPolicy(baseFilter, filters)
@@ -24,23 +53,16 @@ function UF.CompileNativeAuraPolicy(baseFilter, filters)
         return nil, "INVALID_BASE_FILTER"
     end
 
-    local resolved = F.ResolveUnitFrameAuraFilters(baseFilter, filters)
+    local resolved, migration =
+        F.ResolveUnitFrameAuraFilters(baseFilter, filters)
     if not resolved then
         return nil, "INVALID_FILTER_SCHEMA"
     end
 
-    -- Only a legacy `isBossAura` input is an approximation. Canonical
-    -- `raidInCombat` is the exact user-facing name of the C-side category.
-    local hasCanonicalField =
-        filters.player ~= nil
-        or filters.raidInCombat ~= nil
-        or filters.raidPlayerDispellable ~= nil
-        or filters.bigDefensive ~= nil
-        or filters.externalDefensive ~= nil
-    local bossAuraUsesCuratedRaidInCombat =
-        not hasCanonicalField and filters.isBossAura == true
     local enabled = {
+        all = resolved.all,
         player = resolved.player,
+        notPlayer = resolved.notPlayer,
         raidInCombat = resolved.raidInCombat,
         raidPlayerDispellable = resolved.raidPlayerDispellable,
         bigDefensive = resolved.bigDefensive,
@@ -48,38 +70,66 @@ function UF.CompileNativeAuraPolicy(baseFilter, filters)
     }
 
     local groups = {}
-    local precedingTokens = {}
+    local precedingExclusionTokens = {}
+    local requiresVisible = false
+    local requiresAssist = false
 
-    -- The legacy filters are an OR-union. Negating every earlier enabled token
-    -- makes the native groups disjoint while preserving that union and avoids
-    -- inspecting restricted aura identity or counts.
-    for _, rule in ipairs(RULES) do
-        if enabled[rule.key] then
-            local parts = {baseFilter, rule.token}
-            for _, token in ipairs(precedingTokens) do
-                parts[#parts + 1] = "!" .. token
+    if enabled.all then
+        groups[1] = {
+            key = "all",
+            filterString = baseFilter,
+        }
+    else
+        -- The selected categories are an OR-union. Adding the logical
+        -- complement of every earlier category makes native groups disjoint
+        -- without producing invalid double-negation tokens for !PLAYER.
+        for _, rule in ipairs(RULES) do
+            if enabled[rule.key] then
+                local parts = {baseFilter, rule.token}
+                for _, exclusionToken in ipairs(
+                    precedingExclusionTokens
+                ) do
+                    parts[#parts + 1] = exclusionToken
+                end
+
+                groups[#groups + 1] = {
+                    key = rule.key,
+                    filterString = concat(parts, "|"),
+                }
+                precedingExclusionTokens[
+                    #precedingExclusionTokens + 1
+                ] = rule.exclusionToken
             end
-
-            groups[#groups + 1] = {
-                key = rule.key,
-                filterString = concat(parts, "|"),
-            }
-            precedingTokens[#precedingTokens + 1] = rule.token
         end
     end
 
     local groupCount = #groups
+    if groupCount > 0 and not enabled.all then
+        requiresVisible = true
+        requiresAssist = true
+        for _, rule in ipairs(RULES) do
+            if enabled[rule.key] then
+                requiresVisible =
+                    requiresVisible and rule.requiresVisible == true
+                requiresAssist =
+                    requiresAssist and rule.requiresAssist == true
+            end
+        end
+    end
+
     return {
         groups = groups,
         empty = groupCount == 0,
-        requiresVisible = enabled.player,
-        requiresAssist = enabled.bigDefensive or enabled.externalDefensive,
+        requiresVisible = requiresVisible,
+        requiresAssist = requiresAssist,
         degradations = {
             perGroupLimit = groupCount > 1,
             perGroupSort = groupCount > 1,
             privateAuraSourceUnseparable = groupCount > 0,
             bossAuraUsesCuratedRaidInCombat =
-                bossAuraUsesCuratedRaidInCombat,
+                migration.bossAuraUsesCuratedRaidInCombat,
+            legacySourceFilterUsesSuperset =
+                migration.legacySourceFilterUsesSuperset,
         },
     }
 end

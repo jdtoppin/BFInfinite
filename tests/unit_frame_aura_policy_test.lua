@@ -145,6 +145,11 @@ local function testEmptyPoliciesStayEmpty()
         false,
         "empty helpful boss approximation"
     )
+    assertEqual(
+        helpful.degradations.legacySourceFilterUsesSuperset,
+        false,
+        "empty helpful source migration"
+    )
 
     local harmful = compile("HARMFUL", {
         bigDefensive = true,
@@ -155,11 +160,13 @@ local function testEmptyPoliciesStayEmpty()
 end
 
 local function testLegacyTruthTable()
-    assertGroups(compile("HELPFUL", {
+    local player = compile("HELPFUL", {
         castByMe = true,
-    }), {
+    })
+    assertGroups(player, {
         {"player", "HELPFUL|PLAYER"},
     }, "cast by me")
+    assertEqual(player.requiresVisible, true, "player visibility gate")
 
     assertGroups(compile("HARMFUL", {
         isBossAura = true,
@@ -173,43 +180,164 @@ local function testLegacyTruthTable()
         {"raidPlayerDispellable", "HELPFUL|RAID_PLAYER_DISPELLABLE"},
     }, "dispellable")
 
-    local defensiveGroups = {
-        {"bigDefensive", "HELPFUL|BIG_DEFENSIVE"},
-        {"externalDefensive", "HELPFUL|EXTERNAL_DEFENSIVE|!BIG_DEFENSIVE"},
-    }
-    assertGroups(compile("HELPFUL", {
+    local others = compile("HELPFUL", {
         castByOthers = true,
-    }), defensiveGroups, "cast by others")
-    assertGroups(compile("HELPFUL", {
+    })
+    assertGroups(others, {
+        {"notPlayer", "HELPFUL|!PLAYER"},
+    }, "cast by others")
+    assertEqual(
+        others.degradations.legacySourceFilterUsesSuperset,
+        true,
+        "cast by others widens to not-player"
+    )
+
+    local npc = compile("HARMFUL", {
+        castByNPC = true,
+    })
+    assertGroups(npc, {
+        {"notPlayer", "HARMFUL|!PLAYER"},
+    }, "cast by NPC")
+    assertEqual(
+        npc.degradations.legacySourceFilterUsesSuperset,
+        true,
+        "cast by NPC widens to not-player"
+    )
+
+    local exactNotPlayer = compile("HARMFUL", {
+        castByOthers = true,
+        castByNPC = true,
+    })
+    assertGroups(exactNotPlayer, {
+        {"notPlayer", "HARMFUL|!PLAYER"},
+    }, "other-player and NPC union")
+    assertEqual(
+        exactNotPlayer.degradations.legacySourceFilterUsesSuperset,
+        false,
+        "complete not-player source union"
+    )
+
+    local unit = compile("HELPFUL", {
         castByUnit = true,
-    }), defensiveGroups, "cast by unit")
+    })
+    assertGroups(unit, {
+        {"all", "HELPFUL"},
+    }, "cast by unit")
+    assertEqual(
+        unit.degradations.legacySourceFilterUsesSuperset,
+        true,
+        "cast by unit widens to all"
+    )
+    assertEqual(unit.requiresVisible, false, "all visibility gate")
+    assertEqual(unit.requiresAssist, false, "all assist gate")
 
-    assertGroups(compile("HELPFUL", {
-        castByNPC = true,
-    }), {
-        {"raidInCombat", "HELPFUL|RAID_IN_COMBAT"},
-        {
-            "bigDefensive",
-            "HELPFUL|BIG_DEFENSIVE|!RAID_IN_COMBAT",
-        },
-        {
-            "externalDefensive",
-            "HELPFUL|EXTERNAL_DEFENSIVE|!RAID_IN_COMBAT|!BIG_DEFENSIVE",
-        },
-    }, "helpful NPC")
+    local partialAll = compile("HARMFUL", {
+        castByMe = true,
+        castByOthers = true,
+    })
+    assertGroups(partialAll, {
+        {"all", "HARMFUL"},
+    }, "player plus widened not-player")
+    assertEqual(
+        partialAll.degradations.legacySourceFilterUsesSuperset,
+        true,
+        "partial source union widens to all"
+    )
 
-    assertGroups(compile("HARMFUL", {
-        castByNPC = true,
-    }), {
-        {"raidInCombat", "HARMFUL|RAID_IN_COMBAT"},
-    }, "harmful NPC")
-
-    assertGroups(compile("HARMFUL", {
+    local exactAll = compile("HELPFUL", {
+        castByMe = true,
+        castByOthers = true,
+        castByUnit = true,
         castByNPC = true,
         isBossAura = true,
-    }), {
-        {"raidInCombat", "HARMFUL|RAID_IN_COMBAT"},
-    }, "deduplicated raid filter")
+        dispellable = true,
+    })
+    assertGroups(exactAll, {
+        {"all", "HELPFUL"},
+    }, "complete legacy source union")
+    assertEqual(
+        exactAll.degradations.legacySourceFilterUsesSuperset,
+        false,
+        "complete legacy source union is exact"
+    )
+    assertEqual(
+        exactAll.degradations.bossAuraUsesCuratedRaidInCombat,
+        false,
+        "all makes the boss approximation redundant"
+    )
+end
+
+local function testLegacySourceResolutionExhaustive()
+    local function enabled(mask, bitIndex)
+        return math.floor(mask / (2 ^ bitIndex)) % 2 == 1
+    end
+
+    for mask = 0, 127 do
+        local legacy = {
+            castByMe = enabled(mask, 0),
+            castByOthers = enabled(mask, 1),
+            castByUnit = enabled(mask, 2),
+            castByNPC = enabled(mask, 3),
+            isBossAura = enabled(mask, 4),
+            dispellable = enabled(mask, 5),
+            canBeDispelled = enabled(mask, 6),
+        }
+        local exactNotPlayer =
+            legacy.castByOthers and legacy.castByNPC
+        local expectedNotPlayer =
+            legacy.castByOthers or legacy.castByNPC
+        local exactAll = legacy.castByMe and exactNotPlayer
+        local expectedAll =
+            legacy.castByUnit
+            or (legacy.castByMe and expectedNotPlayer)
+
+        for _, baseFilter in ipairs({"HELPFUL", "HARMFUL"}) do
+            local resolved, migration =
+                F.ResolveUnitFrameAuraFilters(baseFilter, legacy)
+            local label = baseFilter .. " legacy mask " .. mask
+            assertEqual(resolved.all, expectedAll, label .. " all")
+            assertEqual(
+                resolved.player,
+                not expectedAll and legacy.castByMe,
+                label .. " player"
+            )
+            assertEqual(
+                resolved.notPlayer,
+                not expectedAll and expectedNotPlayer,
+                label .. " not-player"
+            )
+            assertEqual(
+                resolved.raidInCombat,
+                not expectedAll and legacy.isBossAura,
+                label .. " raid"
+            )
+            assertEqual(
+                resolved.raidPlayerDispellable,
+                not expectedAll
+                    and (
+                        legacy.dispellable
+                        or legacy.canBeDispelled
+                    ),
+                label .. " dispel"
+            )
+            assertEqual(
+                resolved.bigDefensive,
+                false,
+                label .. " big defensive"
+            )
+            assertEqual(
+                resolved.externalDefensive,
+                false,
+                label .. " external defensive"
+            )
+            assertEqual(
+                migration.legacySourceFilterUsesSuperset,
+                (expectedNotPlayer and not exactNotPlayer)
+                    or (expectedAll and not exactAll),
+                label .. " source widening"
+            )
+        end
+    end
 end
 
 local function testCanonicalDisjointOrder()
@@ -241,8 +369,8 @@ local function testCanonicalDisjointOrder()
         },
     }, "canonical disjoint")
     assertEqual(policy.empty, false, "canonical empty state")
-    assertEqual(policy.requiresVisible, true, "canonical visible gate")
-    assertEqual(policy.requiresAssist, true, "canonical assist gate")
+    assertEqual(policy.requiresVisible, false, "canonical visible gate")
+    assertEqual(policy.requiresAssist, false, "canonical assist gate")
     assertEqual(policy.degradations.perGroupLimit, true, "canonical limit")
     assertEqual(policy.degradations.perGroupSort, true, "canonical sort")
     assertEqual(
@@ -255,6 +383,64 @@ local function testCanonicalDisjointOrder()
         false,
         "canonical raid category is not a boss approximation"
     )
+end
+
+local function testNotPlayerDisjointOrderAndAllCollapse()
+    local policy = compile("HELPFUL", {
+        notPlayer = true,
+        raidInCombat = true,
+        raidPlayerDispellable = true,
+        bigDefensive = true,
+        externalDefensive = true,
+    })
+    assertGroups(policy, {
+        {"notPlayer", "HELPFUL|!PLAYER"},
+        {"raidInCombat", "HELPFUL|RAID_IN_COMBAT|PLAYER"},
+        {
+            "raidPlayerDispellable",
+            "HELPFUL|RAID_PLAYER_DISPELLABLE|PLAYER"
+                .. "|!RAID_IN_COMBAT",
+        },
+        {
+            "bigDefensive",
+            "HELPFUL|BIG_DEFENSIVE|PLAYER|!RAID_IN_COMBAT"
+                .. "|!RAID_PLAYER_DISPELLABLE",
+        },
+        {
+            "externalDefensive",
+            "HELPFUL|EXTERNAL_DEFENSIVE|PLAYER|!RAID_IN_COMBAT"
+                .. "|!RAID_PLAYER_DISPELLABLE|!BIG_DEFENSIVE",
+        },
+    }, "not-player disjoint")
+    for _, group in ipairs(policy.groups) do
+        assertEqual(
+            group.filterString:find("!!", 1, true),
+            nil,
+            "native filter contains double negation"
+        )
+    end
+    assertEqual(
+        policy.requiresVisible,
+        false,
+        "mixed not-player union visibility gate"
+    )
+    assertEqual(
+        policy.requiresAssist,
+        false,
+        "mixed not-player union assist gate"
+    )
+
+    local all = compile("HARMFUL", {
+        all = false,
+        player = true,
+        notPlayer = true,
+        raidInCombat = true,
+    })
+    assertGroups(all, {
+        {"all", "HARMFUL"},
+    }, "player complement collapse")
+    assertEqual(all.requiresVisible, false, "collapsed all visibility gate")
+    assertEqual(all.requiresAssist, false, "collapsed all assist gate")
 end
 
 local function testGateAndDegradationMetadata()
@@ -284,6 +470,21 @@ local function testGateAndDegradationMetadata()
     assertEqual(defensive.requiresAssist, true, "defensive assist gate")
     assertEqual(defensive.degradations.perGroupLimit, true, "defensive limit")
     assertEqual(defensive.degradations.perGroupSort, true, "defensive sort")
+
+    local mixed = compile("HELPFUL", {
+        player = true,
+        bigDefensive = true,
+    })
+    assertEqual(
+        mixed.requiresVisible,
+        false,
+        "mixed union whole-holder visibility gate"
+    )
+    assertEqual(
+        mixed.requiresAssist,
+        false,
+        "mixed union whole-holder assist gate"
+    )
 
     -- Blizzard's 68914 Edit Mode fixture treats RAID_IN_COMBAT as a RAID
     -- substring and therefore selects its raid Bleed sample, not its
@@ -315,44 +516,47 @@ end
 local function testCanonicalCompatibilityMaterialization()
     local legacy = {
         castByMe = true,
-        castByOthers = false,
+        castByOthers = true,
         castByUnit = true,
         castByNPC = true,
-        isBossAura = false,
+        isBossAura = true,
         dispellable = true,
     }
-    local resolved = F.ResolveUnitFrameAuraFilters("HELPFUL", legacy)
-    assertEqual(resolved.player, true, "legacy player resolution")
-    assertEqual(resolved.raidInCombat, true, "legacy raid resolution")
+    local resolved, migration =
+        F.ResolveUnitFrameAuraFilters("HELPFUL", legacy)
+    assertEqual(resolved.all, true, "legacy all resolution")
+    assertEqual(resolved.player, false, "collapsed legacy player")
+    assertEqual(resolved.notPlayer, false, "collapsed legacy not-player")
+    assertEqual(resolved.raidInCombat, false, "collapsed legacy raid")
     assertEqual(
-        resolved.raidPlayerDispellable,
-        true,
-        "legacy dispel resolution"
+        migration.legacySourceFilterUsesSuperset,
+        false,
+        "complete source union migration"
     )
-    assertEqual(resolved.bigDefensive, true, "legacy big defensive")
-    assertEqual(resolved.externalDefensive, true, "legacy external defensive")
 
     assertEqual(
         F.SetUnitFrameAuraFilter(
             "HELPFUL",
             legacy,
-            "bigDefensive",
-            false
+            "raidInCombat",
+            true
         ),
         true,
         "materialize canonical state"
     )
-    assertEqual(legacy.player, true, "materialized player")
+    assertEqual(legacy.all, false, "materialized all")
+    assertEqual(legacy.player, false, "materialized player")
+    assertEqual(legacy.notPlayer, false, "materialized not-player")
     assertEqual(legacy.raidInCombat, true, "materialized raid")
     assertEqual(
         legacy.raidPlayerDispellable,
-        true,
+        false,
         "materialized dispel"
     )
     assertEqual(legacy.bigDefensive, false, "materialized big defensive")
     assertEqual(
         legacy.externalDefensive,
-        true,
+        false,
         "materialized external defensive"
     )
     assertEqual(legacy.castByMe, nil, "retired castByMe removed")
@@ -367,18 +571,18 @@ local function testCanonicalCompatibilityMaterialization()
         "canonical state remains authoritative"
     )
     assertEqual(
-        resolved.bigDefensive,
+        resolved.notPlayer,
         false,
-        "hidden legacy alias cannot re-enable category"
+        "hidden legacy alias cannot re-enable not-player"
     )
 
     local matchFilters =
-        F.GetSecretSafeAuraMatchFilters("HELPFUL", legacy)
+        F.GetSecretSafeUnitFrameAuraMatchFilters(
+            "HELPFUL",
+            legacy
+        )
     local expected = {
-        "HELPFUL|PLAYER",
         "HELPFUL|RAID_IN_COMBAT",
-        "HELPFUL|RAID_PLAYER_DISPELLABLE",
-        "HELPFUL|EXTERNAL_DEFENSIVE",
     }
     assertEqual(#matchFilters, #expected, "canonical match filter count")
     for index, filterString in ipairs(expected) do
@@ -399,6 +603,52 @@ local function testCanonicalCompatibilityMaterialization()
         false,
         "harmful defensive category rejected"
     )
+
+    local notPlayer = {
+        notPlayer = true,
+    }
+    matchFilters =
+        F.GetSecretSafeUnitFrameAuraMatchFilters(
+            "HARMFUL",
+            notPlayer
+        )
+    assertEqual(#matchFilters, 1, "not-player match rule count")
+    assertEqual(
+        matchFilters[1].filterString,
+        "HARMFUL|PLAYER",
+        "not-player C-side filter"
+    )
+    assertEqual(
+        matchFilters[1].matchWhenFilteredOut,
+        true,
+        "not-player complement direction"
+    )
+
+    matchFilters =
+        F.GetSecretSafeUnitFrameAuraMatchFilters(
+            "HELPFUL",
+            {all = true}
+        )
+    assertEqual(#matchFilters, 1, "all match rule count")
+    assertEqual(matchFilters[1], "HELPFUL", "all base match rule")
+end
+
+local function testNameplateProjectionRemainsScoped()
+    local filters = F.GetSecretSafeAuraMatchFilters("HELPFUL", {
+        castByOthers = true,
+    })
+    assertEqual(#filters, 2, "legacy nameplate source filter count")
+    assertEqual(filters[1], "HELPFUL|BIG_DEFENSIVE",
+        "legacy nameplate big defensive")
+    assertEqual(filters[2], "HELPFUL|EXTERNAL_DEFENSIVE",
+        "legacy nameplate external defensive")
+
+    filters = F.GetSecretSafeAuraMatchFilters("HARMFUL", {
+        castByNPC = true,
+    })
+    assertEqual(#filters, 1, "legacy nameplate NPC filter count")
+    assertEqual(filters[1], "HARMFUL|RAID_IN_COMBAT",
+        "legacy nameplate NPC projection")
 end
 
 local function testFreshDeterministicOutput()
@@ -443,9 +693,12 @@ end
 testInvalidInputs()
 testEmptyPoliciesStayEmpty()
 testLegacyTruthTable()
+testLegacySourceResolutionExhaustive()
 testCanonicalDisjointOrder()
+testNotPlayerDisjointOrderAndAllCollapse()
 testGateAndDegradationMetadata()
 testCanonicalCompatibilityMaterialization()
+testNameplateProjectionRemainsScoped()
 testFreshDeterministicOutput()
 
 assertEqual(forbiddenCalls, 0, "forbidden dependency calls")
