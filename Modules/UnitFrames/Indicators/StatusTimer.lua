@@ -42,9 +42,11 @@ end
 -- timer
 ---------------------------------------------------------------------
 local timers = {}
+-- Retail 12.0.7.68887 UnitDocumentation.lua marks UnitGUID secret while
+-- unit identity is restricted. Gate it before truth tests or table keys.
 local function ShowTimer(self)
     local guid = UnitGUID(self.root.unit)
-    if not guid or not F.isValueNonSecret(guid) then return end
+    if not F.isValueNonSecret(guid) or not guid then return end
 
     if not timers[guid] then
         timers[guid] = {status = self.status, start = GetTime()}
@@ -60,7 +62,7 @@ end
 
 local function HideTimer(self)
     local guid = UnitGUID(self.root.unit)
-    if guid and F.isValueNonSecret(guid) then
+    if F.isValueNonSecret(guid) and guid then
         timers[guid] = nil
     end
     self.updater:Hide()
@@ -71,6 +73,14 @@ end
 ---------------------------------------------------------------------
 -- status
 ---------------------------------------------------------------------
+-- Retail 12.0.7.68887 UnitDocumentation.lua marks UnitIsAFK secret
+-- while chat messaging lockdown is active. Gate its return before testing.
+local function IsUnitAFK(unit)
+    local isAFK = UnitIsAFK(unit)
+    if not F.isValueNonSecret(isAFK) then return false end
+    return isAFK
+end
+
 local function SetStatus(self, status)
     if self.useEn then
         self.status = status
@@ -99,7 +109,7 @@ local function UpdateStatus(self)
 
     if not UnitIsConnected(unit) then
         SetStatus(self, "OFFLINE")
-    elseif UnitIsAFK(unit) then
+    elseif IsUnitAFK(unit) then
         SetStatus(self, "AFK")
     elseif UnitIsDeadOrGhost(unit) then
         if UnitIsGhost(unit) then

@@ -15,10 +15,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Lua checks
+      - name: Install Lua tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes lua-check lua5.1 ripgrep
+          sudo apt-get install --yes lua-check lua5.1 luajit ripgrep
 
       - name: Check Lua and policy
         shell: bash
@@ -32,3 +32,9 @@ jobs:
           else
             ./scripts/lint.sh
           fi
+
+      - name: Test unit-frame status timer lockdown
+        run: luajit tests/unit_frame_status_timer_test.lua
+
+      - name: Test protected tooltip-owner anchoring
+        run: luajit tests/tooltip_anchor_taint_test.lua

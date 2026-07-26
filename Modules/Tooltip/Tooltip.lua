@@ -1,6 +1,7 @@
 ---@type BFI
 local BFI = select(2, ...)
 local T = BFI.modules.Tooltip
+local F = BFI.funcs
 local L = BFI.L
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
@@ -60,8 +61,21 @@ local dungeonBests = {}
 ---------------------------------------------------------------------
 -- anchor
 ---------------------------------------------------------------------
+local function IsObjectAccessible(object)
+    if not F.isValueNonSecret(object) then return false end
+    if object == nil then return true end
+
+    -- Retail 12.0.7.68887 Blizzard_NamePlates.lua creates its forbidden pool
+    -- with forbidden=true, and SimpleFrameScriptObjectAPIDocumentation.lua
+    -- marks IsForbidden's result ObjectSecurity-secret. GameTooltip.lua
+    -- SetWorldCursor also warns addon-touched state can taint secret lines.
+    local forbidden = object:IsForbidden()
+    if not F.isValueNonSecret(forbidden) or forbidden then return false end
+    return true
+end
+
 local function GetOwnerConfig(owner)
-    if not owner then return end
+    if not IsObjectAccessible(owner) or owner == nil then return end
 
     if type(owner.tooltip) == "table" then
         return owner.tooltip
@@ -94,14 +108,19 @@ local function ApplyOwnerAnchor(tooltip, parent)
     elseif anchorTo == "parent" then
         local position = ownerConfig.position
         if type(position) ~= "table" then return false end
+        local anchorParent = parent:GetParent()
+        if not IsObjectAccessible(anchorParent) then return true end
         tooltip:ClearAllPoints()
-        tooltip:SetPoint(position[1], parent:GetParent(), position[2], position[3], position[4])
+        tooltip:SetPoint(position[1], anchorParent, position[2], position[3], position[4])
         return true
     elseif anchorTo == "root" then
         local position = ownerConfig.position
-        if type(position) ~= "table" or not parent.root then return false end
+        if type(position) ~= "table" then return false end
+        local root = parent.root
+        if not IsObjectAccessible(root) then return true end
+        if root == nil then return false end
         tooltip:ClearAllPoints()
-        tooltip:SetPoint(position[1], parent.root, position[2], position[3], position[4])
+        tooltip:SetPoint(position[1], root, position[2], position[3], position[4])
         return true
     end
 
@@ -109,25 +128,29 @@ local function ApplyOwnerAnchor(tooltip, parent)
     return false
 end
 
-local function UpdateAnchor(tooltip, parent)
-    if tooltip ~= GameTooltip or tooltip:IsForbidden() then return end
+local function UpdateAnchor(tooltip, parent, resetCursorOwner)
+    if not IsObjectAccessible(tooltip) or tooltip ~= GameTooltip then return end
+    if not IsObjectAccessible(parent) then return end
 
     if ApplyOwnerAnchor(tooltip, parent) then return end
 
     local config = T.config
     if not config or not config.enabled then return end
 
-    parent = parent or AF.UIParent
-
     local mode = config.anchorMode
     if mode == "default" then
         return
     elseif mode == "fixed" then
         local point = oppositePoints[config.anchorPoint] and config.anchorPoint or "BOTTOMRIGHT"
-        -- Native world-cursor tooltips may arrive with ANCHOR_CURSOR or a
-        -- nameplate position. Reset the owner mode before applying the fixed
-        -- BFI point so the native anchor cannot continue moving the tooltip.
-        tooltip:SetOwner(parent, "ANCHOR_NONE")
+        -- Retail 12.0.7.68887 SharedTooltipTemplates.lua
+        -- GameTooltip_SetDefaultAnchor and Blizzard_GameTooltip/Mainline/
+        -- GameTooltip.lua SetWorldCursor(Nameplate) establish ANCHOR_NONE.
+        -- Inaccessible owners already returned above. Preserve the native
+        -- owner here; only the Cursor branch needs its UIParent owner mode
+        -- reset before applying a fixed point.
+        if resetCursorOwner then
+            tooltip:SetOwner(AF.UIParent, "ANCHOR_NONE")
+        end
         tooltip:ClearAllPoints()
         tooltip:SetPoint(point, tooltipAnchor, oppositePoints[point])
         return
@@ -136,6 +159,7 @@ local function UpdateAnchor(tooltip, parent)
     local anchorType = cursorAnchors[mode]
     if not anchorType then return end
 
+    parent = parent or AF.UIParent
     tooltip:ClearAllPoints()
     if mode == "cursor" then
         -- ANCHOR_CURSOR intentionally ignores offsets.
@@ -226,8 +250,8 @@ end
 
 local function ApplyUnitLevelDifficultyColor(tooltip, lineData)
     local config = T.config
-    if tooltip ~= GameTooltip
-        or tooltip:IsForbidden()
+    if not IsObjectAccessible(tooltip)
+        or tooltip ~= GameTooltip
         or not config
         or not config.enabled
         or not config.levelDifficultyColor
@@ -247,7 +271,13 @@ end
 
 local function OnUnitTooltipPreCall(tooltip)
     local config = T.config
-    if tooltip ~= GameTooltip or tooltip:IsForbidden() or not config or not config.enabled then return end
+    if not IsObjectAccessible(tooltip)
+        or tooltip ~= GameTooltip
+        or not config
+        or not config.enabled
+    then
+        return
+    end
 
     unitTooltipActive = true
 
@@ -260,17 +290,23 @@ local function OnUnitTooltipPreCall(tooltip)
 end
 
 local function RefreshActiveUnitTooltip()
-    if unitTooltipActive
-        and UnitExists(MOUSEOVER_UNIT)
-        and GameTooltip:IsShown()
-        and not GameTooltip:IsForbidden()
+    if not unitTooltipActive
+        or not UnitExists(MOUSEOVER_UNIT)
+        or not IsObjectAccessible(GameTooltip)
     then
-        -- SetUnit is a native secure delegate intended to rebuild standard
-        -- tooltips for addon callers without exposing the displayed unit.
-        refreshingUnitTooltip = true
-        GameTooltip:SetUnit(MOUSEOVER_UNIT)
-        refreshingUnitTooltip = nil
+        return
     end
+
+    -- Retail 12.0.7.68887 SimpleFrameAPIDocumentation.lua marks IsShown's
+    -- result Shown-secret. Gate it before deciding whether to refresh.
+    local shown = GameTooltip:IsShown()
+    if not F.isValueNonSecret(shown) or not shown then return end
+
+    -- SetUnit is a native secure delegate intended to rebuild standard
+    -- tooltips for addon callers without exposing the displayed unit.
+    refreshingUnitTooltip = true
+    GameTooltip:SetUnit(MOUSEOVER_UNIT)
+    refreshingUnitTooltip = nil
 end
 
 local function QueueInitialUnitTooltipRefresh()
@@ -420,8 +456,8 @@ end
 
 local function OnUnitTooltipPostCall(tooltip, data)
     local config = T.config
-    if tooltip ~= GameTooltip
-        or tooltip:IsForbidden()
+    if not IsObjectAccessible(tooltip)
+        or tooltip ~= GameTooltip
         or not config
         or not config.enabled
         or (config.hideUnitTooltipsInCombat and InCombatLockdown())
@@ -490,9 +526,10 @@ local function ClearUnitTooltipState()
 end
 
 local function OnTooltipShow(tooltip)
-    if tooltip ~= GameTooltip or tooltip:IsForbidden() then return end
+    if not IsObjectAccessible(tooltip) or tooltip ~= GameTooltip then return end
 
     local owner = tooltip:GetOwner()
+    if not IsObjectAccessible(owner) then return end
     local ownerConfig = GetOwnerConfig(owner)
     if ownerConfig
         and (ownerConfig.enabled == false or (ownerConfig.hideInCombat and InCombatLockdown()))
@@ -502,10 +539,13 @@ local function OnTooltipShow(tooltip)
 end
 
 local function PLAYER_REGEN_DISABLED()
-    if GameTooltip:IsForbidden() then return end
+    if not IsObjectAccessible(GameTooltip) then return end
 
     local owner = GameTooltip:GetOwner()
-    local ownerConfig = GetOwnerConfig(owner)
+    local ownerConfig
+    if IsObjectAccessible(owner) then
+        ownerConfig = GetOwnerConfig(owner)
+    end
     local hideOwnerTooltip = ownerConfig and ownerConfig.hideInCombat
     local config = T.config
     local hideUnitTooltip = unitTooltipActive
@@ -535,9 +575,10 @@ local function Initialize()
         -- directly, so reapply the selected global policy after the native
         -- method completes. None is a leave-state update and must not move a
         -- GameTooltip that may already have another owner.
-        if anchorType == Enum.WorldCursorAnchorType.Cursor
-            or anchorType == Enum.WorldCursorAnchorType.Nameplate
-        then
+        if anchorType == Enum.WorldCursorAnchorType.Cursor then
+            -- Retail 12.0.7.68887 always gives this branch UIParent ownership.
+            UpdateAnchor(tooltip, AF.UIParent, true)
+        elseif anchorType == Enum.WorldCursorAnchorType.Nameplate then
             UpdateAnchor(tooltip, parent)
         end
     end)
