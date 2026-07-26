@@ -30,16 +30,32 @@ local forbiddenTable = setmetatable({}, {
 })
 
 local UF = {}
+local F = {}
+local L = setmetatable({}, {
+    __index = function(_, key)
+        return key
+    end,
+})
+local AF = {}
 local BFI = {
+    funcs = F,
+    L = L,
     modules = {
         UnitFrames = UF,
     },
 }
 local moduleEnvironment = {
+    _G = false,
+    AbstractFramework = AF,
+    assert = assert,
     ipairs = ipairs,
+    next = next,
+    pcall = pcall,
     select = select,
     table = table,
+    tonumber = tonumber,
     type = type,
+    GetCVar = forbidden("GetCVar"),
     CreateFrame = forbidden("CreateFrame"),
     InCombatLockdown = forbidden("InCombatLockdown"),
     UnitCanAssist = forbidden("UnitCanAssist"),
@@ -48,12 +64,18 @@ local moduleEnvironment = {
     C_UnitAuras = forbiddenTable,
     AuraData = forbiddenTable,
 }
+moduleEnvironment._G = moduleEnvironment
 moduleEnvironment["is" .. "secretvalue"] = forbidden("secret-value API")
 setmetatable(moduleEnvironment, {
     __index = function(_, key)
         error("unexpected policy global: " .. tostring(key), 2)
     end,
 })
+
+local utilsChunk, utilsLoadError = loadfile("Utils.lua")
+assertTrue(utilsChunk, utilsLoadError)
+setfenv(utilsChunk, moduleEnvironment)
+utilsChunk("BFInfinite", BFI)
 
 local chunk, loadError = loadfile("Modules/UnitFrames/AuraPolicy.lua")
 assertTrue(chunk, loadError)
@@ -125,8 +147,8 @@ local function testEmptyPoliciesStayEmpty()
     )
 
     local harmful = compile("HARMFUL", {
-        castByOthers = true,
-        castByUnit = true,
+        bigDefensive = true,
+        externalDefensive = true,
     })
     assertGroups(harmful, {}, "unsupported harmful source filters")
     assertEqual(harmful.empty, true, "unsupported harmful state")
@@ -191,13 +213,13 @@ local function testLegacyTruthTable()
 end
 
 local function testCanonicalDisjointOrder()
-    local filters = {}
-    filters.dispellable = true
-    filters.castByNPC = true
-    filters.castByUnit = true
-    filters.castByOthers = true
-    filters.isBossAura = true
-    filters.castByMe = true
+    local filters = {
+        player = true,
+        raidInCombat = true,
+        raidPlayerDispellable = true,
+        bigDefensive = true,
+        externalDefensive = true,
+    }
 
     local policy = compile("HELPFUL", filters)
     assertGroups(policy, {
@@ -230,14 +252,14 @@ local function testCanonicalDisjointOrder()
     )
     assertEqual(
         policy.degradations.bossAuraUsesCuratedRaidInCombat,
-        true,
-        "canonical boss approximation"
+        false,
+        "canonical raid category is not a boss approximation"
     )
 end
 
 local function testGateAndDegradationMetadata()
     local player = compile("HARMFUL", {
-        castByMe = true,
+        player = true,
     })
     assertEqual(player.requiresVisible, true, "player visible gate")
     assertEqual(player.requiresAssist, false, "player assist gate")
@@ -255,7 +277,8 @@ local function testGateAndDegradationMetadata()
     )
 
     local defensive = compile("HELPFUL", {
-        castByOthers = true,
+        bigDefensive = true,
+        externalDefensive = true,
     })
     assertEqual(defensive.requiresVisible, false, "defensive visible gate")
     assertEqual(defensive.requiresAssist, true, "defensive assist gate")
@@ -289,10 +312,99 @@ local function testGateAndDegradationMetadata()
     )
 end
 
+local function testCanonicalCompatibilityMaterialization()
+    local legacy = {
+        castByMe = true,
+        castByOthers = false,
+        castByUnit = true,
+        castByNPC = true,
+        isBossAura = false,
+        dispellable = true,
+    }
+    local resolved = F.ResolveUnitFrameAuraFilters("HELPFUL", legacy)
+    assertEqual(resolved.player, true, "legacy player resolution")
+    assertEqual(resolved.raidInCombat, true, "legacy raid resolution")
+    assertEqual(
+        resolved.raidPlayerDispellable,
+        true,
+        "legacy dispel resolution"
+    )
+    assertEqual(resolved.bigDefensive, true, "legacy big defensive")
+    assertEqual(resolved.externalDefensive, true, "legacy external defensive")
+
+    assertEqual(
+        F.SetUnitFrameAuraFilter(
+            "HELPFUL",
+            legacy,
+            "bigDefensive",
+            false
+        ),
+        true,
+        "materialize canonical state"
+    )
+    assertEqual(legacy.player, true, "materialized player")
+    assertEqual(legacy.raidInCombat, true, "materialized raid")
+    assertEqual(
+        legacy.raidPlayerDispellable,
+        true,
+        "materialized dispel"
+    )
+    assertEqual(legacy.bigDefensive, false, "materialized big defensive")
+    assertEqual(
+        legacy.externalDefensive,
+        true,
+        "materialized external defensive"
+    )
+    assertEqual(legacy.castByMe, nil, "retired castByMe removed")
+    assertEqual(legacy.castByNPC, nil, "retired castByNPC removed")
+    assertEqual(legacy.isBossAura, nil, "retired boss alias removed")
+
+    legacy.castByNPC = true
+    resolved = F.ResolveUnitFrameAuraFilters("HELPFUL", legacy)
+    assertEqual(
+        resolved.raidInCombat,
+        true,
+        "canonical state remains authoritative"
+    )
+    assertEqual(
+        resolved.bigDefensive,
+        false,
+        "hidden legacy alias cannot re-enable category"
+    )
+
+    local matchFilters =
+        F.GetSecretSafeAuraMatchFilters("HELPFUL", legacy)
+    local expected = {
+        "HELPFUL|PLAYER",
+        "HELPFUL|RAID_IN_COMBAT",
+        "HELPFUL|RAID_PLAYER_DISPELLABLE",
+        "HELPFUL|EXTERNAL_DEFENSIVE",
+    }
+    assertEqual(#matchFilters, #expected, "canonical match filter count")
+    for index, filterString in ipairs(expected) do
+        assertEqual(
+            matchFilters[index],
+            filterString,
+            "canonical match filter " .. index
+        )
+    end
+
+    assertEqual(
+        F.SetUnitFrameAuraFilter(
+            "HARMFUL",
+            legacy,
+            "bigDefensive",
+            true
+        ),
+        false,
+        "harmful defensive category rejected"
+    )
+end
+
 local function testFreshDeterministicOutput()
     local filters = {
-        castByMe = true,
-        castByNPC = true,
+        player = true,
+        raidInCombat = true,
         futureField = true,
     }
     local first = compile("HARMFUL", filters)
@@ -323,8 +435,8 @@ local function testFreshDeterministicOutput()
     }, "third deterministic")
     assertEqual(third.degradations.perGroupLimit, true, "fresh degradation")
 
-    assertEqual(filters.castByMe, true, "input castByMe mutation")
-    assertEqual(filters.castByNPC, true, "input castByNPC mutation")
+    assertEqual(filters.player, true, "input player mutation")
+    assertEqual(filters.raidInCombat, true, "input raid mutation")
     assertEqual(filters.futureField, true, "input future field mutation")
 end
 
@@ -333,6 +445,7 @@ testEmptyPoliciesStayEmpty()
 testLegacyTruthTable()
 testCanonicalDisjointOrder()
 testGateAndDegradationMetadata()
+testCanonicalCompatibilityMaterialization()
 testFreshDeterministicOutput()
 
 assertEqual(forbiddenCalls, 0, "forbidden dependency calls")

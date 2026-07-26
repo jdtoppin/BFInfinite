@@ -1,24 +1,16 @@
 ---@type BFI
 local BFI = select(2, ...)
 local UF = BFI.modules.UnitFrames
+local F = BFI.funcs
 
 local concat = table.concat
-local ipairs, type = ipairs, type
+local ipairs = ipairs
 
 -- Retail 12.1.0.68914 (wow-ui-source d3915c78) supports negated native
 -- filter tokens, but each CustomAuraContainer group owns its own limit and
 -- sort. The container also has no selector that separates public from private
 -- aura sources. This compiler records those limitations without reading any
 -- unit, aura, frame, or native-container state.
-local FILTER_FIELDS = {
-    "castByMe",
-    "castByOthers",
-    "castByUnit",
-    "castByNPC",
-    "isBossAura",
-    "dispellable",
-}
-
 local RULES = {
     {key = "player", token = "PLAYER"},
     {key = "raidInCombat", token = "RAID_IN_COMBAT"},
@@ -27,42 +19,32 @@ local RULES = {
     {key = "externalDefensive", token = "EXTERNAL_DEFENSIVE"},
 }
 
-local function HasValidSchema(filters)
-    if type(filters) ~= "table" then return false end
-
-    for _, field in ipairs(FILTER_FIELDS) do
-        local value = filters[field]
-        if value ~= nil and type(value) ~= "boolean" then
-            return false
-        end
-    end
-    return true
-end
-
 function UF.CompileNativeAuraPolicy(baseFilter, filters)
     if baseFilter ~= "HELPFUL" and baseFilter ~= "HARMFUL" then
         return nil, "INVALID_BASE_FILTER"
     end
-    if not HasValidSchema(filters) then
+
+    local resolved = F.ResolveUnitFrameAuraFilters(baseFilter, filters)
+    if not resolved then
         return nil, "INVALID_FILTER_SCHEMA"
     end
 
-    -- `isBossAura` is the legacy saved-variable name. The current migration
-    -- intentionally preserves its secret-safe 12.0.7 behavior through
-    -- Blizzard's curated RAID_IN_COMBAT token. It does not claim the exact
-    -- 12.1 `candidateFilters.isBossAura` semantic; relabeling or replacing
-    -- that user-facing control belongs to the dedicated options migration.
-    local bossAuraUsesCuratedRaidInCombat = filters.isBossAura == true
-    local defensive = baseFilter == "HELPFUL"
-        and (filters.castByOthers or filters.castByUnit or filters.castByNPC)
-        or false
+    -- Only a legacy `isBossAura` input is an approximation. Canonical
+    -- `raidInCombat` is the exact user-facing name of the C-side category.
+    local hasCanonicalField =
+        filters.player ~= nil
+        or filters.raidInCombat ~= nil
+        or filters.raidPlayerDispellable ~= nil
+        or filters.bigDefensive ~= nil
+        or filters.externalDefensive ~= nil
+    local bossAuraUsesCuratedRaidInCombat =
+        not hasCanonicalField and filters.isBossAura == true
     local enabled = {
-        player = filters.castByMe == true,
-        raidInCombat = bossAuraUsesCuratedRaidInCombat
-            or filters.castByNPC == true,
-        raidPlayerDispellable = filters.dispellable == true,
-        bigDefensive = defensive,
-        externalDefensive = defensive,
+        player = resolved.player,
+        raidInCombat = resolved.raidInCombat,
+        raidPlayerDispellable = resolved.raidPlayerDispellable,
+        bigDefensive = resolved.bigDefensive,
+        externalDefensive = resolved.externalDefensive,
     }
 
     local groups = {}

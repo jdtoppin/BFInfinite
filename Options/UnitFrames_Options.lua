@@ -3180,42 +3180,116 @@ builder["auraBaseFilters"] = function(parent)
     local castByMe = AF.CreateCheckButton(pane, L["Cast By Me"])
     AF.SetPoint(castByMe, "TOPLEFT", 15, -30)
     castByMe:SetOnCheck(function(checked)
-        pane.t.cfg.filters.castByMe = checked
+        if AF.isRetail then
+            local baseFilter =
+                pane.t.id == "buffs" and "HELPFUL" or "HARMFUL"
+            if not F.SetUnitFrameAuraFilter(
+                baseFilter,
+                pane.t.cfg.filters,
+                "player",
+                checked
+            ) then
+                return
+            end
+        else
+            pane.t.cfg.filters.castByMe = checked
+        end
         LoadIndicatorConfig(pane.t)
     end)
 
     local castByOthers = AF.CreateCheckButton(pane, L["Cast By Others"])
     AF.SetPoint(castByOthers, "TOPLEFT", castByMe, 185, 0)
     castByOthers:SetOnCheck(function(checked)
-        pane.t.cfg.filters.castByOthers = checked
+        if AF.isRetail then
+            if not F.SetUnitFrameAuraFilter(
+                "HELPFUL",
+                pane.t.cfg.filters,
+                "bigDefensive",
+                checked
+            ) then
+                return
+            end
+        else
+            pane.t.cfg.filters.castByOthers = checked
+        end
         LoadIndicatorConfig(pane.t)
     end)
 
     local castByUnit = AF.CreateCheckButton(pane, L["Cast By Unit"])
     AF.SetPoint(castByUnit, "TOPLEFT", castByMe, "BOTTOMLEFT", 0, -7)
     castByUnit:SetOnCheck(function(checked)
-        pane.t.cfg.filters.castByUnit = checked
+        if AF.isRetail then
+            if not F.SetUnitFrameAuraFilter(
+                "HELPFUL",
+                pane.t.cfg.filters,
+                "externalDefensive",
+                checked
+            ) then
+                return
+            end
+        else
+            pane.t.cfg.filters.castByUnit = checked
+        end
         LoadIndicatorConfig(pane.t)
     end)
 
     local castByNPC = AF.CreateCheckButton(pane, L["Cast By NPC"])
     AF.SetPoint(castByNPC, "TOPLEFT", castByUnit, 185, 0)
     castByNPC:SetOnCheck(function(checked)
-        pane.t.cfg.filters.castByNPC = checked
+        if AF.isRetail then
+            local baseFilter =
+                pane.t.id == "buffs" and "HELPFUL" or "HARMFUL"
+            if not F.SetUnitFrameAuraFilter(
+                baseFilter,
+                pane.t.cfg.filters,
+                "raidInCombat",
+                checked
+            ) then
+                return
+            end
+        else
+            pane.t.cfg.filters.castByNPC = checked
+        end
         LoadIndicatorConfig(pane.t)
     end)
 
     local castByBoss = AF.CreateCheckButton(pane, L["Cast By Boss"])
     AF.SetPoint(castByBoss, "TOPLEFT", castByUnit, "BOTTOMLEFT", 0, -7)
     castByBoss:SetOnCheck(function(checked)
-        pane.t.cfg.filters.isBossAura = checked
+        if AF.isRetail then
+            local baseFilter =
+                pane.t.id == "buffs" and "HELPFUL" or "HARMFUL"
+            if not F.SetUnitFrameAuraFilter(
+                baseFilter,
+                pane.t.cfg.filters,
+                "raidPlayerDispellable",
+                checked
+            ) then
+                return
+            end
+        else
+            pane.t.cfg.filters.isBossAura = checked
+        end
         LoadIndicatorConfig(pane.t)
     end)
 
     local dispellable = AF.CreateCheckButton(pane, L["Dispellable"])
     AF.SetPoint(dispellable, "TOPLEFT", castByBoss, 185, 0)
     dispellable:SetOnCheck(function(checked)
-        pane.t.cfg.filters.dispellable = checked
+        if AF.isRetail then
+            local baseFilter =
+                pane.t.id == "buffs" and "HELPFUL" or "HARMFUL"
+            if not F.SetUnitFrameAuraFilter(
+                baseFilter,
+                pane.t.cfg.filters,
+                "raidPlayerDispellable",
+                checked
+            ) then
+                return
+            end
+        else
+            pane.t.cfg.filters.dispellable = checked
+        end
         LoadIndicatorConfig(pane.t)
     end)
 
@@ -3223,11 +3297,45 @@ builder["auraBaseFilters"] = function(parent)
         pane.t = t
 
         if AF.isRetail then
-            tip:SetText(L["Retail uses Blizzard's C-side aura classifications"])
-            castByOthers:SetText(t.id == "buffs" and L["Defensive"] or L["Cast By Others"])
-            castByBoss:SetText(L["Raid In Combat"])
+            local baseFilter =
+                t.id == "buffs" and "HELPFUL" or "HARMFUL"
+            local filters =
+                F.ResolveUnitFrameAuraFilters(baseFilter, t.cfg.filters)
+                or {}
+            local friendlyHelpful =
+                t.id == "buffs"
+                and (
+                    t.owner == "player"
+                    or t.owner == "pet"
+                    or t.owner == "party"
+                    or t.owner == "raid"
+                )
+
+            tip:SetText(
+                L["Retail uses Blizzard-defined categories; an aura is shown when it matches any enabled category"]
+            )
+            castByMe:SetText(L["Player, Pet, or Vehicle"])
+            castByOthers:SetText(L["Big Defensive"])
+            castByUnit:SetText(L["External Defensive"])
+            castByNPC:SetText(L["Raid In Combat"])
+            castByBoss:SetText(L["Raid-Dispellable"])
+            dispellable:Hide()
+
+            castByMe:SetChecked(filters.player)
+            castByOthers:SetChecked(filters.bigDefensive)
+            castByUnit:SetChecked(filters.externalDefensive)
+            castByNPC:SetChecked(filters.raidInCombat)
+            castByBoss:SetChecked(filters.raidPlayerDispellable)
+
+            castByMe:SetEnabled(true)
+            castByOthers:SetEnabled(t.id == "buffs")
+            castByUnit:SetEnabled(t.id == "buffs")
+            castByNPC:SetEnabled(true)
+            castByBoss:SetEnabled(not friendlyHelpful)
+            return
         end
 
+        dispellable:Show()
         castByMe:SetChecked(t.cfg.filters.castByMe)
         castByOthers:SetChecked(t.cfg.filters.castByOthers)
         castByUnit:SetChecked(t.cfg.filters.castByUnit)
@@ -3235,9 +3343,9 @@ builder["auraBaseFilters"] = function(parent)
         castByBoss:SetChecked(t.cfg.filters.isBossAura)
         dispellable:SetChecked(t.cfg.filters.dispellable)
 
-        castByOthers:SetEnabled(not AF.isRetail or t.id == "buffs")
-        castByUnit:SetEnabled(not AF.isRetail)
-        castByNPC:SetEnabled(not AF.isRetail)
+        castByOthers:SetEnabled(true)
+        castByUnit:SetEnabled(true)
+        castByNPC:SetEnabled(true)
 
         if t.id == "buffs" and (t.owner == "player" or t.owner == "pet" or t.owner == "party" or t.owner == "raid") then
             dispellable:SetEnabled(false)
@@ -3260,10 +3368,21 @@ builder["auraBlackListWhitelist"] = function(parent)
 
     local mode = AF.CreateDropdown(pane, 150)
     AF.SetPoint(mode, "TOPLEFT", 15, -8)
-    mode:SetItems({
+    local legacyModeItems = {
         {text = L["Blacklist"], value = "blacklist"},
         {text = L["Whitelist"], value = "whitelist"},
-    })
+    }
+    local retailModeItems = {
+        {
+            text = L["Exclude Spell IDs (Reaction-Limited)"],
+            value = "blacklist",
+        },
+        {
+            text = L["Include Only Spell IDs (Reaction-Limited)"],
+            value = "whitelist",
+        },
+    }
+    mode:SetItems(legacyModeItems)
 
     local tip = AF.CreateFontString(pane, AF.GetIconString("MouseLeftClick") .. L["Edit"] .. "  " .. AF.GetIconString("MouseRightClick") .. L["Delete"])
     AF.SetPoint(tip, "LEFT", mode, "RIGHT", 8, 0)
@@ -3371,13 +3490,20 @@ builder["auraBlackListWhitelist"] = function(parent)
         pane.t = t
         if AF.isRetail then
             HideEditBox()
+            mode:SetItems(retailModeItems)
             if type(UF.HasNativeAuraContainerBackend) == "function"
                 and UF.HasNativeAuraContainerBackend()
             then
-                tip:SetText(L["Saved spell-ID aura lists are applied where Retail permits identity filtering; editing is unavailable"])
+                tip:SetText(
+                    L["12.1 applies saved spell-ID lists to friendly buffs and enemy debuffs; other reactions require a Never Secret aura. Editing remains retired"]
+                )
             else
-                tip:SetText(L["Spell-ID aura lists are unavailable for restricted Retail auras"])
+                tip:SetText(
+                    L["Spell-ID aura lists require the Retail 12.1 native aura container; editing is unavailable"]
+                )
             end
+        else
+            mode:SetItems(legacyModeItems)
         end
 
         mode:SetSelectedValue(t.cfg.mode)
@@ -3468,6 +3594,13 @@ builder["auraTypeColor"] = function(parent)
         pane.t = t
         if AF.isRetail then
             tip:SetText(AF.GetGradientText(L["Border Color"], "BFI", "white") .. "\n" .. L["Retail supports debuff type coloring"])
+            castByMe:Hide()
+            dispellable:Hide()
+            AF.ClearPoints(debuffType)
+            AF.SetPoint(debuffType, "TOPLEFT", tip, 185, 0)
+        else
+            castByMe:Show()
+            dispellable:Show()
         end
 
         castByMe:SetChecked(t.cfg.auraTypeColor.castByMe)
@@ -3483,6 +3616,10 @@ builder["auraTypeColor"] = function(parent)
         end
 
         debuffType:SetEnabled(t.id == "debuffs")
+    end
+
+    function pane.IsApplicable(t)
+        return not AF.isRetail or t.id == "debuffs"
     end
 
     return pane
@@ -3550,6 +3687,31 @@ builder["auraSubFrame"] = function(parent)
 
     function pane.Load(t)
         pane.t = t
+        if AF.isRetail then
+            enabled:SetText(
+                AF.GetGradientText(
+                    L["Separate Auras Not from Player, Pet, or Vehicle"],
+                    "BFI",
+                    "white"
+                )
+            )
+            filter:Hide()
+            enabled:SetTooltip(
+                L["Separate Auras Not from Player, Pet, or Vehicle"],
+                L["For target units, this separates the complement of Blizzard's PLAYER category"]
+            )
+            AF.ClearPoints(desaturated)
+            AF.SetPoint(
+                desaturated,
+                "TOPLEFT",
+                enabled,
+                "BOTTOMLEFT",
+                0,
+                -7
+            )
+        else
+            filter:Show()
+        end
         UpdateWidgets()
         enabled:SetChecked(t.cfg.subFrame.enabled)
         filter:SetSelectedValue(t.cfg.subFrame.filter)
@@ -3623,6 +3785,18 @@ builder["auraArrangement"] = function(parent)
 
     function pane.Load(t)
         pane.t = t
+        if AF.isRetail
+            and type(UF.HasNativeAuraContainerBackend) == "function"
+            and UF.HasNativeAuraContainerBackend()
+        then
+            numTotal:SetLabel(L["Max Per Enabled Category"])
+            numTotal:SetTooltip(
+                L["Max Per Enabled Category"],
+                L["Retail 12.1 applies this limit to each enabled aura category; maximum combined capacity is the number of enabled categories multiplied by this value"]
+            )
+        else
+            numTotal:SetLabel(L["Max Displayed"])
+        end
         arrangement:SetSelectedValue(t.cfg.orientation)
         width:SetValue(t.cfg.width)
         height:SetValue(t.cfg.height)
@@ -3663,7 +3837,14 @@ builder["cooldownStyle"] = function(parent)
         LoadIndicatorConfig(pane.t)
     end)
 
-    styleDropdown:SetTooltip(L["Cooldown Style"], L["Block type: Recommended for whitelist mode only, and set aura colors in %s"]:format(AF.WrapTextInColor(L["Auras"], "BFI")))
+    if AF.isRetail then
+        styleDropdown:SetTooltip(
+            L["Cooldown Style"],
+            L["Retail cooldown styles change presentation only; Blizzard's opaque aura duration continues to drive the swipe"]
+        )
+    else
+        styleDropdown:SetTooltip(L["Cooldown Style"], L["Block type: Recommended for whitelist mode only, and set aura colors in %s"]:format(AF.WrapTextInColor(L["Auras"], "BFI")))
+    end
 
     function pane.Load(t)
         pane.t = t

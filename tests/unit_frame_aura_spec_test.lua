@@ -109,6 +109,11 @@ local function makeHarness(withNativeSchema)
     })
 
     local BFI = {
+        L = setmetatable({}, {
+            __index = function(_, key)
+                return key
+            end,
+        }),
         funcs = {
             isValueNonSecret = forbidden("F.isValueNonSecret"),
         },
@@ -132,6 +137,9 @@ local function makeHarness(withNativeSchema)
         tostring = tostring,
         type = type,
         AbstractFramework = AF,
+        GetCVar = function()
+            return "0"
+        end,
         CreateFrame = forbidden("CreateFrame"),
         InCombatLockdown = forbidden("InCombatLockdown"),
         C_Timer = forbiddenTable("C_Timer"),
@@ -172,6 +180,7 @@ local function makeHarness(withNativeSchema)
     })
 
     for _, path in ipairs({
+        "Utils.lua",
         "Modules/UnitFrames/AuraPolicy.lua",
         "Modules/UnitFrames/AuraSpec.lua",
     }) do
@@ -1114,6 +1123,35 @@ local function testCapacityMetrics()
         true,
         "five-group sort degradation"
     )
+
+    local splitDefensive = baseConfig()
+    splitDefensive.filters = {
+        player = false,
+        raidInCombat = false,
+        raidPlayerDispellable = false,
+        bigDefensive = true,
+        externalDefensive = false,
+    }
+    local splitDescriptor =
+        compile("target", "HELPFUL", splitDefensive)
+    assertEqual(
+        #splitDescriptor.completeSpec.groups,
+        1,
+        "split defensive group count"
+    )
+    assertEqual(
+        splitDescriptor.completeSpec.groups[1].filterString,
+        "HELPFUL|BIG_DEFENSIVE",
+        "split defensive filter"
+    )
+    assertDeepEqual(splitDescriptor.metrics, {
+        groupCount = 1,
+        legacyMaxFrameCount = 4,
+        nativeVisibleCapacity = 4,
+        nativeBatchSize = 10,
+        initialRestrictedButtonCount = 10,
+        freshContainerRestrictedButtonCountCeiling = 10,
+    }, "split defensive metrics")
 
     local spellFilter = baseConfig()
     spellFilter.blacklist = {12345}
