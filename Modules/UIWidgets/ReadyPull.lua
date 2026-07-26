@@ -5,7 +5,6 @@ local L = BFI.L
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local ceil = math.ceil
 local DoReadyCheck = DoReadyCheck
 local InitiateRolePoll = InitiateRolePoll
 local DoCountdown = C_PartyInfo.DoCountdown

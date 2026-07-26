@@ -137,7 +137,6 @@ end
 ---------------------------------------------------------------------
 -- update
 ---------------------------------------------------------------------
-local init
 local function UpdateHonorBar(_, module, which)
     if module and module ~= "dataBars" then return end
     if which and which ~= "honorBar" then return end

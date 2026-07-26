@@ -10,7 +10,6 @@ local IsXPUserDisabled = IsXPUserDisabled
 local UnitXP = UnitXP
 local UnitXPMax = UnitXPMax
 local UnitLevel = UnitLevel
-local GetMaxLevelForLatestExpansion = GetMaxLevelForLatestExpansion
 local GetNumQuestLogEntries = C_QuestLog.GetNumQuestLogEntries
 local GetQuestIDForLogIndex = C_QuestLog.GetQuestIDForLogIndex
 local GetQuestLogRewardXP = GetQuestLogRewardXP
@@ -169,7 +168,6 @@ function UpdateXP(self)
     self:SetMinMaxValues(0, self.maxXP)
     self:SetBarValue(self.currentXP)
 
-    local width = self:GetBarWidth()
     self.restedXP = GetXPExhaustion() or 0
 
     UpdateBarAndText(self)

@@ -96,7 +96,6 @@ end
 ---------------------------------------------------------------------
 -- update
 ---------------------------------------------------------------------
-local init
 local function UpdateQuickJoinToast(_, module, which)
     if module and module ~= "uiWidgets" then return end
     if which and which ~= "quickJoinToast" then return end

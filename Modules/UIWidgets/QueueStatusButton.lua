@@ -8,7 +8,6 @@ local AF = _G.AbstractFramework
 
 local queueStatusHolder
 local QueueStatusButton = _G.QueueStatusButton
-local QueueStatusButtonIcon = _G.QueueStatusButtonIcon
 
 ---------------------------------------------------------------------
 -- create
@@ -53,7 +52,6 @@ end
 ---------------------------------------------------------------------
 -- update
 ---------------------------------------------------------------------
-local init
 local function UpdateQueueStatus(_, module, which)
     if module and module ~= "uiWidgets" then return end
     if which and which ~= "queueStatus" then return end

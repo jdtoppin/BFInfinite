@@ -348,11 +348,11 @@ local function GetOverlay(id, isInspect, flyout)
         if flyoutSettings.useItemLocation then -- type(flyout.location) == "table"
             -- flyout:GetItemLocation()
             if flyout.location:IsBagAndSlot() then
-                local bag, slot = flyout.location:GetBagAndSlot()
-                overlay.itemLink = GetContainerItemLink(bag, slot)
+                local bag, bagSlot = flyout.location:GetBagAndSlot()
+                overlay.itemLink = GetContainerItemLink(bag, bagSlot)
             elseif flyout.location:IsEquipmentSlot() then
-                local slot = flyout.location:GetEquipmentSlot()
-                overlay.itemLink = GetInventoryItemLink("player", slot)
+                local equipmentSlot = flyout.location:GetEquipmentSlot()
+                overlay.itemLink = GetInventoryItemLink("player", equipmentSlot)
             end
         else -- type(flyout.location) == "number"
             if flyout.location >= EQUIPMENTFLYOUT_FIRST_SPECIAL_LOCATION then
@@ -377,13 +377,13 @@ end
 ---------------------------------------------------------------------
 -- player
 ---------------------------------------------------------------------
-local function UpdatePlayer(_, _, slot)
+local function UpdatePlayer(_, _, requestedSlot)
     local itemLevelEnabled = E.config.equipmentInfo.itemLevel.enabled
     local missingEnhanceEnabled = E.config.equipmentInfo.missingEnhance.enabled
 
     local overlay
-    if slot then
-        overlay = GetOverlay(slot)
+    if requestedSlot then
+        overlay = GetOverlay(requestedSlot)
         if itemLevelEnabled then overlay:UpdateItemLevel() end
         if missingEnhanceEnabled then overlay:UpdateMissingEnhance() end
     else
@@ -427,11 +427,11 @@ end
 ---------------------------------------------------------------------
 -- durability
 ---------------------------------------------------------------------
-local function UpdateDurability(_, _, slot)
+local function UpdateDurability(_, _, requestedSlot)
     if not E.config.equipmentInfo.durability.enabled then return end
 
-    if slot then
-        GetOverlay(slot):UpdateDurability()
+    if requestedSlot then
+        GetOverlay(requestedSlot):UpdateDurability()
     else
         for slot in next, SLOTS do
             GetOverlay(slot):UpdateDurability()

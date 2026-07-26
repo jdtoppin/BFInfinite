@@ -105,8 +105,8 @@ local function UpdateRep(self)
     local factionID = data.factionID
     -- AF.Debug(name, reaction, factionID, "currentStanding:", currentStanding, "current:", currentReactionThreshold, "next:", nextReactionThreshold)
 
-    local standingLabel, hasRewardPending
-    -- TODO: hasRewardPending
+    local standingLabel
+    -- TODO: use the paragon reward-pending result for a future reward indicator.
 
     --! friendship
     local info = factionID and GetFriendshipReputation(factionID)
@@ -121,18 +121,17 @@ local function UpdateRep(self)
     --! renown
     if factionID and IsMajorFaction(factionID) then
         reaction = 10
-        local data = GetMajorFactionData(factionID)
-        standingLabel = _G.RENOWN_LEVEL_LABEL:format(data.renownLevel)
+        local majorFactionData = GetMajorFactionData(factionID)
+        standingLabel = _G.RENOWN_LEVEL_LABEL:format(majorFactionData.renownLevel)
         currentReactionThreshold = 0
-        nextReactionThreshold = data.renownLevelThreshold
-        currentStanding = HasMaximumRenown(factionID) and data.renownLevelThreshold or data.renownReputationEarned or 0
+        nextReactionThreshold = majorFactionData.renownLevelThreshold
+        currentStanding = HasMaximumRenown(factionID) and majorFactionData.renownLevelThreshold or majorFactionData.renownReputationEarned or 0
         -- AF.Debug("[renown]", "currentStanding:", currentStanding, "standingLabel:", standingLabel, "current:", currentReactionThreshold, "next:", nextReactionThreshold)
     end
 
     --! paragon
     if factionID and IsFactionParagon(factionID) then
-        local current, threshold
-        current, threshold, _, hasRewardPending = GetFactionParagonInfo(factionID)
+        local current, threshold = GetFactionParagonInfo(factionID)
 
         if current and threshold then
             standingLabel = L["Paragon"]
@@ -231,7 +230,6 @@ end
 ---------------------------------------------------------------------
 -- update
 ---------------------------------------------------------------------
-local init
 local function UpdateReputationBar(_, module, which)
     if module and module ~= "dataBars" then return end
     if which and which ~= "reputationBar" then return end
