@@ -877,8 +877,36 @@ end
 
 local function GetViewerPosition(config, definition)
     local position = config.position
-    if type(position) ~= "table" or not next(position) then
+    local point
+    local x
+    local y
+    local usesRelativePoint
+    if type(position) == "table" then
+        point = position[1]
+        usesRelativePoint = IsSafeString(position[2])
+        if usesRelativePoint then
+            x = position[3]
+            y = position[4]
+        else
+            x = position[2]
+            y = position[3]
+        end
+    end
+
+    if not IsSafeString(point)
+        or not anchorPoints[point]
+        or not IsSafeNumber(x)
+        or not IsSafeNumber(y)
+    then
         position = AF.Copy(definition.defaultPosition)
+        config.position = position
+    elseif usesRelativePoint
+        or not IsValueNonSecret(position[4])
+        or position[4] ~= nil
+    then
+        -- AF movers persist {point, x, y}. Collapse any legacy four-field
+        -- anchor before handing the same table back to the mover save path.
+        position = {point, x, y}
         config.position = position
     end
 
@@ -889,16 +917,53 @@ local function GetViewerPosition(config, definition)
     return position
 end
 
+local function HolderPositionMatches(holder, position)
+    local numPoints = FrameGetNumPoints(holder)
+    if not IsSafeNumber(numPoints) or numPoints ~= 1 then
+        return false
+    end
+
+    local point, relativeTo, relativePoint, x, y =
+        FrameGetPoint(holder, 1)
+    return IsSafeString(point)
+        and IsValueNonSecret(relativeTo)
+        and relativeTo == AF.UIParent
+        and IsSafeString(relativePoint)
+        and IsSafeNumber(x)
+        and IsSafeNumber(y)
+        and point == position[1]
+        and relativePoint == position[1]
+        and NearlyEqual(x, position[2])
+        and NearlyEqual(y, position[3])
+end
+
 local function BindHolderPosition(state, config)
     local holder = EnsureHolder(state)
     local position = GetViewerPosition(config, state.definition)
-    if state.position ~= position then
-        state.position = position
+    local isDragging = holder.mover and holder.mover.isDragging
+    local positioned = isDragging
+        or HolderPositionMatches(holder, position)
+    if not isDragging
+        and (state.position ~= position or not positioned)
+    then
         AF.UpdateMoverSave(holder, position)
-        AF.LoadPosition(holder, position, AF.UIParent)
+        -- Current AbstractFramework always reads table positions as
+        -- {point, relativePoint, x, y}, while its mover persists
+        -- {point, x, y}. Expand only the transient loader value.
+        AF.LoadPosition(
+            holder,
+            {position[1], position[1], position[2], position[3]},
+            AF.UIParent
+        )
+        positioned = HolderPositionMatches(holder, position)
+        state.position = positioned and position or nil
     end
 
-    holder.enabled = true
+    holder.enabled = positioned
+    if not positioned then
+        holder:Hide()
+        return nil
+    end
     holder:Show()
     return holder
 end
@@ -2375,7 +2440,9 @@ local function RestoreMissingItems(state, activeSet)
 end
 
 local function ReconcileViewer(state, config)
-    BindHolderPosition(state, config)
+    if not BindHolderPosition(state, config) then
+        return false
+    end
     local allItems, visibleItems = GetOrderedItems(state)
     local activeSet = {}
     for _, entry in ipairs(allItems) do

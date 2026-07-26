@@ -179,6 +179,28 @@ local function RepairAnchorPosition(position, fallback)
     return position
 end
 
+local function RepairMoverPosition(position, fallback)
+    if type(position) ~= "table" then
+        return AF.Copy(fallback)
+    end
+
+    local point = position[1]
+    local usesRelativePoint = type(position[2]) == "string"
+    local x = usesRelativePoint and position[3] or position[2]
+    local y = usesRelativePoint and position[4] or position[3]
+    if type(point) ~= "string"
+        or not anchorPoints[point]
+        or type(x) ~= "number"
+        or type(y) ~= "number"
+    then
+        return AF.Copy(fallback)
+    end
+    if usesRelativePoint or position[4] ~= nil then
+        return {point, x, y}
+    end
+    return position
+end
+
 local function RepairTextStyle(style, fallback)
     if type(style) ~= "table" then
         return AF.Copy(fallback)
@@ -227,6 +249,11 @@ AF.RegisterCallback("BFI_UpdateProfile", function(_, profile)
                 end
                 if styleKeys[configKey] then
                     viewerConfig[configKey] = RepairTextStyle(
+                        viewerConfig[configKey],
+                        defaultValue
+                    )
+                elseif configKey == "position" then
+                    viewerConfig[configKey] = RepairMoverPosition(
                         viewerConfig[configKey],
                         defaultValue
                     )
