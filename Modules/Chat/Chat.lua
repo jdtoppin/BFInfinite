@@ -814,7 +814,7 @@ local function UpdateChat(_, module)
     AF.SetFont(chatCopyFrame.scroll.eb, C.config.font)
 
     AF.UpdateMoverSave(chatContainer, config.position)
-    AF.LoadPosition(chatContainer, config.position)
+    BFI.funcs.LoadPosition(chatContainer, config.position)
     AF.SetSize(chatContainer, config.width, config.height)
     chatContainer:SetBackdropColor(AF.UnpackColor(config.bgColor))
     chatContainer:SetBackdropBorderColor(AF.UnpackColor(config.borderColor))

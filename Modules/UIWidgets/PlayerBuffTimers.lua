@@ -53,7 +53,7 @@ local function UpdateConfig(_, module, which)
 
     buffTimerHolder:SetScale(config.scale)
     AF.ClearPoints(buffTimerHolder)
-    AF.LoadPosition(buffTimerHolder, config.position)
+    BFI.funcs.LoadPosition(buffTimerHolder, config.position)
     AF.UpdateMoverSave(buffTimerHolder, config.position)
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateConfig)

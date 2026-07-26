@@ -144,7 +144,7 @@ local function UpdateAltPowerBar(_, module, which)
     end
 
     AF.ClearPoints(altPowerBarHolder)
-    AF.LoadPosition(altPowerBarHolder, config.position)
+    BFI.funcs.LoadPosition(altPowerBarHolder, config.position)
     AF.SetSize(altPowerBarHolder, config.width, config.height)
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateAltPowerBar)

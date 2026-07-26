@@ -581,6 +581,6 @@ local function UpdateObjectiveTracker(_, module, which)
     AF.UpdateMoverSave(trackerContainer, config.position)
 
     -- position
-    AF.LoadPosition(trackerContainer, config.position)
+    BFI.funcs.LoadPosition(trackerContainer, config.position)
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateObjectiveTracker)

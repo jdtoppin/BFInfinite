@@ -254,7 +254,7 @@ local function UpdateReputationBar(_, module, which)
     reputationBar:RegisterEvent("UPDATE_FACTION", UpdateRep)
 
     AF.UpdateMoverSave(reputationBar, config.position)
-    AF.LoadPosition(reputationBar, config.position)
+    BFI.funcs.LoadPosition(reputationBar, config.position)
     AF.SetSize(reputationBar, config.width, config.height)
 
     reputationBar:SetBorderColor(AF.UnpackColor(config.borderColor))

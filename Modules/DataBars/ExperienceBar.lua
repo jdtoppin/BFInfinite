@@ -281,7 +281,7 @@ local function UpdateExperienceBar(_, module, which)
     -- mover
     AF.UpdateMoverSave(experienceBar, config.position)
 
-    AF.LoadPosition(experienceBar, config.position)
+    BFI.funcs.LoadPosition(experienceBar, config.position)
     AF.SetSize(experienceBar, config.width, config.height)
 
     experienceBar:SetBorderColor(AF.UnpackColor(config.borderColor))

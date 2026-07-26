@@ -120,7 +120,7 @@ local function UpdateQuickJoinToast(_, module, which)
     quickJoinToastHolder.enabled = true
 
     AF.UpdateMoverSave(quickJoinToastHolder, config.position)
-    AF.LoadPosition(quickJoinToastHolder, config.position)
+    BFI.funcs.LoadPosition(quickJoinToastHolder, config.position)
 
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateQuickJoinToast)

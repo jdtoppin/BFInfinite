@@ -222,6 +222,7 @@ local function CreateOptionsFrame()
     AF.ApplyCombatProtectionToWidget(editModeButton)
     editModeButton:SetOnClick(function()
         optionsFrame:Hide()
+        F.PrepareEditModePositions()
         AF.ShowMovers()
     end)
 

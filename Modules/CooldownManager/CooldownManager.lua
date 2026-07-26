@@ -867,6 +867,8 @@ local function EnsureHolder(state)
     holder.enabled = false
     holder:Hide()
 
+    local position = state.definition.defaultPosition
+    BFI.funcs.LoadPosition(holder, position, AF.UIParent)
     state.holder = holder
     state.previewFrames = {}
     AF.CreateMover(holder, "BFI: " .. L["Cooldown Manager"], state.definition.moverName)
@@ -917,7 +919,7 @@ local function GetViewerPosition(config, definition)
     return position
 end
 
-local function HolderPositionMatches(holder, position)
+local function HolderPositionMatches(holder, position, ignoreOffsets)
     local numPoints = FrameGetNumPoints(holder)
     if not IsSafeNumber(numPoints) or numPoints ~= 1 then
         return false
@@ -933,28 +935,21 @@ local function HolderPositionMatches(holder, position)
         and IsSafeNumber(y)
         and point == position[1]
         and relativePoint == position[1]
-        and NearlyEqual(x, position[2])
-        and NearlyEqual(y, position[3])
+        and (ignoreOffsets
+            or (NearlyEqual(x, position[2])
+                and NearlyEqual(y, position[3])))
 end
 
 local function BindHolderPosition(state, config)
     local holder = EnsureHolder(state)
     local position = GetViewerPosition(config, state.definition)
     local isDragging = holder.mover and holder.mover.isDragging
-    local positioned = isDragging
-        or HolderPositionMatches(holder, position)
+    local positioned = HolderPositionMatches(holder, position, isDragging)
     if not isDragging
         and (state.position ~= position or not positioned)
     then
         AF.UpdateMoverSave(holder, position)
-        -- Current AbstractFramework always reads table positions as
-        -- {point, relativePoint, x, y}, while its mover persists
-        -- {point, x, y}. Expand only the transient loader value.
-        AF.LoadPosition(
-            holder,
-            {position[1], position[1], position[2], position[3]},
-            AF.UIParent
-        )
+        BFI.funcs.LoadPosition(holder, position, AF.UIParent)
         positioned = HolderPositionMatches(holder, position)
         state.position = positioned and position or nil
     end

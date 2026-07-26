@@ -118,7 +118,7 @@ local function UpdateParty(_, module, which, skipIndicatorUpdates)
     AF.UpdateMoverSave(party, config.general.position)
 
     -- position
-    AF.LoadPosition(party, config.general.position)
+    BFI.funcs.LoadPosition(party, config.general.position)
 
     -- container size
     if config.general.orientation == "top_to_bottom" or config.general.orientation == "bottom_to_top" then

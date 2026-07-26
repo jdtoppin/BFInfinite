@@ -121,7 +121,7 @@ local function UpdateRaid(_, module, which, skipIndicatorUpdates)
     AF.UpdateMoverSave(raid, config.general.position)
 
     -- position
-    AF.LoadPosition(raid, config.general.position)
+    BFI.funcs.LoadPosition(raid, config.general.position)
 
     -- container size
     if strfind(config.general.orientation, "^[top|bottom]") then

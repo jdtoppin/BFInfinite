@@ -256,7 +256,7 @@ local function UpdateReadyPull(_, module, which)
     readyPullFrame:RegisterEvent("READY_CHECK_FINISHED", ReadyCheckFinish)
 
     AF.UpdateMoverSave(readyPullFrame, config.position)
-    AF.LoadPosition(readyPullFrame, config.position)
+    BFI.funcs.LoadPosition(readyPullFrame, config.position)
 
     CheckPermission()
     AF.RegisterCallback("AF_GROUP_PERMISSION_CHANGED", CheckPermission)

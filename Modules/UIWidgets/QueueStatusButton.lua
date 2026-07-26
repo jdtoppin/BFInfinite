@@ -65,7 +65,7 @@ local function UpdateQueueStatus(_, module, which)
     end
 
     AF.UpdateMoverSave(queueStatusHolder, config.position)
-    AF.LoadPosition(queueStatusHolder, config.position)
+    BFI.funcs.LoadPosition(queueStatusHolder, config.position)
 
     queueStatusHolder.scale = config.scale
     QueueStatusButton:SetScale(0.001)

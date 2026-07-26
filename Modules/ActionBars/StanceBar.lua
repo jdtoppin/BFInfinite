@@ -190,7 +190,7 @@ local function UpdateStanceBar(_, module, which)
 
     -- load config
     AB.ReArrange(stanceBar, config.width, config.height, config.spacingX, config.spacingY, config.buttonsPerLine, config.num, config.orientation)
-    AF.LoadPosition(stanceBar, config.position)
+    BFI.funcs.LoadPosition(stanceBar, config.position)
 
     stanceBar:SetFrameStrata(AB.config.general.frameStrata)
     stanceBar:SetFrameLevel(AB.config.general.frameLevel)

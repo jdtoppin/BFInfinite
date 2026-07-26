@@ -278,6 +278,6 @@ local function UpdateMicroMenu(_, module, which)
     AF.UpdateMoverSave(microMenu, config.position)
 
     -- position
-    AF.LoadPosition(microMenu, config.position)
+    BFI.funcs.LoadPosition(microMenu, config.position)
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateMicroMenu)

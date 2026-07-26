@@ -235,7 +235,7 @@ local function Overlay_LoadConfig(overlay)
     local config = E.config.equipmentInfo.itemLevel
     if config.enabled then
         overlay.itemLevel:Show()
-        AF.LoadPosition(overlay.itemLevel, config.position)
+        BFI.funcs.LoadPosition(overlay.itemLevel, config.position)
         AF.SetFont(overlay.itemLevel, config.font)
         overlay:UpdateItemLevel()
     else
@@ -276,7 +276,7 @@ local function Overlay_LoadConfig(overlay)
     config = E.config.equipmentInfo.missingEnhance
     if overlay.missingEnhance and config.enabled then
         overlay.missingEnhance:Show()
-        AF.LoadPosition(overlay.missingEnhance, config.position)
+        BFI.funcs.LoadPosition(overlay.missingEnhance, config.position)
         -- AF.SetSize(overlay.missingEnhance, config.size, config.size)
         AF.SetSize(overlay.missingEnchant, config.size, config.size)
         AF.SetSize(overlay.missingGem, config.size, config.size)
