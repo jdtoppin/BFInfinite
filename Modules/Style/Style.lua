@@ -1046,13 +1046,48 @@ function S.MakeMovable(frame, dragHandle)
     RestoreFramePosition(frame)
 end
 
+local function GetTitledFrameCloseButton(frame)
+    local name = frame.GetName and frame:GetName()
+    return frame.CloseButton or frame.ClosePanelButton or (name and _G[name .. "CloseButton"])
+end
+
+local function GetMaximizeMinimizeFrame(frame)
+    return frame.MaximizeMinimizeButton or frame.MaximizeMinimizeFrame or frame.MaximizeMinimize
+end
+
+local function GetTitleBarInfoAnchor(frame)
+    local maximizeMinimizeFrame = GetMaximizeMinimizeFrame(frame)
+    if maximizeMinimizeFrame then
+        return maximizeMinimizeFrame
+    end
+    return GetTitledFrameCloseButton(frame)
+end
+
+function S.StyleTitleBarInfoButton(frame, button)
+    assert(frame, "StyleTitleBarInfoButton: frame is nil")
+    assert(button, "StyleTitleBarInfoButton: button is nil")
+    assert(frame.BFIHeader, "StyleTitleBarInfoButton: frame has no BFI header")
+
+    if not button._BFITitleBarInfoStyled then
+        button._BFITitleBarInfoStyled = true
+        S.StyleIconButton(button, AF.GetIcon("Info_Square"), 12, "gray", "gray_hover")
+        AF.SetSize(button, 20, 20)
+        button:SetHitRectInsets(0, 0, 0, 0)
+    end
+
+    -- Title controls read left-to-right as info, minimize/maximize, close.
+    local anchor = GetTitleBarInfoAnchor(frame)
+    assert(anchor, "StyleTitleBarInfoButton: frame has no close or minimize button")
+    AF.ClearPoints(button)
+    AF.SetPoint(button, "TOPRIGHT", anchor, "TOPLEFT", 1, 0)
+    AF.SetFrameLevel(button, 1, frame.BFIHeader)
+end
+
 function S.StyleTitledFrame(frame, movableTarget)
     assert(frame, "StyleTitledFrame: frame is nil")
 
     if frame._BFIStyled then return end
     frame._BFIStyled = true
-
-    local name = frame.GetName and frame:GetName()
 
     -- remove blizzard ----------------------------------------------
     S.RemoveNineSliceAndBackground(frame)
@@ -1106,26 +1141,25 @@ function S.StyleTitledFrame(frame, movableTarget)
     end
 
     -- close button
-    local closeButton = frame.CloseButton or frame.ClosePanelButton or (name and _G[name .. "CloseButton"])
+    local closeButton = GetTitledFrameCloseButton(frame)
     S.StyleCloseButton(closeButton)
     closeButton:ClearAllPoints()
     closeButton:SetPoint("TOPRIGHT")
     AF.SetFrameLevel(closeButton, 1, frame.BFIHeader)
 
     -- minimize/maximize button
-    local maximizeMinimizeFrame = frame.MaximizeMinimizeButton or frame.MaximizeMinimizeFrame
+    local maximizeMinimizeFrame = GetMaximizeMinimizeFrame(frame)
     if maximizeMinimizeFrame then
         local maximizeButton = maximizeMinimizeFrame.MaximizeButton
         S.StyleMaximizeButton(maximizeButton)
-        AF.SetFrameLevel(maximizeButton, 1, frame.BFIHeader)
-        maximizeButton:ClearAllPoints()
-        AF.SetPoint(maximizeButton, "TOPRIGHT", closeButton, "TOPLEFT", 1, 0)
 
         local minimizeButton = maximizeMinimizeFrame.MinimizeButton
         S.StyleMinimizeButton(minimizeButton)
-        AF.SetFrameLevel(minimizeButton, 1, frame.BFIHeader)
-        minimizeButton:ClearAllPoints()
-        AF.SetPoint(minimizeButton, "TOPRIGHT", closeButton, "TOPLEFT", 1, 0)
+
+        AF.ClearPoints(maximizeMinimizeFrame)
+        AF.SetPoint(maximizeMinimizeFrame, "TOPRIGHT", closeButton, "TOPLEFT", 1, 0)
+        AF.SetSize(maximizeMinimizeFrame, 27, 20)
+        AF.SetFrameLevel(maximizeMinimizeFrame, 1, frame.BFIHeader)
     end
 
     -- BFI owns the drag handle and preserves Blizzard's panel-management

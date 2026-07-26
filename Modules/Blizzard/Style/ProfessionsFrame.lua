@@ -537,12 +537,7 @@ local function StyleProfessionHelpButton(page)
 
     button:SetScript("OnEnter", nil)
     button:SetScript("OnLeave", nil)
-    S.StyleIconButton(button, AF.GetIcon("Info_Square"), 12, "gray", "gray_hover")
-    AF.SetSize(button, 20, 20)
-    button:SetHitRectInsets(0, 0, 0, 0)
-    AF.ClearPoints(button)
-    AF.SetPoint(button, "TOPLEFT", ProfessionsFrame.BFIHeader, "TOPLEFT")
-    AF.SetFrameLevel(button, 1, ProfessionsFrame.BFIHeader)
+    S.StyleTitleBarInfoButton(ProfessionsFrame, button)
     AF.SetTooltip(button, "BOTTOMLEFT", 0, -2, _G.MAIN_HELP_BUTTON_TOOLTIP)
     button:SetScript("OnClick", function()
         ToggleProfessionHelpTips(page)
@@ -746,28 +741,12 @@ local function StyleOrdersPage(page)
     StyleOrderView(page.OrderView)
 end
 
----------------------------------------------------------------------
--- shells
----------------------------------------------------------------------
-local function StyleMaximizeMinimize(frame)
-    local maximizeMinimize = frame.MaximizeMinimize
-    if not maximizeMinimize then return end
-
-    S.StyleMaximizeButton(maximizeMinimize.MaximizeButton)
-    S.StyleMinimizeButton(maximizeMinimize.MinimizeButton)
-    maximizeMinimize:ClearAllPoints()
-    maximizeMinimize:SetPoint("TOPRIGHT", frame.CloseButton, "TOPLEFT", 1, 0)
-    AF.SetSize(maximizeMinimize, 27, 20)
-    AF.SetFrameLevel(maximizeMinimize, 1, frame.BFIHeader)
-end
-
 local function StyleBlizzard()
     ProfessionsFrame = _G.ProfessionsFrame
     InspectRecipeFrame = _G.InspectRecipeFrame
     if not ProfessionsFrame or not InspectRecipeFrame then return end
 
     S.StyleTitledFrame(ProfessionsFrame)
-    StyleMaximizeMinimize(ProfessionsFrame)
     S.StyleTabSystem(ProfessionsFrame.TabSystem)
 
     StyleCraftingPage(ProfessionsFrame.CraftingPage)
