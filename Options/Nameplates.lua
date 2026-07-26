@@ -1409,7 +1409,7 @@ local function CreateNameplatesPanel()
 
     local castsNotice = AF.CreateFontString(
         castsPane,
-        L["Cast settings apply to every nameplate. Important, not-kickable, and player-targeted indicators use separate Blizzard secret-safe classifications; no custom spell or NPC lists are used."],
+        L["Cast settings apply to every nameplate. Important, not-kickable, and player-targeted indicators use Blizzard secret-safe classifications. Interrupt readiness tracks your primary known interrupt; no enemy spell or NPC lists are used."],
         "gray"
     )
     AF.SetPoint(castsNotice, "TOPLEFT", castsPane, 15, -30)
@@ -1427,6 +1427,11 @@ local function CreateNameplatesPanel()
         "casts",
         L["Color by Interruptibility"],
         80
+    )
+    local interruptReadyTickPane = CreateSectionPane(
+        "casts",
+        L["Interrupt Ready Tick"],
+        105
     )
     local castHighlightsPane = CreateSectionPane(
         "casts",
@@ -1486,7 +1491,7 @@ local function CreateNameplatesPanel()
 
     local normalCastColor = AF.CreateColorPicker(
         castBasePane,
-        L["Normal"]
+        L["Kick Cooling Down / No Kick"]
     )
     AF.SetPoint(
         normalCastColor,
@@ -1498,7 +1503,7 @@ local function CreateNameplatesPanel()
 
     local interruptibleCastColor = AF.CreateColorPicker(
         castBasePane,
-        L["Interruptible"]
+        L["Kick Ready"]
     )
     AF.SetPoint(
         interruptibleCastColor,
@@ -1607,6 +1612,86 @@ local function CreateNameplatesPanel()
         )
         UpdateCastWidgets()
     end)
+
+    local interruptReadiness = AF.CreateCheckButton(
+        castInterruptibilityPane,
+        L["Use My Interrupt Cooldown"]
+    )
+    AF.SetPoint(
+        interruptReadiness,
+        "TOPLEFT",
+        castInterruptibilityPane,
+        200,
+        -45
+    )
+    interruptReadiness:SetOnCheck(function(checked)
+        SetSharedCastSectionValue(
+            "interruptibleCheck",
+            "requireUsable",
+            checked
+        )
+        UpdateCastWidgets()
+    end)
+
+    local interruptReadyTickHelp = AF.CreateFontString(
+        interruptReadyTickPane,
+        L["Shows where your primary interrupt becomes ready. The tick is clipped when that happens after the cast ends."],
+        "gray"
+    )
+    AF.SetPoint(
+        interruptReadyTickHelp,
+        "TOPLEFT",
+        interruptReadyTickPane,
+        15,
+        -30
+    )
+    AF.SetPoint(
+        interruptReadyTickHelp,
+        "TOPRIGHT",
+        interruptReadyTickPane,
+        -15,
+        -30
+    )
+    interruptReadyTickHelp:SetJustifyH("LEFT")
+    interruptReadyTickHelp:SetWordWrap(true)
+
+    local interruptReadyTick = AF.CreateCheckButton(
+        interruptReadyTickPane,
+        L["Enable"]
+    )
+    AF.SetPoint(
+        interruptReadyTick,
+        "TOPLEFT",
+        interruptReadyTickPane,
+        15,
+        -75
+    )
+    interruptReadyTick:SetOnCheck(function(checked)
+        SetSharedCastSectionValue(
+            "interruptReadyTick",
+            "enabled",
+            checked
+        )
+        UpdateCastWidgets()
+    end)
+
+    local interruptReadyTickColor = AF.CreateColorPicker(
+        interruptReadyTickPane,
+        L["Tick Color"]
+    )
+    AF.SetPoint(
+        interruptReadyTickColor,
+        "TOPLEFT",
+        interruptReadyTickPane,
+        200,
+        -75
+    )
+    WireCastColorPicker(
+        interruptReadyTickColor,
+        "color",
+        "interruptReadyTick",
+        true
+    )
 
     local importantGlow = AF.CreateCheckButton(
         castHighlightsPane,
@@ -1999,6 +2084,19 @@ local function CreateNameplatesPanel()
         end
 
         interruptibility:SetChecked(checkConfig.enabled)
+        interruptReadiness:SetChecked(
+            checkConfig.requireUsable
+        )
+        interruptReadyTick:SetChecked(
+            castConfig.interruptReadyTick.enabled
+        )
+        if not AF.IsColorPickerOpen(
+            interruptReadyTickColor
+        ) then
+            interruptReadyTickColor:SetColor(
+                castConfig.interruptReadyTick.color
+            )
+        end
         UpdateCastStateIconWidgets(
             uninterruptibleIconWidgets,
             castConfig.uninterruptibleIcon
@@ -2038,7 +2136,12 @@ local function CreateNameplatesPanel()
         AF.SetEnabled(
             checkConfig.enabled,
             interruptibleCastColor,
-            uninterruptibleCastColor
+            uninterruptibleCastColor,
+            interruptReadiness
+        )
+        AF.SetEnabled(
+            castConfig.interruptReadyTick.enabled,
+            interruptReadyTickColor
         )
         AF.SetEnabled(
             castConfig.importantGlow.enabled,

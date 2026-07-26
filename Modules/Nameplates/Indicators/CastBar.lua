@@ -5,6 +5,9 @@ local AF = _G.AbstractFramework
 ---@class Nameplates
 local NP = BFI.modules.Nameplates
 
+local StandardFill = Enum.StatusBarFillStyle.Standard
+local ReverseFill = Enum.StatusBarFillStyle.Reverse
+
 local function SetBorderColor(self, r, g, b, a)
     self:SetBackdropBorderColor(r, g, b, a)
     self.iconBG:SetVertexColor(r, g, b, a)
@@ -167,6 +170,10 @@ local function CastBar_SetupInterruptibility(self, config)
 
     self.borderColor = config.borderColor or AF.GetColorTable("border")
     self.interruptibleCheckEnabled = interruptibleCheck.enabled ~= false
+    self:SetInterruptReadinessColoring(
+        self.interruptibleCheckEnabled
+            and interruptibleCheck.requireUsable == true
+    )
 
     if self.interruptibleCheckEnabled then
         self:SetInterruptibilityColors(
@@ -183,6 +190,28 @@ local function CastBar_SetupInterruptibility(self, config)
     end
 
     SetDefaultBorderColor(self)
+end
+
+local function CastBar_SetupInterruptReadyTick(self, config)
+    config = config or {}
+
+    local enabled = config.enabled == true
+    local color = config.color or {0, 1, 0, 1}
+
+    self.interruptReadyCastTick:SetColorTexture(
+        AF.UnpackColor(color)
+    )
+    self.interruptReadyChannelTick:SetColorTexture(
+        AF.UnpackColor(color)
+    )
+    if enabled then
+        self:SetInterruptReadyMarkers(
+            self.interruptReadyCastBar,
+            self.interruptReadyChannelBar
+        )
+    else
+        self:SetInterruptReadyMarkers(nil, nil)
+    end
 end
 
 local function CastBar_SetupUninterruptibleIcon(self, config)
@@ -272,13 +301,14 @@ local function CastBar_LoadConfig(self, config)
     self.config = config
 
     AF.SetFrameLevel(self, config.frameLevel, self.root)
-    AF.SetFrameLevel(self.importantCastCarrier, 3, self)
+    AF.SetFrameLevel(self.interruptReadyClip, 3, self)
+    AF.SetFrameLevel(self.importantCastCarrier, 4, self)
     AF.SetFrameLevel(
         self.importantGlow,
         0,
         self.importantCastCarrier
     )
-    AF.SetFrameLevel(self.uninterruptibleCastCarrier, 4, self)
+    AF.SetFrameLevel(self.uninterruptibleCastCarrier, 5, self)
     NP.LoadIndicatorPosition(self, config.position, config.anchorTo)
     AF.SetSize(self, config.width, config.height)
 
@@ -298,6 +328,10 @@ local function CastBar_LoadConfig(self, config)
     CastBar_SetupUninterruptibleIcon(
         self,
         config.uninterruptibleIcon
+    )
+    CastBar_SetupInterruptReadyTick(
+        self,
+        config.interruptReadyTick
     )
     CastBar_UpdateImportantCastRegion(self)
     CastBar_SetupPlayerTargetHighlight(
@@ -363,6 +397,7 @@ function NP.CreateCastBar(parent, name)
     frame.bar = bar
     AF.SetOnePixelInside(bar, frame)
     AF.SetFrameLevel(bar, 1, frame)
+    bar:SetStatusBarTexture(AF.GetPlainTexture())
 
     local spark = bar:CreateTexture(nil, "ARTWORK", nil, 3)
     frame.spark = spark
@@ -391,6 +426,129 @@ function NP.CreateCastBar(parent, name)
     local spellTargetTextRegion =
         overlay:CreateFontString(nil, "OVERLAY", "AF_FONT_NORMAL")
     frame.spellTargetTextRegion = spellTargetTextRegion
+
+    local interruptReadyClip =
+        CreateFrame("Frame", nil, frame)
+    frame.interruptReadyClip = interruptReadyClip
+    interruptReadyClip:SetAllPoints(bar)
+    interruptReadyClip:SetClipsChildren(true)
+    interruptReadyClip:EnableMouse(false)
+    AF.SetFrameLevel(interruptReadyClip, 3, frame)
+
+    local interruptReadyMask = frame:CreateMaskTexture()
+    frame.interruptReadyMask = interruptReadyMask
+    interruptReadyMask:SetAllPoints(bar)
+    interruptReadyMask:SetTexture(
+        AF.GetPlainTexture(),
+        "CLAMPTOBLACKADDITIVE",
+        "CLAMPTOBLACKADDITIVE"
+    )
+
+    local interruptReadyCastBar =
+        CreateFrame("StatusBar", nil, interruptReadyClip)
+    frame.interruptReadyCastBar = interruptReadyCastBar
+    interruptReadyCastBar:SetPoint(
+        "TOP",
+        interruptReadyClip,
+        "TOP"
+    )
+    interruptReadyCastBar:SetPoint(
+        "BOTTOM",
+        interruptReadyClip,
+        "BOTTOM"
+    )
+    interruptReadyCastBar:SetPoint(
+        "LEFT",
+        bar:GetStatusBarTexture(),
+        "RIGHT"
+    )
+    interruptReadyCastBar:SetPoint(
+        "RIGHT",
+        interruptReadyClip,
+        "RIGHT"
+    )
+    interruptReadyCastBar:SetFillStyle(StandardFill)
+    interruptReadyCastBar:SetStatusBarTexture(
+        AF.GetPlainTexture()
+    )
+    interruptReadyCastBar:GetStatusBarTexture():SetAlpha(0)
+    interruptReadyCastBar:SetAlpha(0)
+    interruptReadyCastBar:EnableMouse(false)
+
+    local interruptReadyCastTick =
+        interruptReadyCastBar:CreateTexture(
+            nil,
+            "OVERLAY"
+        )
+    frame.interruptReadyCastTick = interruptReadyCastTick
+    interruptReadyCastTick:SetPoint(
+        "TOPLEFT",
+        interruptReadyCastBar:GetStatusBarTexture(),
+        "TOPRIGHT"
+    )
+    interruptReadyCastTick:SetPoint(
+        "BOTTOMLEFT",
+        interruptReadyCastBar:GetStatusBarTexture(),
+        "BOTTOMRIGHT"
+    )
+    AF.SetWidth(interruptReadyCastTick, 2)
+    interruptReadyCastTick:AddMaskTexture(
+        interruptReadyMask
+    )
+
+    local interruptReadyChannelBar =
+        CreateFrame("StatusBar", nil, interruptReadyClip)
+    frame.interruptReadyChannelBar =
+        interruptReadyChannelBar
+    interruptReadyChannelBar:SetPoint(
+        "TOP",
+        interruptReadyClip,
+        "TOP"
+    )
+    interruptReadyChannelBar:SetPoint(
+        "BOTTOM",
+        interruptReadyClip,
+        "BOTTOM"
+    )
+    interruptReadyChannelBar:SetPoint(
+        "LEFT",
+        interruptReadyClip,
+        "LEFT"
+    )
+    interruptReadyChannelBar:SetPoint(
+        "RIGHT",
+        bar:GetStatusBarTexture(),
+        "RIGHT"
+    )
+    interruptReadyChannelBar:SetFillStyle(ReverseFill)
+    interruptReadyChannelBar:SetStatusBarTexture(
+        AF.GetPlainTexture()
+    )
+    interruptReadyChannelBar:GetStatusBarTexture():SetAlpha(0)
+    interruptReadyChannelBar:SetAlpha(0)
+    interruptReadyChannelBar:EnableMouse(false)
+
+    local interruptReadyChannelTick =
+        interruptReadyChannelBar:CreateTexture(
+            nil,
+            "OVERLAY"
+        )
+    frame.interruptReadyChannelTick =
+        interruptReadyChannelTick
+    interruptReadyChannelTick:SetPoint(
+        "TOPRIGHT",
+        interruptReadyChannelBar:GetStatusBarTexture(),
+        "TOPLEFT"
+    )
+    interruptReadyChannelTick:SetPoint(
+        "BOTTOMRIGHT",
+        interruptReadyChannelBar:GetStatusBarTexture(),
+        "BOTTOMLEFT"
+    )
+    AF.SetWidth(interruptReadyChannelTick, 2)
+    interruptReadyChannelTick:AddMaskTexture(
+        interruptReadyMask
+    )
 
     local importantCastCarrier =
         CreateFrame("Frame", nil, frame)

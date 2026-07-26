@@ -53,7 +53,7 @@ end
 ---------------------------------------------------------------------
 -- defaults
 ---------------------------------------------------------------------
-local SCHEMA_VERSION = 6
+local SCHEMA_VERSION = 7
 NP.SCHEMA_VERSION = SCHEMA_VERSION
 
 local defaults = {
@@ -260,6 +260,10 @@ do
             interruptibleCheck = {
                 enabled = true,
                 requireUsable = true,
+            },
+            interruptReadyTick = {
+                enabled = true,
+                color = {0, 1, 0, 1},
             },
             uninterruptibleIcon = {
                 enabled = true,
