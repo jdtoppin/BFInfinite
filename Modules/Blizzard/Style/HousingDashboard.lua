@@ -21,9 +21,9 @@ local function CreateSquareElement(frame)
     background:SetAllPoints()
 end
 
--- Mirror the Profession Book rows: a narrow class-colour accent at the
--- leading edge, followed by a quiet gray surface that fades into the panel.
--- A second class-colour gradient supplies hover and selected state without
+-- Mirror the Profession Book rows: keep a narrow class-colour accent at the
+-- leading edge over a quiet gray surface that fades into the panel. A second
+-- class-colour gradient appears only for hover and selected state, without
 -- bringing back Blizzard's heavy orange card borders.
 local function CreateFadeSurface(frame)
     if frame._BFIHousingFadeSurface then return end
@@ -34,6 +34,13 @@ local function CreateFadeSurface(frame)
         frame.BFIHousingBackground:SetAlpha(0)
     end
 
+    local accent = AF.CreateTexture(frame, nil, nil, "BORDER", -8)
+    accent:SetColor("BFI")
+    AF.SetPoint(accent, "TOPLEFT", 1, -1)
+    AF.SetPoint(accent, "BOTTOMLEFT", 1, 1)
+    AF.SetWidth(accent, 2)
+    frame.BFIHousingFadeAccent = accent
+
     local background = AF.CreateGradientTexture(
         frame,
         "HORIZONTAL",
@@ -43,7 +50,9 @@ local function CreateFadeSurface(frame)
         "BACKGROUND",
         -8
     )
-    background:SetAllPoints()
+    AF.SetPoint(background, "TOPLEFT", accent, "TOPRIGHT", 1, 0)
+    AF.SetPoint(background, "RIGHT")
+    AF.SetPoint(background, "BOTTOM", accent)
     frame.BFIHousingFadeBackground = background
 
     local state = AF.CreateGradientTexture(
@@ -55,30 +64,22 @@ local function CreateFadeSurface(frame)
         "OVERLAY",
         -8
     )
-    state:SetAllPoints()
+    state:SetAllPoints(background)
     state:SetBlendMode("ADD")
     frame.BFIHousingFadeState = state
-
-    local accent = AF.CreateTexture(frame, nil, "BFI", "BORDER", -8)
-    AF.SetPoint(accent, "TOPLEFT", 1, -1)
-    AF.SetPoint(accent, "BOTTOMLEFT", 1, 1)
-    AF.SetWidth(accent, 2)
-    frame.BFIHousingFadeAccent = accent
 end
 
 local function SetFadeSurfaceState(frame, state)
     local strength = 0
     if state == "pressed" then
         strength = 1
-    elseif state == "selected" then
+    elseif state == "selected" or state == "hovered" then
         strength = 0.9
-    elseif state == "hovered" then
-        strength = 0.55
     end
 
     frame.BFIHousingFadeBackground:SetAlpha(state == "disabled" and 0.3 or 1)
     frame.BFIHousingFadeState:SetAlpha(strength)
-    frame.BFIHousingFadeAccent:SetAlpha(strength)
+    frame.BFIHousingFadeAccent:SetColor(state == "disabled" and "disabled" or "BFI")
     frame.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(state == "disabled" and "disabled" or "border"))
 end
 
@@ -436,7 +437,7 @@ local function StyleCatalog(catalog)
     preview.PreviewCornerLeft:SetAlpha(0)
     preview.PreviewCornerRight:SetAlpha(0)
     CreateFadeSurface(preview)
-    SetFadeSurfaceState(preview, "selected")
+    SetFadeSurfaceState(preview, "normal")
 
     preview._BFIHousingCatalog = catalog
     hooksecurefunc(preview, "ClearPreviewData", UpdatePreviewedCatalogEntry)
