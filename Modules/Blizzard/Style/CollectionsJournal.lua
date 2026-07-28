@@ -211,18 +211,22 @@ local function StyleMountListButton(button, elementData)
     local index = elementData and elementData.index or button.index
     if not index then return end
 
-    local _, _, _, _, isUsable, _, _, _, _, _, _, mountID =
+    local _, _, _, _, _, _, _, _, _, shouldHideOnChar, isCollected, mountID =
         _G.C_MountJournal.GetDisplayedMountInfo(index)
-    local needsFanfare = mountID and _G.C_MountJournal.NeedsFanfare(mountID)
-    local usable = isUsable or needsFanfare
+    if not mountID then return end
 
-    -- Blizzard marks collected-but-unusable mounts by tinting both the row
-    -- and icon red. Keep the row neutral and use grayscale content instead,
-    -- while leaving selected, active, and hover textures untouched.
+    local needsFanfare = mountID and _G.C_MountJournal.NeedsFanfare(mountID)
+    local characterUsable = needsFanfare or (isCollected and not shouldHideOnChar)
+    local iconAlpha = characterUsable and 1 or (isCollected and 0.5 or 0.25)
+
+    -- Blizzard's isUsable value tracks whether a mount can be summoned in the
+    -- current context, which makes most collected mounts look unavailable
+    -- indoors. Use the stable collection/character visibility flags instead.
     button.icon:SetVertexColor(AF.GetColorRGB("white"))
-    button.icon:SetDesaturated(not usable)
-    button.name:SetFontObject(usable and "GameFontNormal" or "GameFontDisable")
-    button.icon.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(usable and "border" or "disabled"))
+    button.icon:SetDesaturated(not characterUsable)
+    button.icon:SetAlpha(iconAlpha)
+    button.name:SetFontObject(characterUsable and "GameFontNormal" or "GameFontDisable")
+    button.icon.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(characterUsable and "border" or "disabled"))
 end
 
 local function StyleTabs(collectionsJournal)
