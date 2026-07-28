@@ -265,6 +265,9 @@ local function InitAndBackupCVars()
         "AutoPushSpellToActionBar",
         -- bags
         "combinedBags",
+        -- damage meter
+        "damageMeterEnabled",
+        "damageMeterResetOnNewInstance",
         -- nameplates
         "nameplateOccludedAlphaMult",
         "nameplateShowOnlyNames",

@@ -9,6 +9,7 @@ local ADDON_NAME = "Blizzard_DamageMeter"
 local active
 local addonCallbackRegistered
 local deferredLoadFrame
+local pendingLoadCallbacks = {}
 
 local function IsNativeAddonLoaded()
     return _G.C_AddOns.IsAddOnLoaded(ADDON_NAME)
@@ -31,21 +32,51 @@ local function CancelDeferredLoad()
     end
 end
 
-function DM.OnNativeAddonLoaded()
-    UnregisterAddonCallback()
-    if not DM.IsActive() then return end
+local function HasPendingLoadCallbacks()
+    return #pendingLoadCallbacks > 0
+end
 
-    if DM.Skin.Install() then
-        DM.Skin.ApplyAll()
+local function AddPendingLoadCallback(callback)
+    if type(callback) ~= "function" then return end
+
+    for _, pendingCallback in ipairs(pendingLoadCallbacks) do
+        if pendingCallback == callback then
+            return
+        end
+    end
+
+    pendingLoadCallbacks[#pendingLoadCallbacks + 1] = callback
+end
+
+local function RunPendingLoadCallbacks()
+    local callbacks = pendingLoadCallbacks
+    pendingLoadCallbacks = {}
+
+    for _, callback in ipairs(callbacks) do
+        callback(_G.DamageMeter)
     end
 end
 
-local function LoadNativeAddon()
-    if not DM.IsActive() then return end
+function DM.OnNativeAddonLoaded()
+    UnregisterAddonCallback()
+    CancelDeferredLoad()
+
+    if DM.IsActive() and DM.Skin.Install() then
+        DM.Skin.ApplyAll()
+        if type(DM.ApplyDefaultPositionIfNeeded) == "function" then
+            DM.ApplyDefaultPositionIfNeeded()
+        end
+    end
+
+    RunPendingLoadCallbacks()
+end
+
+function DM.EnsureNativeLoaded(callback)
+    AddPendingLoadCallback(callback)
 
     if IsNativeAddonLoaded() then
         DM.OnNativeAddonLoaded()
-        return
+        return true
     end
 
     if not addonCallbackRegistered then
@@ -58,51 +89,61 @@ local function LoadNativeAddon()
             deferredLoadFrame = _G.CreateFrame("Frame")
             deferredLoadFrame:SetScript("OnEvent", function(self)
                 self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-                if DM.IsActive() then
-                    LoadNativeAddon()
+                if DM.IsActive() or HasPendingLoadCallbacks() then
+                    DM.EnsureNativeLoaded()
                 end
             end)
         end
         deferredLoadFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-        return
+        return false
     end
 
     _G.C_AddOns.LoadAddOn(ADDON_NAME)
     if IsNativeAddonLoaded() then
         DM.OnNativeAddonLoaded()
+        return true
     end
+
+    return false
 end
 
 function DM.Enable()
     if active then
         if IsNativeAddonLoaded() then
             DM.Skin.ApplyAll()
+            if type(DM.ApplyDefaultPositionIfNeeded) == "function" then
+                DM.ApplyDefaultPositionIfNeeded()
+            end
         else
-            LoadNativeAddon()
+            DM.EnsureNativeLoaded()
         end
         return
     end
 
     active = true
-    LoadNativeAddon()
+    DM.EnsureNativeLoaded()
 end
 
 function DM.Disable()
     if not active then
-        UnregisterAddonCallback()
-        CancelDeferredLoad()
+        if not HasPendingLoadCallbacks() then
+            UnregisterAddonCallback()
+            CancelDeferredLoad()
+        end
         return
     end
 
     active = nil
-    UnregisterAddonCallback()
-    CancelDeferredLoad()
+    if not HasPendingLoadCallbacks() then
+        UnregisterAddonCallback()
+        CancelDeferredLoad()
+    end
     DM.Skin.Disable()
 end
 
 function DM.Refresh()
     if DM.IsActive() then
-        LoadNativeAddon()
+        DM.EnsureNativeLoaded()
     end
 end
 

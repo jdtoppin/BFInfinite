@@ -36,7 +36,11 @@ jobs:
       - name: Test Damage Meter data adapter
         run: luajit tests/damage_meter_data_test.lua
 
-      - name: Test Damage Meter defaults and lifecycle
+      - name: Test Damage Meter native adapter
+        run: luajit tests/damage_meter_native_test.lua
+
+      - name: Test Damage Meter defaults, layout, and lifecycle
         run: |
           luajit tests/damage_meter_defaults_test.lua
+          luajit tests/damage_meter_layout_test.lua
           luajit tests/damage_meter_lifecycle_test.lua

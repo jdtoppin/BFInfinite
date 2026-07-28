@@ -23,6 +23,7 @@ local function loadLifecycle(options)
         installCalls = 0,
         loadAddonCalls = 0,
         loaded = options.loaded == true,
+        nativeDamageMeter = {},
         registerAddonCalls = 0,
         registerEventCalls = 0,
         unregisterAddonCalls = 0,
@@ -72,6 +73,7 @@ local function loadLifecycle(options)
     }
     local environment = {
         AbstractFramework = AF,
+        DamageMeter = state.nativeDamageMeter,
         C_AddOns = {
             IsAddOnLoaded = function(addonName)
                 assertEqual(addonName, NATIVE_ADDON, "loaded query addon")
@@ -116,6 +118,7 @@ local function loadLifecycle(options)
         InCombatLockdown = function()
             return state.inCombat
         end,
+        ipairs = ipairs,
         select = select,
         type = type,
     }
@@ -152,6 +155,48 @@ dormantDM.config.enabled = true
 dormantUpdate(nil, "otherModule")
 assertEqual(dormantDM.IsActive(), false, "unrelated module remains inactive")
 assertDormant(dormant, "unrelated module")
+
+local settingsDM, settingsState = loadLifecycle()
+local settingsCallbackCalls = 0
+local settingsCallbackMeter
+local settingsLoaded = settingsDM.EnsureNativeLoaded(function(nativeDamageMeter)
+    settingsCallbackCalls = settingsCallbackCalls + 1
+    settingsCallbackMeter = nativeDamageMeter
+end)
+assertEqual(settingsLoaded, true, "disabled skin settings load result")
+assertEqual(settingsDM.IsActive(), false, "disabled skin settings load remains inactive")
+assertEqual(settingsState.loadAddonCalls, 1, "disabled skin settings requests load")
+assertEqual(settingsState.registerAddonCalls, 1, "disabled skin settings registers callback")
+assertEqual(settingsState.unregisterAddonCalls, 1, "disabled skin settings unregisters callback")
+assertEqual(settingsState.installCalls, 0, "disabled skin settings avoids install")
+assertEqual(settingsState.applyCalls, 0, "disabled skin settings avoids apply")
+assertEqual(settingsCallbackCalls, 1, "disabled skin settings callback")
+assertEqual(
+    settingsCallbackMeter,
+    settingsState.nativeDamageMeter,
+    "disabled skin settings callback meter"
+)
+
+local immediateDM, immediate = loadLifecycle({
+    loaded = true,
+})
+local immediateCallbackCalls = 0
+local immediateCallbackMeter
+local immediatelyLoaded = immediateDM.EnsureNativeLoaded(function(nativeDamageMeter)
+    immediateCallbackCalls = immediateCallbackCalls + 1
+    immediateCallbackMeter = nativeDamageMeter
+end)
+assertEqual(immediatelyLoaded, true, "loaded settings request result")
+assertEqual(immediateCallbackCalls, 1, "loaded settings callback immediate")
+assertEqual(
+    immediateCallbackMeter,
+    immediate.nativeDamageMeter,
+    "loaded settings callback meter"
+)
+assertEqual(immediate.loadAddonCalls, 0, "loaded settings avoids load")
+assertEqual(immediate.registerAddonCalls, 0, "loaded settings avoids registration")
+assertEqual(immediate.installCalls, 0, "loaded settings avoids install")
+assertEqual(immediate.applyCalls, 0, "loaded settings avoids apply")
 
 local loadedDM, loaded = loadLifecycle({
     loaded = true,
@@ -229,6 +274,73 @@ assertEqual(combat.loadAddonCalls, 1, "regen loads addon")
 assertEqual(combat.unregisterAddonCalls, 1, "regen clears addon callback")
 assertEqual(combat.installCalls, 1, "regen install")
 assertEqual(combat.applyCalls, 1, "regen apply")
+
+local deferredSettingsDM, deferredSettings = loadLifecycle({
+    inCombat = true,
+})
+local deferredSettingsCallbackCalls = 0
+local deferredSettingsCallbackMeter
+local deferredSettingsLoaded = deferredSettingsDM.EnsureNativeLoaded(
+    function(nativeDamageMeter)
+        deferredSettingsCallbackCalls = deferredSettingsCallbackCalls + 1
+        deferredSettingsCallbackMeter = nativeDamageMeter
+    end
+)
+assertEqual(deferredSettingsLoaded, false, "combat settings request defers")
+assertEqual(deferredSettingsDM.IsActive(), false, "combat settings skin remains inactive")
+assertEqual(deferredSettings.registerAddonCalls, 1, "combat settings registers callback")
+assertEqual(deferredSettings.createFrameCalls, 1, "combat settings deferred frame")
+assertEqual(deferredSettings.registerEventCalls, 1, "combat settings deferred event")
+assertEqual(deferredSettings.loadAddonCalls, 0, "combat settings avoids immediate load")
+assertEqual(deferredSettingsCallbackCalls, 0, "combat settings callback waits")
+
+deferredSettings.inCombat = false
+deferredSettings.frames[1]:Trigger("PLAYER_REGEN_ENABLED")
+assertEqual(deferredSettings.loadAddonCalls, 1, "combat settings regen loads")
+assertEqual(deferredSettings.unregisterAddonCalls, 1, "combat settings regen unregisters")
+assertEqual(deferredSettings.installCalls, 0, "combat settings regen avoids install")
+assertEqual(deferredSettings.applyCalls, 0, "combat settings regen avoids apply")
+assertEqual(deferredSettingsCallbackCalls, 1, "combat settings regen callback")
+assertEqual(
+    deferredSettingsCallbackMeter,
+    deferredSettings.nativeDamageMeter,
+    "combat settings regen callback meter"
+)
+
+local retainedDM, retained = loadLifecycle({
+    inCombat = true,
+})
+retainedDM.config.enabled = true
+retained.updateCallbacks.BFI_UpdateModule(nil, "damageMeter")
+local retainedCallbackCalls = 0
+retainedDM.EnsureNativeLoaded(function(nativeDamageMeter)
+    assertEqual(
+        nativeDamageMeter,
+        retained.nativeDamageMeter,
+        "retained settings callback meter"
+    )
+    retainedCallbackCalls = retainedCallbackCalls + 1
+end)
+local retainedFrame = retained.frames[1]
+retainedDM.config.enabled = false
+retained.updateCallbacks.BFI_UpdateModule(nil, "damageMeter")
+assertEqual(retainedDM.IsActive(), false, "retained settings skin disabled")
+assertEqual(retained.disableCalls, 1, "retained settings restoration callback")
+assertEqual(retained.unregisterAddonCalls, 0, "retained settings keeps addon callback")
+assertEqual(
+    retainedFrame.events.PLAYER_REGEN_ENABLED,
+    true,
+    "retained settings keeps regen event"
+)
+assertEqual(retainedCallbackCalls, 0, "retained settings callback still pending")
+
+retained.inCombat = false
+retainedFrame:Trigger("PLAYER_REGEN_ENABLED")
+assertEqual(retained.loadAddonCalls, 1, "retained settings regen loads")
+assertEqual(retained.unregisterAddonCalls, 1, "retained settings regen unregisters")
+assertEqual(retained.installCalls, 0, "retained settings avoids disabled install")
+assertEqual(retained.applyCalls, 0, "retained settings avoids disabled apply")
+assertEqual(retainedCallbackCalls, 1, "retained settings callback runs")
 
 local cancelledDM, cancelled = loadLifecycle({
     inCombat = true,
