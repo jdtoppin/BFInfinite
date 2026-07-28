@@ -8,8 +8,6 @@ local AF = _G.AbstractFramework
 local defaults = {
     enabled = false,
     accentHeader = true,
-    barTexture = "AF",
-    barBackgroundAlpha = 0.65,
 }
 
 local function NormalizeConfig(config)
@@ -18,16 +16,6 @@ local function NormalizeConfig(config)
     end
     if type(config.accentHeader) ~= "boolean" then
         config.accentHeader = defaults.accentHeader
-    end
-    if type(config.barTexture) ~= "string" or config.barTexture == "" then
-        config.barTexture = defaults.barTexture
-    end
-
-    local alpha = tonumber(config.barBackgroundAlpha)
-    if alpha then
-        config.barBackgroundAlpha = math.max(0, math.min(1, alpha))
-    else
-        config.barBackgroundAlpha = defaults.barBackgroundAlpha
     end
 end
 

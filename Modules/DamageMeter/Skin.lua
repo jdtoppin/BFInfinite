@@ -10,52 +10,84 @@ local AF = _G.AbstractFramework
 DM.Skin = DM.Skin or {}
 local Skin = DM.Skin
 
-local entryStates = setmetatable({}, {__mode = "k"})
-local fontStates = setmetatable({}, {__mode = "k"})
 local sessionWindowStates = setmetatable({}, {__mode = "k"})
 local sourceWindowStates = setmetatable({}, {__mode = "k"})
 local controlStates = setmetatable({}, {__mode = "k"})
 local resizeButtonStates = setmetatable({}, {__mode = "k"})
 local scrollBarStates = setmetatable({}, {__mode = "k"})
+local pendingSecondaryPlacements = {}
+local placementFrame
+local COMPACT_HEADER_HEIGHT = 26
 
 -- FrameXML evidence: Retail PTR 12.1.0.68914, Gethe/wow-ui-source commit
 -- d3915c78aba77a7a9be76acbfa35c674bbb6abe9. Blizzard_DamageMeter owns all
 -- combat data, row order, interaction, layout, and secret-value handling.
 -- This file only changes presentation on known native frames and ignores
 -- ScrollBox elementData, which can contain secret fields.
+--
+-- Do not register callbacks on DamageMeterEntry frames or attach AF-owned
+-- regions to them. Native entry initialization compares secret names, and any
+-- addon execution on those pooled rows can taint Blizzard's comparison.
 
 local function IsActive()
     return type(DM.IsActive) == "function" and DM.IsActive()
 end
 
-local function CaptureFont(fontString)
-    if not fontString or fontStates[fontString] then return end
-
-    local font, size, flags = fontString:GetFont()
-    fontStates[fontString] = {
-        fontObject = fontString.GetFontObject and fontString:GetFontObject(),
-        font = font,
-        size = size,
-        flags = flags,
-    }
+local function ClearPendingSecondaryPlacements()
+    for index in next, pendingSecondaryPlacements do
+        pendingSecondaryPlacements[index] = nil
+    end
+    if placementFrame then
+        placementFrame:UnregisterEvent("PLAYER_REGEN_ENABLED")
+    end
 end
 
-local function ApplyFont(fontString)
-    if not fontString then return end
+local function PlacePendingSecondaryWindows()
+    if not IsActive() then
+        ClearPendingSecondaryPlacements()
+        return
+    end
 
-    CaptureFont(fontString)
-    local _, size, flags = fontString:GetFont()
-    fontString:SetFont(AF.LSM_GetFont("BFI"), size or 12, flags or "")
+    for index = 2, 3 do
+        if pendingSecondaryPlacements[index] then
+            pendingSecondaryPlacements[index] = nil
+
+            if type(DM.ArrangeSecondaryWindows) == "function" then
+                local ok, reason = DM.ArrangeSecondaryWindows({index})
+                if not ok and reason == "combat" then
+                    -- A closed window returns window_unavailable; continue so
+                    -- another queued window can still be placed.
+                    -- Combat is the only retryable result.
+                    pendingSecondaryPlacements[index] = true
+                end
+            end
+        end
+    end
+
+    if placementFrame and next(pendingSecondaryPlacements) then
+        placementFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    end
 end
 
-local function RestoreFont(fontString)
-    local state = fontStates[fontString]
-    if not state then return end
+local function QueueSecondaryPlacement(index)
+    pendingSecondaryPlacements[index] = true
 
-    if state.fontObject and fontString.SetFontObject then
-        fontString:SetFontObject(state.fontObject)
-    elseif state.font then
-        fontString:SetFont(state.font, state.size or 12, state.flags or "")
+    if not placementFrame then
+        placementFrame = _G.CreateFrame("Frame")
+        placementFrame:SetScript("OnEvent", function(self)
+            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            PlacePendingSecondaryWindows()
+        end)
+    end
+    placementFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+end
+
+local function PlaceSecondaryWindow(index)
+    if type(DM.ArrangeSecondaryWindows) ~= "function" then return end
+
+    local ok, reason = DM.ArrangeSecondaryWindows({index})
+    if not ok and reason == "combat" then
+        QueueSecondaryPlacement(index)
     end
 end
 
@@ -530,80 +562,6 @@ local function RestoreScrollBarChrome(scrollBar, state)
     end
 end
 
-local function EnsureEntryHooks(entry)
-    if entry._BFIDamageMeterHooks then return end
-    entry._BFIDamageMeterHooks = true
-
-    hooksecurefunc(entry, "UpdateStyle", function(self)
-        if IsActive() then
-            Skin.ApplyEntry(self)
-        end
-    end)
-    hooksecurefunc(entry, "UpdateBackground", function(self)
-        if IsActive() then
-            Skin.ApplyEntry(self)
-        end
-    end)
-end
-
-function Skin.ApplyEntry(entry)
-    if not IsActive() or not entry or not DM.config then return end
-
-    EnsureEntryHooks(entry)
-
-    local statusBar = entry:GetStatusBar()
-    local state = entryStates[entry]
-    if not state then
-        local statusTexture = statusBar:GetStatusBarTexture()
-        state = {
-            statusTexture = statusTexture:GetTexture(),
-            statusAtlas = statusTexture:GetAtlas(),
-        }
-        entryStates[entry] = state
-    end
-
-    local backing = entry._BFIDamageMeterBacking
-    if not backing then
-        backing = AF.CreateTexture(statusBar, nil, nil, "BACKGROUND", -8)
-        entry._BFIDamageMeterBacking = backing
-        backing:SetAllPoints(statusBar)
-    end
-
-    backing:SetColorTexture(AF.UnpackColor(
-        AF.GetColorTable("background", DM.config.barBackgroundAlpha)
-    ))
-    backing:Show()
-
-    statusBar:SetStatusBarTexture(AF.LSM_GetBarTexture(DM.config.barTexture))
-    entry:GetBackground():SetAlpha(0)
-    entry:GetBackgroundEdge():SetAlpha(0)
-
-    ApplyFont(entry:GetName())
-    ApplyFont(entry:GetValue())
-end
-
-local function OnEntryInitialized(_, entry)
-    if IsActive() then
-        Skin.ApplyEntry(entry)
-    end
-end
-
-local function RegisterScrollBox(scrollBox)
-    if not scrollBox or scrollBox._BFIDamageMeterCallback then return end
-    scrollBox._BFIDamageMeterCallback = true
-
-    _G.ScrollUtil.AddInitializedFrameCallback(
-        scrollBox,
-        OnEntryInitialized,
-        Skin,
-        false
-    )
-
-    scrollBox:ForEachFrame(function(entry)
-        Skin.ApplyEntry(entry)
-    end)
-end
-
 local function EnsureSourceWindowHooks(sourceWindow)
     if sourceWindow._BFIDamageMeterHooks then return end
     sourceWindow._BFIDamageMeterHooks = true
@@ -643,7 +601,6 @@ local function ApplySourceWindow(sourceWindow)
     sourceWindow._BFIDamageMeterFill:Show()
 
     EnsureSourceWindowHooks(sourceWindow)
-    RegisterScrollBox(sourceWindow:GetScrollBox())
     ApplyScrollBarChrome(sourceWindow:GetScrollBar())
     ApplyResizeButtonChrome(sourceWindow:GetResizeButton(), sourceWindow)
 
@@ -759,6 +716,7 @@ function Skin.ApplySessionWindow(sessionWindow)
         local header = sessionWindow:GetHeader()
         state = {
             headerAlpha = header:GetAlpha(),
+            headerHeight = header:GetHeight(),
         }
         sessionWindowStates[sessionWindow] = state
 
@@ -788,6 +746,7 @@ function Skin.ApplySessionWindow(sessionWindow)
     EnsureSessionWindowHooks(sessionWindow)
     EnsureBorder(sessionWindow)
 
+    sessionWindow:GetHeader():SetHeight(COMPACT_HEADER_HEIGHT)
     sessionWindow:GetHeader():SetAlpha(0)
     if DM.config.accentHeader then
         sessionWindow._BFIDamageMeterHeaderFill:SetColor(
@@ -805,33 +764,9 @@ function Skin.ApplySessionWindow(sessionWindow)
     sessionWindow._BFIDamageMeterHeaderFill:Show()
 
     ApplySessionBackground(sessionWindow)
-    ApplyFont(sessionWindow:GetDamageMeterTypeName())
-    ApplyFont(sessionWindow:GetSessionName())
-    ApplyFont(sessionWindow:GetSessionTimerFontString())
-    ApplyFont(sessionWindow:GetNotActiveFontString())
 
     ApplySessionControlChrome(sessionWindow)
-    RegisterScrollBox(sessionWindow:GetScrollBox())
-    Skin.ApplyEntry(sessionWindow:GetLocalPlayerEntry())
     ApplySourceWindow(sessionWindow:GetSourceWindow())
-end
-
-local function RestoreEntry(entry, state)
-    if entry._BFIDamageMeterBacking then
-        entry._BFIDamageMeterBacking:Hide()
-    end
-
-    local statusTexture = entry:GetStatusBar():GetStatusBarTexture()
-    if state.statusAtlas then
-        statusTexture:SetAtlas(state.statusAtlas)
-    else
-        statusTexture:SetTexture(state.statusTexture)
-    end
-
-    RestoreFont(entry:GetName())
-    RestoreFont(entry:GetValue())
-    entry:UpdateStyle()
-    entry:UpdateBackground()
 end
 
 local function RestoreSourceWindow(sourceWindow, state)
@@ -857,10 +792,7 @@ local function RestoreSessionWindow(sessionWindow, state)
     end
 
     sessionWindow:GetHeader():SetAlpha(state.headerAlpha)
-    RestoreFont(sessionWindow:GetDamageMeterTypeName())
-    RestoreFont(sessionWindow:GetSessionName())
-    RestoreFont(sessionWindow:GetSessionTimerFontString())
-    RestoreFont(sessionWindow:GetNotActiveFontString())
+    sessionWindow:GetHeader():SetHeight(state.headerHeight)
     sessionWindow:UpdateBackground()
 end
 
@@ -880,6 +812,14 @@ function Skin.Install()
             local sessionWindow = self:GetSessionWindow(index)
             if sessionWindow then
                 Skin.ApplySessionWindow(sessionWindow)
+                -- Window creation and category selection stay in Blizzard's
+                -- native menu. Once setup is complete, positioning the new
+                -- frame does not refresh or inspect its combat rows.
+                if index > 1
+                    and type(DM.ArrangeSecondaryWindows) == "function"
+                then
+                    PlaceSecondaryWindow(index)
+                end
             end
         end)
     end
@@ -896,9 +836,8 @@ function Skin.ApplyAll()
 end
 
 function Skin.Disable()
-    for entry, state in next, entryStates do
-        RestoreEntry(entry, state)
-    end
+    ClearPendingSecondaryPlacements()
+
     for control, state in next, controlStates do
         RestoreControlChrome(control, state)
     end

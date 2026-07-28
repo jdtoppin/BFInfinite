@@ -61,8 +61,6 @@ end
 local function assertDefaults(config, message)
     assertEqual(config.enabled, false, message .. " enabled")
     assertEqual(config.accentHeader, true, message .. " accent header")
-    assertEqual(config.barTexture, "AF", message .. " bar texture")
-    assertEqual(config.barBackgroundAlpha, 0.65, message .. " background alpha")
 end
 
 local DM, callbacks = loadDefaults()
@@ -90,8 +88,6 @@ assertDefaults(malformedProfile.damageMeter, "malformed config")
 assertEqual(DM.config, malformedProfile.damageMeter, "malformed config identity")
 
 local partialConfig = {
-    barBackgroundAlpha = "0.25",
-    barTexture = "Custom",
     extra = "preserved",
 }
 local partialProfile = {
@@ -102,14 +98,10 @@ assertEqual(partialProfile.damageMeter, partialConfig, "partial config identity"
 assertEqual(DM.config, partialConfig, "active partial config identity")
 assertEqual(partialConfig.enabled, false, "partial enabled default")
 assertEqual(partialConfig.accentHeader, true, "partial accent default")
-assertEqual(partialConfig.barTexture, "Custom", "valid texture preserved")
-assertEqual(partialConfig.barBackgroundAlpha, 0.25, "numeric alpha normalized")
 assertEqual(partialConfig.extra, "preserved", "unknown config preserved")
 
 local invalidConfig = {
     accentHeader = 1,
-    barBackgroundAlpha = "invalid",
-    barTexture = "",
     enabled = "yes",
 }
 updateProfile(nil, {
@@ -117,23 +109,9 @@ updateProfile(nil, {
 })
 assertDefaults(invalidConfig, "invalid field normalization")
 
-invalidConfig.barBackgroundAlpha = -0.5
-updateProfile(nil, {
-    damageMeter = invalidConfig,
-})
-assertEqual(invalidConfig.barBackgroundAlpha, 0, "alpha lower clamp")
-
-invalidConfig.barBackgroundAlpha = 1.5
-updateProfile(nil, {
-    damageMeter = invalidConfig,
-})
-assertEqual(invalidConfig.barBackgroundAlpha, 1, "alpha upper clamp")
-
 local configIdentity = DM.config
 configIdentity.enabled = true
 configIdentity.accentHeader = false
-configIdentity.barTexture = "Other"
-configIdentity.barBackgroundAlpha = 0
 configIdentity.extra = "remove"
 DM.ResetToDefaults()
 assertEqual(DM.config, configIdentity, "reset config identity")

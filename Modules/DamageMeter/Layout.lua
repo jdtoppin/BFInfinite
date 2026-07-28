@@ -3,8 +3,8 @@ local BFI = select(2, ...)
 ---@class DamageMeter
 local DM = BFI.modules.DamageMeter
 
-local DEFAULT_X = -20
-local DEFAULT_Y = 20
+local DEFAULT_X = 0
+local DEFAULT_Y = 0
 local WINDOW_SPACING = 8
 
 -- FrameXML evidence: Retail PTR 12.1.0.68914, Gethe/wow-ui-source commit
@@ -32,14 +32,58 @@ local function CanChangeLayout(manager)
     return DM.Native.CanPersistLayout()
 end
 
-local function ArrangeShownSecondaryWindows(damageMeter, firstIndex)
-    firstIndex = firstIndex or 2
-    local previous = firstIndex == 2
-        and damageMeter
-        or damageMeter:GetSessionWindow(firstIndex - 1)
-    if not previous
-        or (firstIndex > 2 and not previous:IsShown()) then
-        return false, "window_unavailable"
+local function GetExactTargetSet(damageMeter, indices)
+    if indices == nil then
+        return nil
+    end
+
+    if type(indices) ~= "table" then
+        return nil, "invalid_value"
+    end
+
+    local maxWindows = math.min(
+        damageMeter:GetMaxSessionWindowCount(),
+        3
+    )
+    local targets = {}
+    local count = 0
+    local highestKey = 0
+
+    for key, index in next, indices do
+        if type(key) ~= "number"
+            or key < 1
+            or key % 1 ~= 0
+            or type(index) ~= "number"
+            or index < 2
+            or index > maxWindows
+            or index % 1 ~= 0
+            or targets[index] then
+            return nil, "invalid_value"
+        end
+
+        targets[index] = true
+        count = count + 1
+        highestKey = math.max(highestKey, key)
+    end
+
+    if highestKey ~= count then
+        return nil, "invalid_value"
+    end
+
+    for index in next, targets do
+        local window = damageMeter:GetSessionWindow(index)
+        if not window or not window:IsShown() then
+            return nil, "window_unavailable"
+        end
+    end
+
+    return targets
+end
+
+local function ArrangeShownSecondaryWindows(damageMeter, indices)
+    local targets, targetError = GetExactTargetSet(damageMeter, indices)
+    if targetError then
+        return false, targetError
     end
 
     local width, height = damageMeter:GetSize()
@@ -47,20 +91,30 @@ local function ArrangeShownSecondaryWindows(damageMeter, firstIndex)
         damageMeter:GetMaxSessionWindowCount(),
         3
     )
+    local previous = damageMeter
 
-    for i = firstIndex, maxWindows do
+    for i = 2, maxWindows do
         local window = damageMeter:GetSessionWindow(i)
         if window and window:IsShown() then
-            window:ClearAllPoints()
-            window:SetPoint(
-                "BOTTOMRIGHT",
-                previous,
-                "BOTTOMLEFT",
-                -WINDOW_SPACING,
-                0
-            )
-            window:SetSize(width, height)
-            window:SetUserPlaced(true)
+            local isUserPlaced =
+                type(window.IsUserPlaced) == "function"
+                and window:IsUserPlaced()
+            -- An exact index list marks automatic placement. Normalize every
+            -- visible native fallback in that mode so a pre-existing unplaced
+            -- window cannot strand the new one at the top-left. A nil list is
+            -- the explicit arrange-all action and may replace user positions.
+            if targets == nil or not isUserPlaced then
+                window:ClearAllPoints()
+                window:SetPoint(
+                    "BOTTOMRIGHT",
+                    previous,
+                    "BOTTOMLEFT",
+                    -WINDOW_SPACING,
+                    0
+                )
+                window:SetSize(width, height)
+                window:SetUserPlaced(true)
+            end
             previous = window
         end
     end
@@ -88,7 +142,8 @@ function DM.ApplyBottomRightLayout()
     if not damageMeter then
         return false, errorReason
     end
-    if type(damageMeter.OnSystemPositionChange) ~= "function"
+    if type(_G.securecallfunction) ~= "function"
+        or type(damageMeter.OnSystemPositionChange) ~= "function"
         or type(manager.SaveLayouts) ~= "function" then
         return false, "unavailable"
     end
@@ -99,13 +154,16 @@ function DM.ApplyBottomRightLayout()
     end
 
     SetBottomRight(damageMeter)
-    damageMeter:OnSystemPositionChange()
-    manager:SaveLayouts()
-    ArrangeShownSecondaryWindows(damageMeter, 2)
+    _G.securecallfunction(
+        damageMeter.OnSystemPositionChange,
+        damageMeter
+    )
+    _G.securecallfunction(manager.SaveLayouts, manager)
+    ArrangeShownSecondaryWindows(damageMeter)
     return true
 end
 
-function DM.ArrangeSecondaryWindows(firstIndex)
+function DM.ArrangeSecondaryWindows(indices)
     if _G.InCombatLockdown() then
         return false, "combat"
     end
@@ -118,14 +176,7 @@ function DM.ArrangeSecondaryWindows(firstIndex)
         return false, "unavailable"
     end
 
-    firstIndex = firstIndex or 2
-    if type(firstIndex) ~= "number"
-        or firstIndex < 2
-        or firstIndex % 1 ~= 0 then
-        return false, "invalid_value"
-    end
-
-    return ArrangeShownSecondaryWindows(damageMeter, firstIndex)
+    return ArrangeShownSecondaryWindows(damageMeter, indices)
 end
 
 function DM.ApplyDefaultPositionIfNeeded()
@@ -144,9 +195,18 @@ function DM.ApplyDefaultPositionIfNeeded()
 
     local canChange, reason = CanChangeLayout(manager)
     if canChange then
+        if type(_G.securecallfunction) ~= "function"
+            or type(damageMeter.OnSystemPositionChange) ~= "function"
+            or type(manager.SaveLayouts) ~= "function" then
+            return false, "unavailable"
+        end
+
         SetBottomRight(damageMeter)
-        damageMeter:OnSystemPositionChange()
-        manager:SaveLayouts()
+        _G.securecallfunction(
+            damageMeter.OnSystemPositionChange,
+            damageMeter
+        )
+        _G.securecallfunction(manager.SaveLayouts, manager)
         return true
     end
     if reason ~= "preset" then

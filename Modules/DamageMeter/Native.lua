@@ -11,7 +11,10 @@ local Native = DM.Native
 -- conversions are defined by Blizzard_EditMode/Shared/EditModeSettingDisplayInfo.lua;
 -- persistence and live updates use Blizzard_EditMode/Shared/EditModeManager.lua
 -- and EditModeSystemTemplates.lua; window management uses the public methods on
--- Blizzard_DamageMeter/DamageMeter.lua.
+-- Blizzard_DamageMeter/DamageMeter.lua. BFI only reads native Edit Mode
+-- settings and window counts here. Blizzard's own controls remain the sole
+-- mutation path for row-affecting settings, session windows, meter types, and
+-- secret-bearing combat data.
 
 local CVAR_ENABLED = "damageMeterEnabled"
 local CVAR_RESET_ON_NEW_INSTANCE = "damageMeterResetOnNewInstance"
@@ -95,95 +98,6 @@ local SETTING_DEFINITIONS = {
     },
 }
 
-local DAMAGE_METER_TYPE_DEFINITIONS = {
-    {
-        key = "damageDone",
-        value = _G.Enum.DamageMeterType.DamageDone,
-        labelGlobal = "DAMAGE_METER_TYPE_DAMAGE_DONE",
-    },
-    {
-        key = "dps",
-        value = _G.Enum.DamageMeterType.Dps,
-        labelGlobal = "DAMAGE_METER_TYPE_DPS",
-    },
-    {
-        key = "healingDone",
-        value = _G.Enum.DamageMeterType.HealingDone,
-        labelGlobal = "DAMAGE_METER_TYPE_HEALING_DONE",
-    },
-    {
-        key = "hps",
-        value = _G.Enum.DamageMeterType.Hps,
-        labelGlobal = "DAMAGE_METER_TYPE_HPS",
-    },
-    {
-        key = "absorbs",
-        value = _G.Enum.DamageMeterType.Absorbs,
-        labelGlobal = "DAMAGE_METER_TYPE_ABSORBS",
-    },
-    {
-        key = "interrupts",
-        value = _G.Enum.DamageMeterType.Interrupts,
-        labelGlobal = "DAMAGE_METER_TYPE_INTERRUPTS",
-    },
-    {
-        key = "dispels",
-        value = _G.Enum.DamageMeterType.Dispels,
-        labelGlobal = "DAMAGE_METER_TYPE_DISPELS",
-    },
-    {
-        key = "damageTaken",
-        value = _G.Enum.DamageMeterType.DamageTaken,
-        labelGlobal = "DAMAGE_METER_TYPE_DAMAGE_TAKEN",
-    },
-    {
-        key = "avoidableDamageTaken",
-        value = _G.Enum.DamageMeterType.AvoidableDamageTaken,
-        labelGlobal = "DAMAGE_METER_TYPE_AVOIDABLE_DAMAGE_TAKEN",
-    },
-    {
-        key = "deaths",
-        value = _G.Enum.DamageMeterType.Deaths,
-        labelGlobal = "DAMAGE_METER_TYPE_DEATHS",
-    },
-    {
-        key = "enemyDamageTaken",
-        value = _G.Enum.DamageMeterType.EnemyDamageTaken,
-        labelGlobal = "DAMAGE_METER_TYPE_ENEMY_DAMAGE_TAKEN",
-    },
-}
-
-local DAMAGE_METER_TYPE_SET = {}
-for _, definition in ipairs(DAMAGE_METER_TYPE_DEFINITIONS) do
-    DAMAGE_METER_TYPE_SET[definition.value] = true
-end
-
-local TRIPLE_WINDOW_PRESET = {
-    _G.Enum.DamageMeterType.DamageDone,
-    _G.Enum.DamageMeterType.HealingDone,
-    _G.Enum.DamageMeterType.DamageTaken,
-}
-
-local function CopyArray(source)
-    local copy = {}
-    for i, value in ipairs(source) do
-        copy[i] = value
-    end
-    return copy
-end
-
-local function CopyTypeDefinitions()
-    local copy = {}
-    for i, definition in ipairs(DAMAGE_METER_TYPE_DEFINITIONS) do
-        copy[i] = {
-            key = definition.key,
-            value = definition.value,
-            labelGlobal = definition.labelGlobal,
-        }
-    end
-    return copy
-end
-
 local function CopyDefinition(definition)
     if not definition then return nil end
 
@@ -223,37 +137,8 @@ local function IsSettingReady(damageMeter, definition)
         and damageMeter:HasSetting(definition.setting)
 end
 
-local function IsValidSettingValue(definition, value)
-    if definition.boolean then
-        return type(value) == "boolean"
-    end
-    if type(value) ~= "number" then
-        return false
-    end
-    if definition.values then
-        return definition.values[value] == true
-    end
-    if value < definition.min or value > definition.max then
-        return false
-    end
-    return (value - definition.min) % definition.step == 0
-end
-
-local function IsValidWindowType(damageMeterType)
-    return type(damageMeterType) == "number"
-        and DAMAGE_METER_TYPE_SET[damageMeterType] == true
-end
-
 function Native.GetSettingDefinition(key)
     return CopyDefinition(SETTING_DEFINITIONS[key])
-end
-
-function Native.GetDamageMeterTypes()
-    return CopyTypeDefinitions()
-end
-
-function Native.GetTripleWindowPreset()
-    return CopyArray(TRIPLE_WINDOW_PRESET)
 end
 
 function Native.GetEnabled()
@@ -345,38 +230,6 @@ function Native.CanPersistLayout()
     return false, "preset"
 end
 
-function Native.SetSetting(key, value)
-    local definition = SETTING_DEFINITIONS[key]
-    if not definition then
-        return false, "unknown_setting"
-    end
-    if not IsValidSettingValue(definition, value) then
-        return false, "invalid_value"
-    end
-
-    local damageMeter = GetDamageMeter()
-    local manager = GetEditModeManager()
-    if not IsSettingReady(damageMeter, definition)
-        or not manager
-        or type(manager.OnSystemSettingChange) ~= "function"
-        or type(manager.SaveLayouts) ~= "function" then
-        return false, "unavailable"
-    end
-    local canPersist, reason = Native.CanPersistLayout()
-    if not canPersist then
-        return false, reason
-    end
-
-    local displayValue = definition.boolean and (value and 1 or 0) or value
-    manager:OnSystemSettingChange(
-        damageMeter,
-        definition.setting,
-        displayValue
-    )
-    manager:SaveLayouts()
-    return true
-end
-
 function Native.GetMaxWindowCount()
     local damageMeter = GetDamageMeter()
     if not damageMeter
@@ -398,99 +251,4 @@ function Native.GetWindowCount()
     end
 
     return damageMeter:GetCurrentSessionWindowCount()
-end
-
-function Native.GetWindowTypes()
-    local damageMeter = GetDamageMeter()
-    if not damageMeter
-        or type(damageMeter.GetMaxSessionWindowCount) ~= "function"
-        or type(damageMeter.GetSessionWindow) ~= "function"
-        or type(damageMeter.GetSessionWindowDamageMeterType) ~= "function" then
-        return nil, "unavailable"
-    end
-
-    local types = {}
-    local maxWindows = math.min(
-        damageMeter:GetMaxSessionWindowCount(),
-        MAX_SUPPORTED_WINDOWS
-    )
-    for i = 1, maxWindows do
-        local window = damageMeter:GetSessionWindow(i)
-        if window and window:IsShown() then
-            types[#types + 1] =
-                damageMeter:GetSessionWindowDamageMeterType(window)
-        end
-    end
-    return types
-end
-
-function Native.ConfigureWindows(types)
-    if type(types) ~= "table" then
-        return false, "invalid_value"
-    end
-
-    local count = #types
-    if count < 1 or count > MAX_SUPPORTED_WINDOWS then
-        return false, "window_count"
-    end
-    for key in next, types do
-        if type(key) ~= "number"
-            or key < 1
-            or key > count
-            or key % 1 ~= 0 then
-            return false, "invalid_value"
-        end
-    end
-    for i = 1, count do
-        if not IsValidWindowType(types[i]) then
-            return false, "invalid_value"
-        end
-    end
-    if type(_G.InCombatLockdown) == "function"
-        and _G.InCombatLockdown() then
-        return false, "combat"
-    end
-
-    local damageMeter = GetDamageMeter()
-    if not damageMeter
-        or type(damageMeter.GetMaxSessionWindowCount) ~= "function"
-        or type(damageMeter.GetSessionWindow) ~= "function"
-        or type(damageMeter.ShowNewSecondarySessionWindow) ~= "function"
-        or type(damageMeter.HideSessionWindow) ~= "function"
-        or type(damageMeter.SetSessionWindowDamageMeterType) ~= "function" then
-        return false, "unavailable"
-    end
-
-    local maxWindows = math.min(
-        damageMeter:GetMaxSessionWindowCount(),
-        MAX_SUPPORTED_WINDOWS
-    )
-    if count > maxWindows then
-        return false, "window_count"
-    end
-
-    for i = 1, count do
-        local window = damageMeter:GetSessionWindow(i)
-        if not window or not window:IsShown() then
-            damageMeter:ShowNewSecondarySessionWindow()
-            window = damageMeter:GetSessionWindow(i)
-        end
-        if not window or not window:IsShown() then
-            return false, "window_unavailable"
-        end
-        damageMeter:SetSessionWindowDamageMeterType(window, types[i])
-    end
-
-    for i = count + 1, maxWindows do
-        local window = damageMeter:GetSessionWindow(i)
-        if window and window:IsShown() then
-            damageMeter:HideSessionWindow(window)
-        end
-    end
-
-    return true
-end
-
-function Native.ApplyTripleWindowPreset()
-    return Native.ConfigureWindows(TRIPLE_WINDOW_PRESET)
 end

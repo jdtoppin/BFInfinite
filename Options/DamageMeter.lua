@@ -15,13 +15,11 @@ local windowsPane
 local appearancePane
 local actionsPane
 local combatRefreshFrame
+local nativeSettingWidgets = {}
 local nativeLayoutWidgets = {}
-local nativeWindowWidgets = {}
-local windowTypeSelections = {}
 local statusText
 local presetTip
 local windowCount
-local windowTypeDropdowns = {}
 
 local SETTING_ITEMS = {
     visibility = {
@@ -40,20 +38,6 @@ local SETTING_ITEMS = {
         {text = L["Compact"], value = _G.Enum.DamageMeterNumbers.Compact},
         {text = L["Complete"], value = _G.Enum.DamageMeterNumbers.Complete},
     },
-}
-
-local TYPE_LABEL_FALLBACKS = {
-    absorbs = L["Absorbs"],
-    avoidableDamageTaken = L["Avoidable Damage Taken"],
-    damageDone = L["Damage Done"],
-    damageTaken = L["Damage Taken"],
-    deaths = L["Deaths"],
-    dispels = L["Dispels"],
-    dps = L["Damage Per Second"],
-    enemyDamageTaken = L["Enemy Damage Taken"],
-    healingDone = L["Healing Done"],
-    hps = L["Healing Per Second"],
-    interrupts = L["Interrupts"],
 }
 
 local function SetStatus(message, color)
@@ -102,15 +86,15 @@ local function CreateDamageMeterPanel()
     scroll.scrollContent:SetHeight(805)
 end
 
-local function RegisterNativeLayoutWidgets(...)
+local function RegisterNativeSettingWidgets(...)
     for i = 1, select("#", ...) do
-        nativeLayoutWidgets[#nativeLayoutWidgets + 1] = select(i, ...)
+        nativeSettingWidgets[#nativeSettingWidgets + 1] = select(i, ...)
     end
 end
 
-local function RegisterNativeWindowWidgets(...)
+local function RegisterNativeLayoutWidgets(...)
     for i = 1, select("#", ...) do
-        nativeWindowWidgets[#nativeWindowWidgets + 1] = select(i, ...)
+        nativeLayoutWidgets[#nativeLayoutWidgets + 1] = select(i, ...)
     end
 end
 
@@ -123,14 +107,6 @@ local function HandleNativeResult(ok, reason)
     local message, color = GetErrorMessage(reason)
     SetStatus(message, color)
     return false
-end
-
-local function SetNativeSetting(key, value)
-    local ok, reason = DM.Native.SetSetting(key, value)
-    if not HandleNativeResult(ok, reason) and displayPane then
-        displayPane.Load()
-        layoutPane.Load()
-    end
 end
 
 local function CreateMeterPane()
@@ -199,10 +175,7 @@ local function CreateSettingDropdown(parent, key, label, x, y)
     dropdown:SetLabel(label)
     AF.SetPoint(dropdown, "TOPLEFT", parent, x, y)
     dropdown:SetItems(SETTING_ITEMS[key])
-    dropdown:SetOnSelect(function(value)
-        SetNativeSetting(key, value)
-    end)
-    RegisterNativeLayoutWidgets(dropdown)
+    RegisterNativeSettingWidgets(dropdown)
     return dropdown
 end
 
@@ -214,6 +187,7 @@ local function CreateDisplayPane()
         205
     )
     AF.SetPoint(displayPane, "TOPLEFT", meterPane, "BOTTOMLEFT", 0, -20)
+    displayPane:SetTips(L["Damage Meter Native Settings Read Only"])
 
     local visibility = CreateSettingDropdown(
         displayPane,
@@ -242,20 +216,14 @@ local function CreateDisplayPane()
         L["Show Specialization Icons"]
     )
     AF.SetPoint(showSpecIcon, "TOPLEFT", displayPane, 15, -143)
-    showSpecIcon:SetOnCheck(function(checked)
-        SetNativeSetting("showSpecIcon", checked)
-    end)
 
     local showClassColor = AF.CreateCheckButton(
         displayPane,
         L["Use Class Colors"]
     )
     AF.SetPoint(showClassColor, "TOPLEFT", displayPane, 15, -174)
-    showClassColor:SetOnCheck(function(checked)
-        SetNativeSetting("showClassColor", checked)
-    end)
 
-    RegisterNativeLayoutWidgets(showSpecIcon, showClassColor)
+    RegisterNativeSettingWidgets(showSpecIcon, showClassColor)
 
     function displayPane.Load()
         local value
@@ -296,10 +264,7 @@ local function CreateNativeSlider(parent, key, label, x, y)
     if isPercentage then
         slider.percentSign:Show()
     end
-    slider:SetAfterValueChanged(function(value)
-        SetNativeSetting(key, value)
-    end)
-    RegisterNativeLayoutWidgets(slider)
+    RegisterNativeSettingWidgets(slider)
     return slider
 end
 
@@ -311,7 +276,7 @@ local function CreateLayoutPane()
         330
     )
     AF.SetPoint(layoutPane, "TOPLEFT", displayPane, "TOPRIGHT", 20, 0)
-    layoutPane:SetTips(L["Damage Meter Layout Preset Tip"])
+    layoutPane:SetTips(L["Damage Meter Native Settings Read Only"])
 
     local widgets = {
         frameWidth = CreateNativeSlider(
@@ -346,7 +311,8 @@ local function CreateLayoutPane()
     AF.SetPoint(presetTip, "TOPRIGHT", layoutPane, -15, -272)
     presetTip:SetJustifyH("LEFT")
     presetTip:SetWordWrap(true)
-    presetTip:SetText(L["Damage Meter Layout Preset Tip"])
+    presetTip:SetColor("gray")
+    presetTip:SetText(L["Damage Meter Native Settings Read Only"])
 
     function layoutPane.Load()
         for key, widget in next, widgets do
@@ -358,47 +324,12 @@ local function CreateLayoutPane()
     end
 end
 
-local function BuildWindowTypeItems()
-    local items = {}
-    for _, definition in ipairs(DM.Native.GetDamageMeterTypes()) do
-        items[#items + 1] = {
-            text = _G[definition.labelGlobal]
-                or TYPE_LABEL_FALLBACKS[definition.key]
-                or definition.key,
-            value = definition.value,
-        }
-    end
-    return items
-end
-
-local function ApplyWindowSelections()
-    local count = windowCount:GetSelectedValue() or 1
-    local previousCount = DM.Native.GetWindowCount() or 1
-    local types = {}
-    for i = 1, count do
-        types[i] = windowTypeSelections[i]
-    end
-
-    local ok, reason = DM.Native.ConfigureWindows(types)
-    if HandleNativeResult(ok, reason) then
-        if count > previousCount then
-            if type(DM.ApplyDefaultPositionIfNeeded) == "function" then
-                DM.ApplyDefaultPositionIfNeeded()
-            end
-            if type(DM.ArrangeSecondaryWindows) == "function" then
-                DM.ArrangeSecondaryWindows(math.max(2, previousCount + 1))
-            end
-        end
-        windowsPane.Load()
-    end
-end
-
 local function CreateWindowsPane()
     windowsPane = AF.CreateTitledPane(
         scroll.scrollContent,
         L["Meters"],
         255,
-        315
+        105
     )
     AF.SetPoint(windowsPane, "TOPLEFT", displayPane, "BOTTOMLEFT", 0, -20)
     windowsPane:SetTips(L["Damage Meter Windows Tip"])
@@ -411,65 +342,13 @@ local function CreateWindowsPane()
         {text = "2", value = 2},
         {text = "3", value = 3},
     })
-    windowCount:SetOnSelect(function()
-        ApplyWindowSelections()
-    end)
-    RegisterNativeWindowWidgets(windowCount)
-
-    local typeItems = BuildWindowTypeItems()
-    for i = 1, 3 do
-        local dropdown = AF.CreateDropdown(windowsPane, 225)
-        windowTypeDropdowns[i] = dropdown
-        dropdown:SetLabel(L["Window " .. i])
-        AF.SetPoint(dropdown, "TOPLEFT", windowsPane, 15, -100 - ((i - 1) * 48))
-        dropdown:SetItems(typeItems)
-        dropdown:SetOnSelect(function(value)
-            windowTypeSelections[i] = value
-            if i <= (windowCount:GetSelectedValue() or 1) then
-                ApplyWindowSelections()
-            end
-        end)
-        RegisterNativeWindowWidgets(dropdown)
-    end
-
-    local triple = AF.CreateButton(
-        windowsPane,
-        L["Damage + Healing + Damage Taken"],
-        "BFI",
-        225,
-        25
-    )
-    AF.SetPoint(triple, "BOTTOMLEFT", windowsPane, 15, 12)
-    triple:SetOnClick(function()
-        local types = DM.Native.GetTripleWindowPreset()
-        local ok, reason = DM.Native.ConfigureWindows(types)
-        if HandleNativeResult(ok, reason) then
-            if type(DM.ApplyDefaultPositionIfNeeded) == "function" then
-                DM.ApplyDefaultPositionIfNeeded()
-            end
-            if type(DM.ArrangeSecondaryWindows) == "function" then
-                DM.ArrangeSecondaryWindows(2)
-            end
-            for i = 1, 3 do
-                windowTypeSelections[i] = types[i]
-            end
-            windowsPane.Load()
-        end
-    end)
-    RegisterNativeWindowWidgets(triple)
+    RegisterNativeSettingWidgets(windowCount)
 
     function windowsPane.Load()
-        local types = DM.Native.GetWindowTypes()
-        if type(types) ~= "table" then return end
-
-        local defaults = DM.Native.GetTripleWindowPreset()
-        for i = 1, 3 do
-            windowTypeSelections[i] = types[i]
-                or windowTypeSelections[i]
-                or defaults[i]
-            windowTypeDropdowns[i]:SetSelectedValue(windowTypeSelections[i])
+        local count = DM.Native.GetWindowCount()
+        if count ~= nil then
+            windowCount:SetSelectedValue(math.max(1, count))
         end
-        windowCount:SetSelectedValue(math.max(1, #types))
     end
 end
 
@@ -478,7 +357,7 @@ local function CreateAppearancePane()
         scroll.scrollContent,
         L["BFI Appearance"],
         255,
-        190
+        115
     )
     AF.SetPoint(appearancePane, "TOPLEFT", layoutPane, "BOTTOMLEFT", 0, -20)
     appearancePane:SetTips(L["Damage Meter Skin Tip"])
@@ -504,44 +383,12 @@ local function CreateAppearancePane()
         RefreshDamageMeter()
     end)
 
-    local barTexture = AF.CreateDropdown(appearancePane, 105)
-    barTexture:SetLabel(L["Bar Texture"])
-    AF.SetPoint(barTexture, "TOPLEFT", appearancePane, 15, -115)
-    barTexture:SetItems(AF.LSM_GetBarTextureDropdownItems())
-    barTexture:SetOnSelect(function(value)
-        DM.config.barTexture = value
-        RefreshDamageMeter()
-    end)
-
-    local barBackgroundAlpha = AF.CreateSlider(
-        appearancePane,
-        L["Bar Background Opacity"],
-        105,
-        0,
-        1,
-        0.05,
-        true,
-        false
-    )
-    AF.SetPoint(barBackgroundAlpha, "TOPLEFT", appearancePane, 135, -115)
-    barBackgroundAlpha:SetAfterValueChanged(function(value)
-        DM.config.barBackgroundAlpha = value
-        RefreshDamageMeter()
-    end)
-
     function appearancePane.Load()
         local config = DM.config
         enabled:SetChecked(config.enabled)
         accentHeader:SetChecked(config.accentHeader)
-        barTexture:SetSelectedValue(config.barTexture)
-        barBackgroundAlpha:SetValue(config.barBackgroundAlpha)
 
-        AF.SetEnabled(
-            config.enabled,
-            accentHeader,
-            barTexture,
-            barBackgroundAlpha
-        )
+        AF.SetEnabled(config.enabled, accentHeader)
     end
 end
 
@@ -562,7 +409,14 @@ local function CreateActionsPane()
         530,
         100
     )
-    AF.SetPoint(actionsPane, "TOPLEFT", windowsPane, "BOTTOMLEFT", 0, -20)
+    AF.SetPoint(
+        actionsPane,
+        "TOPRIGHT",
+        appearancePane,
+        "BOTTOMRIGHT",
+        0,
+        -20
+    )
 
     local bottomRight = AF.CreateButton(
         actionsPane,
@@ -636,16 +490,12 @@ local function LoadNativeControls()
         combatRefreshFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     end
 
+    AF.SetEnabled(false, unpack(nativeSettingWidgets))
     AF.SetEnabled(
         nativeReady and canPersist and not inCombat,
         unpack(nativeLayoutWidgets)
     )
-    AF.SetEnabled(
-        nativeReady and not inCombat,
-        unpack(nativeWindowWidgets)
-    )
-
-    presetTip:SetShown(nativeReady and persistError == "preset")
+    presetTip:SetShown(nativeReady)
 
     if nativeReady then
         displayPane.Load()

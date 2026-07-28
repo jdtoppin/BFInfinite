@@ -16,14 +16,21 @@ local function assertPoint(frame, expected, message)
     end
 end
 
-local function newWindow(name, shown)
+local function assertArray(actual, expected, message)
+    assertEqual(#actual, #expected, message .. " length")
+    for i, value in ipairs(expected) do
+        assertEqual(actual[i], value, message .. " value " .. i)
+    end
+end
+
+local function newWindow(name, shown, initialUserPlaced)
     local window = {
         clearCalls = 0,
         name = name,
         points = {},
         shown = shown,
         sizeCalls = {},
-        userPlaced = nil,
+        userPlaced = initialUserPlaced,
     }
 
     function window:ClearAllPoints()
@@ -33,6 +40,10 @@ local function newWindow(name, shown)
 
     function window:IsShown()
         return self.shown
+    end
+
+    function window:IsUserPlaced()
+        return self.userPlaced
     end
 
     function window:SetPoint(...)
@@ -65,6 +76,8 @@ local function loadLayout(options)
         persistReason = options.persistReason,
         positionChangeCalls = 0,
         saveCalls = 0,
+        secureCalls = {},
+        secureFunctionNames = {},
         uiParent = {},
         windows = {},
     }
@@ -97,7 +110,13 @@ local function loadLayout(options)
     local windowCount = options.windowCount or 1
     state.windows[1] = damageMeter
     for i = 2, windowCount do
-        state.windows[i] = newWindow("DamageMeterSessionWindow" .. i, true)
+        local userPlaced = options.userPlacedIndices
+            and options.userPlacedIndices[i]
+        state.windows[i] = newWindow(
+            "DamageMeterSessionWindow" .. i,
+            true,
+            userPlaced
+        )
     end
 
     local manager = {}
@@ -110,6 +129,10 @@ local function loadLayout(options)
     function manager:SaveLayouts()
         state.saveCalls = state.saveCalls + 1
     end
+
+    state.secureFunctionNames[damageMeter.OnSystemPositionChange] =
+        "position"
+    state.secureFunctionNames[manager.SaveLayouts] = "save"
 
     local damageMeterModule = {
         Native = {
@@ -127,6 +150,14 @@ local function loadLayout(options)
             DamageMeter = damageMeterModule,
         },
     }
+    local securecallfunction
+    if options.secureCallAvailable ~= false then
+        securecallfunction = function(func, ...)
+            state.secureCalls[#state.secureCalls + 1] =
+                state.secureFunctionNames[func]
+            return func(...)
+        end
+    end
     local environment = {
         DamageMeter = damageMeter,
         EditModeManagerFrame = manager,
@@ -136,6 +167,8 @@ local function loadLayout(options)
         UIParent = state.uiParent,
         ipairs = ipairs,
         math = math,
+        next = next,
+        securecallfunction = securecallfunction,
         select = select,
         type = type,
     }
@@ -162,11 +195,15 @@ assertPoint(savedMeter, {
     "BOTTOMRIGHT",
     saved.uiParent,
     "BOTTOMRIGHT",
-    -20,
-    20,
+    0,
+    0,
 }, "custom layout primary point")
 assertEqual(saved.positionChangeCalls, 1, "custom layout position persisted")
 assertEqual(saved.saveCalls, 1, "custom layout saved")
+assertArray(saved.secureCalls, {
+    "position",
+    "save",
+}, "custom layout secure calls")
 
 local second = saved.windows[2]
 assertEqual(second.clearCalls, 1, "second window points cleared")
@@ -221,8 +258,8 @@ assertPoint(runtimeMeter, {
     "BOTTOMRIGHT",
     runtime.uiParent,
     "BOTTOMRIGHT",
-    -20,
-    20,
+    0,
+    0,
 }, "preset runtime primary point")
 assertEqual(runtime.positionChangeCalls, 0, "preset runtime not persisted")
 assertEqual(runtime.saveCalls, 0, "preset runtime not saved")
@@ -245,12 +282,16 @@ assertPoint(automaticMeter, {
     "BOTTOMRIGHT",
     automatic.uiParent,
     "BOTTOMRIGHT",
-    -20,
-    20,
+    0,
+    0,
 }, "custom default primary point")
 assertEqual(automatic.positionChangeCalls, 1,
     "custom default primary persisted")
 assertEqual(automatic.saveCalls, 1, "custom default layout saved")
+assertArray(automatic.secureCalls, {
+    "position",
+    "save",
+}, "custom default secure calls")
 assertEqual(automatic.windows[2].clearCalls, 0,
     "custom default secondary preserved")
 assertEqual(#automatic.windows[2].sizeCalls, 0,
@@ -281,16 +322,40 @@ assertPoint(custom.windows[2], {
     0,
 }, "custom secondary point")
 
+local exactDM, exact = loadLayout({
+    windowCount = 3,
+})
+ok, reason = exactDM.ArrangeSecondaryWindows({2, 3})
+assertEqual(ok, true, "exact secondary layout apply")
+assertEqual(reason, nil, "exact secondary layout reason")
+assertPoint(exact.windows[2], {
+    "BOTTOMRIGHT",
+    exact.windows[1],
+    "BOTTOMLEFT",
+    -8,
+    0,
+}, "exact second window point")
+assertPoint(exact.windows[3], {
+    "BOTTOMRIGHT",
+    exact.windows[2],
+    "BOTTOMLEFT",
+    -8,
+    0,
+}, "exact third window point")
+
 local partialDM, partial = loadLayout({
     windowCount = 3,
 })
-ok, reason = partialDM.ArrangeSecondaryWindows(3)
+ok, reason = partialDM.ArrangeSecondaryWindows({3})
 assertEqual(ok, true, "new secondary layout apply")
 assertEqual(reason, nil, "new secondary layout reason")
-assertEqual(partial.windows[2].clearCalls, 0,
-    "existing secondary position preserved")
-assertEqual(#partial.windows[2].sizeCalls, 0,
-    "existing secondary size preserved")
+assertPoint(partial.windows[2], {
+    "BOTTOMRIGHT",
+    partial.windows[1],
+    "BOTTOMLEFT",
+    -8,
+    0,
+}, "existing unplaced secondary point")
 assertPoint(partial.windows[3], {
     "BOTTOMRIGHT",
     partial.windows[2],
@@ -298,6 +363,82 @@ assertPoint(partial.windows[3], {
     -8,
     0,
 }, "new secondary point")
+
+local mixedDM, mixed = loadLayout({
+    userPlacedIndices = {
+        [2] = true,
+    },
+    windowCount = 3,
+})
+ok, reason = mixedDM.ArrangeSecondaryWindows({3})
+assertEqual(ok, true, "mixed secondary layout apply")
+assertEqual(reason, nil, "mixed secondary layout reason")
+assertEqual(mixed.windows[2].clearCalls, 0,
+    "existing user-placed secondary preserved")
+assertPoint(mixed.windows[3], {
+    "BOTTOMRIGHT",
+    mixed.windows[2],
+    "BOTTOMLEFT",
+    -8,
+    0,
+}, "new secondary follows existing user placement")
+
+local userPlacedDM, userPlaced = loadLayout({
+    userPlacedIndices = {
+        [2] = true,
+        [3] = true,
+    },
+    windowCount = 3,
+})
+ok, reason = userPlacedDM.ArrangeSecondaryWindows({2, 3})
+assertEqual(ok, true, "user-placed exact layout apply")
+assertEqual(reason, nil, "user-placed exact layout reason")
+assertEqual(userPlaced.windows[2].clearCalls, 0,
+    "user-placed second window preserved")
+assertEqual(userPlaced.windows[3].clearCalls, 0,
+    "user-placed third window preserved")
+
+ok, reason = userPlacedDM.ArrangeSecondaryWindows()
+assertEqual(ok, true, "explicit all layout apply")
+assertEqual(reason, nil, "explicit all layout reason")
+assertEqual(userPlaced.windows[2].clearCalls, 1,
+    "explicit all moves user-placed second window")
+assertEqual(userPlaced.windows[3].clearCalls, 1,
+    "explicit all moves user-placed third window")
+
+local invalidDM = loadLayout({
+    windowCount = 3,
+})
+ok, reason = invalidDM.ArrangeSecondaryWindows(3)
+assertEqual(ok, false, "numeric secondary target refused")
+assertEqual(reason, "invalid_value", "numeric target refusal reason")
+ok, reason = invalidDM.ArrangeSecondaryWindows({1})
+assertEqual(ok, false, "primary target refused")
+assertEqual(reason, "invalid_value", "primary target refusal reason")
+ok, reason = invalidDM.ArrangeSecondaryWindows({[2] = 3})
+assertEqual(ok, false, "sparse target list refused")
+assertEqual(reason, "invalid_value", "sparse target refusal reason")
+
+local unavailableDM, unavailable, unavailableMeter = loadLayout({
+    secureCallAvailable = false,
+    windowCount = 2,
+})
+ok, reason = unavailableDM.ApplyBottomRightLayout()
+assertEqual(ok, false, "missing secure call refused")
+assertEqual(reason, "unavailable", "missing secure call reason")
+assertEqual(unavailableMeter.clearCalls, 0,
+    "missing secure call preserves primary position")
+assertEqual(unavailable.positionChangeCalls, 0,
+    "missing secure call skips position persistence")
+assertEqual(unavailable.saveCalls, 0,
+    "missing secure call skips layout save")
+
+ok, reason = unavailableDM.ApplyDefaultPositionIfNeeded()
+assertEqual(ok, false, "default placement without secure call refused")
+assertEqual(reason, "unavailable",
+    "default placement missing secure call reason")
+assertEqual(unavailableMeter.clearCalls, 0,
+    "default placement preserves primary without secure call")
 
 local combatDM, combat, combatMeter = loadLayout({
     inCombat = true,
