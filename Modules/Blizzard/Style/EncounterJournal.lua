@@ -71,7 +71,11 @@ local function SetFlatTexture(texture, color, alpha)
 end
 
 local function SetTextColor(region, color)
-    if region and region.SetTextColor then
+    if not region or not region.SetTextColor then return end
+
+    if region.IsObjectType and region:IsObjectType("SimpleHTML") then
+        region:SetTextColor("P", AF.GetColorRGB(color))
+    else
         region:SetTextColor(AF.GetColorRGB(color))
     end
 end
