@@ -25,7 +25,7 @@ end
 -- leading edge over a quiet gray surface that fades into the panel. A second
 -- class-colour gradient appears only for hover and selected state, without
 -- bringing back Blizzard's heavy orange card borders.
-local function CreateFadeSurface(frame, neutralOnly)
+local function CreateFadeSurface(frame)
     if frame._BFIHousingFadeSurface then return end
     frame._BFIHousingFadeSurface = true
 
@@ -54,8 +54,6 @@ local function CreateFadeSurface(frame, neutralOnly)
     AF.SetPoint(background, "RIGHT")
     AF.SetPoint(background, "BOTTOM", accent)
     frame.BFIHousingFadeBackground = background
-
-    if neutralOnly then return end
 
     local state = AF.CreateGradientTexture(
         frame,
@@ -365,26 +363,48 @@ local function StyleCatalogCategory(frame)
     UpdateCatalogCategory(frame)
 end
 
-local function UpdateCatalogBackButton(button, isPressed)
-    local state = "normal"
+local function HideCatalogBackButtonChrome(button)
+    button.Icon:SetAlpha(0)
+    button.Icon:Hide()
+    button.HoverIcon:SetAlpha(0)
+    button.HoverIcon:Hide()
+    button.Text:SetAlpha(0)
+    button.Text:Hide()
+end
+
+local function UpdateCatalogBackButton(button)
+    HideCatalogBackButtonChrome(button)
+
+    local color = "darkgray"
     if not button:IsEnabled() then
-        state = "disabled"
-    elseif isPressed then
-        state = "pressed"
+        color = "disabled"
     elseif button._BFIHousingHovered or button:IsMouseMotionFocus() then
-        state = "hovered"
+        color = "BFI"
     end
-    SetFadeSurfaceState(button, state)
+    button.BFIHousingBackIcon:SetVertexColor(AF.GetColorRGB(color))
 end
 
 local function StyleCatalogBackButton(button)
-    button.expand = true
-    button.align = nil
+    button.expand = nil
+    button.align = "center"
+    button.fixedWidth = 35
+    button.fixedHeight = 35
+    AF.SetSize(button, 35, 35)
 
     if not button._BFIHousingBackStyled then
         button._BFIHousingBackStyled = true
-        StyleActionButton(button)
-        CreateFadeSurface(button)
+
+        button.enabledTooltip = button.enabledTooltip or button.Text:GetText()
+        button.Icon.ignoreInLayout = true
+        button.HoverIcon.ignoreInLayout = true
+        button.Text.ignoreInLayout = true
+        HideCatalogBackButtonChrome(button)
+
+        local icon = AF.CreateTexture(button, AF.GetIcon("ArrowLeft1"), "darkgray", "ARTWORK", 1)
+        AF.SetSize(icon, 20, 20)
+        AF.SetPoint(icon, "CENTER")
+        button.BFIHousingBackIcon = icon
+
         button:HookScript("OnEnter", function(self)
             self._BFIHousingHovered = true
             UpdateCatalogBackButton(self)
@@ -395,8 +415,9 @@ local function StyleCatalogBackButton(button)
         end)
         button:HookScript("OnHide", function(self)
             self._BFIHousingHovered = nil
-            SetFadeSurfaceState(self, "normal")
+            UpdateCatalogBackButton(self)
         end)
+        button:HookScript("OnShow", UpdateCatalogBackButton)
         button:HookScript("OnEnable", UpdateCatalogBackButton)
         button:HookScript("OnDisable", UpdateCatalogBackButton)
         hooksecurefunc(button, "UpdateVisuals", UpdateCatalogBackButton)
@@ -446,7 +467,6 @@ local function UpdatePreviewedCatalogEntry(preview, entryInfo)
     if not catalog then return end
 
     HideCatalogPreviewChrome(preview)
-    SetFadeSurfaceState(preview, "normal")
     catalog._BFIPreviewedRecordID = entryInfo and entryInfo.recordID or nil
     catalog._BFIPreviewedEntryType = entryInfo and entryInfo.entryType or nil
     StyleVisibleCatalogEntries(catalog.OptionsContainer.ScrollBox)
@@ -483,8 +503,6 @@ local function StyleCatalog(catalog)
 
     local preview = catalog.PreviewFrame
     HideCatalogPreviewChrome(preview)
-    CreateFadeSurface(preview, true)
-    SetFadeSurfaceState(preview, "normal")
 
     preview._BFIHousingCatalog = catalog
     hooksecurefunc(preview, "ClearPreviewData", UpdatePreviewedCatalogEntry)
