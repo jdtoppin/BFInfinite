@@ -1,5 +1,8 @@
 ---@type BFI
 local BFI = select(2, ...)
+local L = BFI.L
+---@class Funcs
+local F = BFI.funcs
 ---@class DamageMeter
 local DM = BFI.modules.DamageMeter
 ---@type Style
@@ -18,6 +21,8 @@ local scrollBarStates = setmetatable({}, {__mode = "k"})
 local pendingSecondaryPlacements = {}
 local placementFrame
 local COMPACT_HEADER_HEIGHT = 26
+local HEADER_CONTROL_SIZE = 18
+local HEADER_CONTROL_GAP = 2
 
 -- FrameXML evidence: Retail PTR 12.1.0.68914, Gethe/wow-ui-source commit
 -- d3915c78aba77a7a9be76acbfa35c674bbb6abe9. Blizzard_DamageMeter owns all
@@ -102,6 +107,21 @@ local function DisableOwnedMouse(frame)
     frame:EnableMouse(false)
     if frame.EnableMouseMotion then
         frame:EnableMouseMotion(false)
+    end
+end
+
+local function CapturePoints(region)
+    local points = {}
+    for i = 1, region:GetNumPoints() do
+        points[i] = {region:GetPoint(i)}
+    end
+    return points
+end
+
+local function RestorePoints(region, points)
+    region:ClearAllPoints()
+    for _, point in ipairs(points) do
+        region:SetPoint(unpack(point))
     end
 end
 
@@ -632,6 +652,90 @@ local function ApplySessionBackground(sessionWindow)
     sessionWindow._BFIDamageMeterBodyFill:Show()
 end
 
+local function ApplySettingsNavigation(
+    sessionWindow,
+    settingsDropdown,
+    sessionDropdown,
+    minimizeButton
+)
+    -- Blizzard's dropdown keeps ownership of window creation, deletion,
+    -- locking, and Edit Mode. The separate addon-owned gear opens BFI
+    -- directly without replacing or post-processing the native menu.
+    local state = sessionWindowStates[sessionWindow]
+    if not state then return end
+
+    local button = state.bfiSettingsButton
+    if not button then
+        button = AF.CreateButton(
+            sessionWindow,
+            nil,
+            "BFI",
+            HEADER_CONTROL_SIZE,
+            HEADER_CONTROL_SIZE
+        )
+        state.bfiSettingsButton = button
+        button:SetTexture(
+            AF.GetIcon("Settings"),
+            {13, 13},
+            {"CENTER", 0, 0}
+        )
+        button:SetTooltip(L["Open BFI Damage Meter Settings"])
+        button:SetOnClick(function()
+            if type(F.OpenOptionsFrame) == "function" then
+                F.OpenOptionsFrame("damageMeter")
+            end
+        end)
+
+        settingsDropdown:HookScript("OnEnter", function(self)
+            if IsActive() then
+                AF.ShowTooltip(
+                    self,
+                    "TOPRIGHT",
+                    0,
+                    2,
+                    {L["Damage Meter Window Menu"]}
+                )
+            end
+        end)
+        settingsDropdown:HookScript("OnLeave", AF.HideTooltip)
+    end
+
+    button:ClearAllPoints()
+    AF.SetPoint(
+        button,
+        "RIGHT",
+        minimizeButton,
+        "LEFT",
+        -HEADER_CONTROL_GAP,
+        0
+    )
+    button:Show()
+
+    settingsDropdown:ClearAllPoints()
+    settingsDropdown:SetSize(
+        HEADER_CONTROL_SIZE,
+        HEADER_CONTROL_SIZE
+    )
+    AF.SetPoint(
+        settingsDropdown,
+        "RIGHT",
+        button,
+        "LEFT",
+        -HEADER_CONTROL_GAP,
+        0
+    )
+
+    sessionDropdown:ClearAllPoints()
+    AF.SetPoint(
+        sessionDropdown,
+        "RIGHT",
+        settingsDropdown,
+        "LEFT",
+        -HEADER_CONTROL_GAP,
+        0
+    )
+end
+
 local function ApplySessionControlChrome(sessionWindow)
     local typeDropdown = sessionWindow:GetDamageMeterTypeDropdown()
     ApplyControlChrome(
@@ -664,10 +768,10 @@ local function ApplySessionControlChrome(sessionWindow)
     ApplyControlChrome(
         settingsDropdown,
         {
-            icon = "Settings",
-            iconSize = 13,
-            width = 18,
-            height = 18,
+            icon = "Menu3",
+            iconSize = 12,
+            width = HEADER_CONTROL_SIZE,
+            height = HEADER_CONTROL_SIZE,
         },
         settingsDropdown.Icon
     )
@@ -686,6 +790,13 @@ local function ApplySessionControlChrome(sessionWindow)
         minimizeButton:GetPushedTexture(),
         minimizeButton:GetHighlightTexture(),
         minimizeButton:GetDisabledTexture()
+    )
+
+    ApplySettingsNavigation(
+        sessionWindow,
+        settingsDropdown,
+        sessionDropdown,
+        minimizeButton
     )
 
     ApplyScrollBarChrome(sessionWindow:GetScrollBar())
@@ -714,9 +825,15 @@ function Skin.ApplySessionWindow(sessionWindow)
     local state = sessionWindowStates[sessionWindow]
     if not state then
         local header = sessionWindow:GetHeader()
+        local settingsDropdown = sessionWindow:GetSettingsDropdown()
+        local sessionDropdown = sessionWindow:GetSessionDropdown()
         state = {
             headerAlpha = header:GetAlpha(),
             headerHeight = header:GetHeight(),
+            settingsDropdownWidth = settingsDropdown:GetWidth(),
+            settingsDropdownHeight = settingsDropdown:GetHeight(),
+            settingsDropdownPoints = CapturePoints(settingsDropdown),
+            sessionDropdownPoints = CapturePoints(sessionDropdown),
         }
         sessionWindowStates[sessionWindow] = state
 
@@ -781,6 +898,9 @@ local function RestoreSourceWindow(sourceWindow, state)
 end
 
 local function RestoreSessionWindow(sessionWindow, state)
+    if state.bfiSettingsButton then
+        state.bfiSettingsButton:Hide()
+    end
     if sessionWindow._BFIDamageMeterHeaderFill then
         sessionWindow._BFIDamageMeterHeaderFill:Hide()
     end
@@ -793,6 +913,18 @@ local function RestoreSessionWindow(sessionWindow, state)
 
     sessionWindow:GetHeader():SetAlpha(state.headerAlpha)
     sessionWindow:GetHeader():SetHeight(state.headerHeight)
+    sessionWindow:GetSettingsDropdown():SetSize(
+        state.settingsDropdownWidth,
+        state.settingsDropdownHeight
+    )
+    RestorePoints(
+        sessionWindow:GetSettingsDropdown(),
+        state.settingsDropdownPoints
+    )
+    RestorePoints(
+        sessionWindow:GetSessionDropdown(),
+        state.sessionDropdownPoints
+    )
     sessionWindow:UpdateBackground()
 end
 

@@ -21,6 +21,13 @@ local statusText
 local presetTip
 local windowCount
 
+local CONTENT_WIDTH = 530
+local CONTENT_HEIGHT = 905
+local SECTION_GAP = 20
+local HALF_WIDTH = 255
+local WIDE_CONTROL_WIDTH = 150
+local SLIDER_WIDTH = 140
+
 local SETTING_ITEMS = {
     visibility = {
         {text = L["Always"], value = _G.Enum.DamageMeterVisibility.Always},
@@ -82,8 +89,8 @@ local function CreateDamageMeterPanel()
     AF.SetPoint(scroll, "TOPLEFT", damageMeterPanel, 15, -15)
     AF.SetPoint(scroll, "BOTTOMRIGHT", damageMeterPanel, -10, 15)
     scroll:SetScrollStep(50)
-    scroll.scrollContent:SetWidth(530)
-    scroll.scrollContent:SetHeight(805)
+    scroll.scrollContent:SetWidth(CONTENT_WIDTH)
+    scroll.scrollContent:SetHeight(CONTENT_HEIGHT)
 end
 
 local function RegisterNativeSettingWidgets(...)
@@ -113,8 +120,8 @@ local function CreateMeterPane()
     meterPane = AF.CreateTitledPane(
         scroll.scrollContent,
         L["Native Meter"],
-        530,
-        105
+        CONTENT_WIDTH,
+        115
     )
     AF.SetPoint(meterPane, "TOPLEFT")
     meterPane:SetTips(L["Damage Meter Native Tip"])
@@ -171,7 +178,7 @@ local function CreateMeterPane()
 end
 
 local function CreateSettingDropdown(parent, key, label, x, y)
-    local dropdown = AF.CreateDropdown(parent, 105)
+    local dropdown = AF.CreateDropdown(parent, WIDE_CONTROL_WIDTH)
     dropdown:SetLabel(label)
     AF.SetPoint(dropdown, "TOPLEFT", parent, x, y)
     dropdown:SetItems(SETTING_ITEMS[key])
@@ -182,11 +189,18 @@ end
 local function CreateDisplayPane()
     displayPane = AF.CreateTitledPane(
         scroll.scrollContent,
-        L["Display"],
-        255,
-        205
+        L["Blizzard Display (Read-only)"],
+        CONTENT_WIDTH,
+        145
     )
-    AF.SetPoint(displayPane, "TOPLEFT", meterPane, "BOTTOMLEFT", 0, -20)
+    AF.SetPoint(
+        displayPane,
+        "TOPLEFT",
+        meterPane,
+        "BOTTOMLEFT",
+        0,
+        -SECTION_GAP
+    )
     displayPane:SetTips(L["Damage Meter Native Settings Read Only"])
 
     local visibility = CreateSettingDropdown(
@@ -194,34 +208,34 @@ local function CreateDisplayPane()
         "visibility",
         L["Visibility"],
         15,
-        -45
+        -50
     )
     local style = CreateSettingDropdown(
         displayPane,
         "style",
         L["Style"],
-        135,
-        -45
+        190,
+        -50
     )
     local numbers = CreateSettingDropdown(
         displayPane,
         "numbers",
         L["Number Format"],
-        15,
-        -100
+        365,
+        -50
     )
 
     local showSpecIcon = AF.CreateCheckButton(
         displayPane,
         L["Show Specialization Icons"]
     )
-    AF.SetPoint(showSpecIcon, "TOPLEFT", displayPane, 15, -143)
+    AF.SetPoint(showSpecIcon, "TOPLEFT", displayPane, 15, -103)
 
     local showClassColor = AF.CreateCheckButton(
         displayPane,
         L["Use Class Colors"]
     )
-    AF.SetPoint(showClassColor, "TOPLEFT", displayPane, 15, -174)
+    AF.SetPoint(showClassColor, "TOPLEFT", displayPane, 280, -103)
 
     RegisterNativeSettingWidgets(showSpecIcon, showClassColor)
 
@@ -253,7 +267,7 @@ local function CreateNativeSlider(parent, key, label, x, y)
     local slider = AF.CreateSlider(
         parent,
         label,
-        105,
+        SLIDER_WIDTH,
         definition.min,
         definition.max,
         definition.step,
@@ -271,44 +285,51 @@ end
 local function CreateLayoutPane()
     layoutPane = AF.CreateTitledPane(
         scroll.scrollContent,
-        L["Layout"],
-        255,
-        330
+        L["Blizzard Layout (Read-only)"],
+        CONTENT_WIDTH,
+        290
     )
-    AF.SetPoint(layoutPane, "TOPLEFT", displayPane, "TOPRIGHT", 20, 0)
+    AF.SetPoint(
+        layoutPane,
+        "TOPLEFT",
+        displayPane,
+        "BOTTOMLEFT",
+        0,
+        -SECTION_GAP
+    )
     layoutPane:SetTips(L["Damage Meter Native Settings Read Only"])
 
     local widgets = {
         frameWidth = CreateNativeSlider(
-            layoutPane, "frameWidth", L["Frame Width"], 15, -45
+            layoutPane, "frameWidth", L["Frame Width"], 15, -55
         ),
         frameHeight = CreateNativeSlider(
-            layoutPane, "frameHeight", L["Frame Height"], 135, -45
+            layoutPane, "frameHeight", L["Frame Height"], 190, -55
         ),
         barHeight = CreateNativeSlider(
-            layoutPane, "barHeight", L["Bar Height"], 15, -105
+            layoutPane, "barHeight", L["Bar Height"], 365, -55
         ),
         padding = CreateNativeSlider(
-            layoutPane, "padding", L["Padding"], 135, -105
+            layoutPane, "padding", L["Padding"], 15, -120
         ),
         textSize = CreateNativeSlider(
-            layoutPane, "textSize", L["Text Size"], 15, -165
+            layoutPane, "textSize", L["Text Size"], 190, -120
         ),
         transparency = CreateNativeSlider(
-            layoutPane, "transparency", L["Window Opacity"], 135, -165
+            layoutPane, "transparency", L["Window Opacity"], 365, -120
         ),
         backgroundTransparency = CreateNativeSlider(
             layoutPane,
             "backgroundTransparency",
             L["Background Opacity"],
             15,
-            -225
+            -185
         ),
     }
 
     presetTip = AF.CreateFontString(layoutPane, nil, "firebrick")
-    AF.SetPoint(presetTip, "TOPLEFT", layoutPane, 15, -272)
-    AF.SetPoint(presetTip, "TOPRIGHT", layoutPane, -15, -272)
+    AF.SetPoint(presetTip, "TOPLEFT", layoutPane, 15, -230)
+    AF.SetPoint(presetTip, "TOPRIGHT", layoutPane, -15, -230)
     presetTip:SetJustifyH("LEFT")
     presetTip:SetWordWrap(true)
     presetTip:SetColor("gray")
@@ -327,16 +348,23 @@ end
 local function CreateWindowsPane()
     windowsPane = AF.CreateTitledPane(
         scroll.scrollContent,
-        L["Meters"],
-        255,
-        105
+        L["Blizzard Meters (Read-only)"],
+        HALF_WIDTH,
+        115
     )
-    AF.SetPoint(windowsPane, "TOPLEFT", displayPane, "BOTTOMLEFT", 0, -20)
+    AF.SetPoint(
+        windowsPane,
+        "TOPLEFT",
+        layoutPane,
+        "BOTTOMLEFT",
+        0,
+        -SECTION_GAP
+    )
     windowsPane:SetTips(L["Damage Meter Windows Tip"])
 
-    windowCount = AF.CreateDropdown(windowsPane, 105)
+    windowCount = AF.CreateDropdown(windowsPane, 190)
     windowCount:SetLabel(L["Window Count"])
-    AF.SetPoint(windowCount, "TOPLEFT", windowsPane, 15, -45)
+    AF.SetPoint(windowCount, "TOPLEFT", windowsPane, 15, -50)
     windowCount:SetItems({
         {text = "1", value = 1},
         {text = "2", value = 2},
@@ -356,10 +384,17 @@ local function CreateAppearancePane()
     appearancePane = AF.CreateTitledPane(
         scroll.scrollContent,
         L["BFI Appearance"],
-        255,
+        HALF_WIDTH,
         115
     )
-    AF.SetPoint(appearancePane, "TOPLEFT", layoutPane, "BOTTOMLEFT", 0, -20)
+    AF.SetPoint(
+        appearancePane,
+        "TOPLEFT",
+        windowsPane,
+        "TOPRIGHT",
+        SECTION_GAP,
+        0
+    )
     appearancePane:SetTips(L["Damage Meter Skin Tip"])
 
     local enabled = AF.CreateCheckButton(
@@ -406,23 +441,23 @@ local function CreateActionsPane()
     actionsPane = AF.CreateTitledPane(
         scroll.scrollContent,
         L["Damage Meter Actions"],
-        530,
-        100
+        CONTENT_WIDTH,
+        120
     )
     AF.SetPoint(
         actionsPane,
-        "TOPRIGHT",
-        appearancePane,
-        "BOTTOMRIGHT",
+        "TOPLEFT",
+        windowsPane,
+        "BOTTOMLEFT",
         0,
-        -20
+        -SECTION_GAP
     )
 
     local bottomRight = AF.CreateButton(
         actionsPane,
         L["Place Meters Bottom Right"],
         "BFI",
-        160,
+        245,
         25
     )
     AF.SetPoint(bottomRight, "TOPLEFT", actionsPane, 15, -35)
@@ -442,10 +477,10 @@ local function CreateActionsPane()
         actionsPane,
         L["Open Blizzard Edit Mode"],
         "BFI",
-        160,
+        245,
         25
     )
-    AF.SetPoint(editModeButton, "LEFT", bottomRight, "RIGHT", 10, 0)
+    AF.SetPoint(editModeButton, "TOPLEFT", actionsPane, 270, -35)
     AF.ApplyCombatProtectionToWidget(editModeButton)
     editModeButton:SetOnClick(OpenEditMode)
 
@@ -453,10 +488,10 @@ local function CreateActionsPane()
         actionsPane,
         L["Reset Combat Data"],
         "red",
-        160,
+        245,
         25
     )
-    AF.SetPoint(reset, "LEFT", editModeButton, "RIGHT", 10, 0)
+    AF.SetPoint(reset, "TOPLEFT", actionsPane, 15, -75)
     AF.ApplyCombatProtectionToWidget(reset)
     reset:SetOnClick(function()
         local dialog = AF.GetDialog(

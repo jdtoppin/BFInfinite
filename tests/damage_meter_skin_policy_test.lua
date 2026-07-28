@@ -43,6 +43,21 @@ assertContains(
     "local COMPACT_HEADER_HEIGHT = 26",
     "compact native header contract"
 )
+assertContains(
+    skin,
+    'F.OpenOptionsFrame("damageMeter")',
+    "BFI header gear opens the BFI Damage Meter panel"
+)
+assertContains(
+    skin,
+    'icon = "Menu3"',
+    "native window actions remain available through an overflow control"
+)
+assertNotContains(
+    skin,
+    "settingsDropdown:SetScript",
+    "native Damage Meter menu scripts must remain Blizzard-owned"
+)
 
 local options = readFile("Options/DamageMeter.lua")
 assertNotContains(
@@ -64,6 +79,13 @@ assertNotContains(
     options,
     "DM.Native.Configure",
     "native session windows must remain Blizzard-controlled"
+)
+
+local optionsFrame = readFile("Options/OptionsFrame.lua")
+assertContains(
+    optionsFrame,
+    "function F.OpenOptionsFrame(id)",
+    "module header controls require deterministic options navigation"
 )
 
 local native = readFile("Modules/DamageMeter/Native.lua")
