@@ -14,6 +14,7 @@
     <!-- <Include file="Nameplates\Load.xml"/> -->
     <Include file="Maps\Load.xml"/>
     <Include file="DataBars\Load.xml"/>
+    <Include file="DamageMeter\Load.xml"/>
     <Include file="Chat\Load.xml"/>
     <Include file="Tooltip\Load.xml"/>
     <Include file="UIWidgets\Load.xml"/>

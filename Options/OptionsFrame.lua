@@ -33,6 +33,7 @@ local list = {
     "tooltip",
     "uiWidgets",
     "dataBars",
+    "damageMeter",
     -- "dataBroker",
     "maps",
     "chat",

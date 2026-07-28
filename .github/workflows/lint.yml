@@ -18,7 +18,7 @@ jobs:
       - name: Install luacheck
         run: |
           sudo apt-get update
-          sudo apt-get install --yes lua-check ripgrep
+          sudo apt-get install --yes lua-check luajit ripgrep
 
       - name: Check Lua and policy
         shell: bash
@@ -32,3 +32,11 @@ jobs:
           else
             ./scripts/lint.sh
           fi
+
+      - name: Test Damage Meter data adapter
+        run: luajit tests/damage_meter_data_test.lua
+
+      - name: Test Damage Meter defaults and lifecycle
+        run: |
+          luajit tests/damage_meter_defaults_test.lua
+          luajit tests/damage_meter_lifecycle_test.lua

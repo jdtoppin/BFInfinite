@@ -52,6 +52,7 @@ local resetterInfo = {
     tooltip = {},
     uiWidgets = {},
     dataBars = {},
+    damageMeter = {},
     maps = {},
     chat = {},
 }

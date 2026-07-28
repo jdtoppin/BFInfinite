@@ -895,6 +895,7 @@ local function CreateModuleCopyFrame()
         {text = L["Tooltip"], id = "tooltip"},
         {text = L["UI Widgets"], id = "uiWidgets"},
         {text = L["Data Bars"], id = "dataBars"},
+        {text = L["Damage Meter"], id = "damageMeter"},
         {text = L["Maps"], id = "maps"},
         {text = L["Chat"], id = "chat"},
     }

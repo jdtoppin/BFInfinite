@@ -42,6 +42,16 @@ L["Show Bags"] = "显示背包"
 L["Show Blizzard Bag Bar"] = "显示暴雪背包栏"
 L["Show Combined View"] = "显示合并视图"
 L["Slot Spacing"] = "格子间距"
+L["Damage Meter"] = "伤害统计"
+L["Apply BFI Damage Meter Skin"] = "应用 BFI 伤害统计皮肤"
+L["Accent Header"] = "强调标题栏"
+L["Bar Texture"] = "条形材质"
+L["Bar Background Opacity"] = "条形背景不透明度"
+L["Blizzard Controls"] = "暴雪控制"
+L["Open Blizzard Damage Meter Settings"] = "打开暴雪伤害统计设置"
+L["Open Blizzard Edit Mode"] = "打开暴雪编辑模式"
+L["Damage Meter Skin Tip"] = "BFI 仅美化暴雪的战斗安全伤害统计，不会替换其数据、排序、历史记录、技能明细或死亡回顾。"
+L["Damage Meter Blizzard Controls Tip"] = "位置、尺寸、可见性、数字格式、条形高度与间距、职业颜色和额外窗口仍由暴雪编辑模式统一管理。"
 
 ---------------------------------------------------------------------
 -- general
