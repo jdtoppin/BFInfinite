@@ -78,7 +78,11 @@ end
 local function StyleCollectionListBackground(texture, backdrop)
     if not texture then return end
 
-    texture:SetColorTexture(AF.GetColorRGB("widget_dark", 0.9))
+    -- Mount initialization can leave a red vertex tint behind for unusable
+    -- entries. Replace both the source and its tint so every collection list
+    -- gets the same neutral idle surface as Pets and Sets.
+    texture:SetTexture(AF.GetPlainTexture())
+    texture:SetVertexColor(AF.GetColorRGB("widget_dark", 0.9))
     texture:SetAlpha(1)
     if backdrop then
         AF.SetOnePixelInside(texture, backdrop)
@@ -181,8 +185,8 @@ end
 local function StyleCollectionListButton(button)
     if not button then return end
 
-    -- Keep Blizzard's pooled Show/Hide and red unusable-state updates, but
-    -- replace the rounded list atlases with flat square BFI state textures.
+    -- Keep Blizzard's pooled Show/Hide state while replacing the rounded list
+    -- atlases with flat square BFI state textures.
     StyleCollectionRowSurface(button, button.background, button.selectedTexture, button:GetHighlightTexture())
 
     local dragButton = button.DragButton or button.dragButton
@@ -199,6 +203,26 @@ local function StyleCollectionListButton(button)
     if dragButton then
         StyleLevelPlate(dragButton.levelBG, dragButton.level, button.icon)
     end
+end
+
+local function StyleMountListButton(button, elementData)
+    StyleCollectionListButton(button)
+
+    local index = elementData and elementData.index or button.index
+    if not index then return end
+
+    local _, _, _, _, isUsable, _, _, _, _, _, _, mountID =
+        _G.C_MountJournal.GetDisplayedMountInfo(index)
+    local needsFanfare = mountID and _G.C_MountJournal.NeedsFanfare(mountID)
+    local usable = isUsable or needsFanfare
+
+    -- Blizzard marks collected-but-unusable mounts by tinting both the row
+    -- and icon red. Keep the row neutral and use grayscale content instead,
+    -- while leaving selected, active, and hover textures untouched.
+    button.icon:SetVertexColor(AF.GetColorRGB("white"))
+    button.icon:SetDesaturated(not usable)
+    button.name:SetFontObject(usable and "GameFontNormal" or "GameFontDisable")
+    button.icon.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(usable and "border" or "disabled"))
 end
 
 local function StyleTabs(collectionsJournal)
@@ -265,7 +289,7 @@ local function StyleMountJournal()
     S.RemoveTextures(frame.MountDisplay.ShadowOverlay, true)
     S.StyleCheckButton(frame.MountDisplay.ModelScene.TogglePlayer)
     StyleSquareIcon(frame.MountDisplay.InfoButton.Icon)
-    frame.ScrollBox:ForEachFrame(StyleCollectionListButton)
+    frame.ScrollBox:ForEachFrame(StyleMountListButton)
 end
 
 ---------------------------------------------------------------------
@@ -835,7 +859,7 @@ local function StyleBlizzard()
     -- and PTR 12.1.0.68914
     -- (Gethe wow-ui-source d3915c78aba77a7a9be76acbfa35c674bbb6abe9).
     -- The Collections XML surface is stable between those pinned artifacts.
-    hooksecurefunc("MountJournal_InitMountButton", StyleCollectionListButton)
+    hooksecurefunc("MountJournal_InitMountButton", StyleMountListButton)
     hooksecurefunc("PetJournal_InitPetButton", StyleCollectionListButton)
     hooksecurefunc("PetJournal_UpdatePetLoadOut", StylePetLoadoutSlots)
     hooksecurefunc("PetJournal_UpdatePetCard", StylePetCard)
