@@ -1,6 +1,9 @@
 package-as: BFInfinite
 enable-nolib-creation: no
 
+ignore:
+  - tests
+
 manual-changelog:
   filename: CHANGELOG.md
   markup-type: markdown

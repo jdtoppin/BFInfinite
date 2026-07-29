@@ -18,7 +18,7 @@ jobs:
       - name: Install Lua checks
         run: |
           sudo apt-get update
-          sudo apt-get install --yes lua-check lua5.1 ripgrep
+          sudo apt-get install --yes lua-check lua5.1 luajit ripgrep
 
       - name: Check Lua and policy
         shell: bash
@@ -32,3 +32,33 @@ jobs:
           else
             ./scripts/lint.sh
           fi
+
+      - name: Test 12.1 unit-frame aura controller
+        run: luajit tests/unit_frame_aura_controller_test.lua
+
+      - name: Test 12.1 unit-frame aura policy
+        run: luajit tests/unit_frame_aura_policy_test.lua
+
+      - name: Test 12.1 unit-frame aura spec
+        run: luajit tests/unit_frame_aura_spec_test.lua
+
+      - name: Test 12.1 unit-frame aura runtime
+        run: luajit tests/unit_frame_aura_runtime_test.lua
+
+      - name: Test unit-frame aura options
+        run: luajit tests/unit_frame_aura_options_test.lua
+
+      - name: Test unit-frame aura filter options
+        run: luajit tests/unit_frame_aura_filter_options_test.lua
+
+      - name: Test unit-frame aura Global Colors
+        run: luajit tests/unit_frame_aura_spell_colors_test.lua
+
+      - name: Test unit-frame aura Global Colors options
+        run: luajit tests/unit_frame_aura_colors_options_test.lua
+
+      - name: Test unit-frame config-mode lifecycle
+        run: luajit tests/unit_frame_config_mode_lifecycle_test.lua
+
+      - name: Test secure group-header unit routing
+        run: luajit tests/unit_frame_group_header_routing_test.lua
