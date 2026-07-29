@@ -19,6 +19,7 @@ local unpack = unpack
 -- separate. Style only static regions on that ordinary pool. Never inspect
 -- aura data, visibility, buttonInfo, or aura-driven state.
 local MAX_NATIVE_ICON_SIZE = 30
+local EXPECTED_DEBUFF_BUTTON_COUNT = 16
 local ICON_CROP_MIN = 0.08
 local ICON_CROP_MAX = 0.92
 
@@ -96,7 +97,6 @@ local function ResolveTarget()
 
     local frame = _G.DebuffFrame
     local container = frame and frame.AuraContainer
-    local privateAnchors = frame and frame.PrivateAuraAnchors
     local deadlyFrame = _G.DeadlyDebuffFrame
     if not frame
         or not container
@@ -105,8 +105,6 @@ local function ResolveTarget()
         or type(frame.auraFrames) ~= "table"
         or type(frame.UpdateAuraButtons) ~= "function"
         or type(container.UpdateGridLayout) ~= "function"
-        or type(privateAnchors) ~= "table"
-        or #privateAnchors == 0
         or not deadlyFrame
         or deadlyFrame == frame
         or deadlyFrame == container
@@ -114,19 +112,8 @@ local function ResolveTarget()
         return
     end
 
-    for _, anchor in ipairs(privateAnchors) do
-        if not anchor
-            or type(anchor.GetParent) ~= "function"
-            or anchor:GetParent() ~= frame
-        then
-            return
-        end
-    end
-
     local expectedButtonCount = tonumber(frame.maxAuras)
-    if not expectedButtonCount
-        or expectedButtonCount < 1
-    then
+    if expectedButtonCount ~= EXPECTED_DEBUFF_BUTTON_COUNT then
         return
     end
 

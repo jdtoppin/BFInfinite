@@ -132,7 +132,7 @@ local function NewHarness(options)
 
     local container = {}
     local frame = {
-        maxAuras = 2,
+        maxAuras = options.maxAuras or 16,
         auraFrames = {},
     }
     function container:GetParent()
@@ -151,7 +151,7 @@ local function NewHarness(options)
     local privateAnchor = {}
     function privateAnchor:GetParent()
         privateParentCalls = privateParentCalls + 1
-        return options.malformedPrivateAnchor and container or frame
+        error("BFInfinite must not access private-aura anchors", 2)
     end
     frame.PrivateAuraAnchors = {privateAnchor}
 
@@ -260,8 +260,8 @@ do
     )
     assertEqual(
         harness.getPrivateParentCalls(),
-        1,
-        "private anchor topology is checked once"
+        0,
+        "private anchors are never accessed"
     )
     assertTrue(
         BD.UpdateBlizzardDebuffStyle(config),
@@ -274,7 +274,7 @@ do
     )
     assertEqual(
         harness.getFontCalls(),
-        2,
+        16,
         "only fixed ordinary count regions are styled"
     )
     assertTrue(
@@ -319,8 +319,8 @@ do
 
     local state = BD.GetBlizzardDebuffStyleState()
     assertTrue(state.active, "style state active")
-    assertEqual(state.styledButtonCount, 2, "styled button count")
-    assertEqual(state.snapshotsCreated, 2, "snapshot count")
+    assertEqual(state.styledButtonCount, 16, "styled button count")
+    assertEqual(state.snapshotsCreated, 16, "snapshot count")
 
     config.width = 100
     config.height = 5
@@ -331,7 +331,7 @@ do
         "style updates without new construction"
     )
     state = BD.GetBlizzardDebuffStyleState()
-    assertEqual(state.snapshotsCreated, 2, "snapshots are not duplicated")
+    assertEqual(state.snapshotsCreated, 16, "snapshots are not duplicated")
     for _, button in ipairs(harness.buttons) do
         assertEqual(button.Icon.width, 30, "icon width clamps to cell")
         assertEqual(button.Icon.height, 10, "icon height clamps to cell")
@@ -392,11 +392,16 @@ end
 
 do
     local harness = NewHarness({
-        malformedPrivateAnchor = true,
+        maxAuras = 15,
     })
     assertFalse(
         harness.BD.HasBlizzardDebuffStyleCapability(),
-        "changed private-anchor topology fails closed"
+        "changed ordinary-button pool size fails closed"
+    )
+    assertEqual(
+        harness.getPrivateParentCalls(),
+        0,
+        "unsupported topology still does not access private anchors"
     )
 end
 
@@ -418,6 +423,8 @@ do
         "no visibility side channel")
     assertNil(source:find(".buttonInfo", 1, true),
         "no aura-data table reads")
+    assertNil(source:find("PrivateAuraAnchors", 1, true),
+        "no private-aura anchor table access")
     assertNil(source:find(":UpdateAuraButtons", 1, true),
         "no Blizzard aura updates driven")
     assertNil(source:find(":UpdateGridLayout", 1, true),
