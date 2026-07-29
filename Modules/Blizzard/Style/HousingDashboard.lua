@@ -189,6 +189,108 @@ local function StyleCatalogFilterMenu(dropdown)
     StyleCatalogFilterMenuDescriptions(rootDescription)
 end
 
+-- Category and subcategory IDs are separate DB2 namespaces and overlap.
+-- Retail 12.0.7 and PTR 12.1 share the current IDs; PTR adds subcategories
+-- 52 (Vines and Hanging Plants) and 53 (Pet Beds). Atlas keys provide a
+-- language-neutral secondary lookup, while unknown future entries retain
+-- Blizzard's native identity glyph below.
+local catalogCategoryIcons = {
+    [1] = "Housing_Furnishings",
+    [2] = "Housing_Structural",
+    [3] = "Housing_Accents",
+    [4] = "Housing_Lighting",
+    [5] = "Housing_Functional",
+    [6] = "Housing_Nature",
+    [8] = "Housing_Misc",
+    [9] = "Housing_Rooms",
+    [17] = "Housing_Featured",
+    [18] = "Housing_All",
+}
+
+local catalogSubcategoryIcons = {
+    [1] = "Housing_Seating",
+    [2] = "Housing_Beds",
+    [3] = "Housing_Doors",
+    [4] = "Housing_Construction",
+    [5] = "Housing_Tables",
+    [6] = "Housing_Storage",
+    [7] = "Housing_Furnishings",
+    [8] = "Housing_Windows",
+    [9] = "Housing_LargeStructures",
+    [10] = "Housing_Structural",
+    [11] = "Housing_Ornamental",
+    [12] = "Housing_WallHangings",
+    [13] = "Housing_FoodDrink",
+    [14] = "Housing_Floor",
+    [15] = "Housing_Accents",
+    [16] = "Housing_LargeLights",
+    [17] = "Housing_WallLights",
+    [18] = "Housing_CeilingLights",
+    [19] = "Housing_SmallLights",
+    [21] = "Housing_Lighting",
+    [22] = "Housing_Utility",
+    [25] = "Housing_LargeFoliage",
+    [26] = "Housing_SmallFoliage",
+    [27] = "Housing_Bushes",
+    [28] = "Housing_GroundCover",
+    [29] = "Housing_Nature",
+    [34] = "Housing_Misc",
+    [35] = "Housing_Rooms",
+    [51] = "Housing_Functional",
+    [52] = "Housing_Vines",
+    [53] = "Housing_PetBeds",
+}
+
+local catalogAtlasIcons = {
+    ["category-icons_accents"] = "Housing_Accents",
+    ["category-icons_all"] = "Housing_All",
+    ["category-icons_beds"] = "Housing_Beds",
+    ["category-icons_bushes"] = "Housing_Bushes",
+    ["category-icons_doors"] = "Housing_Doors",
+    ["category-icons_featured"] = "Housing_Featured",
+    ["category-icons_floor"] = "Housing_Floor",
+    ["category-icons_food-and-drink"] = "Housing_FoodDrink",
+    ["category-icons_furnishings"] = "Housing_Furnishings",
+    ["category-icons_ground-cover"] = "Housing_GroundCover",
+    ["category-icons_hanging-lights"] = "Housing_CeilingLights",
+    ["category-icons_interactive"] = "Housing_Functional",
+    ["category-icons_large-foliage"] = "Housing_LargeFoliage",
+    ["category-icons_large-lights"] = "Housing_LargeLights",
+    ["category-icons_large-structures"] = "Housing_LargeStructures",
+    ["category-icons_lighting"] = "Housing_Lighting",
+    ["category-icons_misc"] = "Housing_Misc",
+    ["category-icons_ornamental"] = "Housing_Ornamental",
+    ["category-icons_pets"] = "Housing_PetBeds",
+    ["category-icons_plants"] = "Housing_Nature",
+    ["category-icons_rooms"] = "Housing_Rooms",
+    ["category-icons_seating"] = "Housing_Seating",
+    ["category-icons_small-foliage"] = "Housing_SmallFoliage",
+    ["category-icons_small-lights"] = "Housing_SmallLights",
+    ["category-icons_storage"] = "Housing_Storage",
+    ["category-icons_structural"] = "Housing_Structural",
+    ["category-icons_tables-and-desks"] = "Housing_Tables",
+    ["category-icons_utility"] = "Housing_Utility",
+    ["category-icons_vines"] = "Housing_Vines",
+    ["category-icons_wall-hangings"] = "Housing_WallHangings",
+    ["category-icons_wall-lights"] = "Housing_WallLights",
+    ["category-icons_walls-and-columns"] = "Housing_Construction",
+    ["category-icons_windows"] = "Housing_Windows",
+}
+
+local function GetCatalogCategoryIcon(frame)
+    local iconName
+    if frame.atlasKey == "category-icons_all" then
+        iconName = "Housing_All"
+    elseif frame.isSubcategory then
+        iconName = catalogSubcategoryIcons[frame.ID]
+    else
+        iconName = catalogCategoryIcons[frame.ID]
+    end
+
+    iconName = iconName or catalogAtlasIcons[frame.atlasKey]
+    return iconName and AF.GetIcon(iconName, BFI.name)
+end
+
 local function IsCatalogEntryPreviewed(frame)
     local catalog = frame._BFIHousingCatalog
     local entryVariantID = frame.entryVariantID
@@ -295,15 +397,23 @@ local function UpdateCatalogCategory(frame, isPressed)
 
     SetFadeSurfaceState(frame, state)
 
-    -- Blizzard category atlases include their circular chrome. Keep their
-    -- category identity, but show only the centered glyph through a clipped
-    -- square viewport; the BFI surface owns hover and selection state.
+    -- Prefer BFI's flat semantic category family. Unknown future categories
+    -- retain Blizzard's identity glyph, clipped to remove its circular chrome.
+    local customIcon = GetCatalogCategoryIcon(frame)
     local inactiveAtlas = frame.atlasNames and frame.atlasNames["_inactive"]
-    if inactiveAtlas then
+    if customIcon then
+        frame.BFIHousingGlyph:SetTexture(customIcon)
+        frame.BFIHousingGlyph:SetTexCoord(0, 1, 0, 1)
+        -- The source artwork includes its own optical padding. Fill the
+        -- 30-pixel viewport so the visible mark stays legible at UI scale.
+        AF.SetSize(frame.BFIHousingGlyph, 30, 30)
+    elseif inactiveAtlas then
         frame.BFIHousingGlyph:SetAtlas(inactiveAtlas)
+        AF.SetSize(frame.BFIHousingGlyph, 48, 48)
     else
         frame.BFIHousingGlyph:SetTexture(frame.Icon:GetTexture())
         frame.BFIHousingGlyph:SetTexCoord(frame.Icon:GetTexCoord())
+        AF.SetSize(frame.BFIHousingGlyph, 48, 48)
     end
     frame.Icon:SetAlpha(0)
     frame.Icon:Hide()
