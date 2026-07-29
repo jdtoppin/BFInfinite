@@ -79,6 +79,8 @@ local function NewHarness(options)
     local createFrameCalls = 0
     local customDisableCalls = {}
     local customUpdateCalls = {}
+    local blizzardStyleDisableCalls = 0
+    local blizzardStyleUpdateCalls = {}
     local eventCallbacks = {}
     local refreshEvents = {}
     local inCombat = options.inCombat == true
@@ -212,6 +214,21 @@ local function NewHarness(options)
             customDisableCalls[#customDisableCalls + 1] = which
         end
     end
+    if options.registerBlizzardDebuffStyle then
+        BD.HasBlizzardDebuffStyleCapability = function()
+            return true
+        end
+        BD.UpdateBlizzardDebuffStyle = function(config)
+            blizzardStyleUpdateCalls[#blizzardStyleUpdateCalls + 1] =
+                config
+            return true
+        end
+        BD.DisableBlizzardDebuffStyle = function()
+            blizzardStyleDisableCalls =
+                blizzardStyleDisableCalls + 1
+            return true
+        end
+    end
 
     return {
         BD = BD,
@@ -220,6 +237,10 @@ local function NewHarness(options)
         end,
         customDisableCalls = customDisableCalls,
         customUpdateCalls = customUpdateCalls,
+        blizzardStyleUpdateCalls = blizzardStyleUpdateCalls,
+        getBlizzardStyleDisableCalls = function()
+            return blizzardStyleDisableCalls
+        end,
         refreshEvents = refreshEvents,
         setCombat = function(value)
             inCombat = value == true
@@ -266,6 +287,7 @@ do
         interfaceVersion = 120100,
         afVersion = 33,
         registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
     })
     local BD = harness.BD
 
@@ -278,7 +300,7 @@ do
     )
     assertEqual(
         BD.GetAuraBackend("debuffs"),
-        BD.CUSTOM_AURA_CONTAINER_BACKEND,
+        BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
         "12.1 debuffs backend"
     )
     assertEqual(
@@ -288,12 +310,19 @@ do
     )
     harness.update()
     assertEqual(harness.getCreateFrameCalls(), 0, "12.1 custom selector construction")
-    assertEqual(#harness.customUpdateCalls, 2, "12.1 custom update count")
+    assertEqual(#harness.customUpdateCalls, 1, "12.1 custom update count")
     assertEqual(harness.customUpdateCalls[1].which, "buffs", "12.1 custom buffs update")
     assertEqual(harness.customUpdateCalls[1].config, BD.config.buffs, "12.1 custom buffs config")
-    assertEqual(harness.customUpdateCalls[2].which, "debuffs", "12.1 custom debuffs update")
-    assertEqual(harness.customUpdateCalls[2].config, BD.config.debuffs, "12.1 custom debuffs config")
-    assertEqual(#harness.customDisableCalls, 0, "12.1 custom disable count")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 1,
+        "12.1 Blizzard style update count")
+    assertEqual(harness.blizzardStyleUpdateCalls[1], BD.config.debuffs,
+        "12.1 Blizzard style config")
+    assertEqual(#harness.customDisableCalls, 1,
+        "12.1 custom Debuffs controller disabled")
+    assertEqual(harness.customDisableCalls[1], "debuffs",
+        "12.1 custom Debuffs disable pane")
+    assertEqual(harness.getBlizzardStyleDisableCalls(), 0,
+        "12.1 active style is not restored")
 end
 
 do
@@ -301,6 +330,22 @@ do
         interfaceVersion = 120100,
         afVersion = 33,
         registerCustomBackend = true,
+    })
+    local BD = harness.BD
+
+    assertEqual(
+        BD.GetAuraBackend("debuffs"),
+        nil,
+        "12.1 harmful custom container fails closed without style adapter"
+    )
+end
+
+do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 33,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
         inCombat = true,
     })
     local BD = harness.BD
@@ -358,19 +403,28 @@ do
     assertEqual(BD.IsBuffsDebuffsUpdatePending(), false, "regen clears queue")
     assertEqual(harness.hasRegenCallback(), false, "regen callback released")
     assertEqual(#harness.refreshEvents, 3, "queue clear refresh")
-    assertEqual(#harness.customUpdateCalls, 2, "wildcard retry updates both panes")
+    assertEqual(#harness.customUpdateCalls, 1,
+        "wildcard retry updates custom Buffs")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 1,
+        "wildcard retry updates Blizzard Debuffs style")
 end
 
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
         afVersion = 33,
+        registerBlizzardDebuffStyle = true,
     })
     local BD = harness.BD
 
     assertEqual(BD.HasCustomAuraContainerCapability(), true, "unregistered custom capability")
     assertEqual(BD.GetAuraBackend("buffs"), nil, "unregistered 12.1 backend")
     assertEqual(BD.HasAuraBackend("buffs"), false, "unregistered 12.1 availability")
+    assertEqual(
+        BD.GetAuraBackend("debuffs"),
+        BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
+        "Debuffs style does not require custom Buffs construction"
+    )
     harness.update()
     assertEqual(harness.getCreateFrameCalls(), 0, "unregistered 12.1 legacy fallback")
 end
@@ -380,11 +434,17 @@ do
         interfaceVersion = 120100,
         afVersion = 32,
         registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
     })
     local BD = harness.BD
 
     assertEqual(BD.HasCustomAuraContainerCapability(), false, "AF r32 custom capability")
     assertEqual(BD.GetAuraBackend("buffs"), nil, "AF r32 12.1 backend")
+    assertEqual(
+        BD.GetAuraBackend("debuffs"),
+        BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
+        "Debuffs style remains independent of custom AF revision"
+    )
     harness.update()
     assertEqual(harness.getCreateFrameCalls(), 0, "AF r32 12.1 legacy fallback")
 end
@@ -394,12 +454,15 @@ do
         interfaceVersion = 120200,
         afVersion = 33,
         registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
     })
     local BD = harness.BD
 
     assertEqual(BD.HasSecureAuraHeaderBackend(), false, "12.2 legacy capability")
     assertEqual(BD.HasCustomAuraContainerCapability(), false, "unverified 12.2 custom capability")
     assertEqual(BD.GetAuraBackend("buffs"), nil, "unverified 12.2 backend")
+    assertEqual(BD.GetAuraBackend("debuffs"), nil,
+        "unverified 12.2 Debuffs style backend")
     harness.update()
     assertEqual(harness.getCreateFrameCalls(), 0, "unverified 12.2 legacy fallback")
 end
