@@ -28,13 +28,14 @@ end
 local function CreatePreviewNote(parent)
     local note = AF.CreateFontString(
         parent,
-        L["Simulated preview; sizes are normalized for readability."],
+        L["Preview sizes are normalized."],
         "gray"
     )
     AF.SetPoint(note, "TOPLEFT", parent, 15, -30)
     AF.SetPoint(note, "TOPRIGHT", parent, -15, -30)
+    AF.SetFont(note, "BFI", 10, "none", false)
     note:SetJustifyH("LEFT")
-    note:SetWordWrap(true)
+    note:SetWordWrap(false)
     return note
 end
 
@@ -215,7 +216,7 @@ function NP.CreateSemanticColorOptionsPreview(parent)
             parent,
             L[info.label],
             column == 0 and LEFT_X or RIGHT_X,
-            -52 - row * 64,
+            -56 - row * 64,
             TILE_WIDTH,
             56,
             -31
@@ -424,37 +425,37 @@ function NP.CreateCastOptionsPreview(parent)
             parent,
             L["Kick Ready"],
             LEFT_X,
-            -52
+            -56
         ),
         cooling = CreateCastTile(
             parent,
             L["Cooling / No Kick"],
             RIGHT_X,
-            -52
+            -56
         ),
         protected = CreateCastTile(
             parent,
             L["Not Kickable"],
             LEFT_X,
-            -122
+            -128
         ),
         important = CreateCastTile(
             parent,
             L["Important Cast"],
             RIGHT_X,
-            -122
+            -128
         ),
         targeting = CreateCastTile(
             parent,
             L["Targeting You"],
             LEFT_X,
-            -192
+            -200
         ),
         channel = CreateCastTile(
             parent,
             L["Reverse Channel"],
             RIGHT_X,
-            -192
+            -200
         ),
     }
 
@@ -463,8 +464,9 @@ function NP.CreateCastOptionsPreview(parent)
         L["The X means a normal kick will not work; a stop may still work. If both alerts apply, the X replaces the exclamation mark while the important glow remains."],
         "sand"
     )
-    AF.SetPoint(footer, "TOPLEFT", parent, 15, -264)
-    AF.SetPoint(footer, "TOPRIGHT", parent, -15, -264)
+    AF.SetPoint(footer, "TOPLEFT", parent, 15, -278)
+    AF.SetPoint(footer, "TOPRIGHT", parent, -15, -278)
+    AF.SetFont(footer, "BFI", 10, "none", false)
     footer:SetJustifyH("LEFT")
     footer:SetWordWrap(true)
 

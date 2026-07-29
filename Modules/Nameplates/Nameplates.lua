@@ -265,9 +265,14 @@ local function DetachNameplate(np, clearUnit)
         NP.DisableIndicators(np)
     end
 
-    RestoreNativeHitTest(np)
-    np.hitRegion:Hide()
-    np.hitRegionConfigured = nil
+    local nativeHitTestRestored = RestoreNativeHitTest(np)
+    -- If the protected setter is temporarily unavailable, keep the
+    -- mouse-disabled carrier alive because the native base still references
+    -- it. Blizzard will replace those points on its next secure SetUnit.
+    if nativeHitTestRestored or not np.customHitTest then
+        np.hitRegion:Hide()
+        np.hitRegionConfigured = nil
+    end
     np:Hide()
 
     if np.unitFrame then
@@ -722,17 +727,67 @@ RestoreNativeHitTest = function(np)
         return false
     end
 
-    if type(np.unitFrame.UpdateHitTestArea) == "function" then
-        np.unitFrame:UpdateHitTestArea(NamePlateSetupOptions)
-    elseif type(np.unitFrame.ApplyFrameOptions) == "function"
-        and type(base.GetFrameOptions) == "function"
+    local unitFrame = np.unitFrame
+    local healthBars = unitFrame.HealthBarsContainer
+    local healthBar = healthBars and healthBars.healthBar
+    local setupOptions = NamePlateSetupOptions
+    local healthBarHeight =
+        setupOptions and setupOptions.healthBarHeight
+    if not healthBar
+        or type(healthBarHeight) ~= "number"
+        or type(base.SetHitTestPoints) ~= "function"
     then
-        -- 12.0.7 sets the native hit-test points as part of this method;
-        -- 12.1 exposes the narrower UpdateHitTestArea helper above.
-        np.unitFrame:ApplyFrameOptions(
-            NamePlateSetupOptions,
-            base:GetFrameOptions()
-        )
+        return false
+    end
+
+    -- Do not call Blizzard's broad ApplyFrameOptions method here. On Retail
+    -- 12.0.7 it also rewrites CompactUnitFrame state from addon execution;
+    -- a reused native plate can then reach secret health comparisons under
+    -- BFI taint. Restore only the documented C++ hit-test anchors copied from
+    -- Blizzard_NamePlateUnitFrame.lua in 12.0.7.68887 (4383ced) and
+    -- 12.1.0.68824 (fa38386). In 12.1, show-only-name plates intentionally
+    -- have no hit-test anchors.
+    if type(unitFrame.UpdateHitTestArea) == "function"
+        and unitFrame.showOnlyName == true
+    then
+        if type(base.ClearAllHitTestPoints) ~= "function" then
+            return false
+        end
+        base:ClearAllHitTestPoints()
+    elseif setupOptions.unitNameInsideHealthBar then
+        base:SetHitTestPoints({
+            {
+                point = "TOPLEFT",
+                relativeTo = healthBar,
+                relativePoint = "TOPLEFT",
+                offsetX = -10,
+                offsetY = healthBarHeight / 2,
+            },
+            {
+                point = "BOTTOMRIGHT",
+                relativeTo = healthBar,
+                relativePoint = "BOTTOMRIGHT",
+                offsetX = 10,
+                offsetY = -healthBarHeight / 2,
+            },
+        })
+    elseif unitFrame.name then
+        base:SetHitTestPoints({
+            {
+                point = "TOPLEFT",
+                relativeTo = unitFrame.name,
+                relativePoint = "TOPLEFT",
+                offsetX = -14,
+                offsetY = 0,
+            },
+            {
+                point = "BOTTOMRIGHT",
+                relativeTo = healthBar,
+                relativePoint = "BOTTOMRIGHT",
+                offsetX = 10,
+                offsetY = -healthBarHeight / 2,
+            },
+        })
     else
         return false
     end

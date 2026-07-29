@@ -1283,7 +1283,7 @@ local function CreateNameplatesPanel()
     local colorsPane = CreateSectionPane(
         "colors",
         L["Dungeon Priority Colors"],
-        160
+        190
     )
 
     local colorsNotice = AF.CreateFontString(
@@ -1323,7 +1323,7 @@ local function CreateNameplatesPanel()
     local semanticPreviewPane = CreateSectionPane(
         "colors",
         L["Quick Reference"],
-        185
+        195
     )
     local semanticPreview =
         NP.CreateSemanticColorOptionsPreview(
@@ -1434,7 +1434,7 @@ local function CreateNameplatesPanel()
     local castsPane = CreateSectionPane(
         "casts",
         L["Cast Bar Appearance"],
-        105
+        170
     )
 
     local castsNotice = AF.CreateFontString(
@@ -1450,7 +1450,7 @@ local function CreateNameplatesPanel()
     local castPreviewPane = CreateSectionPane(
         "casts",
         L["Quick Reference"],
-        315
+        330
     )
     local castPreview =
         NP.CreateCastOptionsPreview(castPreviewPane)
@@ -1464,27 +1464,27 @@ local function CreateNameplatesPanel()
     local castInterruptibilityPane = CreateSectionPane(
         "casts",
         L["Color by Interruptibility"],
-        80
+        105
     )
     local interruptReadyTickPane = CreateSectionPane(
         "casts",
         L["Interrupt Ready Tick"],
-        105
+        130
     )
     local castHighlightsPane = CreateSectionPane(
         "casts",
         L["Glow"] .. " / " .. L["Highlight Color"],
-        110
+        140
     )
     local uninterruptibleIconPane = CreateSectionPane(
         "casts",
         L["Not Kickable X"],
-        230
+        250
     )
     local importantIconPane = CreateSectionPane(
         "casts",
         L["Important Cast Icon"],
-        230
+        250
     )
     local castContentPane = CreateSectionPane(
         "casts",
@@ -1547,8 +1547,8 @@ local function CreateNameplatesPanel()
         interruptibleCastColor,
         "TOPLEFT",
         castBasePane,
-        200,
-        -110
+        15,
+        -155
     )
 
     local uninterruptibleCastColor = AF.CreateColorPicker(
@@ -1559,7 +1559,7 @@ local function CreateNameplatesPanel()
         uninterruptibleCastColor,
         "TOPLEFT",
         castBasePane,
-        15,
+        200,
         -155
     )
 
@@ -1640,7 +1640,7 @@ local function CreateNameplatesPanel()
         "TOPLEFT",
         castInterruptibilityPane,
         15,
-        -45
+        -40
     )
     interruptibility:SetOnCheck(function(checked)
         SetSharedCastSectionValue(
@@ -1659,8 +1659,8 @@ local function CreateNameplatesPanel()
         interruptReadiness,
         "TOPLEFT",
         castInterruptibilityPane,
-        200,
-        -45
+        15,
+        -70
     )
     interruptReadiness:SetOnCheck(function(checked)
         SetSharedCastSectionValue(
@@ -1700,9 +1700,10 @@ local function CreateNameplatesPanel()
     AF.SetPoint(
         interruptReadyTick,
         "TOPLEFT",
-        interruptReadyTickPane,
-        15,
-        -75
+        interruptReadyTickHelp,
+        "BOTTOMLEFT",
+        0,
+        -12
     )
     interruptReadyTick:SetOnCheck(function(checked)
         SetSharedCastSectionValue(
@@ -1720,9 +1721,10 @@ local function CreateNameplatesPanel()
     AF.SetPoint(
         interruptReadyTickColor,
         "TOPLEFT",
-        interruptReadyTickPane,
-        200,
-        -75
+        interruptReadyTickHelp,
+        "BOTTOMLEFT",
+        185,
+        -12
     )
     WireCastColorPicker(
         interruptReadyTickColor,
@@ -1759,7 +1761,7 @@ local function CreateNameplatesPanel()
         importantGlowColor,
         "TOPLEFT",
         castHighlightsPane,
-        200,
+        220,
         -40
     )
     WireCastColorPicker(
@@ -1788,7 +1790,14 @@ local function CreateNameplatesPanel()
             pane,
             L["Enable"]
         )
-        AF.SetPoint(enableIcon, "TOPLEFT", pane, 15, -65)
+        AF.SetPoint(
+            enableIcon,
+            "TOPLEFT",
+            help,
+            "BOTTOMLEFT",
+            0,
+            -12
+        )
         enableIcon:SetOnCheck(function(checked)
             SetSharedCastSectionValue(
                 section,
@@ -1808,7 +1817,14 @@ local function CreateNameplatesPanel()
             nil,
             true
         )
-        AF.SetPoint(size, "TOPLEFT", pane, 200, -70)
+        AF.SetPoint(
+            size,
+            "TOPLEFT",
+            help,
+            "BOTTOMLEFT",
+            185,
+            -17
+        )
         size:SetAfterValueChanged(function(value)
             SetSharedCastSectionValue(section, "size", value)
         end)
@@ -1818,9 +1834,10 @@ local function CreateNameplatesPanel()
         AF.SetPoint(
             anchorPoint,
             "TOPLEFT",
-            pane,
-            15,
-            -125
+            help,
+            "BOTTOMLEFT",
+            0,
+            -72
         )
         anchorPoint:SetItems(AF.GetDropdownItems_AnchorPoint())
         anchorPoint:SetOnSelect(function(value)
@@ -1837,9 +1854,10 @@ local function CreateNameplatesPanel()
         AF.SetPoint(
             relativePoint,
             "TOPLEFT",
-            pane,
-            200,
-            -125
+            help,
+            "BOTTOMLEFT",
+            185,
+            -72
         )
         relativePoint:SetItems(
             AF.GetDropdownItems_AnchorPoint()
@@ -1863,7 +1881,14 @@ local function CreateNameplatesPanel()
             nil,
             true
         )
-        AF.SetPoint(xOffset, "TOPLEFT", pane, 15, -185)
+        AF.SetPoint(
+            xOffset,
+            "TOPLEFT",
+            help,
+            "BOTTOMLEFT",
+            0,
+            -132
+        )
         xOffset:SetAfterValueChanged(function(value)
             SetSharedCastArrayValue(
                 section,
@@ -1883,7 +1908,14 @@ local function CreateNameplatesPanel()
             nil,
             true
         )
-        AF.SetPoint(yOffset, "TOPLEFT", pane, 200, -185)
+        AF.SetPoint(
+            yOffset,
+            "TOPLEFT",
+            help,
+            "BOTTOMLEFT",
+            185,
+            -132
+        )
         yOffset:SetAfterValueChanged(function(value)
             SetSharedCastArrayValue(
                 section,
@@ -1945,8 +1977,8 @@ local function CreateNameplatesPanel()
         playerTargetColor,
         "TOPLEFT",
         castHighlightsPane,
-        200,
-        -75
+        15,
+        -105
     )
     WireCastColorPicker(
         playerTargetColor,
