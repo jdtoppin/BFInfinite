@@ -3,13 +3,18 @@ local BFI = select(2, ...)
 local UF = BFI.modules.UnitFrames
 
 local ceil, floor, huge, min = math.ceil, math.floor, math.huge, math.min
-local ipairs, pairs, rawget, type = ipairs, pairs, rawget, type
-local sub = string.sub
+local ipairs, next, pairs, rawget, sort, type =
+    ipairs, next, pairs, rawget, table.sort, type
+local format, sub = string.format, string.sub
 
 -- Retail 12.1.0.68914 (wow-ui-source d3915c78) creates restricted
 -- CustomAuraContainer buttons in batches of ten. Keep the constant here as
 -- audit metadata only; this compiler never creates a frame.
 local NATIVE_BUTTON_BATCH_SIZE = 10
+-- Preserve #90's existing ceiling of eight policy groups (80 initial
+-- restricted-button reservations per runtime). Colour expansion falls back
+-- as a whole rather than exceeding that established construction budget.
+local MAX_NATIVE_COLOR_EXPANDED_GROUPS = 8
 
 local ANCHOR_POINTS = {
     BOTTOM = true,
@@ -137,6 +142,10 @@ end
 
 local function CopyColor(color)
     return {color[1], color[2], color[3], color[4]}
+end
+
+local function IsBlockCooldownStyle(style)
+    return sub(style, 1, 5) == "block"
 end
 
 local function ValidateDurationText(config)
@@ -286,6 +295,142 @@ local function NormalizeSpellIDCandidateFilters(config)
     return nil, false
 end
 
+local function GetColorKey(color)
+    return format(
+        "%.17g|%.17g|%.17g|%.17g",
+        color[1],
+        color[2],
+        color[3],
+        color[4]
+    )
+end
+
+local function NormalizeNativeSpellColorBuckets(config)
+    -- Global Colors apply only to Block rows. Helpful rows require an
+    -- assistable unit and harmful rows require a non-assistable unit later;
+    -- otherwise Blizzard can bypass every identity map and duplicate auras
+    -- across colour groups.
+    if not IsBlockCooldownStyle(config.cooldownStyle)
+        or config.spellColors == nil
+    then
+        return nil, nil, false
+    end
+    if type(config.spellColors) ~= "table" then
+        return nil, nil, nil, "INVALID_SPELL_COLOR_MAP"
+    end
+
+    local bucketByKey = {}
+    local bucketKeys = {}
+    local coloredSpellIDs = {}
+    for spellID, color in pairs(config.spellColors) do
+        if not IsPositiveInteger(spellID)
+            or not IsColor(color)
+            or not IsFiniteNumber(color[4])
+        then
+            return nil, nil, nil, "INVALID_SPELL_COLOR_MAP"
+        end
+
+        local colorKey = GetColorKey(color)
+        local bucket = bucketByKey[colorKey]
+        if not bucket then
+            bucket = {
+                color = CopyColor(color),
+                spellIDs = {},
+            }
+            bucketByKey[colorKey] = bucket
+            bucketKeys[#bucketKeys + 1] = colorKey
+        end
+        bucket.spellIDs[spellID] = true
+        coloredSpellIDs[spellID] = true
+    end
+
+    if not next(coloredSpellIDs) then
+        return nil, nil, false
+    end
+
+    sort(bucketKeys)
+    local buckets = {}
+    for index, colorKey in ipairs(bucketKeys) do
+        local bucket = bucketByKey[colorKey]
+        buckets[index] = {
+            color = CopyColor(bucket.color),
+            spellIDs = Copy(bucket.spellIDs),
+        }
+    end
+    return buckets, coloredSpellIDs, true
+end
+
+local function CopyNonIdentityCandidateFilters(candidateFilters)
+    local copied = {}
+    for key, value in pairs(candidateFilters or {}) do
+        if key ~= "includeSpellIDs"
+            and key ~= "excludeSpellIDs"
+        then
+            copied[key] = Copy(value)
+        end
+    end
+    return copied
+end
+
+local function BuildColoredCandidateFilters(
+    candidateFilters,
+    bucketSpellIDs
+)
+    local baseInclude = candidateFilters
+        and candidateFilters.includeSpellIDs
+    local baseExclude = candidateFilters
+        and candidateFilters.excludeSpellIDs
+    local combined =
+        CopyNonIdentityCandidateFilters(candidateFilters)
+
+    local includeSpellIDs = {}
+    for spellID in pairs(bucketSpellIDs) do
+        if baseInclude == nil or baseInclude[spellID] then
+            includeSpellIDs[spellID] = true
+        end
+    end
+    combined.includeSpellIDs = includeSpellIDs
+    if baseInclude == nil and baseExclude ~= nil then
+        combined.excludeSpellIDs = Copy(baseExclude)
+    end
+    return combined
+end
+
+local function BuildDefaultCandidateFilters(
+    candidateFilters,
+    coloredSpellIDs
+)
+    local baseInclude = candidateFilters
+        and candidateFilters.includeSpellIDs
+    local baseExclude = candidateFilters
+        and candidateFilters.excludeSpellIDs
+    local combined =
+        CopyNonIdentityCandidateFilters(candidateFilters)
+
+    if baseInclude ~= nil then
+        local includeSpellIDs = {}
+        for spellID in pairs(baseInclude) do
+            if not coloredSpellIDs[spellID]
+                and (
+                    baseExclude == nil
+                    or not baseExclude[spellID]
+                )
+            then
+                includeSpellIDs[spellID] = true
+            end
+        end
+        combined.includeSpellIDs = includeSpellIDs
+        return combined
+    end
+
+    local excludeSpellIDs = Copy(coloredSpellIDs)
+    for spellID in pairs(baseExclude or {}) do
+        excludeSpellIDs[spellID] = true
+    end
+    combined.excludeSpellIDs = excludeSpellIDs
+    return combined
+end
+
 local function GetNativeSchema()
     local anchorUtil = rawget(_G, "AnchorUtil")
     local sortMethod = rawget(_G, "AuraContainerSortMethod")
@@ -396,8 +541,13 @@ local function NewLayout(index, config, primarySpacing, crossSpacing)
     }
 end
 
-local function NewButtonStyle(baseFilter, config, tooltip)
-    return {
+local function NewButtonStyle(
+    baseFilter,
+    config,
+    tooltip,
+    blockColor
+)
+    local style = {
         noBorder = true,
         width = config.width,
         height = config.height,
@@ -410,6 +560,16 @@ local function NewButtonStyle(baseFilter, config, tooltip)
             and config.auraTypeColor.debuffType == true,
         tooltip = Copy(tooltip),
     }
+
+    -- This is ordinary saved configuration, never aura-derived data. Omit it
+    -- for icon styles so an inactive setting cannot affect native construction.
+    if IsBlockCooldownStyle(config.cooldownStyle)
+        and blockColor ~= nil
+    then
+        style.blockColor = CopyColor(blockColor)
+    end
+
+    return style
 end
 
 local function AddDiagnostic(diagnostics, code)
@@ -424,6 +584,10 @@ local function EmptyMetrics()
         nativeBatchSize = 0,
         initialRestrictedButtonCount = 0,
         freshContainerRestrictedButtonCountCeiling = 0,
+        requestedColorBucketCount = 0,
+        requestedColorExpandedGroupCount = 0,
+        requestedColorExpandedCapacity = 0,
+        colorGroupBudgetExceeded = false,
     }
 end
 
@@ -476,6 +640,12 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     if not COOLDOWN_STYLES[config.cooldownStyle] then
         return nil, "INVALID_COOLDOWN_STYLE"
     end
+    local spellColorBuckets, coloredSpellIDs, spellColorsRequested,
+        spellColorError =
+        NormalizeNativeSpellColorBuckets(config)
+    if spellColorError then
+        return nil, spellColorError
+    end
     if not ValidateDurationText(config.durationText) then
         return nil, "INVALID_DURATION_TEXT"
     end
@@ -506,12 +676,28 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     end
 
     local empty = policy.empty
+    local requestedColorBucketCount =
+        spellColorsRequested and #spellColorBuckets or 0
+    local requestedColorExpandedGroupCount =
+        spellColorsRequested
+        and #policy.groups
+            * (requestedColorBucketCount + 1)
+        or 0
+    local requestedColorExpandedCapacity =
+        requestedColorExpandedGroupCount * config.numTotal
+    local colorGroupBudgetExceeded =
+        requestedColorExpandedGroupCount
+            > MAX_NATIVE_COLOR_EXPANDED_GROUPS
+    local spellColorsActive = not empty
+        and spellColorsRequested
+        and not colorGroupBudgetExceeded
     -- 12.1 evaluates these maps inside the restricted aura container.
     -- Identity matching is reaction-gated there: helpful auras require an
     -- assistable unit and harmful auras require a non-assistable unit, except
     -- for spells Blizzard classifies NeverSecret. Keep the full map and make
     -- BFI's holder use only the direction where the map cannot be bypassed.
-    local spellIDFiltersRestricted = not empty and identityFilterActive
+    local spellIDFiltersRestricted = not empty
+        and (identityFilterActive or spellColorsActive)
     local sourceColorsIgnored = not empty
         and config.auraTypeColor ~= nil
         and (config.auraTypeColor.castByMe == true
@@ -523,6 +709,10 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     degradations.spellIDListsIgnored = false
     degradations.spellIDFiltersRestrictedByUnitReaction =
         spellIDFiltersRestricted
+    degradations.globalSpellColorsUseIndependentGroups =
+        not empty and spellColorsActive
+    degradations.globalSpellColorsBudgetExceeded =
+        not empty and colorGroupBudgetExceeded
     degradations.auraTypeColorSourceRulesIgnored = sourceColorsIgnored
     degradations.tooltipPlacementApproximate = not empty and tooltipApproximate
     degradations.partitionDeferred = partitionDeferred
@@ -544,14 +734,23 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
             requiresAssist = policy.requiresAssist
                 or (
                     baseFilter == "HELPFUL"
-                    and identityFilterActive
+                    and (
+                        identityFilterActive
+                        or spellColorsActive
+                    )
                 ),
             spellIDFilterRequiresPublicAssist =
                 baseFilter == "HELPFUL"
-                and identityFilterActive,
+                and (
+                    identityFilterActive
+                    or spellColorsActive
+                ),
             spellIDFilterRequiresPublicNonAssist =
                 baseFilter == "HARMFUL"
-                and identityFilterActive,
+                and (
+                    identityFilterActive
+                    or spellColorsActive
+                ),
         },
         partition = Copy(partition),
         migrationReady = not empty and not partitionDeferred,
@@ -573,6 +772,17 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
             "SPELL_ID_FILTERS_RESTRICTED_BY_UNIT_REACTION"
         )
     end
+    if spellColorsActive then
+        AddDiagnostic(
+            descriptor.diagnostics,
+            "GLOBAL_SPELL_COLORS_USE_INDEPENDENT_GROUPS"
+        )
+    elseif colorGroupBudgetExceeded then
+        AddDiagnostic(
+            descriptor.diagnostics,
+            "NATIVE_SPELL_COLORS_GROUP_BUDGET_EXCEEDED"
+        )
+    end
     if sourceColorsIgnored then
         AddDiagnostic(
             descriptor.diagnostics,
@@ -586,7 +796,49 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         AddDiagnostic(descriptor.diagnostics, "TARGET_PARTITION_DEFERRED")
     end
 
-    local groupCount = #policy.groups
+    local groupDefinitions = {}
+    for _, policyGroup in ipairs(policy.groups) do
+        if spellColorsActive then
+            for colorIndex, bucket in ipairs(
+                spellColorBuckets
+            ) do
+                local combined =
+                    BuildColoredCandidateFilters(
+                        candidateFilters,
+                        bucket.spellIDs
+                    )
+                groupDefinitions[#groupDefinitions + 1] = {
+                    key = policyGroup.key
+                        .. "_color_"
+                        .. colorIndex,
+                    filterString = policyGroup.filterString,
+                    candidateFilters = combined,
+                    blockColor = CopyColor(bucket.color),
+                }
+            end
+
+            local combined =
+                BuildDefaultCandidateFilters(
+                    candidateFilters,
+                    coloredSpellIDs
+                )
+            groupDefinitions[#groupDefinitions + 1] = {
+                key = policyGroup.key .. "_default",
+                filterString = policyGroup.filterString,
+                candidateFilters = combined,
+            }
+        else
+            groupDefinitions[#groupDefinitions + 1] = {
+                key = policyGroup.key,
+                filterString = policyGroup.filterString,
+                candidateFilters = Copy(candidateFilters),
+            }
+        end
+    end
+
+    local groupCount = #groupDefinitions
+    descriptor.degradations.perGroupLimit = groupCount > 1
+    descriptor.degradations.perGroupSort = groupCount > 1
     local capacity = groupCount * config.numTotal
     local perLine = min(config.numPerLine, config.numTotal)
     local lineSlots = min(capacity, perLine)
@@ -625,30 +877,37 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
 
     local completeGroups = {}
     local tuningGroups = {}
-    for index, policyGroup in ipairs(policy.groups) do
+    for index, groupDefinition in ipairs(groupDefinitions) do
         local layout = NewLayout(index, config, primarySpacing, crossSpacing)
-        local style = NewButtonStyle(baseFilter, config, tooltip)
+        local style = NewButtonStyle(
+            baseFilter,
+            config,
+            tooltip,
+            groupDefinition.blockColor
+        )
         completeGroups[index] = {
-            key = policyGroup.key,
-            filterString = policyGroup.filterString,
+            key = groupDefinition.key,
+            filterString = groupDefinition.filterString,
             maxFrameCount = config.numTotal,
-            candidateFilters = Copy(candidateFilters),
+            candidateFilters =
+                Copy(groupDefinition.candidateFilters),
             sortMethod = schema.defaultSort,
             sortDirection = schema.normalSort,
             layout = layout,
             buttonStyle = style,
         }
         tuningGroups[index] = {
-            key = policyGroup.key,
-            filterString = policyGroup.filterString,
+            key = groupDefinition.key,
+            filterString = groupDefinition.filterString,
             maxFrameCount = config.numTotal,
-            candidateFilters = Copy(candidateFilters),
+            candidateFilters =
+                Copy(groupDefinition.candidateFilters),
             sortMethod = schema.defaultSort,
             sortDirection = schema.normalSort,
             layout = Copy(layout),
         }
         descriptor.constructionKey.groups[index] = {
-            key = policyGroup.key,
+            key = groupDefinition.key,
             buttonStyle = Copy(style),
         }
     end
@@ -687,6 +946,14 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         freshContainerRestrictedButtonCountCeiling = groupCount
             * ceil(config.numTotal / NATIVE_BUTTON_BATCH_SIZE)
             * NATIVE_BUTTON_BATCH_SIZE,
+        requestedColorBucketCount =
+            requestedColorBucketCount,
+        requestedColorExpandedGroupCount =
+            requestedColorExpandedGroupCount,
+        requestedColorExpandedCapacity =
+            requestedColorExpandedCapacity,
+        colorGroupBudgetExceeded =
+            colorGroupBudgetExceeded,
     }
 
     return descriptor

@@ -579,6 +579,9 @@ local function makeHarness(
         end
     end
 
+    function AF.RegisterCallback()
+    end
+
     function AF.SetEnabled(enabled, ...)
         for index = 1, select("#", ...) do
             select(index, ...):SetEnabled(enabled)
@@ -1522,6 +1525,8 @@ local function testRetailIndicatorAwareNativeWording()
         harness.builders.auraBlackListWhitelist(spellParent)
     local arrangementPane =
         harness.builders.auraArrangement(makeParent())
+    local cooldownPane =
+        harness.builders.cooldownStyle(makeParent())
     local mode = findWidget(
         spellPane,
         "dropdown",
@@ -1539,6 +1544,12 @@ local function testRetailIndicatorAwareNativeWording()
         "slider",
         "initialText",
         "Max Displayed"
+    )
+    local cooldown = findWidget(
+        cooldownPane,
+        "dropdown",
+        "kind",
+        "dropdown"
     )
     local nativeTopPadding
 
@@ -1604,13 +1615,45 @@ local function testRetailIndicatorAwareNativeWording()
         arrangementPane.Load(info)
         assertEqual(
             maximum.label,
-            "Max Per Enabled Category",
+            "Max Per Aura Group",
             label .. " native maximum label"
         )
         assertContains(
             maximum.tooltipBody,
-            "maximum combined capacity",
+            "applies to each group",
             label .. " native maximum warning"
+        )
+        assertContains(
+            maximum.tooltipBody,
+            "more auras overall",
+            label .. " native independent group totals"
+        )
+        assertContains(
+            maximum.tooltipBody,
+            "sort separately",
+            label .. " native independent group sorting"
+        )
+
+        cooldownPane.Load(info)
+        assertContains(
+            cooldown.tooltipBody,
+            "opaque aura duration",
+            label .. " native cooldown duration source"
+        )
+        assertContains(
+            cooldown.tooltipBody,
+            "spell colors configured in Auras",
+            label .. " native spell-color location"
+        )
+        assertContains(
+            cooldown.tooltipBody,
+            "unlisted spells use gray",
+            label .. " native unlisted spell fallback"
+        )
+        assertNotContains(
+            cooldown.tooltipBody,
+            "not applied by this older aura system",
+            label .. " stale legacy cooldown explanation"
         )
     end
 
@@ -1679,6 +1722,28 @@ local function testRetailIndicatorAwareNativeWording()
             maximum.tooltipBody,
             nil,
             label .. " stale native maximum warning"
+        )
+
+        cooldownPane.Load(info)
+        assertContains(
+            cooldown.tooltipBody,
+            "opaque aura duration",
+            label .. " legacy cooldown duration source"
+        )
+        assertContains(
+            cooldown.tooltipBody,
+            "saved for WoW 12.1",
+            label .. " legacy saved spell colors"
+        )
+        assertContains(
+            cooldown.tooltipBody,
+            "not applied by this older aura system",
+            label .. " legacy spell-color behavior"
+        )
+        assertNotContains(
+            cooldown.tooltipBody,
+            "spell colors configured in Auras",
+            label .. " stale native cooldown explanation"
         )
     end
 
@@ -1808,12 +1873,22 @@ local function testRetailPresentation(hasNativeBackend)
         "Max Displayed"
     )
     if hasNativeBackend then
-        assertEqual(maximum.label, "Max Per Enabled Category",
+        assertEqual(maximum.label, "Max Per Aura Group",
             version .. " native maximum label")
         assertContains(
             maximum.tooltipBody,
-            "maximum combined capacity",
+            "each group",
             version .. " native maximum warning"
+        )
+        assertContains(
+            maximum.tooltipBody,
+            "more auras overall",
+            version .. " native independent group totals"
+        )
+        assertContains(
+            maximum.tooltipBody,
+            "sort separately",
+            version .. " native independent group sorting"
         )
     else
         assertEqual(maximum.label, "Max Displayed",
@@ -1834,11 +1909,44 @@ local function testRetailPresentation(hasNativeBackend)
         COOLDOWN_STYLES,
         version .. " cooldown styles"
     )
+    assertEqual(
+        cooldown.tooltipTitle,
+        "Cooldown Style",
+        version .. " cooldown tooltip title"
+    )
     assertContains(
         cooldown.tooltipBody,
         "opaque aura duration",
-        version .. " cooldown explanation"
+        version .. " cooldown duration source"
     )
+    if hasNativeBackend then
+        assertContains(
+            cooldown.tooltipBody,
+            "spell colors configured in Auras",
+            version .. " native spell-color location"
+        )
+        assertContains(
+            cooldown.tooltipBody,
+            "when WoW can match them safely",
+            version .. " native spell-color safety"
+        )
+        assertContains(
+            cooldown.tooltipBody,
+            "unlisted spells use gray",
+            version .. " native unlisted spell fallback"
+        )
+    else
+        assertContains(
+            cooldown.tooltipBody,
+            "saved for WoW 12.1",
+            version .. " saved spell-color compatibility"
+        )
+        assertContains(
+            cooldown.tooltipBody,
+            "not applied by this older aura system",
+            version .. " legacy spell-color behavior"
+        )
+    end
     harness:ClearLoads()
     for _, style in ipairs(COOLDOWN_STYLES) do
         cooldown.onSelect(style)

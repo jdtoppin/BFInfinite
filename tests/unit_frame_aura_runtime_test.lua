@@ -47,6 +47,25 @@ local function deepEqual(left, right, seen)
     return true
 end
 
+local function spellColorConstructionKey(spellColors)
+    local colorKeys = {}
+    local seen = {}
+    for _, color in pairs(spellColors or {}) do
+        local key = table.concat({
+            tostring(color[1]),
+            tostring(color[2]),
+            tostring(color[3]),
+            tostring(color[4]),
+        }, "|")
+        if not seen[key] then
+            seen[key] = true
+            colorKeys[#colorKeys + 1] = key
+        end
+    end
+    table.sort(colorKeys)
+    return colorKeys
+end
+
 local function countEvents(harness, name)
     local count = 0
     for _, event in ipairs(harness.events) do
@@ -156,6 +175,8 @@ local function makeHarness(options)
         legacyFrames = {},
         compiles = {},
         registered = {},
+        afCallbacks = {},
+        spellColors = copy(options.spellColors or {}),
         visibleResult = true,
         assistResult = true,
         inCombat = false,
@@ -182,6 +203,26 @@ local function makeHarness(options)
     function AF.RemoveFromPixelUpdater(frame)
         frame.pixelRemoved = true
         record(harness, "af.pixel-remove", frame)
+    end
+
+    function AF.RegisterCallback(event, callback)
+        harness.afCallbacks[event] =
+            harness.afCallbacks[event] or {}
+        harness.afCallbacks[event][callback] = true
+    end
+
+    function AF.Fire(event, ...)
+        record(harness, "af.fire", event, ...)
+        local callbacks = harness.afCallbacks[event]
+        if not callbacks then return end
+
+        local snapshot = {}
+        for callback in pairs(callbacks) do
+            snapshot[#snapshot + 1] = callback
+        end
+        for _, callback in ipairs(snapshot) do
+            callback(event, ...)
+        end
     end
 
     function AF.ReSize(frame)
@@ -317,6 +358,10 @@ local function makeHarness(options)
                         key = "group",
                         buttonStyle = {
                             style = config.style,
+                            spellColorFamilies =
+                                spellColorConstructionKey(
+                                    config.spellColors
+                                ),
                         },
                     },
                 },
@@ -371,6 +416,7 @@ local function makeHarness(options)
             }
             descriptor.tuningSpec = {
                 tag = config.tag,
+                spellColors = copy(config.spellColors),
                 holder = copy(descriptor.completeSpec.holder),
                 groups = {
                     {
@@ -447,9 +493,15 @@ local function makeHarness(options)
         record(harness, "uf.unregister", event, callback)
     end
 
+    local A = {}
+    function A.GetNativeSpellColorMap()
+        return copy(harness.spellColors)
+    end
+
     local BFI = {
         funcs = F,
         modules = {
+            Auras = A,
             UnitFrames = UF,
         },
     }
@@ -1718,6 +1770,94 @@ local function testPolymorphicGlobalRefreshSource()
         "debuff refresh still calls the legacy implementation")
 end
 
+local function testGlobalSpellColorRefresh()
+    local harness = makeHarness({
+        spellColors = {
+            [101] = {0.1, 0.8, 0.2, 1},
+        },
+    })
+    local firstRoot = newRoot("FirstColors", "target")
+    local secondRoot = newRoot("SecondColors", "focus")
+    local firstRuntime = createRuntime(harness, firstRoot)
+    local secondRuntime = createRuntime(harness, secondRoot)
+
+    firstRuntime:LoadConfig(validConfig())
+    secondRuntime:LoadConfig(validConfig())
+    assertEqual(#harness.compiles, 2, "initial color compile count")
+    assertTrue(
+        harness.compiles[1].config.spellColors[101] ~= nil,
+        "global colors were not injected into first compile"
+    )
+    assertTrue(
+        harness.compiles[2].config.spellColors[101] ~= nil,
+        "global colors were not injected into hidden runtime compile"
+    )
+
+    harness.spellColors[202] = {0.1, 0.8, 0.2, 1}
+    harness:ClearEvents()
+    harness.AF.Fire("BFI_UpdateConfig", "auras", "colors")
+    assertEqual(#harness.compiles, 4,
+        "same-family edit did not refresh every runtime")
+    assertEqual(
+        countEvents(harness, "af.fire"),
+        1,
+        "same-family edit requested a reload"
+    )
+    assertEqual(firstRuntime:GetNativeAuraState().reloadRequired, false,
+        "same-family first runtime reload state")
+    assertEqual(secondRuntime:GetNativeAuraState().reloadRequired, false,
+        "same-family hidden runtime reload state")
+    harness:RunTimers(0.15)
+
+    harness.spellColors[303] = {0.9, 0.2, 0.4, 1}
+    harness:ClearEvents()
+    harness.AF.Fire("BFI_UpdateConfig", "auras", "colors")
+    assertEqual(#harness.compiles, 6,
+        "new-family edit did not refresh every runtime")
+    assertEqual(
+        countEvents(harness, "af.fire"),
+        2,
+        "new-family edit did not emit one coalesced reload event"
+    )
+    local reloadEvent = lastEvent(harness, "af.fire")
+    assertEqual(
+        reloadEvent.args[1],
+        "BFI_NativeAuraReloadRequired",
+        "new-family reload event"
+    )
+    assertEqual(firstRuntime:GetNativeAuraState().reloadRequired, true,
+        "new-family first runtime reload state")
+    assertEqual(secondRuntime:GetNativeAuraState().reloadRequired, true,
+        "new-family hidden runtime reload state")
+
+    local compileCount = #harness.compiles
+    harness.AF.Fire("BFI_UpdateConfig", "colors", "casts")
+    assertEqual(#harness.compiles, compileCount,
+        "unrelated common colors refreshed aura runtimes")
+end
+
+local function testLegacyPathDoesNotReadAuraIdentityForColors()
+    local file = assert(io.open(
+        "Modules/UnitFrames/Indicators/Auras.lua",
+        "r"
+    ))
+    local source = file:read("*a")
+    file:close()
+
+    assertTrue(
+        source:find("GetAuraColor", 1, true) == nil,
+        "legacy aura still requests a per-spell color"
+    )
+    assertTrue(
+        source:find("auraData.spellId", 1, true) == nil,
+        "legacy aura still indexes a live aura spell ID for color"
+    )
+    assertTrue(
+        source:find("AF.GetColorRGB%(\"BFI\"%)") == nil,
+        "legacy preview pretends to know a per-spell color"
+    )
+end
+
 local function testGroupRuntimeSelectionAndFallback()
     local unavailable = makeHarness({
         backend = false,
@@ -2514,6 +2654,8 @@ testConfigModeNeverRetargetsPlayer()
 testDisabledConfigModePreviewCannotEscape()
 testWaitingUnitAndTerminalDestroy()
 testPolymorphicGlobalRefreshSource()
+testGlobalSpellColorRefresh()
+testLegacyPathDoesNotReadAuraIdentityForColors()
 testGroupRuntimeSelectionAndFallback()
 testGroupSeedsPrebuildBeforeCombat()
 testGroupUnitRetargetsBeforePendingCombatConfig()

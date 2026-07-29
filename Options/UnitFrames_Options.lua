@@ -447,6 +447,11 @@ local function ShowNativeAuraReloadDialog()
     dialog:SetOnCancel(nativeAuraReloadCancel)
 end
 
+AF.RegisterCallback(
+    "BFI_NativeAuraReloadRequired",
+    ShowNativeAuraReloadDialog
+)
+
 local function LoadIndicatorConfig(t)
     AF.Debug(AF.GetColorStr("darkgray"), "LoadIndicatorConfig", t.owner, t.id)
 
@@ -4272,10 +4277,10 @@ builder["auraArrangement"] = function(parent)
     function pane.Load(t)
         pane.t = t
         if UsesNativeAuraContainer(t) then
-            numTotal:SetLabel(L["Max Per Enabled Category"])
+            numTotal:SetLabel(L["Max Per Aura Group"])
             numTotal:SetTooltip(
-                L["Max Per Enabled Category"],
-                L["Retail 12.1 applies this limit to each enabled aura category; maximum combined capacity is the number of enabled categories multiplied by this value"]
+                L["Max Per Aura Group"],
+                L["WoW 12.1 may split a row by enabled category and saved spell colors. This limit applies to each group, so the row can show more auras overall and groups may sort separately"]
             )
         else
             numTotal:SetLabel(L["Max Displayed"])
@@ -4321,18 +4326,27 @@ builder["cooldownStyle"] = function(parent)
         LoadIndicatorConfig(pane.t)
     end)
 
-    if AF.isRetail then
-        styleDropdown:SetTooltip(
-            L["Cooldown Style"],
-            L["Retail cooldown styles change presentation only; Blizzard's opaque aura duration continues to drive the swipe"]
-        )
-    else
-        styleDropdown:SetTooltip(L["Cooldown Style"], L["Block type: Recommended for whitelist mode only, and set aura colors in %s"]:format(AF.WrapTextInColor(L["Auras"], "BFI")))
-    end
-
     function pane.Load(t)
         pane.t = t
         styleDropdown:SetSelectedValue(t.cfg.cooldownStyle)
+        if AF.isRetail then
+            if UsesNativeAuraContainer(t) then
+                styleDropdown:SetTooltip(
+                    L["Cooldown Style"],
+                    L["Retail cooldown styles change presentation only; Blizzard's opaque aura duration continues to drive the swipe. Block styles can use the spell colors configured in Auras when WoW can match them safely; unlisted spells use gray"]
+                )
+            else
+                styleDropdown:SetTooltip(
+                    L["Cooldown Style"],
+                    L["Retail cooldown styles change presentation only; Blizzard's opaque aura duration continues to drive the swipe. Global spell colors are saved for WoW 12.1 but are not applied by this older aura system"]
+                )
+            end
+        else
+            styleDropdown:SetTooltip(
+                L["Cooldown Style"],
+                L["Block type: Recommended for whitelist mode only, and set aura colors in %s"]:format(AF.WrapTextInColor(L["Auras"], "BFI"))
+            )
+        end
     end
 
     return pane
