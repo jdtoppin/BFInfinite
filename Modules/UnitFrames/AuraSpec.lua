@@ -528,9 +528,10 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
 
     local empty = policy.empty
     -- 12.1 evaluates these maps inside the restricted aura container.
-    -- Identity matching is reaction-gated there; notably, harmful auras on
-    -- assistable units may be matched only when Blizzard marks them
-    -- NeverSecret. Keep the full config-derived map and report that limit.
+    -- Identity matching is reaction-gated there: helpful auras require an
+    -- assistable unit and harmful auras require a non-assistable unit, except
+    -- for spells Blizzard classifies NeverSecret. Keep the full map and make
+    -- BFI's holder use only the direction where the map cannot be bypassed.
     local spellIDFiltersRestricted = not empty and identityFilterActive
     local sourceColorsIgnored = not empty
         and config.auraTypeColor ~= nil
@@ -566,6 +567,12 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
                     baseFilter == "HELPFUL"
                     and identityFilterActive
                 ),
+            spellIDFilterRequiresPublicAssist =
+                baseFilter == "HELPFUL"
+                and identityFilterActive,
+            spellIDFilterRequiresPublicNonAssist =
+                baseFilter == "HARMFUL"
+                and identityFilterActive,
         },
         partition = Copy(partition),
         migrationReady = not empty and not partitionDeferred,

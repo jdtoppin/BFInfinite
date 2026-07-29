@@ -6,6 +6,12 @@ local F = BFI.funcs
 local concat = table.concat
 local ipairs = ipairs
 
+local function HasAuraFilterToken(key, token)
+    local auraFilters = AuraUtil and AuraUtil.AuraFilters
+    return type(auraFilters) == "table"
+        and auraFilters[key] == token
+end
+
 -- Retail 12.1.0.68914 (wow-ui-source d3915c78) supports negated native
 -- filter tokens, but each CustomAuraContainer group owns its own limit and
 -- sort. The container also has no selector that separates public from private
@@ -46,6 +52,16 @@ local RULES = {
         exclusionToken = "!EXTERNAL_DEFENSIVE",
         requiresAssist = true,
     },
+    {
+        key = "important",
+        token = "IMPORTANT",
+        exclusionToken = "!IMPORTANT",
+    },
+    {
+        key = "anyDispellable",
+        token = "DISPELLABLE",
+        exclusionToken = "!DISPELLABLE",
+    },
 }
 
 function UF.CompileNativeAuraPolicy(baseFilter, filters)
@@ -59,6 +75,17 @@ function UF.CompileNativeAuraPolicy(baseFilter, filters)
         return nil, "INVALID_FILTER_SCHEMA"
     end
 
+    local importantSupported =
+        HasAuraFilterToken("Important", "IMPORTANT")
+    local anyDispellableSupported =
+        HasAuraFilterToken("Dispellable", "DISPELLABLE")
+    local unsupportedPtr7Category =
+        (resolved.important and not importantSupported)
+        or (
+            resolved.anyDispellable
+            and not anyDispellableSupported
+        )
+
     local enabled = {
         all = resolved.all,
         player = resolved.player,
@@ -67,7 +94,21 @@ function UF.CompileNativeAuraPolicy(baseFilter, filters)
         raidPlayerDispellable = resolved.raidPlayerDispellable,
         bigDefensive = resolved.bigDefensive,
         externalDefensive = resolved.externalDefensive,
+        important =
+            importantSupported and resolved.important,
+        anyDispellable =
+            anyDispellableSupported and resolved.anyDispellable,
     }
+
+    -- Imported future profiles must not feed unknown filter tokens to an
+    -- earlier client. Widening to the base type preserves requested auras and
+    -- makes the compatibility loss explicit in diagnostics.
+    if unsupportedPtr7Category then
+        for key in pairs(enabled) do
+            enabled[key] = false
+        end
+        enabled.all = true
+    end
 
     local groups = {}
     local precedingExclusionTokens = {}
@@ -130,6 +171,11 @@ function UF.CompileNativeAuraPolicy(baseFilter, filters)
                 migration.bossAuraUsesCuratedRaidInCombat,
             legacySourceFilterUsesSuperset =
                 migration.legacySourceFilterUsesSuperset,
+            legacyDispellableUsesRaidPlayerDispellable =
+                migration
+                    .legacyDispellableUsesRaidPlayerDispellable,
+            unsupportedPtr7CategoryUsesBaseFilter =
+                unsupportedPtr7Category,
         },
     }
 end

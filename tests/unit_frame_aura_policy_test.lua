@@ -50,6 +50,7 @@ local moduleEnvironment = {
     assert = assert,
     ipairs = ipairs,
     next = next,
+    pairs = pairs,
     pcall = pcall,
     select = select,
     table = table,
@@ -63,6 +64,12 @@ local moduleEnvironment = {
     UnitIsVisible = forbidden("UnitIsVisible"),
     C_UnitAuras = forbiddenTable,
     AuraData = forbiddenTable,
+    AuraUtil = {
+        AuraFilters = {
+            Important = "IMPORTANT",
+            Dispellable = "DISPELLABLE",
+        },
+    },
 }
 moduleEnvironment._G = moduleEnvironment
 moduleEnvironment["is" .. "secretvalue"] = forbidden("secret-value API")
@@ -150,10 +157,22 @@ local function testEmptyPoliciesStayEmpty()
         false,
         "empty helpful source migration"
     )
+    assertEqual(
+        helpful.degradations
+            .legacyDispellableUsesRaidPlayerDispellable,
+        false,
+        "empty helpful legacy dispel migration"
+    )
+    assertEqual(
+        helpful.degradations.unsupportedPtr7CategoryUsesBaseFilter,
+        false,
+        "empty helpful PTR 7 capability degradation"
+    )
 
     local harmful = compile("HARMFUL", {
         bigDefensive = true,
         externalDefensive = true,
+        important = true,
     })
     assertGroups(harmful, {}, "unsupported harmful source filters")
     assertEqual(harmful.empty, true, "unsupported harmful state")
@@ -174,11 +193,18 @@ local function testLegacyTruthTable()
         {"raidInCombat", "HARMFUL|RAID_IN_COMBAT"},
     }, "legacy boss choice uses curated encounter filter")
 
-    assertGroups(compile("HELPFUL", {
+    local dispellable = compile("HELPFUL", {
         dispellable = true,
-    }), {
+    })
+    assertGroups(dispellable, {
         {"raidPlayerDispellable", "HELPFUL|RAID_PLAYER_DISPELLABLE"},
     }, "dispellable")
+    assertEqual(
+        dispellable.degradations
+            .legacyDispellableUsesRaidPlayerDispellable,
+        true,
+        "legacy dispellable migration is reported"
+    )
 
     local others = compile("HELPFUL", {
         castByOthers = true,
@@ -331,10 +357,30 @@ local function testLegacySourceResolutionExhaustive()
                 label .. " external defensive"
             )
             assertEqual(
+                resolved.important,
+                false,
+                label .. " important"
+            )
+            assertEqual(
+                resolved.anyDispellable,
+                false,
+                label .. " any dispellable"
+            )
+            assertEqual(
                 migration.legacySourceFilterUsesSuperset,
                 (expectedNotPlayer and not exactNotPlayer)
                     or (expectedAll and not exactAll),
                 label .. " source widening"
+            )
+            assertEqual(
+                migration
+                    .legacyDispellableUsesRaidPlayerDispellable,
+                not expectedAll
+                    and (
+                        legacy.dispellable
+                        or legacy.canBeDispelled
+                    ),
+                label .. " legacy dispel migration"
             )
         end
     end
@@ -347,6 +393,8 @@ local function testCanonicalDisjointOrder()
         raidPlayerDispellable = true,
         bigDefensive = true,
         externalDefensive = true,
+        important = true,
+        anyDispellable = true,
     }
 
     local policy = compile("HELPFUL", filters)
@@ -366,6 +414,18 @@ local function testCanonicalDisjointOrder()
             "externalDefensive",
             "HELPFUL|EXTERNAL_DEFENSIVE|!PLAYER|!RAID_IN_COMBAT"
                 .. "|!RAID_PLAYER_DISPELLABLE|!BIG_DEFENSIVE",
+        },
+        {
+            "important",
+            "HELPFUL|IMPORTANT|!PLAYER|!RAID_IN_COMBAT"
+                .. "|!RAID_PLAYER_DISPELLABLE|!BIG_DEFENSIVE"
+                .. "|!EXTERNAL_DEFENSIVE",
+        },
+        {
+            "anyDispellable",
+            "HELPFUL|DISPELLABLE|!PLAYER|!RAID_IN_COMBAT"
+                .. "|!RAID_PLAYER_DISPELLABLE|!BIG_DEFENSIVE"
+                .. "|!EXTERNAL_DEFENSIVE|!IMPORTANT",
         },
     }, "canonical disjoint")
     assertEqual(policy.empty, false, "canonical empty state")
@@ -392,6 +452,8 @@ local function testNotPlayerDisjointOrderAndAllCollapse()
         raidPlayerDispellable = true,
         bigDefensive = true,
         externalDefensive = true,
+        important = true,
+        anyDispellable = true,
     })
     assertGroups(policy, {
         {"notPlayer", "HELPFUL|!PLAYER"},
@@ -410,6 +472,18 @@ local function testNotPlayerDisjointOrderAndAllCollapse()
             "externalDefensive",
             "HELPFUL|EXTERNAL_DEFENSIVE|PLAYER|!RAID_IN_COMBAT"
                 .. "|!RAID_PLAYER_DISPELLABLE|!BIG_DEFENSIVE",
+        },
+        {
+            "important",
+            "HELPFUL|IMPORTANT|PLAYER|!RAID_IN_COMBAT"
+                .. "|!RAID_PLAYER_DISPELLABLE|!BIG_DEFENSIVE"
+                .. "|!EXTERNAL_DEFENSIVE",
+        },
+        {
+            "anyDispellable",
+            "HELPFUL|DISPELLABLE|PLAYER|!RAID_IN_COMBAT"
+                .. "|!RAID_PLAYER_DISPELLABLE|!BIG_DEFENSIVE"
+                .. "|!EXTERNAL_DEFENSIVE|!IMPORTANT",
         },
     }, "not-player disjoint")
     for _, group in ipairs(policy.groups) do
@@ -486,6 +560,21 @@ local function testGateAndDegradationMetadata()
         "mixed union whole-holder assist gate"
     )
 
+    local ptr7Categories = compile("HELPFUL", {
+        important = true,
+        anyDispellable = true,
+    })
+    assertEqual(
+        ptr7Categories.requiresVisible,
+        false,
+        "PTR 7 categories do not add a visibility gate"
+    )
+    assertEqual(
+        ptr7Categories.requiresAssist,
+        false,
+        "PTR 7 categories do not add an assist gate"
+    )
+
     -- Blizzard's 68914 Edit Mode fixture treats RAID_IN_COMBAT as a RAID
     -- substring and therefore selects its raid Bleed sample, not its
     -- non-raid isBossAura Poison sample. This test records BFI's existing
@@ -533,6 +622,11 @@ local function testCanonicalCompatibilityMaterialization()
         false,
         "complete source union migration"
     )
+    assertEqual(
+        migration.legacyDispellableUsesRaidPlayerDispellable,
+        false,
+        "all-source legacy dispel migration is redundant"
+    )
 
     assertEqual(
         F.SetUnitFrameAuraFilter(
@@ -558,6 +652,12 @@ local function testCanonicalCompatibilityMaterialization()
         legacy.externalDefensive,
         false,
         "materialized external defensive"
+    )
+    assertEqual(legacy.important, false, "materialized important")
+    assertEqual(
+        legacy.anyDispellable,
+        false,
+        "materialized any dispellable"
     )
     assertEqual(legacy.castByMe, nil, "retired castByMe removed")
     assertEqual(legacy.castByNPC, nil, "retired castByNPC removed")
@@ -603,6 +703,16 @@ local function testCanonicalCompatibilityMaterialization()
         false,
         "harmful defensive category rejected"
     )
+    assertEqual(
+        F.SetUnitFrameAuraFilter(
+            "HARMFUL",
+            legacy,
+            "important",
+            true
+        ),
+        false,
+        "harmful important category rejected"
+    )
 
     local notPlayer = {
         notPlayer = true,
@@ -631,6 +741,101 @@ local function testCanonicalCompatibilityMaterialization()
         )
     assertEqual(#matchFilters, 1, "all match rule count")
     assertEqual(matchFilters[1], "HELPFUL", "all base match rule")
+end
+
+local function testPtr7LegacyProjectionCapabilities()
+    local matchFilters =
+        F.GetSecretSafeUnitFrameAuraMatchFilters(
+            "HELPFUL",
+            {
+                important = true,
+                anyDispellable = true,
+            }
+        )
+    assertEqual(#matchFilters, 1, "legacy helpful PTR 7 match rule count")
+    assertEqual(
+        matchFilters[1],
+        "HELPFUL",
+        "legacy helpful PTR 7 categories widen to the base filter"
+    )
+
+    matchFilters =
+        F.GetSecretSafeUnitFrameAuraMatchFilters(
+            "HARMFUL",
+            {
+                important = true,
+                anyDispellable = true,
+            }
+        )
+    assertEqual(#matchFilters, 1, "harmful PTR 7 match rule count")
+    assertEqual(
+        matchFilters[1],
+        "HARMFUL",
+        "legacy harmful PTR 7 category widens to the base filter"
+    )
+
+    local auraFilters = moduleEnvironment.AuraUtil.AuraFilters
+    auraFilters.Important = nil
+    local degradedImportant = compile("HELPFUL", {
+        important = true,
+    })
+    assertGroups(degradedImportant, {
+        {"all", "HELPFUL"},
+    }, "unsupported important category")
+    assertEqual(
+        degradedImportant.degradations
+            .unsupportedPtr7CategoryUsesBaseFilter,
+        true,
+        "unsupported important category reports base-filter degradation"
+    )
+
+    auraFilters.Important = "IMPORTANT"
+    auraFilters.Dispellable = "unexpected-token"
+    local degradedDispellable = compile("HARMFUL", {
+        anyDispellable = true,
+    })
+    assertGroups(degradedDispellable, {
+        {"all", "HARMFUL"},
+    }, "unsupported any-dispellable category")
+    assertEqual(
+        degradedDispellable.degradations
+            .unsupportedPtr7CategoryUsesBaseFilter,
+        true,
+        "unsupported any-dispellable reports base-filter degradation"
+    )
+
+    auraFilters.Important = nil
+    auraFilters.Dispellable = nil
+    matchFilters =
+        F.GetSecretSafeUnitFrameAuraMatchFilters(
+            "HELPFUL",
+            {
+                important = true,
+                anyDispellable = true,
+            }
+        )
+    assertEqual(
+        #matchFilters,
+        1,
+        "legacy PTR 7 fallback count is capability independent"
+    )
+    assertEqual(
+        matchFilters[1],
+        "HELPFUL",
+        "unsupported PTR 7 categories still widen on the legacy path"
+    )
+    auraFilters.Important = "IMPORTANT"
+    auraFilters.Dispellable = "DISPELLABLE"
+
+    local supported = compile("HELPFUL", {
+        important = true,
+        anyDispellable = true,
+    })
+    assertEqual(
+        supported.degradations.unsupportedPtr7CategoryUsesBaseFilter,
+        false,
+        "supported PTR 7 categories do not report capability degradation"
+    )
 end
 
 local function testNameplateProjectionRemainsScoped()
@@ -698,6 +903,7 @@ testCanonicalDisjointOrder()
 testNotPlayerDisjointOrderAndAllCollapse()
 testGateAndDegradationMetadata()
 testCanonicalCompatibilityMaterialization()
+testPtr7LegacyProjectionCapabilities()
 testNameplateProjectionRemainsScoped()
 testFreshDeterministicOutput()
 

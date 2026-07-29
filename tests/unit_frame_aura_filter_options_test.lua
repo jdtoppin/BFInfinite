@@ -38,6 +38,8 @@ local CANONICAL_FIELDS = {
     "raidPlayerDispellable",
     "bigDefensive",
     "externalDefensive",
+    "important",
+    "anyDispellable",
 }
 
 local LEGACY_FIELDS = {
@@ -258,7 +260,17 @@ local function hasPoint(widget, point, relativeTo, relativePoint)
     return false
 end
 
-local function makeHarness(isRetail, hasNativeBackend)
+local function makeHarness(
+    isRetail,
+    hasNativeBackend,
+    auraFilters
+)
+    if auraFilters == nil then
+        auraFilters = hasNativeBackend and {
+            Important = "IMPORTANT",
+            Dispellable = "DISPELLABLE",
+        } or {}
+    end
     local harness = {
         configLoads = {},
         panes = {},
@@ -316,10 +328,18 @@ local function makeHarness(isRetail, hasNativeBackend)
                     not all
                     and baseFilter == "HELPFUL"
                     and config.externalDefensive == true,
+                important =
+                    not all
+                    and baseFilter == "HELPFUL"
+                    and config.important == true,
+                anyDispellable =
+                    not all
+                    and config.anyDispellable == true,
             }, {
                 legacy = false,
                 legacySourceFilterUsesSuperset = false,
                 bossAuraUsesCuratedRaidInCombat = false,
+                legacyDispellableUsesRaidPlayerDispellable = false,
             }
         end
 
@@ -338,6 +358,12 @@ local function makeHarness(isRetail, hasNativeBackend)
                 or (all and not exactAll),
             bossAuraUsesCuratedRaidInCombat =
                 not all and config.isBossAura == true,
+            legacyDispellableUsesRaidPlayerDispellable =
+                not all
+                and (
+                    config.dispellable == true
+                    or config.canBeDispelled == true
+                ),
         }
         if all then
             return {
@@ -348,6 +374,8 @@ local function makeHarness(isRetail, hasNativeBackend)
                 raidPlayerDispellable = false,
                 bigDefensive = false,
                 externalDefensive = false,
+                important = false,
+                anyDispellable = false,
             }, migration
         end
 
@@ -361,6 +389,8 @@ local function makeHarness(isRetail, hasNativeBackend)
                 or config.canBeDispelled == true,
             bigDefensive = false,
             externalDefensive = false,
+            important = false,
+            anyDispellable = false,
         }, migration
     end
 
@@ -384,6 +414,7 @@ local function makeHarness(isRetail, hasNativeBackend)
             and (
                 field == "bigDefensive"
                 or field == "externalDefensive"
+                or field == "important"
             )
         then
             return false
@@ -654,6 +685,9 @@ local function makeHarness(isRetail, hasNativeBackend)
     local environment = {
         _G = false,
         AbstractFramework = AF,
+        AuraUtil = {
+            AuraFilters = auraFilters,
+        },
         BFIOptionsFrame_UnitFramesPanel = {},
         NONE = "None",
         ceil = math.ceil,
@@ -849,7 +883,7 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         castByNPC = false,
         isBossAura = true,
         dispellable = false,
-    })
+    }, "legacy")
 
     pane.Load(info)
     local allAuras = findWidget(
@@ -894,11 +928,17 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         "text",
         "Raid Player-Dispellable"
     )
-    local retiredDispellable = findWidget(
+    local anyDispellable = findWidget(
         pane,
         "checkButton",
         "initialText",
         "Dispellable"
+    )
+    local important = findWidget(
+        pane,
+        "checkButton",
+        "initialText",
+        "Important Enemy Buffs"
     )
     local tip = findWidget(
         pane,
@@ -953,8 +993,63 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         harness.resizeCalls > 0,
         version .. " category scroll recalculation"
     )
-    assertEqual(retiredDispellable.shown, false,
-        version .. " legacy dispellable visibility")
+    assertEqual(anyDispellable.shown, hasNativeBackend,
+        version .. " any-dispellable capability visibility")
+    assertEqual(important.shown, hasNativeBackend,
+        version .. " important capability visibility")
+    assertEqual(anyDispellable.text, "Any Dispel Type",
+        version .. " any-dispellable label")
+    assertEqual(important.text, "Important Enemy Buffs",
+        version .. " important label")
+    if hasNativeBackend then
+        assertContains(
+            raidDispellable.tooltipBody,
+            "someone in your raid can dispel",
+            version .. " raid-dispellable raid capability"
+        )
+        assertContains(
+            raidDispellable.tooltipBody,
+            "including helpful enrages on enemies",
+            version .. " raid-dispellable enemy-enrage scope"
+        )
+    else
+        assertContains(
+            raidDispellable.tooltipBody,
+            "your character can dispel",
+            version .. " raid-dispellable player capability"
+        )
+        assertNotContains(
+            raidDispellable.tooltipBody,
+            "someone in your raid",
+            version .. " raid-dispellable PTR semantics"
+        )
+    end
+    if hasNativeBackend then
+        assertEqual(anyDispellable.enabled, false,
+            version .. " legacy-row any-dispellable enabled state")
+        assertEqual(important.enabled, false,
+            version .. " legacy-row important enabled state")
+        assertEqual(
+            anyDispellable.tooltipTitle,
+            "Native Aura Container Required",
+            version .. " legacy-row any-dispellable explanation"
+        )
+        assertContains(
+            anyDispellable.tooltipBody,
+            "widens the selection to all auras of this type",
+            version .. " legacy-row any-dispellable behavior"
+        )
+        assertEqual(
+            important.tooltipTitle,
+            "Native Aura Container Required",
+            version .. " legacy-row important explanation"
+        )
+        assertContains(
+            important.tooltipBody,
+            "widens the selection to all auras of this type",
+            version .. " legacy-row important behavior"
+        )
+    end
     assertEqual(allAuras.checked, true,
         version .. " migrated all state")
     assertEqual(player.checked, false,
@@ -969,6 +1064,10 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         version .. " migrated raid-in-combat state")
     assertEqual(raidDispellable.checked, false,
         version .. " migrated raid-dispellable state")
+    assertEqual(anyDispellable.checked, false,
+        version .. " migrated any-dispellable state")
+    assertEqual(important.checked, false,
+        version .. " migrated important state")
     assertEqual(
         allAuras.tooltipTitle,
         "Conservative Legacy Migration",
@@ -1043,6 +1142,8 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         raidPlayerDispellable = true,
         bigDefensive = true,
         externalDefensive = true,
+        important = false,
+        anyDispellable = false,
     }, version .. " canonical materialization")
 
     local harmful = newInfo("debuffs", "target", {
@@ -1051,6 +1152,8 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         raidPlayerDispellable = true,
         bigDefensive = true,
         externalDefensive = true,
+        important = true,
+        anyDispellable = true,
     })
     pane.Load(harmful)
     assertEqual(bigDefensive.checked, false,
@@ -1063,6 +1166,10 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         version .. " harmful external defensive enabled state")
     assertEqual(raidDispellable.enabled, true,
         version .. " hostile raid-dispellable enabled state")
+    assertEqual(anyDispellable.enabled, hasNativeBackend,
+        version .. " harmful any-dispellable enabled state")
+    assertEqual(important.enabled, false,
+        version .. " harmful important enabled state")
     assertEqual(allAuras.enabled, true,
         version .. " harmful all enabled state")
     assertEqual(notPlayer.enabled, true,
@@ -1074,10 +1181,75 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         raidPlayerDispellable = true,
         bigDefensive = true,
         externalDefensive = true,
+        important = true,
+        anyDispellable = true,
     })
     pane.Load(friendly)
     assertEqual(raidDispellable.enabled, false,
         version .. " friendly raid-dispellable enabled state")
+    assertEqual(anyDispellable.enabled, hasNativeBackend,
+        version .. " friendly any-dispellable enabled state")
+    assertEqual(important.enabled, false,
+        version .. " friendly important enabled state")
+
+    if hasNativeBackend then
+        local hostileHelpful = newInfo(
+            "buffs",
+            "target",
+            {
+                player = true,
+                important = false,
+                anyDispellable = false,
+            },
+            "native"
+        )
+        pane.Load(hostileHelpful)
+        assertEqual(important.enabled, true,
+            version .. " hostile helpful important enabled state")
+        assertEqual(anyDispellable.enabled, true,
+            version .. " hostile helpful any-dispellable enabled state")
+        assertContains(
+            important.tooltipBody,
+            "Blizzard flags as important",
+            version .. " important category explanation"
+        )
+        assertContains(
+            anyDispellable.tooltipBody,
+            "whether or not anyone in your raid",
+            version .. " any-dispellable explanation"
+        )
+
+        local firstSetCall = #harness.setCalls + 1
+        harness:ClearLoads()
+        important.onCheck(true)
+        anyDispellable.onCheck(true)
+        assertEqual(
+            harness.setCalls[firstSetCall].field,
+            "important",
+            version .. " important callback field"
+        )
+        assertEqual(
+            harness.setCalls[firstSetCall + 1].field,
+            "anyDispellable",
+            version .. " any-dispellable callback field"
+        )
+        assertEqual(
+            hostileHelpful.cfg.filters.important,
+            true,
+            version .. " important callback state"
+        )
+        assertEqual(
+            hostileHelpful.cfg.filters.anyDispellable,
+            true,
+            version .. " any-dispellable callback state"
+        )
+        assertFanout(
+            harness,
+            hostileHelpful,
+            2,
+            version .. " PTR 7 category callback fan-out"
+        )
+    end
 
     local sourceOnly = newInfo("debuffs", "target", {
         castByMe = false,
@@ -1109,6 +1281,137 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         "Conservative Legacy Migration",
         version .. " legacy boss approximation warning"
     )
+
+    local migratedDispellable = newInfo(
+        "debuffs",
+        "target",
+        {
+            castByMe = false,
+            castByOthers = false,
+            castByUnit = false,
+            castByNPC = false,
+            isBossAura = false,
+            dispellable = true,
+        },
+        "legacy"
+    )
+    pane.Load(migratedDispellable)
+    assertEqual(
+        raidDispellable.checked,
+        true,
+        version .. " legacy dispellable migrated state"
+    )
+    assertEqual(
+        raidDispellable.tooltipTitle,
+        "Conservative Legacy Migration",
+        version .. " legacy dispellable migration warning"
+    )
+    assertContains(
+        raidDispellable.tooltipBody,
+        "Legacy Dispellable now uses Blizzard's RAID_PLAYER_DISPELLABLE category",
+        version .. " legacy dispellable category mapping"
+    )
+    assertContains(
+        raidDispellable.tooltipBody,
+        "on 12.1 this means someone in your raid can dispel the aura",
+        version .. " legacy dispellable PTR semantic warning"
+    )
+
+    if not hasNativeBackend then
+        local importedPtr7 = newInfo(
+            "buffs",
+            "target",
+            {
+                all = false,
+                player = false,
+                notPlayer = false,
+                raidInCombat = false,
+                raidPlayerDispellable = false,
+                bigDefensive = false,
+                externalDefensive = false,
+                important = true,
+                anyDispellable = true,
+            },
+            "legacy"
+        )
+        pane.Load(importedPtr7)
+        assertEqual(
+            allAuras.checked,
+            true,
+            version .. " imported PTR 7 effective all state"
+        )
+        assertEqual(
+            player.checked,
+            false,
+            version .. " imported PTR 7 narrower state"
+        )
+        assertEqual(
+            important.shown,
+            false,
+            version .. " imported unsupported IMPORTANT visibility"
+        )
+        assertEqual(
+            anyDispellable.shown,
+            false,
+            version .. " imported unsupported DISPELLABLE visibility"
+        )
+        assertContains(
+            tip.text,
+            "profile selects a 12.1 aura category unavailable",
+            version .. " imported PTR 7 visible warning"
+        )
+        assertContains(
+            tip.text,
+            "widens the row to All Auras",
+            version .. " imported PTR 7 effective behavior"
+        )
+        assertEqual(
+            allAuras.tooltipTitle,
+            "Newer Aura Category Fallback",
+            version .. " imported PTR 7 tooltip title"
+        )
+
+        harness:ClearLoads()
+        player.onCheck(true)
+        assertEqual(
+            importedPtr7.cfg.filters.important,
+            false,
+            version .. " supported edit retires IMPORTANT"
+        )
+        assertEqual(
+            importedPtr7.cfg.filters.anyDispellable,
+            false,
+            version .. " supported edit retires DISPELLABLE"
+        )
+        assertEqual(
+            importedPtr7.cfg.filters.player,
+            true,
+            version .. " supported edit applies selected category"
+        )
+        assertFanout(
+            harness,
+            importedPtr7,
+            1,
+            version .. " imported PTR 7 retirement fan-out"
+        )
+
+        pane.Load(importedPtr7)
+        assertEqual(
+            allAuras.checked,
+            false,
+            version .. " retired PTR 7 effective all state"
+        )
+        assertEqual(
+            player.checked,
+            true,
+            version .. " retired PTR 7 player state"
+        )
+        assertNotContains(
+            tip.text,
+            "profile selects a 12.1 aura category unavailable",
+            version .. " retired PTR 7 warning"
+        )
+    end
 end
 
 local function testRetailSpellLists(hasNativeBackend)
@@ -1134,11 +1437,11 @@ local function testRetailSpellLists(hasNativeBackend)
         end
     end
 
-    assertEqual(mode.enabled, false,
+    assertEqual(mode.enabled, hasNativeBackend,
         version .. " spell-list mode enabled state")
-    assertEqual(addButton.enabled, false,
+    assertEqual(addButton.enabled, hasNativeBackend,
         version .. " spell-list add enabled state")
-    assertEqual(spellButton.enabled, false,
+    assertEqual(spellButton.enabled, hasNativeBackend,
         version .. " spell-list entry enabled state")
     assertEqual(tip.wordWrap, true,
         version .. " spell-list explanation word wrap")
@@ -1192,13 +1495,18 @@ local function testRetailSpellLists(hasNativeBackend)
         )
         assertContains(
             tip.text,
-            "Never Secret aura",
+            "classified NeverSecret",
             version .. " spell-list reaction warning"
         )
         assertContains(
             tip.text,
-            "disabled pending live reaction and secret validation",
-            version .. " spell-list read-only warning"
+            "bypass both include and exclude lists",
+            version .. " spell-list bypass warning"
+        )
+        assertContains(
+            tip.text,
+            "hides this aura row",
+            version .. " spell-list conservative holder behavior"
         )
     else
         assertContains(
@@ -1228,19 +1536,16 @@ local ALL_AURA_OWNERS = {
 }
 
 local NATIVE_BUFF_OWNERS = {
+    "boss",
+    "focus",
+    "focustarget",
     "player",
     "pet",
+    "pettarget",
     "party",
     "raid",
-}
-
-local LEGACY_BUFF_OWNERS = {
     "target",
-    "focus",
     "targettarget",
-    "focustarget",
-    "pettarget",
-    "boss",
 }
 
 local function testRetailIndicatorAwareNativeWording()
@@ -1284,10 +1589,30 @@ local function testRetailIndicatorAwareNativeWording()
             "Exclude Spell IDs (Reaction-Limited)",
             label .. " native spell-list label"
         )
+        assertEqual(
+            mode.enabled,
+            true,
+            label .. " native spell-list editability"
+        )
         assertContains(
             tip.text,
-            "can apply saved spell-ID lists",
+            "apply spell-ID lists",
             label .. " native spell-list message"
+        )
+        assertContains(
+            tip.text,
+            "classified NeverSecret",
+            label .. " native NeverSecret message"
+        )
+        assertContains(
+            tip.text,
+            "bypass both include and exclude lists",
+            label .. " native bypass message"
+        )
+        assertContains(
+            tip.text,
+            "hides this aura row",
+            label .. " native holder behavior"
         )
         assertNotContains(
             tip.text,
@@ -1342,6 +1667,11 @@ local function testRetailIndicatorAwareNativeWording()
             "Saved Whitelist (Not Applied Here)",
             label .. " inactive whitelist label"
         )
+        assertEqual(
+            mode.enabled,
+            false,
+            label .. " inactive spell-list editability"
+        )
         assertContains(
             tip.text,
             "legacy Retail aura list",
@@ -1391,10 +1721,6 @@ local function testRetailIndicatorAwareNativeWording()
     for _, owner in ipairs(ALL_AURA_OWNERS) do
         assertNativePresentation("debuffs", owner)
     end
-    for _, owner in ipairs(LEGACY_BUFF_OWNERS) do
-        assertLegacyBuffPresentation(owner)
-    end
-
     -- An instantiated runtime is authoritative over the fallback integration
     -- map. This keeps the wording honest while branches are tested alone or
     -- if a later integration changes which aura factory owns a row.
@@ -1613,6 +1939,85 @@ local function testRetailPresentation(hasNativeBackend)
     )
 end
 
+local function testPtr7FilterTokenCapabilities()
+    local cases = {
+        {
+            label = "mismatched PTR 7",
+            tokens = {
+                Important = "IMPORTANT_OLD",
+                Dispellable = "DISPELLABLE_OLD",
+            },
+            importantShown = false,
+            anyDispellableShown = false,
+        },
+        {
+            label = "IMPORTANT-only PTR",
+            tokens = {
+                Important = "IMPORTANT",
+            },
+            importantShown = true,
+            anyDispellableShown = false,
+        },
+        {
+            label = "DISPELLABLE-only PTR",
+            tokens = {
+                Dispellable = "DISPELLABLE",
+            },
+            importantShown = false,
+            anyDispellableShown = true,
+        },
+    }
+
+    for _, case in ipairs(cases) do
+        local harness = makeHarness(
+            true,
+            true,
+            case.tokens
+        )
+        local pane =
+            harness.builders.auraBaseFilters(makeParent())
+        pane.Load(newInfo("debuffs", "target"))
+
+        local important = findWidget(
+            pane,
+            "checkButton",
+            "initialText",
+            "Important Enemy Buffs"
+        )
+        local anyDispellable = findWidget(
+            pane,
+            "checkButton",
+            "initialText",
+            "Dispellable"
+        )
+        assertEqual(
+            important.shown,
+            case.importantShown,
+            case.label .. " IMPORTANT visibility"
+        )
+        assertEqual(
+            anyDispellable.shown,
+            case.anyDispellableShown,
+            case.label .. " DISPELLABLE visibility"
+        )
+        assertEqual(
+            important.text,
+            "Important Enemy Buffs",
+            case.label .. " IMPORTANT label"
+        )
+        assertEqual(
+            anyDispellable.text,
+            "Any Dispel Type",
+            case.label .. " DISPELLABLE label"
+        )
+        assertEqual(
+            pane.height < 142,
+            true,
+            case.label .. " compact layout"
+        )
+    end
+end
+
 local function testNonRetailSemantics()
     local harness = makeHarness(false, true)
     local parent = makeParent()
@@ -1772,6 +2177,7 @@ for _, hasNativeBackend in ipairs({false, true}) do
     testRetailPresentation(hasNativeBackend)
 end
 testRetailIndicatorAwareNativeWording()
+testPtr7FilterTokenCapabilities()
 testNonRetailSemantics()
 
 print("unit_frame_aura_filter_options_test.lua: ok")
