@@ -5,8 +5,71 @@ local BD = BFI.modules.BuffsDebuffs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local LoadOptions
+local LoadOptions, UpdateStatus
 local selected, currentConfig, currentTextConfig
+
+local function IsCustomBuffsBackend(which)
+    return which == "buffs"
+        and BD.GetAuraBackend(which) == BD.CUSTOM_AURA_CONTAINER_BACKEND
+end
+
+function BD.GetBuffsDebuffsOptionsPolicy(which)
+    local backend = BD.GetAuraBackend(which)
+    local custom = IsCustomBuffsBackend(which)
+    local customBuffsAvailable = IsCustomBuffsBackend("buffs")
+    return {
+        available = backend ~= nil,
+        backend = backend,
+        custom = custom,
+        label = which == "debuffs" and customBuffsAvailable
+            and L["Debuffs (Blizzard controlled)"]
+            or L[which == "buffs" and "Buffs" or "Debuffs"],
+        separateOwnItems = {
+            {text = L["Disabled"], value = 0},
+            {text = L["Before"], value = 1, disabled = custom},
+            {text = L["After"], value = -1, disabled = custom},
+        },
+        constructionOwnedStyle = custom,
+        retiredDurationControls = true,
+    }
+end
+
+function BD.GetBuffsDebuffsOptionsStatus(which)
+    local policy = BD.GetBuffsDebuffsOptionsPolicy(which)
+    if not policy.custom then return nil end
+
+    local config = BD.config and BD.config[which]
+    local state = type(BD.GetCustomAuraContainerState) == "function"
+        and BD.GetCustomAuraContainerState(which)
+        or nil
+    local dispatcherPending =
+        type(BD.IsBuffsDebuffsUpdatePending) == "function"
+        and BD.IsBuffsDebuffsUpdatePending(which)
+    local diagnostic = state and state.diagnostic
+    if (config and config.separateOwn ~= 0)
+        or diagnostic == "UNSUPPORTED_SEPARATE_OWN"
+    then
+        return {
+            code = "UNSUPPORTED_SEPARATE_OWN",
+            action = "RECOVER_SEPARATE_OWN",
+        }
+    elseif diagnostic
+        and diagnostic ~= "CONSTRUCTION_CHANGE_REQUIRES_RELOAD"
+    then
+        return {
+            code = "NATIVE_FALLBACK",
+        }
+    elseif state and state.reloadRequired then
+        return {
+            code = "RELOAD_REQUIRED",
+            action = "RELOAD_UI",
+        }
+    elseif dispatcherPending or (state and state.pending) then
+        return {
+            code = "PENDING_SAFE_UPDATE",
+        }
+    end
+end
 
 ---------------------------------------------------------------------
 -- create
@@ -22,10 +85,19 @@ local function CreateBuffsDebuffsPanel()
     buffsDebuffsPanel.switch = switch
     AF.SetPoint(switch, "TOPLEFT", 15, -15)
     AF.SetPoint(switch, "TOPRIGHT", -15, -15)
+    local buffsPolicy = BD.GetBuffsDebuffsOptionsPolicy("buffs")
+    local debuffsPolicy = BD.GetBuffsDebuffsOptionsPolicy("debuffs")
     switch:SetLabels({
-        {text = L["Buffs"], value = "buffs", disabled = not BD.HasAuraBackend("buffs")},
-        {text = L["Debuffs"], value = "debuffs", disabled = not BD.HasAuraBackend("debuffs")},
-        {text = L["Private Auras"], value = "privateAuras", disabled = true},
+        {
+            text = buffsPolicy.label,
+            value = "buffs",
+            disabled = not buffsPolicy.available,
+        },
+        {
+            text = debuffsPolicy.label,
+            value = "debuffs",
+            disabled = not debuffsPolicy.available,
+        },
     })
     switch:SetOnSelect(LoadOptions)
 
@@ -71,7 +143,7 @@ local function CreateNormalPane()
     --------------------------------------------------
     -- iconsPane
     --------------------------------------------------
-    local iconsPane = AF.CreateTitledPane(normalPane, L["Icons"], nil, 235)
+    local iconsPane = AF.CreateTitledPane(normalPane, L["Icons"], nil, 260)
     AF.SetPoint(iconsPane, "TOPLEFT", 0, -5)
     AF.SetPoint(iconsPane, "TOPRIGHT", 0, -5)
 
@@ -88,9 +160,9 @@ local function CreateNormalPane()
     AF.SetPoint(sortMethod, "TOPLEFT", arrangement, "BOTTOMLEFT", 0, -30)
     sortMethod:SetLabel(L["Sort Method"])
     sortMethod:SetItems({
-        {text = L["Index"], value = "INDEX"},
+        {text = L["Aura Order"], value = "INDEX"},
         {text = L["Name"], value = "NAME"},
-        {text = L["Time"], value = "TIME"},
+        {text = L["Expiration Time"], value = "TIME"},
     })
     sortMethod:SetOnSelect(function(value)
         currentConfig.sortMethod = value
@@ -112,11 +184,6 @@ local function CreateNormalPane()
     local separateOwn = AF.CreateDropdown(iconsPane, 150)
     AF.SetPoint(separateOwn, "TOPLEFT", sortDirection, "TOPRIGHT", 35, 0)
     separateOwn:SetLabel(L["Separate Own"])
-    separateOwn:SetItems({
-        {text = L["Disabled"], value = 0},
-        {text = L["Before"], value = 1},
-        {text = L["After"], value = -1},
-    })
     separateOwn:SetOnSelect(function(value)
         currentConfig.separateOwn = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
@@ -125,6 +192,12 @@ local function CreateNormalPane()
     local width = AF.CreateSlider(iconsPane, L["Width"], 150, 10, 100, nil, nil, true)
     AF.SetPoint(width, "TOPLEFT", sortMethod, "BOTTOMLEFT", 0, -30)
     width:SetOnValueChanged(function(value)
+        if IsCustomBuffsBackend(selected) then return end
+        currentConfig.width = value
+        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
+    end)
+    width:SetAfterValueChanged(function(value)
+        if not IsCustomBuffsBackend(selected) then return end
         currentConfig.width = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
@@ -132,6 +205,12 @@ local function CreateNormalPane()
     local height = AF.CreateSlider(iconsPane, L["Height"], 150, 10, 100, nil, nil, true)
     AF.SetPoint(height, "TOPLEFT", width, "BOTTOMLEFT", 0, -45)
     height:SetOnValueChanged(function(value)
+        if IsCustomBuffsBackend(selected) then return end
+        currentConfig.height = value
+        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
+    end)
+    height:SetAfterValueChanged(function(value)
+        if not IsCustomBuffsBackend(selected) then return end
         currentConfig.height = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
@@ -150,26 +229,54 @@ local function CreateNormalPane()
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
 
-    local maxWraps = AF.CreateSlider(iconsPane, L["Max Lines"], 150, 1, 50, 1, nil, true)
+    local maxWraps = AF.CreateSlider(iconsPane, L["Aura Lines"], 150, 1, 50, 1, nil, true)
     AF.SetPoint(maxWraps, "TOPLEFT", spacingX, "TOPRIGHT", 35, 0)
     maxWraps:SetOnValueChanged(function(value)
         currentConfig.maxWraps = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
 
-    local wrapAfter = AF.CreateSlider(iconsPane, L["Displayed Per Line"], 150, 1, 50, 1, nil, true)
+    local wrapAfter = AF.CreateSlider(iconsPane, L["Icons Per Line"], 150, 1, 50, 1, nil, true)
     AF.SetPoint(wrapAfter, "TOPLEFT", spacingY, "TOPRIGHT", 35, 0)
     wrapAfter:SetOnValueChanged(function(value)
         currentConfig.wrapAfter = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
+    local enchantmentCapHelp = L[
+        "Temporary Main-Hand and Off-Hand enchants share this layout and may add up to two icons beyond the aura cap."
+    ]
+    maxWraps:SetTooltip(enchantmentCapHelp)
+    wrapAfter:SetTooltip(enchantmentCapHelp)
+
+    local statusText = AF.CreateFontString(
+        iconsPane,
+        nil,
+        "firebrick",
+        "AF_FONT_SMALL"
+    )
+    normalPane.statusText = statusText
+    AF.SetPoint(statusText, "BOTTOMLEFT", 10, 7)
+    AF.SetWidth(statusText, 350)
+    statusText:SetWordWrap(false)
+    statusText:Hide()
+
+    local statusButton = AF.CreateButton(
+        iconsPane,
+        nil,
+        "BFI_hover",
+        165,
+        20
+    )
+    normalPane.statusButton = statusButton
+    AF.SetPoint(statusButton, "BOTTOMRIGHT", -10, 5)
+    statusButton:Hide()
 
     --------------------------------------------------
     -- textsPane
     --------------------------------------------------
     local textsPane = AF.CreateTitledPane(normalPane, L["Texts"], nil, 235)
-    AF.SetPoint(textsPane, "TOPLEFT", iconsPane, "BOTTOMLEFT", 0, -30)
-    AF.SetPoint(textsPane, "TOPRIGHT", iconsPane, "BOTTOMRIGHT", 0, -30)
+    AF.SetPoint(textsPane, "TOPLEFT", iconsPane, "BOTTOMLEFT", 0, -5)
+    AF.SetPoint(textsPane, "TOPRIGHT", iconsPane, "BOTTOMRIGHT", 0, -5)
 
     local textSwitch = AF.CreateSwitch(textsPane, 210, 20)
     AF.SetPoint(textSwitch, "BOTTOMRIGHT", textsPane.line, "BOTTOMRIGHT", 0, -1)
@@ -202,6 +309,12 @@ local function CreateNormalPane()
     local size = AF.CreateSlider(textsPane, L["Size"], 150, 5, 50, 1, nil, true)
     AF.SetPoint(size, "TOPLEFT", font, "BOTTOMLEFT", 0, -30)
     size:SetOnValueChanged(function(value)
+        if IsCustomBuffsBackend(selected) then return end
+        currentTextConfig.font[2] = value
+        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
+    end)
+    size:SetAfterValueChanged(function(value)
+        if not IsCustomBuffsBackend(selected) then return end
         currentTextConfig.font[2] = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
@@ -234,6 +347,12 @@ local function CreateNormalPane()
     local xOffset = AF.CreateSlider(textsPane, L["X Offset"], 150, -100, 100, 1, nil, true)
     AF.SetPoint(xOffset, "TOPLEFT", anchorPoint, "BOTTOMLEFT", 0, -30)
     xOffset:SetOnValueChanged(function(value)
+        if IsCustomBuffsBackend(selected) then return end
+        currentTextConfig.position[3] = value
+        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
+    end)
+    xOffset:SetAfterValueChanged(function(value)
+        if not IsCustomBuffsBackend(selected) then return end
         currentTextConfig.position[3] = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
@@ -241,6 +360,12 @@ local function CreateNormalPane()
     local yOffset = AF.CreateSlider(textsPane, L["Y Offset"], 150, -100, 100, 1, nil, true)
     AF.SetPoint(yOffset, "TOPLEFT", xOffset, "TOPRIGHT", 35, 0)
     yOffset:SetOnValueChanged(function(value)
+        if IsCustomBuffsBackend(selected) then return end
+        currentTextConfig.position[4] = value
+        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
+    end)
+    yOffset:SetAfterValueChanged(function(value)
+        if not IsCustomBuffsBackend(selected) then return end
         currentTextConfig.position[4] = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
@@ -253,16 +378,23 @@ local function CreateNormalPane()
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
 
-    local showSecondsUnit = AF.CreateCheckButton(textsPane, L["Show Seconds Unit"])
-    AF.SetPoint(showSecondsUnit, "TOPLEFT", enabled, "BOTTOMLEFT", 0, -15)
-    showSecondsUnit:SetOnCheck(function(checked)
-        currentTextConfig.showSecondsUnit = checked
+    local normalColor = AF.CreateColorPicker(textsPane, L["Normal"])
+    AF.SetPoint(normalColor, "TOPLEFT", enabled, "BOTTOMLEFT", 0, -15)
+    normalColor:SetOnChange(function(r, g, b)
+        if IsCustomBuffsBackend(selected) then return end
+        if textSwitch:GetSelectedValue() == "stack" then
+            currentTextConfig.color[1] = r
+            currentTextConfig.color[2] = g
+            currentTextConfig.color[3] = b
+        else
+            currentTextConfig.color.normal[1] = r
+            currentTextConfig.color.normal[2] = g
+            currentTextConfig.color.normal[3] = b
+        end
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
-
-    local normalColor = AF.CreateColorPicker(textsPane, L["Normal"])
-    AF.SetPoint(normalColor, "TOPLEFT", showSecondsUnit, "BOTTOMLEFT", 0, -15)
-    normalColor:SetOnChange(function(r, g, b)
+    normalColor:SetOnConfirm(function(r, g, b)
+        if not IsCustomBuffsBackend(selected) then return end
         if textSwitch:GetSelectedValue() == "stack" then
             currentTextConfig.color[1] = r
             currentTextConfig.color[2] = g
@@ -275,75 +407,17 @@ local function CreateNormalPane()
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
 
-    local percentCheckButton = AF.CreateCheckButton(textsPane)
-    AF.SetPoint(percentCheckButton, "TOPLEFT", normalColor, "BOTTOMLEFT", 0, -7)
-    percentCheckButton:SetOnCheck(function(checked)
-        currentTextConfig.color.percent.enabled = checked
-        textsPane.UpdateWidgets()
-        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
-    end)
-
-    local percentColor = AF.CreateColorPicker(textsPane, L["Remaining Time"])
-    AF.SetPoint(percentColor, "TOPLEFT", percentCheckButton, "TOPRIGHT", 2, 0)
-    percentColor:SetOnChange(function(r, g, b)
-        currentTextConfig.color.percent.rgb[1] = r
-        currentTextConfig.color.percent.rgb[2] = g
-        currentTextConfig.color.percent.rgb[3] = b
-        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
-    end)
-
-    percentColor.label2 = AF.CreateFontString(percentColor, "<")
-    AF.SetPoint(percentColor.label2, "TOPLEFT", percentColor.label, "BOTTOMLEFT", 0, -7)
-
-    local percentDropdown = AF.CreateDropdown(textsPane, 45, nil, "vertical")
-    AF.SetPoint(percentDropdown, "LEFT", percentColor.label2, "RIGHT", 5, 0)
-    percentDropdown:SetItems({
-        {text = "90%", value = 0.9},
-        {text = "80%", value = 0.8},
-        {text = "70%", value = 0.7},
-        {text = "60%", value = 0.6},
-        {text = "50%", value = 0.5},
-        {text = "40%", value = 0.4},
-        {text = "30%", value = 0.3},
-        {text = "20%", value = 0.2},
-        {text = "10%", value = 0.1},
-    })
-    percentDropdown:SetOnSelect(function(value)
-        currentTextConfig.color.percent.value = value
-        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
-    end)
-
-    local secondsCheckButton = AF.CreateCheckButton(textsPane)
-    AF.SetPoint(secondsCheckButton, "LEFT", percentCheckButton)
-    AF.SetPoint(secondsCheckButton, "TOP", percentDropdown, "BOTTOM", 0, -7)
-    secondsCheckButton:SetOnCheck(function(checked)
-        currentTextConfig.color.seconds.enabled = checked
-        textsPane.UpdateWidgets()
-        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
-    end)
-
-    local secondsColor = AF.CreateColorPicker(textsPane, L["Remaining Time"])
-    AF.SetPoint(secondsColor, "TOPLEFT", secondsCheckButton, "TOPRIGHT", 2, 0)
-    secondsColor:SetOnChange(function(r, g, b)
-        currentTextConfig.color.seconds.rgb[1] = r
-        currentTextConfig.color.seconds.rgb[2] = g
-        currentTextConfig.color.seconds.rgb[3] = b
-        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
-    end)
-
-    secondsColor.label2 = AF.CreateFontString(secondsColor, "<")
-    AF.SetPoint(secondsColor.label2, "TOPLEFT", secondsColor.label, "BOTTOMLEFT", 0, -7)
-
-    local secondsEditBox = AF.CreateEditBox(textsPane, nil, 45, 20, "number")
-    AF.SetPoint(secondsEditBox, "LEFT", secondsColor.label2, "RIGHT", 5, 0)
-    secondsEditBox:SetMaxLetters(3)
-    secondsEditBox:SetConfirmButton(function(value)
-        currentTextConfig.color.seconds.value = value
-        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
-    end, nil, "RIGHT_OUTSIDE")
-
-    local sec = AF.CreateFontString(textsPane, L["sec"])
-    AF.SetPoint(sec, "LEFT", secondsEditBox, "RIGHT", 5, 0)
+    local durationHint = AF.CreateFontString(
+        textsPane,
+        L[
+            "Durations abbreviate automatically to seconds, minutes, hours, and days."
+        ],
+        "gray"
+    )
+    AF.SetPoint(durationHint, "TOPLEFT", normalColor, "BOTTOMLEFT", 0, -15)
+    AF.SetWidth(durationHint, 160)
+    durationHint:SetWordWrap(true)
+    durationHint:Hide()
 
     --------------------------------------------------
     -- load
@@ -351,12 +425,6 @@ local function CreateNormalPane()
     function textsPane.UpdateWidgets()
         AF.SetEnabled(currentConfig.enabled, enabled)
         AF.SetEnabled(currentConfig.enabled and currentTextConfig.enabled, font, size, outline, shadow, anchorPoint, relativePoint, xOffset, yOffset, normalColor)
-
-        -- AF's secret-safe duration binding currently supports the base text
-        -- style only. Keep the unimplemented formatter/threshold controls
-        -- visible but disabled rather than presenting settings with no effect.
-        AF.SetEnabled(false, showSecondsUnit, percentCheckButton, percentColor, percentColor.label2, percentDropdown)
-        AF.SetEnabled(false, secondsCheckButton, secondsColor, secondsColor.label2, secondsEditBox, sec)
     end
 
     function textsPane.Load(which)
@@ -374,36 +442,25 @@ local function CreateNormalPane()
         xOffset:SetValue(currentTextConfig.position[3])
         yOffset:SetValue(currentTextConfig.position[4])
 
-        showSecondsUnit:SetChecked(currentTextConfig.showSecondsUnit)
-
         if which == "stack" then
             normalColor:SetColor(currentTextConfig.color)
-
-            percentCheckButton:SetChecked(false)
-            percentColor:SetColor(1, 1, 1)
-            percentDropdown:ClearSelected()
-
-            secondsCheckButton:SetChecked(false)
-            secondsColor:SetColor(1, 1, 1)
-            secondsEditBox:SetText("")
         else
             normalColor:SetColor(currentTextConfig.color.normal)
-
-            percentCheckButton:SetChecked(currentTextConfig.color.percent.enabled)
-            percentColor:SetColor(currentTextConfig.color.percent.rgb)
-            percentDropdown:SetSelectedValue(currentTextConfig.color.percent.value)
-
-            secondsCheckButton:SetChecked(currentTextConfig.color.seconds.enabled)
-            secondsColor:SetColor(currentTextConfig.color.seconds.rgb)
-            secondsEditBox:SetText(currentTextConfig.color.seconds.value)
         end
+        durationHint:SetShown(
+            which == "duration"
+                and (tonumber(AF.versionNum) or 0) >= 25
+        )
     end
 
     function normalPane.Load()
         currentConfig = BD.config[selected]
+        local policy = BD.GetBuffsDebuffsOptionsPolicy(selected)
 
         -- icons
-        AF.SetEnabled(currentConfig.enabled, arrangement, sortMethod, sortDirection, separateOwn, width, height, spacingX, spacingY, maxWraps, wrapAfter)
+        AF.SetEnabled(currentConfig.enabled, arrangement, sortMethod, sortDirection, width, height, spacingX, spacingY, maxWraps, wrapAfter)
+        AF.SetEnabled(policy.custom or currentConfig.enabled, separateOwn)
+        separateOwn:SetItems(policy.separateOwnItems)
         arrangement:SetSelectedValue(currentConfig.orientation)
         sortMethod:SetSelectedValue(currentConfig.sortMethod)
         sortDirection:SetSelectedValue(currentConfig.sortDirection)
@@ -420,18 +477,60 @@ local function CreateNormalPane()
             textSwitch:SetSelectedValue("stack")
         end
         textsPane.Load(textSwitch:GetSelectedValue())
+        UpdateStatus()
     end
 end
 
----------------------------------------------------------------------
--- private
----------------------------------------------------------------------
-local privatePane
+UpdateStatus = function()
+    if not normalPane then return end
+    local status = BD.GetBuffsDebuffsOptionsStatus(selected)
+    local statusText = normalPane.statusText
+    local statusButton = normalPane.statusButton
+    statusButton:SetOnClick(nil)
 
-local function CreatePrivatePane()
-    privatePane = AF.CreateFrame(buffsDebuffsPanel)
-    AF.SetPoint(privatePane, "TOPLEFT", buffsDebuffsPanel.switch, "BOTTOMLEFT", 0, -15)
-    AF.SetPoint(privatePane, "BOTTOMRIGHT", -15, 15)
+    if not status then
+        statusText:Hide()
+        statusButton:Hide()
+        return
+    end
+
+    if status.code == "UNSUPPORTED_SEPARATE_OWN" then
+        statusText:SetText(L[
+            "Separate Own is unavailable in 12.1. Blizzard Buffs remain active."
+        ])
+        statusButton:SetText(L["Use supported sorting"])
+        statusButton:SetOnClick(function()
+            local config = BD.config and BD.config[selected]
+            if not config then return end
+            config.separateOwn = 0
+            AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
+            LoadOptions()
+        end)
+        statusButton:Show()
+    elseif status.code == "RELOAD_REQUIRED" then
+        statusText:SetText(L[
+            "Reload UI to apply Buffs styling. Blizzard Buffs remain active."
+        ])
+        statusButton:SetText(L["Reload UI"])
+        statusButton:SetOnClick(_G.ReloadUI)
+        statusButton:Show()
+    elseif status.code == "PENDING_SAFE_UPDATE" then
+        AF.SetWidth(statusText, 530)
+        statusText:SetText(L[
+            "Buffs update is waiting for combat or hover to end."
+        ])
+        statusButton:Hide()
+    else
+        AF.SetWidth(statusText, 530)
+        statusText:SetText(L[
+            "Blizzard Buffs remain active because the native replacement could not be applied."
+        ])
+        statusButton:Hide()
+    end
+    if statusButton:IsShown() then
+        AF.SetWidth(statusText, 350)
+    end
+    statusText:Show()
 end
 
 ---------------------------------------------------------------------
@@ -441,14 +540,8 @@ LoadOptions = function()
     selected = buffsDebuffsPanel.switch:GetSelectedValue()
     if not selected or not BD.HasAuraBackend(selected) then return end
 
-    if selected == "privateAuras" then
-        normalPane:Hide()
-        privatePane:Show()
-    else
-        normalPane:Show()
-        privatePane:Hide()
-        normalPane.Load()
-    end
+    normalPane:Show()
+    normalPane.Load()
 
     AF.ClearPoints(buffsDebuffsPanel.enabled)
     AF.SetPoint(buffsDebuffsPanel.enabled, "LEFT", buffsDebuffsPanel.switch:GetSelectedButton(), "LEFT", 3, 0)
@@ -481,7 +574,6 @@ AF.RegisterCallback("BFI_ShowOptionsPanel", function(_, id)
         if not buffsDebuffsPanel then
             CreateBuffsDebuffsPanel()
             CreateNormalPane()
-            CreatePrivatePane()
             local firstAvailable = BD.HasAuraBackend("buffs") and "buffs"
                 or (BD.HasAuraBackend("debuffs") and "debuffs")
             if firstAvailable then
