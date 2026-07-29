@@ -20,6 +20,7 @@ patterns=(
     '\bRegion(GetAlpha|IsShown|SetAlpha|Hide|Show)\b'
     '\b(viewer|item|itemFrame|cooldownItem|state[.]viewer):[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\('
     '\b(GetActionInfo|ActionButtonUtil[.]GetActionButtonBySpellID)[[:space:]]*\('
+    '\b(ActionBarButtonAssistedCombatHighlightTemplate|RotationHelper_Ants_Flipbook_2x)\b'
     ':(RefreshLayout|RefreshData|Layout|UpdateShownState|SetIsEditing|SetHideWhenInactive|SetTimerShown|SetTooltipsShown|SetBarContent|SetBarWidthScale|SetCooldownID|ClearCooldownID|SetEditModeData|ClearEditModeData|GetSpellID|GetBaseSpellID|GetCooldownInfo|GetAuraData|RefreshAuraInstance|RefreshTotemData|BreakFromFrameManager|ApplySystemAnchor|ClearFrameSnap|HighlightSystem|ClearHighlight|UpdateSystem|UpdateSystemSetting)[[:space:]]*\('
     '\b(viewer|item|itemFrame|cooldownItem|state[.]viewer|bar|icon|cooldown|name|duration)[.][A-Za-z_][A-Za-z0-9_]*[[:space:]]*='
     '\bS[.](CreateBackdrop|StyleSquareIcon)[[:space:]]*\('

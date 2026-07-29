@@ -222,6 +222,7 @@ methodStatusBar:Hide()
 
 local nativeSkinBorderColor = {AF.GetColorRGB("border")}
 local nativeSkinBackgroundColor = {AF.GetColorRGB("widget_dark")}
+local assistedHighlightColor = {0.1, 0.85, 1, 1}
 -- Blizzard's CDM swipe has rounded alpha corners. Swap only its texture so
 -- Blizzard remains authoritative for each cooldown's live swipe color.
 local nativeCooldownSwipeTexture =
@@ -335,9 +336,10 @@ end
 -- Assisted Combat highlight
 ---------------------------------------------------------------------
 -- Retail 12.0.7 and 12.1 expose the same documented
--- C_AssistedCombat.GetNextCastSpell(false) contract and the same ordinary
--- ActionBarButtonAssistedCombatHighlightTemplate. The recommendation poll is
--- BFI-owned and never calls a Cooldown Viewer item mixin.
+-- C_AssistedCombat.GetNextCastSpell(false) contract. Their native Assisted
+-- Highlight template uses a rounded flipbook atlas, so CDM renders the
+-- recommendation with four BFI-owned square edges instead. The recommendation
+-- poll is BFI-owned and never calls a Cooldown Viewer item mixin.
 local function GetNonSecretSpellID(spellID)
     if not IsSafeNumber(spellID) then
         return nil
@@ -350,40 +352,103 @@ local function GetBaseSpellID(spellID)
     return GetNonSecretSpellID(C_Spell.GetBaseSpell(spellID))
 end
 
+local function CreateAssistedHighlightEdge(highlight)
+    if not CanChangeGeometry(highlight) then return nil end
+
+    local edge = FrameCreateTexture(highlight, nil, "OVERLAY", nil, 7)
+    if not CanChangeGeometry(edge) then return nil end
+
+    TextureSetColorTexture(edge, unpack(assistedHighlightColor))
+    return edge
+end
+
+local function UpdateAssistedHighlightPixels(highlight)
+    local edges = highlight.Edges
+    if not edges
+        or not CanChangeGeometry(highlight)
+        or not CanChangeGeometry(edges.top)
+        or not CanChangeGeometry(edges.bottom)
+        or not CanChangeGeometry(edges.left)
+        or not CanChangeGeometry(edges.right)
+    then
+        return false
+    end
+
+    local effectiveScale = FrameGetEffectiveScale(highlight)
+    if not IsSafeNumber(effectiveScale) or effectiveScale <= 0 then
+        return false
+    end
+
+    local thickness = AF.GetNearestPixelSize(2, effectiveScale, 2)
+    if not IsSafeNumber(thickness) or thickness <= 0 then
+        return false
+    end
+
+    TextureSetHeight(edges.top, thickness)
+    TextureSetHeight(edges.bottom, thickness)
+    TextureSetWidth(edges.left, thickness)
+    TextureSetWidth(edges.right, thickness)
+    return true
+end
+
 local function EnsureAssistedHighlight(item, definition)
     if not definition.assistedHighlight then return nil end
 
     local highlight = assistedHighlights[item]
-    if highlight then return highlight end
+    if highlight then
+        UpdateAssistedHighlightPixels(highlight)
+        return highlight
+    end
 
-    highlight = CreateFrame("Frame", nil, item, "ActionBarButtonAssistedCombatHighlightTemplate")
-    assistedHighlights[item] = highlight
-    highlight:ClearAllPoints()
-    highlight:SetAllPoints(item)
+    highlight = CreateFrame("Frame", nil, item)
+    if not CanChangeGeometry(highlight) then return nil end
 
     local itemLevel = FrameGetFrameLevel(item)
     if IsSafeNumber(itemLevel) then
         FrameSetFrameLevel(highlight, min(itemLevel + 10, 10000))
     end
 
-    -- Match BFI action buttons: keep the highlight frame square with the
-    -- cooldown item and size the higher-resolution ants atlas around its
-    -- actual edges instead of scaling the 45x45 template as a whole.
-    local scaleX = definition.itemWidth / 45
-    local scaleY = definition.itemHeight / 45
-    local flipbookWidth = 66 * scaleX
-    local flipbookHeight = 66 * scaleY
-    local offsetX = (definition.itemWidth - flipbookWidth) / 2 - 1
-    local offsetY = (definition.itemHeight - flipbookHeight) / 2 - 1
+    local top = CreateAssistedHighlightEdge(highlight)
+    local bottom = CreateAssistedHighlightEdge(highlight)
+    local left = CreateAssistedHighlightEdge(highlight)
+    local right = CreateAssistedHighlightEdge(highlight)
+    if not top or not bottom or not left or not right then
+        FrameHide(highlight)
+        return nil
+    end
 
-    highlight.Flipbook:SetAtlas("RotationHelper_Ants_Flipbook_2x")
-    highlight.Flipbook:ClearAllPoints()
-    highlight.Flipbook:SetPoint("TOPLEFT", highlight, offsetX, -offsetY)
-    highlight.Flipbook:SetPoint("BOTTOMRIGHT", highlight, -offsetX, offsetY)
-    highlight.Flipbook.Anim:Play()
-    highlight.Flipbook.Anim:Stop()
-    highlight:SetAlpha(0)
-    highlight:Show()
+    TextureSetPoint(top, "TOPLEFT", highlight, "TOPLEFT", 0, 0)
+    TextureSetPoint(top, "TOPRIGHT", highlight, "TOPRIGHT", 0, 0)
+    TextureSetPoint(bottom, "BOTTOMLEFT", highlight, "BOTTOMLEFT", 0, 0)
+    TextureSetPoint(bottom, "BOTTOMRIGHT", highlight, "BOTTOMRIGHT", 0, 0)
+    TextureSetPoint(left, "TOPLEFT", highlight, "TOPLEFT", 0, 0)
+    TextureSetPoint(left, "BOTTOMLEFT", highlight, "BOTTOMLEFT", 0, 0)
+    TextureSetPoint(right, "TOPRIGHT", highlight, "TOPRIGHT", 0, 0)
+    TextureSetPoint(right, "BOTTOMRIGHT", highlight, "BOTTOMRIGHT", 0, 0)
+    highlight.Edges = {
+        top = top,
+        bottom = bottom,
+        left = left,
+        right = right,
+    }
+
+    local pulse = highlight:CreateAnimationGroup()
+    local alpha = pulse:CreateAnimation("Alpha")
+    alpha:SetFromAlpha(1)
+    alpha:SetToAlpha(0.35)
+    alpha:SetDuration(0.45)
+    pulse:SetLooping("BOUNCE")
+    highlight.Pulse = pulse
+
+    -- Commit the native-derived anchors only after the overlay is complete.
+    -- No Lua path reads the resulting width or height.
+    FrameClearAllPoints(highlight)
+    FrameSetPoint(highlight, "TOPLEFT", item, "TOPLEFT", -2, 2)
+    FrameSetPoint(highlight, "BOTTOMRIGHT", item, "BOTTOMRIGHT", 2, -2)
+    UpdateAssistedHighlightPixels(highlight)
+    FrameSetAlpha(highlight, 0)
+    FrameShow(highlight)
+    assistedHighlights[item] = highlight
     return highlight
 end
 
@@ -433,11 +498,10 @@ local function UpdateItemAssistedHighlight(item)
         and config.enabled
         and config.assistedHighlight
         and ItemMatchesAssistedHighlight(item)
-    highlight:SetAlpha(shown and 1 or 0)
 
     local inCombat = UnitAffectingCombat("player")
     inCombat = IsSafeBoolean(inCombat) and inCombat
-    local animation = highlight.Flipbook.Anim
+    local animation = highlight.Pulse
     if shown and inCombat then
         if not animation:IsPlaying() then
             animation:Play()
@@ -445,6 +509,7 @@ local function UpdateItemAssistedHighlight(item)
     elseif animation:IsPlaying() then
         animation:Stop()
     end
+    FrameSetAlpha(highlight, shown and 1 or 0)
 end
 
 local function RefreshAssistedHighlights()
@@ -1610,7 +1675,11 @@ local function RestoreItemPresentation(item, definition, itemState)
 
     local highlight = assistedHighlights[item]
     if highlight then
-        highlight:SetAlpha(0)
+        local animation = highlight.Pulse
+        if animation:IsPlaying() then
+            animation:Stop()
+        end
+        FrameSetAlpha(highlight, 0)
     end
     HideItemHotkey(item)
     itemState.hotkeyGeneration = nil
