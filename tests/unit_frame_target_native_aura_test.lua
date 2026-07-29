@@ -30,6 +30,7 @@ local function makeHarness()
         events = {},
         frames = {},
         legacyConstructions = {},
+        nativeConstructions = {},
         partitionConstructions = {},
         setupCalls = {},
     }
@@ -127,12 +128,17 @@ local function makeHarness()
     end
 
     function UF.CreateNativeAuras(parent, name, auraFilter)
-        return newIndicator(
+        local indicator = newIndicator(
             parent,
             name,
             auraFilter,
             "nativeAuras"
         )
+        harness.nativeConstructions[
+            #harness.nativeConstructions + 1
+        ] = indicator
+        record("native.create", indicator)
+        return indicator
     end
 
     function UF.CreateNativePartitionedAuras(
@@ -363,14 +369,16 @@ local function testConstructionAndIdentity()
         findIndicator(harness.indicatorDescriptors, "debuffs")
 
     assertEqual(#harness.frames, 1, "Target frame creation count")
-    assertEqual(buffs[1], "auras", "Target buffs builder")
+    assertEqual(buffs[1], "nativeAuras", "Target buffs builder")
     assertEqual(buffs[3], "HELPFUL", "Target buffs filter")
     assertEqual(debuffs[1], "nativePartitionedAuras",
         "Target debuffs builder")
     assertEqual(debuffs[3], "HARMFUL", "Target debuffs filter")
     assertEqual(debuffs[4], true, "Target debuffs sub-frame flag")
-    assertEqual(#harness.legacyConstructions, 1,
+    assertEqual(#harness.legacyConstructions, 0,
         "Target legacy construction count")
+    assertEqual(#harness.nativeConstructions, 1,
+        "Target native construction count")
     assertEqual(#harness.partitionConstructions, 1,
         "Target partition construction count")
     assertEqual(
@@ -378,8 +386,18 @@ local function testConstructionAndIdentity()
         frame.indicators.debuffs,
         "Target partition controller"
     )
-    assertEqual(frame.indicators.buffs.builder, "auras",
-        "Target legacy buffs construction")
+    assertEqual(
+        harness.nativeConstructions[1],
+        frame.indicators.buffs,
+        "Target native Buffs controller"
+    )
+    assertEqual(frame.indicators.buffs.builder, "nativeAuras",
+        "Target native Buffs construction")
+    assertEqual(
+        harness.nativeConstructions[1].auraFilter,
+        "HELPFUL",
+        "Target native Buffs construction filter"
+    )
     assertEqual(
         harness.partitionConstructions[1].auraFilter,
         "HARMFUL",
@@ -389,6 +407,11 @@ local function testConstructionAndIdentity()
         harness.partitionConstructions[1].hasSubFrame,
         true,
         "Target partition construction sub-frame flag"
+    )
+    assertTrue(
+        harness:EventIndex("native.create")
+            < harness:EventIndex("setup"),
+        "Target native Buffs controller was not prebuilt before setup"
     )
     assertTrue(
         harness:EventIndex("partition.create")
@@ -460,6 +483,8 @@ local function testWatchAndSkipLifecycle()
         "Target re-enable unit-watch registration")
     assertEqual(#harness.partitionConstructions, 1,
         "Target re-enable rebuilt partition controller")
+    assertEqual(#harness.nativeConstructions, 1,
+        "Target re-enable rebuilt native Buffs controller")
     assertEqual(frame.enabled, true, "Target re-enabled state")
     assertEqual(frame.unitWatchRegistered, true,
         "Target re-enabled unit watch")
@@ -519,6 +544,10 @@ local function testConfigModeReenable()
         assertEqual(indicator.configMode, true,
             "Target re-enabled indicator preview state")
     end
+    assertEqual(#harness.nativeConstructions, 1,
+        "Target config-mode lifecycle rebuilt native Buffs controller")
+    assertEqual(#harness.partitionConstructions, 1,
+        "Target config-mode lifecycle rebuilt partition controller")
 end
 
 testConstructionAndIdentity()

@@ -29,7 +29,7 @@ local indicators = {
     "targetHighlight",
     "mouseoverHighlight",
     "threatGlow",
-    {"auras", "buffs", "HELPFUL"},
+    {"nativeAuras", "buffs", "HELPFUL"},
     {"nativePartitionedAuras", "debuffs", "HARMFUL", true},
     -- {"auras", "debuffsByMe", "HARMFUL", "castByMe"},
     -- {"auras", "debuffsByOthers", "HARMFUL", "castByOthers"},
