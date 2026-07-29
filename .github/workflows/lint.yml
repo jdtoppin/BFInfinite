@@ -62,3 +62,6 @@ jobs:
 
       - name: Test secure group-header unit routing
         run: luajit tests/unit_frame_group_header_routing_test.lua
+
+      - name: Test 12.1 Player aura integration
+        run: luajit tests/unit_frame_player_native_aura_test.lua
