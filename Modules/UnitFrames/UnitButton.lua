@@ -5,9 +5,7 @@ local UF = BFI.modules.UnitFrames
 local AF = _G.AbstractFramework
 
 local UnitGUID = UnitGUID
-local UnitIsUnit = UnitIsUnit
 local UnitIsPlayer = UnitIsPlayer
-local GetTime = GetTime
 local UnitHasVehicleUI = UnitHasVehicleUI
 local UnitExists = UnitExists
 
@@ -121,7 +119,7 @@ local function UnitButton_OnEvent(self, event, unit, arg)
                 UnitButton_UpdateAll(self, true)
             end
         elseif event == "UNIT_TARGET" then
-            if self._updateOnUnitTargetChanged == unit and not UnitIsUnit("player", unit) then
+            if self._updateOnUnitTargetChanged == unit then
                 if UnitExists(self.unit) then
                     UnitButton_UpdateAll(self, true)
                 end
@@ -145,21 +143,32 @@ local function UnitButton_OnTick(self)
         self.__tickCount = 0
 
         if self.unit and self.effectiveUnit then
-            self.__effectiveGuid =
+            local effectiveGuid =
                 UF.GetPublicUnitIdentityValue(
                     UnitGUID(self.effectiveUnit)
                 )
+            self.__effectiveGuid = effectiveGuid
 
-            local guid =
-                UF.GetPublicUnitIdentityValue(UnitGUID(self.unit))
-            local isPlayer =
-                UF.GetPublicUnitIdentityValue(
-                    UnitIsPlayer(self.unit)
-                )
+            -- The effective and configured tokens usually identify the same
+            -- unit. Reuse the already-sanitized GUID in that case so opaque
+            -- values are never compared and no duplicate secret query occurs.
+            local guid = effectiveGuid
+            if self.effectiveUnit ~= self.unit then
+                guid =
+                    UF.GetPublicUnitIdentityValue(
+                        UnitGUID(self.unit)
+                    )
+            end
 
             -- NOTE: player GUID is non-secret, but be careful with "(enemy)target" units
-            if guid and isPlayer and not self._skipDataCache then
-                if guid and guid ~= self.__unitGuid then
+            if guid and not self._skipDataCache then
+                -- Preserve the old GUID short-circuit: do not make a second
+                -- identity call after the public boundary rejected the GUID.
+                local isPlayer =
+                    UF.GetPublicUnitIdentityValue(
+                        UnitIsPlayer(self.unit)
+                    )
+                if isPlayer and guid ~= self.__unitGuid then
                     -- NOTE: unit entity changed
                     self.__unitGuid = guid
 
