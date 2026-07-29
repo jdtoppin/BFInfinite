@@ -2002,6 +2002,28 @@ local function testPartitionColorBudgetUsesMaxActiveVariant()
         "partition exact friendly groups"
     )
 
+    local inverse = copy(exact)
+    inverse.filters = {
+        notPlayer = true,
+    }
+    local inverseDescriptor =
+        compile("target", "HARMFUL", inverse)
+    assertEqual(
+        inverseDescriptor.metrics.requestedColorExpandedGroupCount,
+        8,
+        "not-player partition exact requested max-active groups"
+    )
+    assertEqual(
+        inverseDescriptor.metrics.colorGroupBudgetExceeded,
+        false,
+        "not-player partition exact budget accepted"
+    )
+    assertEqual(
+        #inverseDescriptor.completeSpec.groups,
+        8,
+        "not-player partition exact friendly groups"
+    )
+
     local duplicated = copy(exact)
     duplicated.filters = {
         all = true,
@@ -2090,7 +2112,7 @@ local function testPartitionColorBudgetPreservesLargeGrayBaseline()
         compile("target", "HELPFUL", colored)
     assertEqual(
         fallbackDescriptor.metrics.requestedColorExpandedGroupCount,
-        28,
+        14,
         "large baseline requested color groups"
     )
     assertEqual(

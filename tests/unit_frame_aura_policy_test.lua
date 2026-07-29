@@ -318,6 +318,21 @@ local function testRelationScopeMetadata()
         "category after player relation scope"
     )
 
+    local inverseSplit = compile("HELPFUL", {
+        notPlayer = true,
+        raidInCombat = true,
+    })
+    assertEqual(
+        inverseSplit.groups[1].playerScope,
+        "notPlayer",
+        "not-player category relation scope"
+    )
+    assertEqual(
+        inverseSplit.groups[2].playerScope,
+        "player",
+        "category after not-player relation scope"
+    )
+
     local unsplit = compile("HELPFUL", {
         raidInCombat = true,
     })
