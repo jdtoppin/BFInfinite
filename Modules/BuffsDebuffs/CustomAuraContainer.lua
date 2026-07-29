@@ -183,11 +183,18 @@ local function AssertDescriptor(descriptor)
         "custom aura descriptor itemEnchantments must be a table")
     assert(descriptor.position == nil or type(descriptor.position) == "table",
         "custom aura descriptor position must be a table or nil")
+    assert(descriptor.positionSave == nil
+        or type(descriptor.positionSave) == "table",
+        "custom aura descriptor positionSave must be a table or nil")
 end
 
 local function CopyDescriptor(descriptor)
     AssertDescriptor(descriptor)
-    return Copy(descriptor)
+    local copy = Copy(descriptor)
+    -- Mover saves must retain the profile-owned table identity. All native
+    -- construction/tuning inputs remain isolated copies.
+    copy.positionSave = descriptor.positionSave
+    return copy
 end
 
 local function ApplyHolder(controller, descriptor)
@@ -196,7 +203,10 @@ local function ApplyHolder(controller, descriptor)
 
     if descriptor.position then
         if holder.mover then
-            AF.UpdateMoverSave(holder, descriptor.position)
+            AF.UpdateMoverSave(
+                holder,
+                descriptor.positionSave or descriptor.position
+            )
         end
         AF.LoadPosition(holder, descriptor.position)
     end
@@ -338,7 +348,7 @@ local function CreateHolder(controller, descriptor)
             holder,
             "BFI: " .. L["UI Widgets"],
             descriptor.moverText,
-            descriptor.position
+            descriptor.positionSave or descriptor.position
         )
     end
 end

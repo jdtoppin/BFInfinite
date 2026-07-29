@@ -384,6 +384,7 @@ local function CompileBuffs(config)
             marker = config.tuning or 1,
         },
         position = {"TOPRIGHT", -4, -4},
+        positionSave = config.positionSave,
         moverText = "Buffs",
     }
 end
@@ -491,9 +492,11 @@ do
     )
 
     local buildStart = #state.calls + 1
+    local profilePosition = {"TOPRIGHT", -4, -4}
     BD.UpdateCustomAuraContainer("buffs", {
         enabled = true,
         tuning = 1,
+        positionSave = profilePosition,
     })
     local buildCalls = state.calls
     local _, restoreIndex = findCall(
@@ -558,6 +561,9 @@ do
     assertTrue(enableIndex < suppressIndex, "enable precedes suppression")
     assertTrue(suppressIndex < showContainerIndex, "suppression precedes container show")
     assertTrue(showContainerIndex < showHolderIndex, "container shows before holder")
+    local moverCall = findCall(buildCalls, "AF.CreateMover", buildStart)
+    assertEqual(moverCall.args[4], profilePosition,
+        "mover retains profile position table identity")
     assertEqual(
         countCalls(buildCalls, "AF.AddCustomItemEnchantment"),
         2,
@@ -603,10 +609,13 @@ do
         countCalls(state.calls, "AF.AddCustomAuraGroup")
     local enchantsBeforeTuning =
         countCalls(state.calls, "AF.AddCustomItemEnchantment")
+    local tuningStart = #state.calls + 1
+    local replacementPosition = {"TOPRIGHT", -8, -8}
     BD.UpdateCustomAuraContainer("buffs", {
         enabled = true,
         tuning = 2,
         maximum = 15,
+        positionSave = replacementPosition,
     })
     assertEqual(
         countCalls(state.calls, "AF.CreateCustomAuraContainer"),
@@ -625,6 +634,13 @@ do
     )
     local maxCall = findCall(state.calls, "AF.SetCustomAuraGroupMaxFrameCount")
     assertTrue(maxCall ~= nil, "tuning applies maximum")
+    local updateMoverCall = findCall(
+        state.calls,
+        "AF.UpdateMoverSave",
+        tuningStart
+    )
+    assertEqual(updateMoverCall.args[2], replacementPosition,
+        "live tuning refreshes mover profile table identity")
 
     local disableStart = #state.calls + 1
     BD.DisableCustomAuraContainer("buffs")
