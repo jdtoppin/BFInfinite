@@ -30,7 +30,9 @@ Use this clean isolated-install sequence:
    #101 at `3a0d80a38247f6487dbbff2371f681672a61adc8`.
 3. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
    #102 at `5bbd4948ec55353ab31418f30a39b4c592ae7457`.
-4. AF #23 at `43f79cf2e9e91c47c9142c3546c900baf8fe092f` with the exact
+4. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
+   #103 at `8025cd837d40ea476c5086d64d3384f826428b1e`.
+5. AF #23 at `43f79cf2e9e91c47c9142c3546c900baf8fe092f` with the exact
    checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
    validation SHA. Record that full branch-head SHA immediately before
    installation.
@@ -60,7 +62,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Target partition | `codex/unitframe-aura-target` | `edcb992` |
 | Party | `codex/unitframe-aura-party` | `a354756` |
 | Raid | `codex/unitframe-aura-raid` | `4f370f7` |
-| Upper-right forbidden-button safety (#99) | `codex/buffs-forbidden-button-safety` | `bad55a58eba8ddfed373ef4edacb81e06bc901f4` |
+| Upper-right Debuff appearance (#103; includes #99) | `codex/buffs-debuffs-native-debuffs` | `8025cd837d40ea476c5086d64d3384f826428b1e` |
 | Secret identity (#100) | `codex/unitframe-secret-identity` | `b8e1671ed8a1c11657416357875f9c8277051654` |
 
 Test in this order:
@@ -71,9 +73,10 @@ Test in this order:
 3. Test each of the ten unit-frame integration leaves independently.
 4. Test the upper-right foundation, controller, Buffs, options, and
    forbidden-button branches in their PR order.
-5. Install AF r35 and the disposable aggregate as clean, complete folders.
-6. Run the 12.1 gates below in order.
-7. Run the narrow 12.0.7 preservation smoke.
+5. Test #103's ordinary Debuff appearance controls with AF r33.
+6. Install AF r35 and the disposable aggregate as clean, complete folders.
+7. Run the 12.1 gates below in order.
+8. Run the narrow 12.0.7 preservation smoke.
 
 Record the full local SHA for every installed folder. A short SHA in this
 document is a review aid, not permission to test a different head.
@@ -342,14 +345,38 @@ or expose private identity, spell, duration, count, or source.
 
 - On 12.1, BFInfinite may own only the supported helpful Buffs native
   container when its complete backend and settings allow it.
-- Blizzard retains harmful Debuffs, harmful private-aura anchors, and
-  `DeadlyDebuffFrame`.
+- Blizzard continues to own all harmful-aura data, filtering, ordering,
+  layout, updates, tooltips, and visibility. BFInfinite only applies static
+  appearance settings to the fixed pool of 16 ordinary Blizzard Debuff
+  buttons.
+- Private-aura anchors are independent siblings of that ordinary pool.
+  BFInfinite must not style, hide, inspect, move, or otherwise operate on
+  them. `DeadlyDebuffFrame` is separate and must also remain unchanged.
 - Toggle Buffs, Separate Own, supported appearance options, profiles, Edit
   Mode, combat, hover, reload, and temporary enchants.
-- Confirm minute/hour/day duration abbreviations.
+- For ordinary Debuffs, verify the main enable toggle, icon width and height
+  from 10 through 30, icon crop, native Debuff border fit, and all supported
+  stack-count font, position, color, shadow, and visibility controls.
+- Confirm the ordinary Debuff duration control only shows or hides Blizzard's
+  text. Blizzard must continue to supply and abbreviate the value in seconds,
+  minutes, hours, and days.
+- Confirm the Debuff arrangement, sorting, spacing, per-line limit, total cap,
+  Separate Own, and duration font, position, and color controls are disabled.
+  Their plain-language explanations must wrap without clipping.
+- Generate ordinary, private, and deadly debuffs together. Confirm ordinary
+  Debuffs receive the selected appearance with no duplicates, while private
+  auras and deadly debuffs retain their original Blizzard presentation.
+- Disable ordinary Debuff styling and confirm the icon, native border, stack
+  count, and duration visibility return exactly to their original Blizzard
+  values. Re-enable it and confirm the same fixed 16 buttons are reused.
+- Change every supported ordinary Debuff setting in combat. Confirm the old
+  presentation remains stable until combat ends, the options report a pending
+  update, and the new presentation applies afterward without a reload.
+- Repeat the ordinary/private/deadly checks across Edit Mode, reload, hover,
+  Mythic+, raid, and PvP restrictions.
 - Confirm no restricted AuraButton inspection, reparenting, duplicate aura,
-  Blizzard update-method driving, or hidden Blizzard-owned harmful/private
-  presentation.
+  script or event hooking, Blizzard update-method driving, active-state or
+  visibility reads, or hidden Blizzard-owned harmful/private presentation.
 
 ### 9. Counters, leaks, errors, and taint
 
@@ -362,6 +389,7 @@ Capture these before and after the full run:
 /dump BFI_Target.indicators.debuffs:GetNativeAuraState()
 /dump BFInfinite.modules.BuffsDebuffs.GetCustomAuraContainerState("buffs")
 /dump BFInfinite.modules.BuffsDebuffs.GetCustomAuraContainerConstructionStats()
+/dump BFInfinite.modules.BuffsDebuffs.GetBlizzardDebuffStyleState()
 ```
 
 These are tracked BFI state only; they do not inspect a native child or aura.
@@ -373,6 +401,13 @@ no-op/live-tuning/provider/unit changes, `providerMode == "live"`, and
 explicit partition fixtures above. Party/Raid totals must match the fixed
 child count; Target totals must include all prebuilt relation variants while
 only one relation is active.
+
+With ordinary Debuff styling enabled, require `active == true`,
+`styledButtonCount == 16`, and `snapshotsCreated == 16`. Repeated settings,
+combat deferral, Edit Mode, and reload-free enable/disable cycles must not
+increase `snapshotsCreated`. With styling disabled, require `active == false`
+and `styledButtonCount == 0`; retaining the 16 restoration snapshots is
+expected.
 
 Reload once, log out cleanly, and inspect the error collector and flushed
 `taint.log`.
@@ -414,7 +449,11 @@ Stop and file a failure with evidence for any of the following:
 - reload prompt for same-family ID tuning, or no reload for a new family;
 - duplicate/stranded restricted buttons, unbounded counter growth, or
   construction during provider-only changes;
-- BFI hiding, reparenting, or driving Blizzard's harmful/private/deadly
-  upper-right presentation;
+- BFI replacing or hiding Blizzard's harmful container, touching private
+  anchors or `DeadlyDebuffFrame`, hooking their scripts or update methods, or
+  reading an ordinary Debuff button's aura, active, or visibility state;
+- failure to restore the original ordinary Debuff appearance when its BFI
+  styling is disabled;
+- any unsupported ordinary Debuff control being enabled;
 - clipped or unwrapped settings explanations;
 - any 12.1 native frame silently using the legacy backend.
