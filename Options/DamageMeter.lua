@@ -8,63 +8,52 @@ local AF = _G.AbstractFramework
 
 local damageMeterPanel
 local scroll
-local meterPane
-local displayPane
-local layoutPane
+local generalPane
 local windowsPane
 local appearancePane
 local actionsPane
-local combatRefreshFrame
-local nativeSettingWidgets = {}
-local nativeLayoutWidgets = {}
 local statusText
-local presetTip
 local windowCount
+local windowTypeDropdowns = {}
 
 local CONTENT_WIDTH = 530
-local CONTENT_HEIGHT = 905
-local SECTION_GAP = 20
-local HALF_WIDTH = 255
-local WIDE_CONTROL_WIDTH = 150
+local CONTENT_HEIGHT = 720
+local SECTION_GAP = 12
+local GENERAL_HEIGHT = 60
+local GENERAL_STATUS_HEIGHT = 80
+local CONTROL_WIDTH = 150
+local WIDE_CONTROL_WIDTH = 240
 local SLIDER_WIDTH = 140
 
-local SETTING_ITEMS = {
-    visibility = {
-        {text = L["Always"], value = _G.Enum.DamageMeterVisibility.Always},
-        {text = L["In Combat"], value = _G.Enum.DamageMeterVisibility.InCombat},
-        {text = L["In Group"], value = _G.Enum.DamageMeterVisibility.InGroup},
-        {text = L["Hidden"], value = _G.Enum.DamageMeterVisibility.Hidden},
-    },
-    style = {
-        {text = L["Default"], value = _G.Enum.DamageMeterStyle.Default},
-        {text = L["Bordered"], value = _G.Enum.DamageMeterStyle.Bordered},
-        {text = L["Thin"], value = _G.Enum.DamageMeterStyle.Thin},
-    },
-    numbers = {
-        {text = L["Minimal"], value = _G.Enum.DamageMeterNumbers.Minimal},
-        {text = L["Compact"], value = _G.Enum.DamageMeterNumbers.Compact},
-        {text = L["Complete"], value = _G.Enum.DamageMeterNumbers.Complete},
-    },
+local METER_TYPE_ITEMS = {
+    {text = L["Damage Done"], value = "DamageDone"},
+    {text = L["Healing Done"], value = "HealingDone"},
+    {text = L["Damage Taken"], value = "DamageTaken"},
 }
+
+local NUMBER_MODE_ITEMS = {
+    {text = L["Total"], value = "total"},
+    {text = L["Per Second"], value = "perSecond"},
+    {text = L["Total and Per Second"], value = "both"},
+}
+
+local function SetPaneTips(pane, title, body)
+    pane:SetTips(title, body)
+    -- Titled panes place their tip button at the right edge. Point the tooltip
+    -- back into the options frame instead of letting it grow off-screen.
+    pane.tips:SetTipsPosition("BOTTOMRIGHT", 0, 0)
+end
 
 local function SetStatus(message, color)
     if not statusText then return end
 
+    local hasMessage = type(message) == "string" and message ~= ""
     statusText:SetText(message or "")
     statusText:SetColor(color or "gray")
-end
-
-local function GetErrorMessage(reason)
-    if reason == "preset" then
-        return L["Damage Meter Layout Requires Custom"], "firebrick"
-    elseif reason == "combat" then
-        return L["Damage Meter Combat Deferred"], "yellow_text"
-    elseif reason == "edit_mode_active" or reason == "pending_changes" then
-        return L["Open Blizzard Edit Mode"], "yellow_text"
-    elseif reason == "cvar_write_failed" then
-        return L["Damage Meter CVar Failed"], "firebrick"
-    end
-    return L["Damage Meter Loading"], "gray"
+    statusText:SetShown(hasMessage)
+    generalPane:SetHeight(
+        hasMessage and GENERAL_STATUS_HEIGHT or GENERAL_HEIGHT
+    )
 end
 
 local function RefreshDamageMeter()
@@ -93,276 +82,117 @@ local function CreateDamageMeterPanel()
     scroll.scrollContent:SetHeight(CONTENT_HEIGHT)
 end
 
-local function RegisterNativeSettingWidgets(...)
-    for i = 1, select("#", ...) do
-        nativeSettingWidgets[#nativeSettingWidgets + 1] = select(i, ...)
-    end
-end
-
-local function RegisterNativeLayoutWidgets(...)
-    for i = 1, select("#", ...) do
-        nativeLayoutWidgets[#nativeLayoutWidgets + 1] = select(i, ...)
-    end
-end
-
-local function HandleNativeResult(ok, reason)
-    if ok then
-        SetStatus()
-        return true
-    end
-
-    local message, color = GetErrorMessage(reason)
-    SetStatus(message, color)
-    return false
-end
-
-local function CreateMeterPane()
-    meterPane = AF.CreateTitledPane(
+local function CreateGeneralPane()
+    generalPane = AF.CreateTitledPane(
         scroll.scrollContent,
-        L["Native Meter"],
+        L["BFI Damage Meter"],
         CONTENT_WIDTH,
-        115
+        GENERAL_HEIGHT
     )
-    AF.SetPoint(meterPane, "TOPLEFT")
-    meterPane:SetTips(L["Damage Meter Native Tip"])
+    AF.SetPoint(generalPane, "TOPLEFT")
+    SetPaneTips(
+        generalPane,
+        L["BFI Damage Meter"],
+        L["BFI Damage Meter Tip"]
+    )
 
     local enabled = AF.CreateCheckButton(
-        meterPane,
-        L["Enable Damage Meter"]
+        generalPane,
+        L["Enable BFI Damage Meter"]
     )
-    AF.SetPoint(enabled, "TOPLEFT", meterPane, 15, -30)
+    AF.SetPoint(enabled, "TOPLEFT", generalPane, 15, -30)
     enabled:SetOnCheck(function(checked)
-        local ok, reason = DM.Native.SetEnabled(checked)
-        if not HandleNativeResult(ok, reason) then
-            meterPane.Load()
-            return
-        end
-        if checked then
-            DM.EnsureNativeLoaded(function()
-                if type(DM.ApplyDefaultPositionIfNeeded) == "function" then
-                    DM.ApplyDefaultPositionIfNeeded()
-                end
-                AF.Fire("BFI_RefreshOptions", "damageMeter")
-            end)
-        end
+        DM.config.enabled = checked
+        RefreshDamageMeter()
+        generalPane.Load()
     end)
 
     local resetOnNewInstance = AF.CreateCheckButton(
-        meterPane,
+        generalPane,
         L["Reset on New Instance"]
     )
     AF.SetPoint(
         resetOnNewInstance,
         "TOPLEFT",
-        meterPane,
-        270,
+        generalPane,
+        280,
         -30
     )
     resetOnNewInstance:SetOnCheck(function(checked)
-        local ok, reason = DM.Native.SetResetOnNewInstance(checked)
-        if not HandleNativeResult(ok, reason) then
-            meterPane.Load()
+        local ok = DM.Native.SetResetOnNewInstance(checked)
+        if ok then
+            SetStatus()
+        else
+            SetStatus(L["Damage Meter CVar Failed"], "firebrick")
+            resetOnNewInstance:SetChecked(
+                DM.Native.GetResetOnNewInstance()
+            )
         end
     end)
 
-    statusText = AF.CreateFontString(meterPane, nil, "gray")
-    AF.SetPoint(statusText, "TOPLEFT", meterPane, 15, -62)
-    AF.SetPoint(statusText, "TOPRIGHT", meterPane, -15, -62)
+    statusText = AF.CreateFontString(generalPane, nil, "gray")
+    AF.SetPoint(statusText, "TOPLEFT", generalPane, 15, -57)
+    AF.SetPoint(statusText, "TOPRIGHT", generalPane, -15, -57)
     statusText:SetJustifyH("LEFT")
-    statusText:SetWordWrap(true)
 
-    function meterPane.Load()
-        enabled:SetChecked(DM.Native.GetEnabled())
-        resetOnNewInstance:SetChecked(DM.Native.GetResetOnNewInstance())
-    end
-end
-
-local function CreateSettingDropdown(parent, key, label, x, y)
-    local dropdown = AF.CreateDropdown(parent, WIDE_CONTROL_WIDTH)
-    dropdown:SetLabel(label)
-    AF.SetPoint(dropdown, "TOPLEFT", parent, x, y)
-    dropdown:SetItems(SETTING_ITEMS[key])
-    RegisterNativeSettingWidgets(dropdown)
-    return dropdown
-end
-
-local function CreateDisplayPane()
-    displayPane = AF.CreateTitledPane(
-        scroll.scrollContent,
-        L["Blizzard Display (Read-only)"],
-        CONTENT_WIDTH,
-        145
-    )
-    AF.SetPoint(
-        displayPane,
-        "TOPLEFT",
-        meterPane,
-        "BOTTOMLEFT",
-        0,
-        -SECTION_GAP
-    )
-    displayPane:SetTips(L["Damage Meter Native Settings Read Only"])
-
-    local visibility = CreateSettingDropdown(
-        displayPane,
-        "visibility",
-        L["Visibility"],
-        15,
-        -50
-    )
-    local style = CreateSettingDropdown(
-        displayPane,
-        "style",
-        L["Style"],
-        190,
-        -50
-    )
-    local numbers = CreateSettingDropdown(
-        displayPane,
-        "numbers",
-        L["Number Format"],
-        365,
-        -50
-    )
-
-    local showSpecIcon = AF.CreateCheckButton(
-        displayPane,
-        L["Show Specialization Icons"]
-    )
-    AF.SetPoint(showSpecIcon, "TOPLEFT", displayPane, 15, -103)
-
-    local showClassColor = AF.CreateCheckButton(
-        displayPane,
-        L["Use Class Colors"]
-    )
-    AF.SetPoint(showClassColor, "TOPLEFT", displayPane, 280, -103)
-
-    RegisterNativeSettingWidgets(showSpecIcon, showClassColor)
-
-    function displayPane.Load()
-        local value
-
-        value = DM.Native.GetSetting("visibility")
-        if value ~= nil then visibility:SetSelectedValue(value) end
-
-        value = DM.Native.GetSetting("style")
-        if value ~= nil then style:SetSelectedValue(value) end
-
-        value = DM.Native.GetSetting("numbers")
-        if value ~= nil then numbers:SetSelectedValue(value) end
-
-        value = DM.Native.GetSetting("showSpecIcon")
-        if value ~= nil then showSpecIcon:SetChecked(value) end
-
-        value = DM.Native.GetSetting("showClassColor")
-        if value ~= nil then showClassColor:SetChecked(value) end
-    end
-end
-
-local function CreateNativeSlider(parent, key, label, x, y)
-    local definition = DM.Native.GetSettingDefinition(key)
-    local isPercentage = key == "transparency"
-        or key == "backgroundTransparency"
-        or key == "textSize"
-    local slider = AF.CreateSlider(
-        parent,
-        label,
-        SLIDER_WIDTH,
-        definition.min,
-        definition.max,
-        definition.step,
-        false,
-        false
-    )
-    AF.SetPoint(slider, "TOPLEFT", parent, x, y)
-    if isPercentage then
-        slider.percentSign:Show()
-    end
-    RegisterNativeSettingWidgets(slider)
-    return slider
-end
-
-local function CreateLayoutPane()
-    layoutPane = AF.CreateTitledPane(
-        scroll.scrollContent,
-        L["Blizzard Layout (Read-only)"],
-        CONTENT_WIDTH,
-        290
-    )
-    AF.SetPoint(
-        layoutPane,
-        "TOPLEFT",
-        displayPane,
-        "BOTTOMLEFT",
-        0,
-        -SECTION_GAP
-    )
-    layoutPane:SetTips(L["Damage Meter Native Settings Read Only"])
-
-    local widgets = {
-        frameWidth = CreateNativeSlider(
-            layoutPane, "frameWidth", L["Frame Width"], 15, -55
-        ),
-        frameHeight = CreateNativeSlider(
-            layoutPane, "frameHeight", L["Frame Height"], 190, -55
-        ),
-        barHeight = CreateNativeSlider(
-            layoutPane, "barHeight", L["Bar Height"], 365, -55
-        ),
-        padding = CreateNativeSlider(
-            layoutPane, "padding", L["Padding"], 15, -120
-        ),
-        textSize = CreateNativeSlider(
-            layoutPane, "textSize", L["Text Size"], 190, -120
-        ),
-        transparency = CreateNativeSlider(
-            layoutPane, "transparency", L["Window Opacity"], 365, -120
-        ),
-        backgroundTransparency = CreateNativeSlider(
-            layoutPane,
-            "backgroundTransparency",
-            L["Background Opacity"],
-            15,
-            -185
-        ),
-    }
-
-    presetTip = AF.CreateFontString(layoutPane, nil, "firebrick")
-    AF.SetPoint(presetTip, "TOPLEFT", layoutPane, 15, -230)
-    AF.SetPoint(presetTip, "TOPRIGHT", layoutPane, -15, -230)
-    presetTip:SetJustifyH("LEFT")
-    presetTip:SetWordWrap(true)
-    presetTip:SetColor("gray")
-    presetTip:SetText(L["Damage Meter Native Settings Read Only"])
-
-    function layoutPane.Load()
-        for key, widget in next, widgets do
-            local value = DM.Native.GetSetting(key)
-            if value ~= nil then
-                widget:SetValue(value)
-            end
+    function generalPane.Load()
+        enabled:SetChecked(DM.config.enabled)
+        resetOnNewInstance:SetChecked(
+            DM.Native.GetResetOnNewInstance()
+        )
+        if DM.config.enabled and not DM.Data.IsAvailable() then
+            SetStatus(
+                L["Damage Meter Data Unavailable"],
+                "yellow_text"
+            )
+        else
+            SetStatus()
         end
     end
+end
+
+local function SetWindowControlState()
+    local count = DM.config.windowCount
+    for index, dropdown in ipairs(windowTypeDropdowns) do
+        dropdown:SetEnabled(index <= count)
+    end
+end
+
+local function CreateWindowTypeDropdown(parent, index, x, y)
+    local dropdown = AF.CreateDropdown(parent, WIDE_CONTROL_WIDTH)
+    dropdown:SetLabel(L["Meter %d Type"]:format(index))
+    dropdown:SetItems(METER_TYPE_ITEMS)
+    AF.SetPoint(dropdown, "TOPLEFT", parent, x, y)
+    dropdown:SetOnSelect(function(value)
+        DM.config.windowTypes[index] = value
+        RefreshDamageMeter()
+    end)
+    windowTypeDropdowns[index] = dropdown
+    return dropdown
 end
 
 local function CreateWindowsPane()
     windowsPane = AF.CreateTitledPane(
         scroll.scrollContent,
-        L["Blizzard Meters (Read-only)"],
-        HALF_WIDTH,
-        115
+        L["Meters"],
+        CONTENT_WIDTH,
+        165
     )
     AF.SetPoint(
         windowsPane,
         "TOPLEFT",
-        layoutPane,
+        generalPane,
         "BOTTOMLEFT",
         0,
         -SECTION_GAP
     )
-    windowsPane:SetTips(L["Damage Meter Windows Tip"])
+    SetPaneTips(
+        windowsPane,
+        L["Meters"],
+        L["BFI Damage Meter Windows Tip"]
+    )
 
-    windowCount = AF.CreateDropdown(windowsPane, 190)
+    windowCount = AF.CreateDropdown(windowsPane, CONTROL_WIDTH)
     windowCount:SetLabel(L["Window Count"])
     AF.SetPoint(windowCount, "TOPLEFT", windowsPane, 15, -50)
     windowCount:SetItems({
@@ -370,49 +200,197 @@ local function CreateWindowsPane()
         {text = "2", value = 2},
         {text = "3", value = 3},
     })
-    RegisterNativeSettingWidgets(windowCount)
+    windowCount:SetOnSelect(function(value)
+        DM.config.windowCount = value
+        SetWindowControlState()
+        RefreshDamageMeter()
+    end)
+
+    CreateWindowTypeDropdown(windowsPane, 1, 190, -50)
+    CreateWindowTypeDropdown(windowsPane, 2, 15, -115)
+    CreateWindowTypeDropdown(windowsPane, 3, 280, -115)
 
     function windowsPane.Load()
-        local count = DM.Native.GetWindowCount()
-        if count ~= nil then
-            windowCount:SetSelectedValue(math.max(1, count))
+        windowCount:SetSelectedValue(DM.config.windowCount)
+        for index, dropdown in ipairs(windowTypeDropdowns) do
+            dropdown:SetSelectedValue(DM.config.windowTypes[index])
         end
+        SetWindowControlState()
     end
+end
+
+local function CreateSlider(
+    parent,
+    label,
+    x,
+    y,
+    min,
+    max,
+    step,
+    isPercentage
+)
+    local slider = AF.CreateSlider(
+        parent,
+        label,
+        SLIDER_WIDTH,
+        min,
+        max,
+        step,
+        isPercentage,
+        true
+    )
+    AF.SetPoint(slider, "TOPLEFT", parent, x, y)
+    return slider
 end
 
 local function CreateAppearancePane()
     appearancePane = AF.CreateTitledPane(
         scroll.scrollContent,
-        L["BFI Appearance"],
-        HALF_WIDTH,
-        115
+        L["Appearance"],
+        CONTENT_WIDTH,
+        325
     )
     AF.SetPoint(
         appearancePane,
         "TOPLEFT",
         windowsPane,
-        "TOPRIGHT",
-        SECTION_GAP,
-        0
+        "BOTTOMLEFT",
+        0,
+        -SECTION_GAP
     )
-    appearancePane:SetTips(L["Damage Meter Skin Tip"])
-
-    local enabled = AF.CreateCheckButton(
+    SetPaneTips(
         appearancePane,
-        L["Apply BFI Damage Meter Skin"]
+        L["Appearance"],
+        L["BFI Damage Meter Appearance Tip"]
     )
-    AF.SetPoint(enabled, "TOPLEFT", appearancePane, 15, -30)
-    enabled:SetOnCheck(function(checked)
-        DM.config.enabled = checked
+
+    local width = CreateSlider(
+        appearancePane, L["Frame Width"], 15, -55, 220, 520, 1
+    )
+    width:SetAfterValueChanged(function(value)
+        DM.config.width = value
         RefreshDamageMeter()
-        appearancePane.Load()
+    end)
+
+    local height = CreateSlider(
+        appearancePane, L["Frame Height"], 190, -55, 120, 520, 1
+    )
+    height:SetAfterValueChanged(function(value)
+        DM.config.height = value
+        RefreshDamageMeter()
+    end)
+
+    local headerHeight = CreateSlider(
+        appearancePane, L["Header Height"], 365, -55, 18, 36, 1
+    )
+    headerHeight:SetAfterValueChanged(function(value)
+        DM.config.headerHeight = value
+        RefreshDamageMeter()
+    end)
+
+    local barHeight = CreateSlider(
+        appearancePane, L["Bar Height"], 15, -120, 14, 36, 1
+    )
+    barHeight:SetAfterValueChanged(function(value)
+        DM.config.barHeight = value
+        RefreshDamageMeter()
+    end)
+
+    local spacing = CreateSlider(
+        appearancePane, L["Bar Spacing"], 190, -120, 0, 8, 1
+    )
+    spacing:SetAfterValueChanged(function(value)
+        DM.config.spacing = value
+        RefreshDamageMeter()
+    end)
+
+    local padding = CreateSlider(
+        appearancePane, L["Padding"], 365, -120, 0, 12, 1
+    )
+    padding:SetAfterValueChanged(function(value)
+        DM.config.padding = value
+        RefreshDamageMeter()
+    end)
+
+    local backgroundAlpha = CreateSlider(
+        appearancePane,
+        L["Background Opacity"],
+        15,
+        -185,
+        0,
+        1,
+        0.01,
+        true
+    )
+    backgroundAlpha:SetAfterValueChanged(function(value)
+        DM.config.backgroundAlpha = value
+        RefreshDamageMeter()
+    end)
+
+    local barAlpha = CreateSlider(
+        appearancePane,
+        L["Bar Opacity"],
+        190,
+        -185,
+        0,
+        1,
+        0.01,
+        true
+    )
+    barAlpha:SetAfterValueChanged(function(value)
+        DM.config.barAlpha = value
+        RefreshDamageMeter()
+    end)
+
+    local texture = AF.CreateDropdown(
+        appearancePane,
+        CONTROL_WIDTH
+    )
+    texture:SetLabel(L["Bar Texture"])
+    AF.SetPoint(texture, "TOPLEFT", appearancePane, 365, -185)
+    texture:SetItems(AF.LSM_GetBarTextureDropdownItems())
+    texture:SetOnSelect(function(value)
+        DM.config.texture = value
+        RefreshDamageMeter()
+    end)
+
+    local numberMode = AF.CreateDropdown(
+        appearancePane,
+        CONTROL_WIDTH
+    )
+    numberMode:SetLabel(L["Number Format"])
+    AF.SetPoint(numberMode, "TOPLEFT", appearancePane, 15, -250)
+    numberMode:SetItems(NUMBER_MODE_ITEMS)
+    numberMode:SetOnSelect(function(value)
+        DM.config.numberMode = value
+        RefreshDamageMeter()
+    end)
+
+    local showSpecIcon = AF.CreateCheckButton(
+        appearancePane,
+        L["Show Specialization Icons"]
+    )
+    AF.SetPoint(showSpecIcon, "TOPLEFT", appearancePane, 190, -250)
+    showSpecIcon:SetOnCheck(function(checked)
+        DM.config.showSpecIcon = checked
+        RefreshDamageMeter()
+    end)
+
+    local classColor = AF.CreateCheckButton(
+        appearancePane,
+        L["Use Class Colors"]
+    )
+    AF.SetPoint(classColor, "TOPLEFT", appearancePane, 380, -250)
+    classColor:SetOnCheck(function(checked)
+        DM.config.classColor = checked
+        RefreshDamageMeter()
     end)
 
     local accentHeader = AF.CreateCheckButton(
         appearancePane,
         L["Accent Header"]
     )
-    AF.SetPoint(accentHeader, "TOPLEFT", enabled, "BOTTOMLEFT", 0, -18)
+    AF.SetPoint(accentHeader, "TOPLEFT", appearancePane, 15, -292)
     accentHeader:SetOnCheck(function(checked)
         DM.config.accentHeader = checked
         RefreshDamageMeter()
@@ -420,20 +398,19 @@ local function CreateAppearancePane()
 
     function appearancePane.Load()
         local config = DM.config
-        enabled:SetChecked(config.enabled)
+        width:SetValue(config.width)
+        height:SetValue(config.height)
+        headerHeight:SetValue(config.headerHeight)
+        barHeight:SetValue(config.barHeight)
+        spacing:SetValue(config.spacing)
+        padding:SetValue(config.padding)
+        backgroundAlpha:SetValue(config.backgroundAlpha)
+        barAlpha:SetValue(config.barAlpha)
+        texture:SetSelectedValue(config.texture)
+        numberMode:SetSelectedValue(config.numberMode)
+        showSpecIcon:SetChecked(config.showSpecIcon)
+        classColor:SetChecked(config.classColor)
         accentHeader:SetChecked(config.accentHeader)
-
-        AF.SetEnabled(config.enabled, accentHeader)
-    end
-end
-
-local function OpenEditMode()
-    BFIOptionsFrame:Hide()
-    if not _G.EditModeManagerFrame then
-        _G.C_AddOns.LoadAddOn("Blizzard_EditMode")
-    end
-    if _G.EditModeManagerFrame then
-        _G.ShowUIPanel(_G.EditModeManagerFrame)
     end
 end
 
@@ -442,12 +419,12 @@ local function CreateActionsPane()
         scroll.scrollContent,
         L["Damage Meter Actions"],
         CONTENT_WIDTH,
-        120
+        100
     )
     AF.SetPoint(
         actionsPane,
         "TOPLEFT",
-        windowsPane,
+        appearancePane,
         "BOTTOMLEFT",
         0,
         -SECTION_GAP
@@ -460,29 +437,13 @@ local function CreateActionsPane()
         245,
         25
     )
-    AF.SetPoint(bottomRight, "TOPLEFT", actionsPane, 15, -35)
+    AF.SetPoint(bottomRight, "TOPLEFT", actionsPane, 15, -42)
     bottomRight:SetOnClick(function()
-        if type(DM.ApplyBottomRightLayout) ~= "function" then return end
-
-        local ok, reason = DM.ApplyBottomRightLayout()
-        if ok then
-            SetStatus(L["Damage Meter Layout Applied"], "softlime")
-        else
-            HandleNativeResult(ok, reason)
+        if DM.Renderer
+            and type(DM.Renderer.ResetPosition) == "function" then
+            DM.Renderer.ResetPosition()
         end
     end)
-    RegisterNativeLayoutWidgets(bottomRight)
-
-    local editModeButton = AF.CreateButton(
-        actionsPane,
-        L["Open Blizzard Edit Mode"],
-        "BFI",
-        245,
-        25
-    )
-    AF.SetPoint(editModeButton, "TOPLEFT", actionsPane, 270, -35)
-    AF.ApplyCombatProtectionToWidget(editModeButton)
-    editModeButton:SetOnClick(OpenEditMode)
 
     local reset = AF.CreateButton(
         actionsPane,
@@ -491,12 +452,11 @@ local function CreateActionsPane()
         245,
         25
     )
-    AF.SetPoint(reset, "TOPLEFT", actionsPane, 15, -75)
-    AF.ApplyCombatProtectionToWidget(reset)
+    AF.SetPoint(reset, "TOPLEFT", actionsPane, 270, -42)
     reset:SetOnClick(function()
         local dialog = AF.GetDialog(
             damageMeterPanel,
-            L["Reset all native Damage Meter combat data?"],
+            L["Reset all Damage Meter combat data?"],
             300
         )
         AF.SetPoint(dialog, "TOP", damageMeterPanel, 0, -50)
@@ -506,59 +466,12 @@ local function CreateActionsPane()
     end)
 end
 
-local function LoadNativeControls()
-    if not meterPane then return end
-
-    meterPane.Load()
-
-    local _, settingError = DM.Native.GetSetting("style")
-    local nativeReady = settingError == nil
-    local canPersist, persistError = DM.Native.CanPersistLayout()
-    local inCombat = _G.InCombatLockdown()
-
-    if not combatRefreshFrame then
-        combatRefreshFrame = _G.CreateFrame("Frame")
-        combatRefreshFrame:SetScript("OnEvent", function()
-            LoadNativeControls()
-        end)
-        combatRefreshFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
-        combatRefreshFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-    end
-
-    AF.SetEnabled(false, unpack(nativeSettingWidgets))
-    AF.SetEnabled(
-        nativeReady and canPersist and not inCombat,
-        unpack(nativeLayoutWidgets)
-    )
-    presetTip:SetShown(nativeReady)
-
-    if nativeReady then
-        displayPane.Load()
-        layoutPane.Load()
-        windowsPane.Load()
-        if not canPersist then
-            local message, color = GetErrorMessage(persistError)
-            SetStatus(message, color)
-        elseif inCombat then
-            SetStatus(L["Damage Meter Combat Deferred"], "yellow_text")
-        else
-            SetStatus()
-        end
-    else
-        SetStatus(L["Damage Meter Loading"], "gray")
-    end
-end
-
-local function OnNativeReady()
-    LoadNativeControls()
-end
-
 local function Load()
-    meterPane.Load()
-    appearancePane.Load()
-    LoadNativeControls()
+    if not DM.config then return end
 
-    DM.EnsureNativeLoaded(OnNativeReady)
+    generalPane.Load()
+    windowsPane.Load()
+    appearancePane.Load()
 end
 
 AF.RegisterCallback("BFI_RefreshOptions", function(_, which)
@@ -570,9 +483,7 @@ AF.RegisterCallback("BFI_ShowOptionsPanel", function(_, id)
     if id == "damageMeter" then
         if not damageMeterPanel then
             CreateDamageMeterPanel()
-            CreateMeterPane()
-            CreateDisplayPane()
-            CreateLayoutPane()
+            CreateGeneralPane()
             CreateWindowsPane()
             CreateAppearancePane()
             CreateActionsPane()

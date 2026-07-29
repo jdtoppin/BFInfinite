@@ -3,7 +3,6 @@
     <Script file="Defaults.lua"/>
     <Script file="Data.lua"/>
     <Script file="Native.lua"/>
-    <Script file="Layout.lua"/>
-    <Script file="Skin.lua"/>
+    <Script file="Renderer.lua"/>
     <Script file="DamageMeter.lua"/>
 </Ui>
