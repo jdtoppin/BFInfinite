@@ -13,6 +13,38 @@ local defaults = {
         "HealingDone",
         "DamageTaken",
     },
+    windowSessions = {
+        {mode = "current"},
+        {mode = "current"},
+        {mode = "current"},
+    },
+    windowSyncSessions = {
+        true,
+        true,
+        true,
+    },
+    windowAutoCurrentOnCombat = {
+        true,
+        true,
+        true,
+    },
+    windowAutoCurrentOnMythicPlusStart = {
+        false,
+        false,
+        false,
+    },
+    windowAutoOverallOnMythicPlusComplete = {
+        false,
+        false,
+        false,
+    },
+    mythicPlusWindowTypes = {
+        false,
+        false,
+        false,
+    },
+    resetOnMythicPlusStart = false,
+    alwaysShowPlayer = true,
     windowHeights = {
         220,
         220,
@@ -76,6 +108,11 @@ local validNumberModes = {
     both = true,
 }
 
+local validSessionModes = {
+    current = true,
+    overall = true,
+}
+
 local validAnchorPoints = {
     TOPLEFT = true,
     TOP = true,
@@ -89,6 +126,22 @@ local validAnchorPoints = {
 }
 
 local function CopyWindowTypes(source)
+    local copy = {}
+    for index = 1, 3 do
+        copy[index] = source[index]
+    end
+    return copy
+end
+
+local function CopyWindowSessions(source)
+    local copy = {}
+    for index = 1, 3 do
+        copy[index] = AF.Copy(source[index])
+    end
+    return copy
+end
+
+local function CopyWindowValues(source)
     local copy = {}
     for index = 1, 3 do
         copy[index] = source[index]
@@ -115,6 +168,20 @@ end
 local function CopyDefaults()
     local copy = AF.Copy(defaults)
     copy.windowTypes = CopyWindowTypes(defaults.windowTypes)
+    copy.windowSessions = CopyWindowSessions(defaults.windowSessions)
+    copy.windowSyncSessions = CopyWindowValues(defaults.windowSyncSessions)
+    copy.windowAutoCurrentOnCombat = CopyWindowValues(
+        defaults.windowAutoCurrentOnCombat
+    )
+    copy.windowAutoCurrentOnMythicPlusStart = CopyWindowValues(
+        defaults.windowAutoCurrentOnMythicPlusStart
+    )
+    copy.windowAutoOverallOnMythicPlusComplete = CopyWindowValues(
+        defaults.windowAutoOverallOnMythicPlusComplete
+    )
+    copy.mythicPlusWindowTypes = CopyWindowValues(
+        defaults.mythicPlusWindowTypes
+    )
     copy.windowHeights = CopyWindowHeights(defaults.windowHeights)
     copy.windowAnchors = CopyWindowAnchors(defaults.windowAnchors)
     return copy
@@ -186,6 +253,58 @@ local function NormalizeWindowAnchors(config)
     end
 end
 
+local function NormalizeWindowSessions(config)
+    if type(config.windowSessions) ~= "table" then
+        config.windowSessions = CopyWindowSessions(defaults.windowSessions)
+        return
+    end
+
+    for index = 1, 3 do
+        local value = config.windowSessions[index]
+        local mode = type(value) == "table" and value.mode or nil
+
+        if not validSessionModes[mode] then
+            mode = defaults.windowSessions[index].mode
+        end
+
+        -- Historical IDs are runtime-only because Blizzard can recycle or
+        -- discard them. Profiles persist only stable Current/Overall modes.
+        config.windowSessions[index] = {
+            mode = mode,
+        }
+    end
+end
+
+local function NormalizeBooleanWindowValues(config, key)
+    local values = config[key]
+    if type(values) ~= "table" then
+        config[key] = CopyWindowValues(defaults[key])
+        return
+    end
+
+    for index = 1, 3 do
+        if type(values[index]) ~= "boolean" then
+            values[index] = defaults[key][index]
+        end
+    end
+end
+
+local function NormalizeMythicPlusWindowTypes(config)
+    local values = config.mythicPlusWindowTypes
+    if type(values) ~= "table" then
+        config.mythicPlusWindowTypes = CopyWindowValues(
+            defaults.mythicPlusWindowTypes
+        )
+        return
+    end
+
+    for index = 1, 3 do
+        if values[index] ~= false and not validWindowTypes[values[index]] then
+            values[index] = defaults.mythicPlusWindowTypes[index]
+        end
+    end
+end
+
 local function NormalizeConfig(config)
     -- Legacy development builds stored transient CVar state in the profile.
     -- It must never survive profile copy, import, or export.
@@ -207,6 +326,24 @@ local function NormalizeConfig(config)
         if not validWindowTypes[config.windowTypes[index]] then
             config.windowTypes[index] = defaults.windowTypes[index]
         end
+    end
+    NormalizeWindowSessions(config)
+    NormalizeBooleanWindowValues(config, "windowSyncSessions")
+    NormalizeBooleanWindowValues(config, "windowAutoCurrentOnCombat")
+    NormalizeBooleanWindowValues(
+        config,
+        "windowAutoCurrentOnMythicPlusStart"
+    )
+    NormalizeBooleanWindowValues(
+        config,
+        "windowAutoOverallOnMythicPlusComplete"
+    )
+    NormalizeMythicPlusWindowTypes(config)
+    if type(config.resetOnMythicPlusStart) ~= "boolean" then
+        config.resetOnMythicPlusStart = defaults.resetOnMythicPlusStart
+    end
+    if type(config.alwaysShowPlayer) ~= "boolean" then
+        config.alwaysShowPlayer = defaults.alwaysShowPlayer
     end
 
     local legacyHeight = NormalizeNumber(
@@ -305,6 +442,11 @@ AF.RegisterCallback("BFI_UpdateProfile", function(_, profile)
 
     NormalizeConfig(profile.damageMeter)
     DM.config = profile.damageMeter
+    if DM.Renderer
+        and type(DM.Renderer.ClearRuntimeSessions) == "function"
+    then
+        DM.Renderer.ClearRuntimeSessions()
+    end
 end)
 
 function DM.GetDefaults()
@@ -314,4 +456,9 @@ end
 function DM.ResetToDefaults()
     wipe(DM.config)
     AF.Merge(DM.config, CopyDefaults())
+    if DM.Renderer
+        and type(DM.Renderer.ClearRuntimeSessions) == "function"
+    then
+        DM.Renderer.ClearRuntimeSessions()
+    end
 end

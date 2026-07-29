@@ -14,15 +14,24 @@ end
 function DM.Enable()
     if active then
         DM.Renderer.SetEnabled(true)
+        if DM.Automation then
+            DM.Automation.SetEnabled(true)
+        end
         return
     end
 
     active = true
     DM.Renderer.SetEnabled(true)
+    if DM.Automation then
+        DM.Automation.SetEnabled(true)
+    end
 end
 
 function DM.Disable()
     active = nil
+    if DM.Automation then
+        DM.Automation.SetEnabled(false)
+    end
     DM.Renderer.SetEnabled(false)
 end
 

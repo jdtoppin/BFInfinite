@@ -232,6 +232,7 @@ local function createHarness()
 
     local config = {
         accentHeader = false,
+        alwaysShowPlayer = false,
         backgroundAlpha = 0.73,
         barAlpha = 0.66,
         barHeight = 19,
@@ -241,6 +242,7 @@ local function createHarness()
         locked = true,
         numberMode = "perSecond",
         padding = 6,
+        resetOnMythicPlusStart = true,
         showSpecIcon = false,
         spacing = 4,
         texture = "TestTexture",
@@ -250,6 +252,31 @@ local function createHarness()
             "DamageDone",
             "HealingDone",
             "DamageTaken",
+        },
+        windowSyncSessions = {
+            true,
+            false,
+            true,
+        },
+        windowAutoCurrentOnCombat = {
+            false,
+            true,
+            false,
+        },
+        windowAutoCurrentOnMythicPlusStart = {
+            true,
+            false,
+            true,
+        },
+        windowAutoOverallOnMythicPlusComplete = {
+            false,
+            true,
+            false,
+        },
+        mythicPlusWindowTypes = {
+            false,
+            "Deaths",
+            "Absorbs",
         },
         windowHeights = {
             277,
@@ -322,7 +349,8 @@ local meters = state.panes.Meters
 local status = state.fontStrings[1]
 assertTrue(panel and panel:IsShown(), "Damage Meter panel must build and show")
 assertTrue(
-    general and meters and state.panes.Appearance
+    general and meters and state.panes["Sessions and Automation"]
+        and state.panes.Appearance
         and state.panes["Damage Meter Actions"],
     "all Damage Meter panes must build"
 )
@@ -336,6 +364,7 @@ assertEqual(meters.points[1][5], -12, "compact section gap")
 local expectedTips = {
     ["BFI Damage Meter"] = "BFI Damage Meter Tip",
     Meters = "BFI Damage Meter Windows Tip",
+    ["Sessions and Automation"] = "BFI Damage Meter Automation Tip",
     Appearance = "BFI Damage Meter Appearance Tip",
 }
 for title, body in pairs(expectedTips) do
@@ -363,6 +392,29 @@ local firstMeterHeight = state.controls["Meter 1 Height"]
 local secondMeterHeight = state.controls["Meter 2 Height"]
 local thirdMeterHeight = state.controls["Meter 3 Height"]
 local lockMeters = state.controls["Lock Meters"]
+local alwaysShowPlayer = state.controls["Always Show Player"]
+local resetOnMythicPlusStart =
+    state.controls["Reset Data on Mythic+ Start"]
+local firstMythicPlusType =
+    state.controls["Meter 1 Type on Mythic+ Start"]
+local secondMythicPlusType =
+    state.controls["Meter 2 Type on Mythic+ Start"]
+local firstSyncSessions =
+    state.controls["Meter 1 Sync Session Selection"]
+local secondSyncSessions =
+    state.controls["Meter 2 Sync Session Selection"]
+local firstAutoCurrentOnCombat =
+    state.controls["Meter 1 Auto Current on Combat"]
+local secondAutoCurrentOnCombat =
+    state.controls["Meter 2 Auto Current on Combat"]
+local firstAutoCurrentOnMythicPlusStart =
+    state.controls["Meter 1 Current on Mythic+ Start"]
+local secondAutoCurrentOnMythicPlusStart =
+    state.controls["Meter 2 Current on Mythic+ Start"]
+local firstAutoOverallOnMythicPlusComplete =
+    state.controls["Meter 1 Overall on Mythic+ Complete"]
+local secondAutoOverallOnMythicPlusComplete =
+    state.controls["Meter 2 Overall on Mythic+ Complete"]
 local texture = state.controls["Bar Texture"]
 local enabled = state.controls["Enable BFI Damage Meter"]
 assertTrue(width and width:IsShown(), "Frame Width control visible")
@@ -400,6 +452,59 @@ assertEqual(firstMeterHeight.value, 277, "first meter height loaded")
 assertEqual(secondMeterHeight.value, 288, "second meter height loaded")
 assertEqual(thirdMeterHeight.value, 299, "third meter height loaded")
 assertEqual(lockMeters.checked, true, "lock state loaded")
+assertEqual(alwaysShowPlayer.checked, false, "player pin state loaded")
+assertEqual(
+    resetOnMythicPlusStart.checked,
+    true,
+    "key-start reset state loaded"
+)
+assertEqual(
+    firstMythicPlusType.selectedText,
+    "Keep Current Type",
+    "first key-start type default visible"
+)
+assertEqual(
+    secondMythicPlusType.selectedValue,
+    "Deaths",
+    "second key-start type loaded"
+)
+assertEqual(
+    #firstMythicPlusType.items,
+    12,
+    "key-start type exposes keep-current and every meter type"
+)
+assertEqual(firstSyncSessions.checked, true, "first session sync loaded")
+assertEqual(secondSyncSessions.checked, false, "second session sync loaded")
+assertEqual(
+    firstAutoCurrentOnCombat.checked,
+    false,
+    "first combat automation loaded"
+)
+assertEqual(
+    secondAutoCurrentOnCombat.checked,
+    true,
+    "second combat automation loaded"
+)
+assertEqual(
+    firstAutoCurrentOnMythicPlusStart.checked,
+    true,
+    "first key-start session loaded"
+)
+assertEqual(
+    secondAutoCurrentOnMythicPlusStart.checked,
+    false,
+    "second key-start session loaded"
+)
+assertEqual(
+    firstAutoOverallOnMythicPlusComplete.checked,
+    false,
+    "first key-complete session loaded"
+)
+assertEqual(
+    secondAutoOverallOnMythicPlusComplete.checked,
+    true,
+    "second key-complete session loaded"
+)
 assertEqual(
     state.controls["Frame Height"],
     nil,
@@ -420,12 +525,91 @@ assertEqual(
 )
 lockMeters.onCheck(false)
 assertEqual(DM.config.locked, false, "lock setting writes live")
+alwaysShowPlayer.onCheck(true)
+assertEqual(DM.config.alwaysShowPlayer, true, "player pin writes live")
+resetOnMythicPlusStart.onCheck(false)
+assertEqual(
+    DM.config.resetOnMythicPlusStart,
+    false,
+    "key-start reset writes live"
+)
+firstMythicPlusType.onSelect("HealingDone")
+assertEqual(
+    DM.config.mythicPlusWindowTypes[1],
+    "HealingDone",
+    "key-start type writes live"
+)
+firstMythicPlusType.onSelect(firstMythicPlusType.items[1].value)
+assertEqual(
+    DM.config.mythicPlusWindowTypes[1],
+    false,
+    "keep-current clears key-start type"
+)
+firstSyncSessions.onCheck(false)
+assertEqual(
+    DM.config.windowSyncSessions[1],
+    false,
+    "session sync writes live"
+)
+firstAutoCurrentOnCombat.onCheck(true)
+assertEqual(
+    DM.config.windowAutoCurrentOnCombat[1],
+    true,
+    "combat automation writes live"
+)
+firstAutoCurrentOnMythicPlusStart.onCheck(false)
+assertEqual(
+    DM.config.windowAutoCurrentOnMythicPlusStart[1],
+    false,
+    "key-start session writes live"
+)
+firstAutoOverallOnMythicPlusComplete.onCheck(true)
+assertEqual(
+    DM.config.windowAutoOverallOnMythicPlusComplete[1],
+    true,
+    "key-complete session writes live"
+)
 windowCount.onSelect(1)
 assertEqual(secondMeterType.enabled, false, "hidden meter type disabled")
 assertEqual(secondMeterHeight.enabled, false, "hidden meter height disabled")
+assertEqual(
+    secondMythicPlusType.enabled,
+    false,
+    "hidden meter key-start type disabled"
+)
+assertEqual(
+    secondSyncSessions.enabled,
+    false,
+    "hidden meter session sync disabled"
+)
+assertEqual(
+    secondAutoCurrentOnCombat.enabled,
+    false,
+    "hidden meter combat automation disabled"
+)
+assertEqual(
+    secondAutoCurrentOnMythicPlusStart.enabled,
+    false,
+    "hidden meter key-start session disabled"
+)
+assertEqual(
+    secondAutoOverallOnMythicPlusComplete.enabled,
+    false,
+    "hidden meter key-complete session disabled"
+)
 windowCount.onSelect(3)
 assertEqual(secondMeterType.enabled, true, "shown meter type enabled")
 assertEqual(secondMeterHeight.enabled, true, "shown meter height enabled")
+assertEqual(
+    secondMythicPlusType.enabled,
+    true,
+    "shown meter key-start type enabled"
+)
+assertEqual(
+    secondSyncSessions.enabled,
+    true,
+    "shown meter session sync enabled"
+)
 
 enabled:SetChecked(true)
 enabled.onCheck(true)

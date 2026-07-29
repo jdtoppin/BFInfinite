@@ -10,17 +10,24 @@ local damageMeterPanel
 local scroll
 local generalPane
 local windowsPane
+local automationPane
 local appearancePane
 local actionsPane
 local statusText
 local windowCount
 local lockMeters
+local alwaysShowPlayer
 local windowTypeDropdowns = {}
 local windowHeightSliders = {}
+local mythicPlusTypeDropdowns = {}
+local syncSessionChecks = {}
+local autoCurrentOnCombatChecks = {}
+local autoCurrentOnMythicPlusStartChecks = {}
+local autoOverallOnMythicPlusCompleteChecks = {}
 local CreateSlider
 
 local CONTENT_WIDTH = 530
-local CONTENT_HEIGHT = 780
+local CONTENT_HEIGHT = 1180
 local SECTION_GAP = 12
 local GENERAL_HEIGHT = 60
 local GENERAL_STATUS_HEIGHT = 80
@@ -99,6 +106,14 @@ local NUMBER_MODE_ITEMS = {
     {text = L["Per Second"], value = "perSecond"},
     {text = L["Total and Per Second"], value = "both"},
 }
+
+local KEEP_CURRENT_TYPE = "__keepCurrentType"
+local MYTHIC_PLUS_TYPE_ITEMS = {
+    {text = L["Keep Current Type"], value = KEEP_CURRENT_TYPE},
+}
+for _, item in ipairs(METER_TYPE_ITEMS) do
+    MYTHIC_PLUS_TYPE_ITEMS[#MYTHIC_PLUS_TYPE_ITEMS + 1] = item
+end
 
 local function SetPaneTips(pane, title, body)
     pane:SetTips(title, body)
@@ -217,8 +232,16 @@ end
 local function SetWindowControlState()
     local count = DM.config.windowCount
     for index, dropdown in ipairs(windowTypeDropdowns) do
-        dropdown:SetEnabled(index <= count)
-        windowHeightSliders[index]:SetEnabled(index <= count)
+        local enabled = index <= count
+        dropdown:SetEnabled(enabled)
+        windowHeightSliders[index]:SetEnabled(enabled)
+        if mythicPlusTypeDropdowns[index] then
+            mythicPlusTypeDropdowns[index]:SetEnabled(enabled)
+            syncSessionChecks[index]:SetEnabled(enabled)
+            autoCurrentOnCombatChecks[index]:SetEnabled(enabled)
+            autoCurrentOnMythicPlusStartChecks[index]:SetEnabled(enabled)
+            autoOverallOnMythicPlusCompleteChecks[index]:SetEnabled(enabled)
+        end
     end
 end
 
@@ -295,6 +318,16 @@ local function CreateWindowsPane()
         RefreshDamageMeter()
     end)
 
+    alwaysShowPlayer = AF.CreateCheckButton(
+        windowsPane,
+        L["Always Show Player"]
+    )
+    AF.SetPoint(alwaysShowPlayer, "TOPLEFT", windowsPane, 350, -50)
+    alwaysShowPlayer:SetOnCheck(function(checked)
+        DM.config.alwaysShowPlayer = checked
+        RefreshDamageMeter()
+    end)
+
     for index = 1, 3 do
         local y = -105 - ((index - 1) * 65)
         CreateWindowTypeDropdown(windowsPane, index, 15, y)
@@ -304,10 +337,160 @@ local function CreateWindowsPane()
     function windowsPane.Load()
         windowCount:SetSelectedValue(DM.config.windowCount)
         lockMeters:SetChecked(DM.config.locked)
+        alwaysShowPlayer:SetChecked(DM.config.alwaysShowPlayer)
         for index, dropdown in ipairs(windowTypeDropdowns) do
             dropdown:SetSelectedValue(DM.config.windowTypes[index])
             windowHeightSliders[index]:SetValue(
                 DM.config.windowHeights[index]
+            )
+        end
+        SetWindowControlState()
+    end
+end
+
+local function CreateAutomationPane()
+    automationPane = AF.CreateTitledPane(
+        scroll.scrollContent,
+        L["Sessions and Automation"],
+        CONTENT_WIDTH,
+        385
+    )
+    AF.SetPoint(
+        automationPane,
+        "TOPLEFT",
+        windowsPane,
+        "BOTTOMLEFT",
+        0,
+        -SECTION_GAP
+    )
+    SetPaneTips(
+        automationPane,
+        L["Sessions and Automation"],
+        L["BFI Damage Meter Automation Tip"]
+    )
+
+    local resetOnMythicPlusStart = AF.CreateCheckButton(
+        automationPane,
+        L["Reset Data on Mythic+ Start"]
+    )
+    AF.SetPoint(
+        resetOnMythicPlusStart,
+        "TOPLEFT",
+        automationPane,
+        15,
+        -32
+    )
+    resetOnMythicPlusStart:SetOnCheck(function(checked)
+        DM.config.resetOnMythicPlusStart = checked
+        RefreshDamageMeter()
+    end)
+
+    for index = 1, 3 do
+        local y = -85 - ((index - 1) * 100)
+
+        local mythicPlusType = AF.CreateDropdown(
+            automationPane,
+            WIDE_CONTROL_WIDTH
+        )
+        mythicPlusType:SetLabel(
+            L["Meter %d Type on Mythic+ Start"]:format(index)
+        )
+        mythicPlusType:SetItems(MYTHIC_PLUS_TYPE_ITEMS)
+        AF.SetPoint(mythicPlusType, "TOPLEFT", automationPane, 15, y)
+        mythicPlusType:SetOnSelect(function(value)
+            if value == KEEP_CURRENT_TYPE then
+                DM.config.mythicPlusWindowTypes[index] = false
+            else
+                DM.config.mythicPlusWindowTypes[index] = value
+            end
+            RefreshDamageMeter()
+        end)
+        mythicPlusTypeDropdowns[index] = mythicPlusType
+
+        local syncSessions = AF.CreateCheckButton(
+            automationPane,
+            L["Meter %d Sync Session Selection"]:format(index)
+        )
+        AF.SetPoint(syncSessions, "TOPLEFT", automationPane, 280, y)
+        syncSessions:SetOnCheck(function(checked)
+            DM.config.windowSyncSessions[index] = checked
+            RefreshDamageMeter()
+        end)
+        syncSessionChecks[index] = syncSessions
+
+        local autoCurrentOnCombat = AF.CreateCheckButton(
+            automationPane,
+            L["Meter %d Auto Current on Combat"]:format(index)
+        )
+        AF.SetPoint(
+            autoCurrentOnCombat,
+            "TOPLEFT",
+            automationPane,
+            280,
+            y - 28
+        )
+        autoCurrentOnCombat:SetOnCheck(function(checked)
+            DM.config.windowAutoCurrentOnCombat[index] = checked
+            RefreshDamageMeter()
+        end)
+        autoCurrentOnCombatChecks[index] = autoCurrentOnCombat
+
+        local autoCurrentOnMythicPlusStart = AF.CreateCheckButton(
+            automationPane,
+            L["Meter %d Current on Mythic+ Start"]:format(index)
+        )
+        AF.SetPoint(
+            autoCurrentOnMythicPlusStart,
+            "TOPLEFT",
+            automationPane,
+            15,
+            y - 63
+        )
+        autoCurrentOnMythicPlusStart:SetOnCheck(function(checked)
+            DM.config.windowAutoCurrentOnMythicPlusStart[index] = checked
+            RefreshDamageMeter()
+        end)
+        autoCurrentOnMythicPlusStartChecks[index] =
+            autoCurrentOnMythicPlusStart
+
+        local autoOverallOnMythicPlusComplete = AF.CreateCheckButton(
+            automationPane,
+            L["Meter %d Overall on Mythic+ Complete"]:format(index)
+        )
+        AF.SetPoint(
+            autoOverallOnMythicPlusComplete,
+            "TOPLEFT",
+            automationPane,
+            280,
+            y - 63
+        )
+        autoOverallOnMythicPlusComplete:SetOnCheck(function(checked)
+            DM.config.windowAutoOverallOnMythicPlusComplete[index] =
+                checked
+            RefreshDamageMeter()
+        end)
+        autoOverallOnMythicPlusCompleteChecks[index] =
+            autoOverallOnMythicPlusComplete
+    end
+
+    function automationPane.Load()
+        local config = DM.config
+        resetOnMythicPlusStart:SetChecked(config.resetOnMythicPlusStart)
+        for index = 1, 3 do
+            mythicPlusTypeDropdowns[index]:SetSelectedValue(
+                config.mythicPlusWindowTypes[index] or KEEP_CURRENT_TYPE
+            )
+            syncSessionChecks[index]:SetChecked(
+                config.windowSyncSessions[index]
+            )
+            autoCurrentOnCombatChecks[index]:SetChecked(
+                config.windowAutoCurrentOnCombat[index]
+            )
+            autoCurrentOnMythicPlusStartChecks[index]:SetChecked(
+                config.windowAutoCurrentOnMythicPlusStart[index]
+            )
+            autoOverallOnMythicPlusCompleteChecks[index]:SetChecked(
+                config.windowAutoOverallOnMythicPlusComplete[index]
             )
         end
         SetWindowControlState()
@@ -348,7 +531,7 @@ local function CreateAppearancePane()
     AF.SetPoint(
         appearancePane,
         "TOPLEFT",
-        windowsPane,
+        automationPane,
         "BOTTOMLEFT",
         0,
         -SECTION_GAP
@@ -557,6 +740,7 @@ local function Load()
 
     generalPane.Load()
     windowsPane.Load()
+    automationPane.Load()
     appearancePane.Load()
 end
 
@@ -571,6 +755,7 @@ AF.RegisterCallback("BFI_ShowOptionsPanel", function(_, id)
             CreateDamageMeterPanel()
             CreateGeneralPane()
             CreateWindowsPane()
+            CreateAutomationPane()
             CreateAppearancePane()
             CreateActionsPane()
         end

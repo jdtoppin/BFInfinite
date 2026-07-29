@@ -21,16 +21,88 @@ local function assertNotContains(contents, text, message)
     end
 end
 
+local function countPlain(contents, text)
+    local count = 0
+    local start = 1
+    while true do
+        local found = contents:find(text, start, true)
+        if not found then return count end
+        count = count + 1
+        start = found + #text
+    end
+end
+
+local function assertCount(contents, text, expected, message)
+    local actual = countPlain(contents, text)
+    if actual ~= expected then
+        error(("%s: expected %d, got %d for %s"):format(
+            message,
+            expected,
+            actual,
+            text
+        ), 2)
+    end
+end
+
+local function assertIdentifierLineAllowlist(
+    contents,
+    identifier,
+    expected,
+    message
+)
+    local actual = {}
+    for rawLine in contents:gmatch("[^\r\n]+") do
+        local line = rawLine:gsub("%-%-.*$", "")
+        line = line:match("^%s*(.-)%s*$")
+        if line:find(
+            "%f[%w_]" .. identifier .. "%f[^%w_]"
+        ) then
+            actual[line] = (actual[line] or 0) + 1
+        end
+    end
+
+    for line, count in pairs(actual) do
+        if expected[line] ~= count then
+            error(("%s: unapproved use (%dx): %s"):format(
+                message,
+                count,
+                line
+            ), 2)
+        end
+    end
+    for line, count in pairs(expected) do
+        if actual[line] ~= count then
+            error(("%s: expected %dx, got %dx: %s"):format(
+                message,
+                count,
+                actual[line] or 0,
+                line
+            ), 2)
+        end
+    end
+end
+
 local renderer = readFile("Modules/DamageMeter/Renderer.lua")
 local forbiddenRendererPatterns = {
     "hooksecurefunc",
     "issecret" .. "value",
     "F.isValueNonSecret",
     "GetCombatSessionSource",
+    "DamageMeterSourceWindow",
+    "ShowSourceWindow",
+    "C_DeathRecap.GetRecapEvents",
+    "sourceGUID",
+    "sourceCreatureID",
+    "deathTimeSeconds",
+    "sourceDisplayType",
+    "factionGroup",
+    "combatSpells",
+    "source[",
+    "session[",
     "table.sort",
     "AF.FormatNumber(",
     "tostring(source.",
-    "type(session",
+    "type(session)",
     "pcall(",
     "xpcall(",
 }
@@ -43,10 +115,76 @@ for _, text in ipairs(forbiddenRendererPatterns) do
     )
 end
 
+assertIdentifierLineAllowlist(renderer, "source", {
+    ["AF.FormatSecretNumber(source.amountPerSecond)"] = 3,
+    ["AF.FormatSecretNumber(source.totalAmount)"] = 2,
+    ["UpdateRow(row, source, sourceIndex, session, config)"] = 1,
+    ["for index, source in ipairs(session.combatSources) do"] = 1,
+    ["if alwaysShowLocalPlayer and source.isLocalPlayer then"] = 1,
+    ["local function UpdateRow(row, source, index, session, config)"] = 1,
+    ["local source = session.combatSources[sourceIndex]"] = 1,
+    ["r, g, b = AF.GetClassColor(source.classFilename)"] = 1,
+    ["row.bar:SetValue(source.totalAmount)"] = 1,
+    ["row.deathRecapID = source.deathRecapID"] = 1,
+    ["row.hoverCard.playerBadge:SetShown(source.isLocalPlayer == true)"] = 1,
+    ["row.hoverCard.shareBar:SetValue(source.totalAmount)"] = 1,
+    ['row.hoverCard.title:SetText(_G.Ambiguate(source.name, "short"))'] = 1,
+    ["row.icon:SetTexture(source.specIconID)"] = 1,
+    ['row.name:SetText(_G.Ambiguate(source.name, "short"))'] = 1,
+    ["row.total:SetText(AF.FormatSecretNumber(source.totalAmount))"] = 1,
+}, "every whole combat-source use must stay on the reviewed safe path")
+
+local sourceFieldCounts = {
+    amountPerSecond = 3,
+    classFilename = 1,
+    deathRecapID = 1,
+    isLocalPlayer = 2,
+    name = 2,
+    specIconID = 1,
+    totalAmount = 5,
+}
+for field, count in pairs(sourceFieldCounts) do
+    assertCount(
+        renderer,
+        "source." .. field,
+        count,
+        "combat-source field allowlist changed"
+    )
+end
+
+local sessionFieldCounts = {
+    combatSources = 4,
+    maxAmount = 1,
+    totalAmount = 2,
+}
+for field, count in pairs(sessionFieldCounts) do
+    assertCount(
+        renderer,
+        "session." .. field,
+        count,
+        "combat-session field allowlist changed"
+    )
+end
+
 assertContains(
     renderer,
     "DM.Data.GetCurrentSession(meterType)",
     "renderer must use the public Damage Meter data adapter"
+)
+assertContains(
+    renderer,
+    "DM.Data.GetOverallSession(meterType)",
+    "renderer must expose Blizzard's overall session"
+)
+assertContains(
+    renderer,
+    "DM.Data.GetHistoricalSession(sessionID, meterType)",
+    "renderer must expose historical sessions through the same safe path"
+)
+assertContains(
+    renderer,
+    "DM.Data.GetAvailableSessions()",
+    "session picker must use Blizzard's non-secret session metadata"
 )
 assertContains(
     renderer,
@@ -82,6 +220,11 @@ assertContains(
     renderer,
     "row.icon:SetTexture(source.specIconID)",
     "addon-owned rows must support specialization icons"
+)
+assertContains(
+    renderer,
+    "_G.OpenDeathRecapUI(deathRecapID)",
+    "death rows must delegate to Blizzard using the never-secret recap ID"
 )
 assertContains(
     renderer,
@@ -193,8 +336,21 @@ local lifecycleAt = loadOrder:find(
     1,
     true
 )
-if not rendererAt or not lifecycleAt or rendererAt >= lifecycleAt then
-    error("renderer must load before the Damage Meter lifecycle", 2)
+local automationAt = loadOrder:find(
+    '<Script file="Automation.lua"/>',
+    1,
+    true
+)
+if not rendererAt
+    or not automationAt
+    or not lifecycleAt
+    or rendererAt >= automationAt
+    or automationAt >= lifecycleAt
+then
+    error(
+        "renderer and automation must load before the Damage Meter lifecycle",
+        2
+    )
 end
 
 print("damage_meter_renderer_policy_test.lua: ok")

@@ -39,8 +39,9 @@ jobs:
       - name: Test Damage Meter native adapter
         run: luajit tests/damage_meter_native_test.lua
 
-      - name: Test Damage Meter renderer, defaults, lifecycle, and policy
+      - name: Test Damage Meter renderer, automation, defaults, lifecycle, and policy
         run: |
+          luajit tests/damage_meter_automation_test.lua
           luajit tests/damage_meter_defaults_test.lua
           luajit tests/damage_meter_lifecycle_test.lua
           luajit tests/damage_meter_options_test.lua

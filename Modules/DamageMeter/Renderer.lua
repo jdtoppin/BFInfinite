@@ -34,15 +34,24 @@ local MIN_WINDOW_WIDTH = 220
 local MAX_WINDOW_WIDTH = 520
 local MIN_WINDOW_HEIGHT = 120
 local MAX_WINDOW_HEIGHT = 520
+local DEFAULT_SESSION_KEY = "current"
+local SESSION_MODE_CURRENT = "current"
+local SESSION_MODE_OVERALL = "overall"
+local SESSION_MODE_HISTORY = "history"
+local SESSION_DROPDOWN_WIDTH = 120
+local MIN_SESSION_DROPDOWN_WIDTH = 60
+local MIN_TYPE_DROPDOWN_WIDTH = 60
 
 local TYPE_DEFINITIONS = {
     DamageDone = {
         title = _G.DAMAGE_METER_TYPE_DAMAGE_DONE or _G.DAMAGE or "Damage",
         enumName = "DamageDone",
+        alwaysShowLocalPlayer = true,
     },
     Dps = {
         title = _G.DAMAGE_METER_TYPE_DPS or _G.DPS or "DPS",
         enumName = "Dps",
+        alwaysShowLocalPlayer = true,
         valuePerSecondAsPrimary = true,
     },
     HealingDone = {
@@ -50,24 +59,29 @@ local TYPE_DEFINITIONS = {
             or _G.HEALING
             or "Healing",
         enumName = "HealingDone",
+        alwaysShowLocalPlayer = true,
     },
     Hps = {
         title = _G.DAMAGE_METER_TYPE_HPS or _G.HPS or "HPS",
         enumName = "Hps",
+        alwaysShowLocalPlayer = true,
         valuePerSecondAsPrimary = true,
     },
     Absorbs = {
         title = _G.DAMAGE_METER_TYPE_ABSORBS or "Absorbs",
         enumName = "Absorbs",
+        alwaysShowLocalPlayer = true,
     },
     Interrupts = {
         title = _G.DAMAGE_METER_TYPE_INTERRUPTS or "Interrupts",
         enumName = "Interrupts",
+        alwaysShowLocalPlayer = true,
         suppressValuePerSecond = true,
     },
     Dispels = {
         title = _G.DAMAGE_METER_TYPE_DISPELS or "Dispels",
         enumName = "Dispels",
+        alwaysShowLocalPlayer = true,
         suppressValuePerSecond = true,
     },
     DamageTaken = {
@@ -75,11 +89,13 @@ local TYPE_DEFINITIONS = {
             or _G.DAMAGE_TAKEN
             or "Damage Taken",
         enumName = "DamageTaken",
+        alwaysShowLocalPlayer = true,
     },
     AvoidableDamageTaken = {
         title = _G.DAMAGE_METER_TYPE_AVOIDABLE_DAMAGE_TAKEN
             or "Avoidable Damage",
         enumName = "AvoidableDamageTaken",
+        alwaysShowLocalPlayer = true,
     },
     Deaths = {
         title = _G.DAMAGE_METER_TYPE_DEATHS or _G.DEATHS or "Deaths",
@@ -135,6 +151,11 @@ local nativeRestoreEnabled
 local resetPositionPending
 local activeDockTarget
 local activeDockDirection
+local ScrollWindow
+local sessionItems = {}
+local sessionSelections = {}
+local sessionItemsDirty = true
+local runtimeHistoricalSessionIDs = {}
 
 local function GetConfig()
     return DM.config
@@ -246,6 +267,227 @@ local function GetMeterType(definition)
     return meterTypes[definition.enumName]
 end
 
+local function GetSessionKey(mode, sessionID)
+    if mode == SESSION_MODE_HISTORY then
+        return SESSION_MODE_HISTORY .. ":" .. sessionID
+    end
+    return mode
+end
+
+local function GetWindowSessionSelection(config, index)
+    local runtimeSessionID = runtimeHistoricalSessionIDs[index]
+    if type(runtimeSessionID) == "number" and runtimeSessionID > 0 then
+        return SESSION_MODE_HISTORY, runtimeSessionID
+    end
+
+    local selections = config.windowSessions
+    local selection = type(selections) == "table" and selections[index]
+        or nil
+    local mode = type(selection) == "table" and selection.mode or nil
+
+    if mode == SESSION_MODE_OVERALL then
+        return mode
+    end
+    return SESSION_MODE_CURRENT
+end
+
+local function SetWindowSessionState(config, index, mode, sessionID)
+    if mode == SESSION_MODE_HISTORY then
+        runtimeHistoricalSessionIDs[index] = sessionID
+        return
+    end
+
+    runtimeHistoricalSessionIDs[index] = nil
+    config.windowSessions = config.windowSessions or {}
+    config.windowSessions[index] = {
+        mode = mode,
+    }
+end
+
+local function ClearRuntimeHistoricalSession(index)
+    local sessionID = runtimeHistoricalSessionIDs[index]
+    runtimeHistoricalSessionIDs[index] = nil
+    if not sessionID or not windows[index] then return end
+
+    local key = GetSessionKey(SESSION_MODE_HISTORY, sessionID)
+    windows[index].scrollOffsets[key] = nil
+    windows[index].maxScrollOffsets[key] = nil
+end
+
+local function GetSessionData(mode, sessionID, meterType)
+    if mode == SESSION_MODE_OVERALL then
+        return DM.Data.GetOverallSession(meterType)
+    end
+    if mode == SESSION_MODE_HISTORY then
+        return DM.Data.GetHistoricalSession(sessionID, meterType)
+    end
+    return DM.Data.GetCurrentSession(meterType)
+end
+
+local function FormatSessionDuration(durationSeconds)
+    if type(_G.SecondsToClock) == "function" then
+        return _G.SecondsToClock(durationSeconds)
+    end
+
+    local seconds = math.max(0, math.floor(durationSeconds))
+    return ("%d:%02d"):format(
+        math.floor(seconds / 60),
+        seconds % 60
+    )
+end
+
+local function BuildSessionItems()
+    local items = {
+        {
+            text = _G.DAMAGE_METER_CURRENT_SESSION or L["Current"],
+            value = SESSION_MODE_CURRENT,
+        },
+        {
+            text = _G.DAMAGE_METER_OVERALL_SESSION or L["Overall"],
+            value = SESSION_MODE_OVERALL,
+        },
+    }
+    local selections = {
+        [SESSION_MODE_CURRENT] = {
+            mode = SESSION_MODE_CURRENT,
+        },
+        [SESSION_MODE_OVERALL] = {
+            mode = SESSION_MODE_OVERALL,
+        },
+    }
+    local available = DM.Data.GetAvailableSessions()
+
+    -- DamageMeterAvailableCombatSession fields are ordinary metadata in
+    -- Retail PTR 12.1.0.68914. Only these session IDs, labels, and durations
+    -- are formatted or retained; combat source payloads remain opaque.
+    if type(available) == "table" then
+        for _, availableSession in ipairs(available) do
+            local sessionID = availableSession.sessionID
+            local key = GetSessionKey(SESSION_MODE_HISTORY, sessionID)
+            local text = availableSession.name
+            if not text or text == "" then
+                local pattern = _G.DAMAGE_METER_COMBAT_NUMBER or "Combat %d"
+                text = pattern:format(sessionID)
+            end
+            if availableSession.durationSeconds then
+                text = ("%s [%s]"):format(
+                    text,
+                    FormatSessionDuration(
+                        availableSession.durationSeconds
+                    )
+                )
+            end
+
+            items[#items + 1] = {
+                text = text,
+                value = key,
+            }
+            selections[key] = {
+                mode = SESSION_MODE_HISTORY,
+                sessionID = sessionID,
+            }
+        end
+    end
+
+    for _, window in ipairs(windows) do
+        for key in pairs(window.scrollOffsets) do
+            if key ~= SESSION_MODE_CURRENT
+                and key ~= SESSION_MODE_OVERALL
+                and not selections[key]
+            then
+                window.scrollOffsets[key] = nil
+            end
+        end
+        for key in pairs(window.maxScrollOffsets) do
+            if key ~= SESSION_MODE_CURRENT
+                and key ~= SESSION_MODE_OVERALL
+                and not selections[key]
+            then
+                window.maxScrollOffsets[key] = nil
+            end
+        end
+    end
+
+    sessionItems = items
+    sessionSelections = selections
+    sessionItemsDirty = nil
+end
+
+local function EnsureSessionItems()
+    if sessionItemsDirty then
+        BuildSessionItems()
+    end
+end
+
+local function ValidateHistoricalSelections(config)
+    EnsureSessionItems()
+    for index = 1, MAX_WINDOWS do
+        local mode, sessionID = GetWindowSessionSelection(config, index)
+        if mode == SESSION_MODE_HISTORY
+            and not sessionSelections[GetSessionKey(mode, sessionID)]
+        then
+            ClearRuntimeHistoricalSession(index)
+        end
+    end
+end
+
+local function RefreshSessionDropdownItems()
+    sessionItemsDirty = true
+    local config = GetConfig()
+    ValidateHistoricalSelections(config)
+    for _, window in ipairs(windows) do
+        local mode, sessionID =
+            GetWindowSessionSelection(config, window.index)
+        window.sessionKey = GetSessionKey(mode, sessionID)
+        window.sessionDropdown:SetItems(sessionItems)
+        window.sessionDropdown:SetSelectedValue(window.sessionKey)
+    end
+    if rendererEnabled then
+        Renderer.Refresh()
+    end
+end
+
+local function ResetHistoricalSelections()
+    local config = GetConfig()
+    for index = 1, MAX_WINDOWS do
+        local mode = GetWindowSessionSelection(config, index)
+        if mode == SESSION_MODE_HISTORY then
+            ClearRuntimeHistoricalSession(index)
+        end
+    end
+end
+
+local function GetScrollBucket(storage, window)
+    local sessionKey = window.sessionKey or DEFAULT_SESSION_KEY
+    local bucket = storage[sessionKey]
+    if not bucket then
+        bucket = {}
+        storage[sessionKey] = bucket
+    end
+    return bucket
+end
+
+local function GetScrollOffset(window, typeName)
+    return GetScrollBucket(window.scrollOffsets, window)[typeName] or 0
+end
+
+local function SetScrollOffset(window, typeName, offset)
+    GetScrollBucket(window.scrollOffsets, window)[typeName] = offset
+end
+
+local function GetMaximumScrollOffset(window, typeName)
+    return GetScrollBucket(window.maxScrollOffsets, window)[typeName] or 0
+end
+
+local function SetMaximumScrollOffset(window, typeName, offset)
+    GetScrollBucket(window.maxScrollOffsets, window)[typeName] = offset
+end
+
+local function ResetWindowScrollOffset(window, typeName)
+    SetScrollOffset(window, typeName, 0)
+    SetMaximumScrollOffset(window, typeName, 0)
+end
+
 local function GetNativeOverrideState()
     if type(_G.BFICVarBackup) ~= "table" then
         _G.BFICVarBackup = {}
@@ -300,8 +542,8 @@ local function CreateRowHoverCard(row)
     local card = AF.CreateFrame(
         _G.UIParent,
         nil,
-        190,
-        68,
+        220,
+        110,
         "BackdropTemplate"
     )
     row.hoverCard = card
@@ -317,7 +559,13 @@ local function CreateRowHoverCard(row)
     title:SetJustifyH("LEFT")
     title:SetWordWrap(false)
     title:SetPoint("TOPLEFT", card, "TOPLEFT", 8, -7)
-    title:SetPoint("TOPRIGHT", card, "TOPRIGHT", -8, -7)
+    title:SetPoint("TOPRIGHT", card, "TOPRIGHT", -42, -7)
+
+    local playerBadge = AF.CreateFontString(card, nil, "gray")
+    card.playerBadge = playerBadge
+    playerBadge:SetText(_G.YOU or L["You"])
+    playerBadge:SetJustifyH("RIGHT")
+    playerBadge:SetPoint("TOPRIGHT", card, "TOPRIGHT", -8, -7)
 
     local totalLabel = AF.CreateFontString(card, nil, "gray")
     card.totalLabel = totalLabel
@@ -328,7 +576,7 @@ local function CreateRowHoverCard(row)
     local totalValue = AF.CreateFontString(card, nil, "white")
     card.totalValue = totalValue
     totalValue:SetJustifyH("RIGHT")
-    totalValue:SetPoint("RIGHT", card, "RIGHT", -8, 2)
+    totalValue:SetPoint("TOPRIGHT", card, "TOPRIGHT", -8, -29)
 
     local perSecondLabel = AF.CreateFontString(card, nil, "gray")
     card.perSecondLabel = perSecondLabel
@@ -345,20 +593,47 @@ local function CreateRowHoverCard(row)
     local perSecondValue = AF.CreateFontString(card, nil, "white")
     card.perSecondValue = perSecondValue
     perSecondValue:SetJustifyH("RIGHT")
-    perSecondValue:SetPoint(
-        "RIGHT",
+    perSecondValue:SetPoint("TOPRIGHT", card, "TOPRIGHT", -8, -49)
+
+    local groupTotalLabel = AF.CreateFontString(card, nil, "gray")
+    card.groupTotalLabel = groupTotalLabel
+    groupTotalLabel:SetText(L["Group Total"])
+    groupTotalLabel:SetJustifyH("LEFT")
+
+    local groupTotalValue = AF.CreateFontString(card, nil, "white")
+    card.groupTotalValue = groupTotalValue
+    groupTotalValue:SetJustifyH("RIGHT")
+
+    local recapHint = AF.CreateFontString(card, nil, "gray")
+    card.recapHint = recapHint
+    recapHint:SetText(L["Click for Death Recap"])
+    recapHint:SetJustifyH("LEFT")
+
+    local shareBar = _G.CreateFrame(
+        "StatusBar",
+        nil,
         card,
-        "RIGHT",
-        -8,
-        -17
+        "BackdropTemplate"
     )
+    card.shareBar = shareBar
+    shareBar:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", 8, 8)
+    shareBar:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", -8, 8)
+    shareBar:SetHeight(4)
+    AF.ApplyDefaultBackdrop_NoBorder(shareBar)
+    shareBar:SetBackdropColor(0, 0, 0, 0.5)
+    shareBar:SetMinMaxValues(0, 1)
+    shareBar:SetValue(0)
 
     return card
 end
 
-local function CreateRow(parent)
+local function CreateRow(parent, window)
     local row = AF.CreateFrame(parent)
     row:EnableMouse(true)
+    row:EnableMouseWheel(true)
+    row:SetScript("OnMouseWheel", function(_, delta)
+        ScrollWindow(window, delta)
+    end)
 
     local bar = _G.CreateFrame("StatusBar", nil, row, "BackdropTemplate")
     row.bar = bar
@@ -441,13 +716,24 @@ local function CreateRow(parent)
         row.highlight:Hide()
         row.hoverCard:Hide()
     end)
+    row:SetScript("OnMouseUp", function(_, button)
+        if button ~= "LeftButton" then return end
+
+        local deathRecapID = row.deathRecapID
+        if deathRecapID
+            and deathRecapID ~= 0
+            and type(_G.OpenDeathRecapUI) == "function"
+        then
+            _G.OpenDeathRecapUI(deathRecapID)
+        end
+    end)
 
     return row
 end
 
 local function EnsureRows(window, count)
     for index = #window.rows + 1, count do
-        window.rows[index] = CreateRow(window.body)
+        window.rows[index] = CreateRow(window.body, window)
     end
 end
 
@@ -548,9 +834,57 @@ local function ApplyRowLayout(row, index, config, texture, definition)
     row.hoverCard.perSecondValue:SetShown(
         not definition.suppressValuePerSecond
     )
-    row.hoverCard:SetHeight(
-        definition.suppressValuePerSecond and 48 or 68
-    )
+    row.hoverCard.groupTotalLabel:ClearAllPoints()
+    row.hoverCard.groupTotalValue:ClearAllPoints()
+    row.hoverCard.recapHint:ClearAllPoints()
+    if definition.suppressValuePerSecond then
+        row.hoverCard.groupTotalLabel:SetPoint(
+            "TOPLEFT",
+            row.hoverCard.totalLabel,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        row.hoverCard.groupTotalValue:SetPoint(
+            "TOPRIGHT",
+            row.hoverCard,
+            "TOPRIGHT",
+            -8,
+            -49
+        )
+        row.hoverCard.recapHint:SetPoint(
+            "TOPLEFT",
+            row.hoverCard.groupTotalLabel,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        row.hoverCard:SetHeight(90)
+    else
+        row.hoverCard.groupTotalLabel:SetPoint(
+            "TOPLEFT",
+            row.hoverCard.perSecondLabel,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        row.hoverCard.groupTotalValue:SetPoint(
+            "TOPRIGHT",
+            row.hoverCard,
+            "TOPRIGHT",
+            -8,
+            -69
+        )
+        row.hoverCard.recapHint:SetPoint(
+            "TOPLEFT",
+            row.hoverCard.groupTotalLabel,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        row.hoverCard:SetHeight(110)
+    end
+    row.hoverCard.shareBar:SetStatusBarTexture(texture)
     row.showTotal = showTotal
     row.showPerSecond = showPerSecond
     row.suppressValuePerSecond = definition.suppressValuePerSecond
@@ -944,12 +1278,144 @@ local function ToggleLocked()
     Renderer.ApplySettings()
 end
 
-local function SelectWindowType(index, typeName)
-    if not TYPE_DEFINITIONS[typeName] then return end
+function Renderer.SetWindowType(index, typeName, options)
+    if type(index) ~= "number"
+        or index < 1
+        or index > MAX_WINDOWS
+        or index ~= math.floor(index)
+        or not TYPE_DEFINITIONS[typeName]
+    then
+        return false
+    end
 
+    options = type(options) == "table" and options or {}
     local config = GetConfig()
     config.windowTypes[index] = typeName
-    Renderer.ApplySettings()
+    if windows[index] then
+        ResetWindowScrollOffset(windows[index], typeName)
+    end
+    if options.refresh ~= false and rendererEnabled then
+        Renderer.ApplySettings()
+    end
+    return true
+end
+
+function Renderer.GetWindowSession(index)
+    if type(index) ~= "number"
+        or index < 1
+        or index > MAX_WINDOWS
+        or index ~= math.floor(index)
+    then
+        return
+    end
+
+    return GetWindowSessionSelection(GetConfig(), index)
+end
+
+function Renderer.ClearRuntimeSessions()
+    for index = 1, MAX_WINDOWS do
+        runtimeHistoricalSessionIDs[index] = nil
+        if windows[index] then
+            windows[index].scrollOffsets = {}
+            windows[index].maxScrollOffsets = {}
+        end
+    end
+end
+
+function Renderer.SetWindowSession(
+    index,
+    mode,
+    sessionID,
+    options
+)
+    if type(index) ~= "number"
+        or index < 1
+        or index > MAX_WINDOWS
+        or index ~= math.floor(index)
+    then
+        return false
+    end
+    if mode ~= SESSION_MODE_CURRENT
+        and mode ~= SESSION_MODE_OVERALL
+        and mode ~= SESSION_MODE_HISTORY
+    then
+        return false
+    end
+
+    EnsureSessionItems()
+    if mode == SESSION_MODE_HISTORY then
+        if type(sessionID) ~= "number"
+            or not sessionSelections[GetSessionKey(mode, sessionID)]
+        then
+            return false
+        end
+    else
+        sessionID = nil
+    end
+
+    options = type(options) == "table" and options or {}
+    local config = GetConfig()
+    local syncSettings = config.windowSyncSessions
+    local shouldSync = options.sync ~= false
+        and type(syncSettings) == "table"
+        and syncSettings[index] == true
+
+    for targetIndex = 1, MAX_WINDOWS do
+        if targetIndex == index
+            or shouldSync and syncSettings[targetIndex] == true
+        then
+            SetWindowSessionState(
+                config,
+                targetIndex,
+                mode,
+                sessionID
+            )
+            if windows[targetIndex] then
+                windows[targetIndex].sessionKey =
+                    GetSessionKey(mode, sessionID)
+                windows[targetIndex].sessionDropdown:SetSelectedValue(
+                    windows[targetIndex].sessionKey
+                )
+            end
+        end
+    end
+
+    if options.refresh ~= false and rendererEnabled then
+        Renderer.Refresh()
+    end
+    return true
+end
+
+local function SelectWindowSession(index, key)
+    EnsureSessionItems()
+    local selection = sessionSelections[key]
+    if not selection then return end
+
+    Renderer.SetWindowSession(
+        index,
+        selection.mode,
+        selection.sessionID
+    )
+end
+
+ScrollWindow = function(window, delta)
+    if not rendererEnabled or window.minimized then return end
+
+    local definition = GetWindowDefinition(window.index)
+    local typeName = definition.enumName
+    local offset = GetScrollOffset(window, typeName)
+    local maximum = GetMaximumScrollOffset(window, typeName)
+    local nextOffset = offset
+    if delta < 0 then
+        nextOffset = offset + 1
+    elseif delta > 0 then
+        nextOffset = offset - 1
+    end
+    nextOffset = Clamp(nextOffset, 0, maximum)
+    if nextOffset == offset then return end
+
+    SetScrollOffset(window, typeName, nextOffset)
+    Renderer.Refresh()
 end
 
 local function CreateWindow(index)
@@ -962,6 +1428,9 @@ local function CreateWindow(index)
     )
     window.index = index
     window.rows = {}
+    window.sessionKey = DEFAULT_SESSION_KEY
+    window.scrollOffsets = {}
+    window.maxScrollOffsets = {}
     window:SetClampedToScreen(true)
     window:SetMovable(true)
     window:SetFrameStrata("LOW")
@@ -992,7 +1461,24 @@ local function CreateWindow(index)
     window.typeDropdown = typeDropdown
     typeDropdown:SetItems(GetTypeItems())
     typeDropdown:SetOnSelect(function(typeName)
-        SelectWindowType(index, typeName)
+        Renderer.SetWindowType(index, typeName)
+    end)
+
+    local sessionDropdown = AF.CreateDropdown(
+        header,
+        SESSION_DROPDOWN_WIDTH,
+        11
+    )
+    window.sessionDropdown = sessionDropdown
+    EnsureSessionItems()
+    sessionDropdown:SetItems(sessionItems)
+    sessionDropdown:SetOnSelect(function(key)
+        SelectWindowSession(index, key)
+    end)
+    sessionDropdown.button:HookScript("OnMouseDown", function(_, button)
+        if button == "LeftButton" then
+            RefreshSessionDropdownItems()
+        end
     end)
 
     local dragGrip = AF.CreateButton(
@@ -1108,6 +1594,10 @@ local function CreateWindow(index)
     )
     window.body = body
     AF.ApplyDefaultBackdrop_NoBorder(body)
+    body:EnableMouseWheel(true)
+    body:SetScript("OnMouseWheel", function(_, delta)
+        ScrollWindow(window, delta)
+    end)
 
     local resize = AF.CreateResizeButton(
         window,
@@ -1171,6 +1661,8 @@ end
 
 local function ApplyWindowLayout(window, config)
     local definition = GetWindowDefinition(window.index)
+    local sessionMode, sessionID =
+        GetWindowSessionSelection(config, window.index)
     local controlSize = math.max(14, math.min(20, config.headerHeight - 4))
     local windowHeight = GetWindowHeight(config, window.index)
     local visibleRows = GetVisibleRowCount(config, windowHeight)
@@ -1243,6 +1735,27 @@ local function ApplyWindowLayout(window, config)
         config.locked and "gray" or "white"
     )
 
+    window.sessionKey = GetSessionKey(sessionMode, sessionID)
+    window.sessionDropdown:SetItems(sessionItems)
+    local availableDropdownWidth = config.width
+        - 17
+        - (controlSize * 4)
+    window.sessionDropdown:SetWidth(Clamp(
+        availableDropdownWidth - MIN_TYPE_DROPDOWN_WIDTH,
+        MIN_SESSION_DROPDOWN_WIDTH,
+        SESSION_DROPDOWN_WIDTH
+    ))
+    window.sessionDropdown:ClearAllPoints()
+    window.sessionDropdown:SetPoint(
+        "RIGHT",
+        window.lock,
+        "LEFT",
+        -3,
+        0
+    )
+    window.sessionDropdown:SetHeight(controlSize)
+    window.sessionDropdown:SetSelectedValue(window.sessionKey)
+
     window.typeDropdown:ClearAllPoints()
     window.typeDropdown:SetPoint(
         "LEFT",
@@ -1253,7 +1766,7 @@ local function ApplyWindowLayout(window, config)
     )
     window.typeDropdown:SetPoint(
         "RIGHT",
-        window.lock,
+        window.sessionDropdown,
         "LEFT",
         -3,
         0
@@ -1285,6 +1798,7 @@ end
 
 local function HideWindowTransient(window)
     for _, row in ipairs(window.rows) do
+        row.deathRecapID = nil
         row.hoverCard:Hide()
         row.highlight:Hide()
     end
@@ -1293,13 +1807,14 @@ end
 local function HideUnusedRows(window, firstUnused)
     for index = firstUnused, #window.rows do
         local row = window.rows[index]
+        row.deathRecapID = nil
         row:Hide()
         row.hoverCard:Hide()
         row.highlight:Hide()
     end
 end
 
-local function UpdateRow(row, source, index, config)
+local function UpdateRow(row, source, index, session, config)
     local r, g, b
     if config.classColor then
         r, g, b = AF.GetClassColor(source.classFilename)
@@ -1308,12 +1823,23 @@ local function UpdateRow(row, source, index, config)
     end
 
     row.bar:SetStatusBarColor(r, g, b, config.barAlpha)
+    row.hoverCard.shareBar:SetStatusBarColor(r, g, b, config.barAlpha)
     row.iconHolder:SetBackdropBorderColor(r, g, b, 1)
     row.hoverCard:SetBackdropBorderColor(r, g, b, 1)
     row.rank:SetText(index)
     row.icon:SetTexture(source.specIconID)
     row.name:SetText(_G.Ambiguate(source.name, "short"))
     row.hoverCard.title:SetText(_G.Ambiguate(source.name, "short"))
+    row.hoverCard.playerBadge:SetShown(source.isLocalPlayer == true)
+    row.deathRecapID = source.deathRecapID
+    row.hoverCard.recapHint:SetShown(
+        row.deathRecapID ~= nil and row.deathRecapID ~= 0
+    )
+    row.hoverCard.groupTotalValue:SetText(
+        AF.FormatSecretNumber(session.totalAmount)
+    )
+    row.hoverCard.shareBar:SetMinMaxValues(0, session.totalAmount)
+    row.hoverCard.shareBar:SetValue(source.totalAmount)
 
     if row.showTotal then
         row.total:SetText(AF.FormatSecretNumber(source.totalAmount))
@@ -1339,6 +1865,36 @@ local function UpdateRow(row, source, index, config)
     end
 end
 
+local function GetSourceDisplayState(session, alwaysShowLocalPlayer)
+    local sourceCount = 0
+    local localPlayerIndex
+    for index, source in ipairs(session.combatSources) do
+        sourceCount = index
+        -- Retail PTR 12.1.0.68914 marks isLocalPlayer NeverSecret in
+        -- DamageMeterDocumentation.lua (Gethe commit d3915c78). Only this
+        -- boolean and the non-secret iteration index are retained.
+        if alwaysShowLocalPlayer and source.isLocalPlayer then
+            localPlayerIndex = index
+        end
+    end
+    return sourceCount, localPlayerIndex
+end
+
+local function ShowSourceRow(
+    window,
+    rowIndex,
+    session,
+    sourceIndex,
+    config
+)
+    local row = window.rows[rowIndex]
+    local source = session.combatSources[sourceIndex]
+    row.bar:SetMinMaxValues(0, session.maxAmount)
+    row.bar:SetValue(source.totalAmount)
+    UpdateRow(row, source, sourceIndex, session, config)
+    row:Show()
+end
+
 local function UpdateWindow(window, config)
     if window.minimized then return end
 
@@ -1349,21 +1905,108 @@ local function UpdateWindow(window, config)
         return
     end
 
-    local session = DM.Data.GetCurrentSession(meterType)
+    local sessionMode, sessionID =
+        GetWindowSessionSelection(config, window.index)
+    window.sessionKey = GetSessionKey(sessionMode, sessionID)
+    window.sessionDropdown:SetSelectedValue(window.sessionKey)
+    local session = GetSessionData(sessionMode, sessionID, meterType)
+    if (not session or not session.combatSources)
+        and sessionMode == SESSION_MODE_HISTORY
+    then
+        ClearRuntimeHistoricalSession(window.index)
+        sessionMode, sessionID = GetWindowSessionSelection(
+            config,
+            window.index
+        )
+        window.sessionKey = GetSessionKey(sessionMode, sessionID)
+        window.sessionDropdown:SetSelectedValue(window.sessionKey)
+        session = GetSessionData(sessionMode, sessionID, meterType)
+    end
+    if not session or not session.combatSources then
+        HideUnusedRows(window, 1)
+        return
+    end
+    local sourceCount, localPlayerIndex = GetSourceDisplayState(
+        session,
+        config.alwaysShowPlayer == true
+            and definition.alwaysShowLocalPlayer
+            and window.visibleRowCount > 1
+    )
+    local typeName = definition.enumName
+    local maximumOffset = math.max(
+        0,
+        sourceCount - window.visibleRowCount
+    )
+    if localPlayerIndex and localPlayerIndex <= maximumOffset then
+        maximumOffset = maximumOffset + 1
+    end
+    local offset = Clamp(
+        GetScrollOffset(window, typeName),
+        0,
+        maximumOffset
+    )
+    SetScrollOffset(window, typeName, offset)
+    SetMaximumScrollOffset(window, typeName, maximumOffset)
+
+    local firstSource = offset + 1
+    local naturalLastSource = math.min(
+        sourceCount,
+        firstSource + window.visibleRowCount - 1
+    )
+    local pinBefore = localPlayerIndex
+        and localPlayerIndex < firstSource
+    local pinAfter = localPlayerIndex
+        and localPlayerIndex > naturalLastSource
+    local sourceSlots = window.visibleRowCount
+        - ((pinBefore or pinAfter) and 1 or 0)
+    local lastSource = math.min(
+        sourceCount,
+        firstSource + sourceSlots - 1
+    )
     local used = 0
 
-    for index, source in ipairs(session.combatSources) do
-        if index > window.visibleRowCount then break end
+    if pinBefore then
+        used = used + 1
+        ShowSourceRow(
+            window,
+            used,
+            session,
+            localPlayerIndex,
+            config
+        )
+    end
 
-        local row = window.rows[index]
-        row.bar:SetMinMaxValues(0, session.maxAmount)
-        row.bar:SetValue(source.totalAmount)
-        UpdateRow(row, source, index, config)
-        row:Show()
-        used = index
+    for sourceIndex = firstSource, lastSource do
+        used = used + 1
+        ShowSourceRow(window, used, session, sourceIndex, config)
+    end
+
+    if pinAfter then
+        used = used + 1
+        ShowSourceRow(
+            window,
+            used,
+            session,
+            localPlayerIndex,
+            config
+        )
     end
 
     HideUnusedRows(window, used + 1)
+end
+
+local function ResetScrollOffsets()
+    for _, window in ipairs(windows) do
+        window.scrollOffsets = {}
+        window.maxScrollOffsets = {}
+    end
+end
+
+local function ResetCurrentSessionScrollOffsets()
+    for _, window in ipairs(windows) do
+        window.scrollOffsets[SESSION_MODE_CURRENT] = nil
+        window.maxScrollOffsets[SESSION_MODE_CURRENT] = nil
+    end
 end
 
 function Renderer.ResetPosition()
@@ -1399,6 +2042,12 @@ function Renderer.Refresh()
 
     BeginNativeOverride()
     local config = GetConfig()
+    if sessionItemsDirty then
+        ValidateHistoricalSelections(config)
+        for _, window in ipairs(windows) do
+            window.sessionDropdown:SetItems(sessionItems)
+        end
+    end
     for index = 1, MAX_WINDOWS do
         if index > config.windowCount then
             HideWindowTransient(windows[index])
@@ -1428,6 +2077,23 @@ local function EnsureEventFrame()
         if event == "PLAYER_LOGOUT" then
             EndNativeOverride()
         else
+            -- Retail PTR 12.1.0.68914 FrameXML retains scroll for
+            -- DAMAGE_METER_COMBAT_SESSION_UPDATED, but discards Current
+            -- scroll when DAMAGE_METER_CURRENT_SESSION_UPDATED replaces the
+            -- active session identity (Gethe commit d3915c78).
+            if event == "DAMAGE_METER_CURRENT_SESSION_UPDATED"
+                or event == "PLAYER_ENTERING_WORLD"
+            then
+                sessionItemsDirty = true
+            end
+            if event == "DAMAGE_METER_CURRENT_SESSION_UPDATED" then
+                ResetCurrentSessionScrollOffsets()
+            end
+            if event == "DAMAGE_METER_RESET" then
+                sessionItemsDirty = true
+                ResetHistoricalSelections()
+                ResetScrollOffsets()
+            end
             ScheduleRefresh()
         end
     end)
@@ -1458,6 +2124,7 @@ function Renderer.ApplySettings()
     EnsureWindows()
     local config = GetConfig()
     EnsureInteractionConfig(config)
+    ValidateHistoricalSelections(config)
     for index = 1, MAX_WINDOWS do
         local window = windows[index]
         ApplyWindowLayout(window, config)
@@ -1475,6 +2142,7 @@ function Renderer.SetEnabled(enabled)
         end
 
         rendererEnabled = true
+        sessionItemsDirty = true
         EnsureWindows()
         EnsureInteractionConfig(GetConfig())
         if resetPositionPending then

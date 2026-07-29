@@ -37,27 +37,55 @@ local function assertPoint(
     assertEqual(anchor.y, y, message .. " y")
 end
 
-local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
+local function loadRenderer(
+    initialNativeEnabled,
+    savedRestoreEnabled,
+    availableSessionCount
+)
     local state = {
         ambiguousInputs = {},
         ambiguousOutputs = {},
         available = true,
+        availableSessions = {
+            {
+                durationSeconds = 95,
+                name = "Training Dummy",
+                sessionID = 91,
+            },
+        },
         classColorInputs = {},
         currentSessions = {},
+        deathRecapCalls = {},
         formatInputs = {},
         formatOutputs = {},
         frames = {},
+        historicalSessions = {
+            [91] = {},
+        },
         namedFrames = {},
         nativeEnabled = initialNativeEnabled ~= false,
         nativeOverrideState = {},
         nativeSetCalls = {},
         openOptionsCalls = {},
+        overallSessions = {},
         timers = {},
         unsafeOperations = 0,
     }
     if type(savedRestoreEnabled) == "boolean" then
         state.nativeOverrideState.damageMeterNativeEnabledBeforeBFI =
             savedRestoreEnabled
+    end
+    if type(availableSessionCount) == "number" then
+        state.availableSessions = {}
+        for sessionID = 1, availableSessionCount do
+            state.availableSessions[sessionID] = {
+                durationSeconds = sessionID,
+                name = "Session " .. sessionID,
+                sessionID = sessionID,
+            }
+            state.historicalSessions[sessionID] =
+                state.historicalSessions[sessionID] or {}
+        end
     end
 
     local function unsafeOperation()
@@ -222,6 +250,10 @@ local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
         self.mouseEnabled = enabled
     end
 
+    function frameMethods:EnableMouseWheel(enabled)
+        self.mouseWheelEnabled = enabled
+    end
+
     function frameMethods:RegisterForDrag(button)
         self.dragButton = button
     end
@@ -375,6 +407,7 @@ local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
 
     function AF.CreateDropdown(parent, width)
         local dropdown = newFrame("Dropdown", parent, nil, width, 20)
+        dropdown.button = newFrame("Button", dropdown)
 
         function dropdown:SetItems(items)
             self.items = items
@@ -482,6 +515,7 @@ local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
 
     local config = {
         accentHeader = true,
+        alwaysShowPlayer = true,
         backgroundAlpha = 0.82,
         barAlpha = 0.9,
         barHeight = 20,
@@ -497,6 +531,16 @@ local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
         texture = "AF",
         width = 300,
         windowCount = 3,
+        windowSessions = {
+            {mode = "current"},
+            {mode = "current"},
+            {mode = "current"},
+        },
+        windowSyncSessions = {
+            true,
+            true,
+            true,
+        },
         windowAnchors = {
             {
                 relativeTo = 0,
@@ -544,6 +588,19 @@ local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
 
     function DM.Data.GetCurrentSession(meterType)
         return state.currentSessions[meterType]
+    end
+
+    function DM.Data.GetOverallSession(meterType)
+        return state.overallSessions[meterType]
+    end
+
+    function DM.Data.GetHistoricalSession(sessionID, meterType)
+        local sessionsByType = state.historicalSessions[sessionID]
+        return sessionsByType and sessionsByType[meterType]
+    end
+
+    function DM.Data.GetAvailableSessions()
+        return state.availableSessions
     end
 
     function DM.Native.GetEnabled()
@@ -632,10 +689,18 @@ local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
             return false
         end,
         MINIMIZE = "Minimize",
+        OpenDeathRecapUI = function(deathRecapID)
+            state.deathRecapCalls[#state.deathRecapCalls + 1] =
+                deathRecapID
+        end,
+        SecondsToClock = function()
+            return "1:35"
+        end,
         SETTINGS = "Settings",
         UIParent = uiParent,
         ipairs = ipairs,
         math = math,
+        pairs = pairs,
         select = select,
         type = type,
     }
@@ -662,19 +727,24 @@ local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
                 "per-second-" .. index
             ),
             classFilename = "MAGE",
+            isLocalPlayer = false,
             name = newOpaqueValue("name-" .. index),
             specIconID = 1000 + index,
             totalAmount = newOpaqueValue("total-" .. index),
+            deathRecapID = 0,
         }
         local session = {
             combatSources = {
                 source,
             },
             maxAmount = newOpaqueValue("maximum-" .. index),
+            totalAmount = newOpaqueValue("session-total-" .. index),
         }
         sources[index] = source
         sessions[index] = session
         state.currentSessions[meterType] = session
+        state.overallSessions[meterType] = session
+        state.historicalSessions[91][meterType] = session
     end
 
     local chunk, loadError = loadfile(
@@ -776,11 +846,31 @@ assertSame(
 )
 assertSame(
     state.formatInputs[1],
+    sessions[1].totalAmount,
+    "opaque group total reaches approved formatter unchanged"
+)
+assertSame(
+    firstRow.hoverCard.groupTotalValue.text,
+    state.formatOutputs[sessions[1].totalAmount],
+    "formatted group total reaches hover sink"
+)
+assertSame(
+    firstRow.hoverCard.shareBar.maximum,
+    sessions[1].totalAmount,
+    "opaque group total reaches hover StatusBar unchanged"
+)
+assertSame(
+    firstRow.hoverCard.shareBar.value,
+    sources[1].totalAmount,
+    "opaque source total reaches hover StatusBar unchanged"
+)
+assertSame(
+    state.formatInputs[2],
     sources[1].totalAmount,
     "opaque total reaches approved formatter unchanged"
 )
 assertSame(
-    state.formatInputs[3],
+    state.formatInputs[4],
     sources[1].amountPerSecond,
     "opaque rate reaches approved formatter unchanged"
 )
@@ -805,12 +895,12 @@ assertSame(
     "hover title receives approved name output"
 )
 assertSame(
-    state.formatInputs[2],
+    state.formatInputs[3],
     sources[1].totalAmount,
     "hover total uses a separate approved number pipeline"
 )
 assertSame(
-    state.formatInputs[4],
+    state.formatInputs[5],
     sources[1].amountPerSecond,
     "hover rate uses a separate approved number pipeline"
 )
@@ -870,6 +960,123 @@ assertEqual(
     "damageMeter",
     "settings gear opens Damage Meter section"
 )
+
+assertEqual(
+    #first.sessionDropdown.items,
+    3,
+    "session picker exposes current, overall, and available history"
+)
+assertEqual(
+    first.sessionDropdown.items[1].value,
+    "current",
+    "session picker starts with current"
+)
+assertEqual(
+    first.sessionDropdown.items[2].value,
+    "overall",
+    "session picker includes overall"
+)
+assertEqual(
+    first.sessionDropdown.items[3].value,
+    "history:91",
+    "session picker keys historical IDs without source data"
+)
+assertEqual(
+    first.sessionDropdown.items[3].text,
+    "Training Dummy [1:35]",
+    "historical session shows safe label and duration metadata"
+)
+assertEqual(
+    first.sessionDropdown.width,
+    120,
+    "session picker has practical room for historical labels"
+)
+DM.config.width = 220
+Renderer.ApplySettings()
+assertEqual(
+    first.sessionDropdown.width,
+    71,
+    "compact meters preserve room for both header dropdowns"
+)
+DM.config.width = 300
+Renderer.ApplySettings()
+assertEqual(
+    Renderer.SetWindowSession(1.5, "current"),
+    false,
+    "session setter rejects fractional window indexes"
+)
+first.sessionDropdown:Select("overall")
+assertEqual(DM.config.windowSessions[1].mode, "overall", "first overall")
+assertEqual(DM.config.windowSessions[2].mode, "overall", "syncs second")
+assertEqual(DM.config.windowSessions[3].mode, "overall", "syncs third")
+DM.config.windowSyncSessions[2] = false
+first.sessionDropdown:Select("history:91")
+local firstSessionMode, firstHistoricalSessionID =
+    Renderer.GetWindowSession(1)
+assertEqual(firstSessionMode, "history", "first runtime history")
+assertEqual(firstHistoricalSessionID, 91, "runtime history ID retained")
+assertEqual(
+    DM.config.windowSessions[1].mode,
+    "overall",
+    "historical choice does not replace durable mode"
+)
+assertEqual(
+    DM.config.windowSessions[1].sessionID,
+    nil,
+    "historical ID is never persisted"
+)
+assertEqual(
+    DM.config.windowSessions[2].mode,
+    "overall",
+    "opted-out second retains its session"
+)
+local thirdSessionMode, thirdHistoricalSessionID =
+    Renderer.GetWindowSession(3)
+assertEqual(thirdSessionMode, "history", "third runtime history stays synced")
+assertEqual(thirdHistoricalSessionID, 91, "third runtime history ID")
+assertEqual(
+    DM.config.windowSessions[3].mode,
+    "overall",
+    "synced history keeps third durable mode"
+)
+state.historicalSessions[91][11] = nil
+Renderer.Refresh()
+assertEqual(
+    Renderer.GetWindowSession(1),
+    "overall",
+    "missing runtime history restores the durable first mode"
+)
+assertEqual(
+    first.sessionDropdown.selectedValue,
+    "overall",
+    "missing runtime history updates the visible selection"
+)
+state.historicalSessions[91][11] = sessions[1]
+first.sessionDropdown:Select("history:91")
+Renderer.ClearRuntimeSessions()
+assertEqual(
+    Renderer.GetWindowSession(1),
+    "overall",
+    "clearing runtime history restores durable first mode"
+)
+assertEqual(
+    Renderer.GetWindowSession(3),
+    "overall",
+    "clearing runtime history restores durable third mode"
+)
+Renderer.Refresh()
+assertEqual(
+    first.sessionDropdown.selectedValue,
+    "overall",
+    "runtime clear is reflected on refresh"
+)
+first.sessionDropdown:Select("history:91")
+first.sessionDropdown:Select("current")
+DM.config.windowSyncSessions[2] = true
+second.sessionDropdown:Select("current")
+assertEqual(DM.config.windowSessions[1].mode, "current", "first restored")
+assertEqual(DM.config.windowSessions[2].mode, "current", "second restored")
+assertEqual(DM.config.windowSessions[3].mode, "current", "third restored")
 
 assertEqual(
     #first.typeDropdown.items,
@@ -936,6 +1143,302 @@ assertEqual(
     true,
     "regular views restore configured icons"
 )
+
+sources[10].deathRecapID = 77
+first.typeDropdown:Select("Deaths")
+assertEqual(
+    firstRow.hoverCard.recapHint.shown,
+    true,
+    "death rows advertise Blizzard's recap"
+)
+firstRow:RunScript("OnMouseUp", "LeftButton")
+assertEqual(#state.deathRecapCalls, 1, "death row opens one native recap")
+assertEqual(state.deathRecapCalls[1], 77, "never-secret recap ID forwarded")
+sources[10].deathRecapID = 0
+Renderer.Refresh()
+firstRow:RunScript("OnMouseUp", "LeftButton")
+assertEqual(#state.deathRecapCalls, 1, "zero recap ID is ignored")
+first.typeDropdown:Select("DamageDone")
+
+local scrollingSources = {}
+for index = 1, 11 do
+    scrollingSources[index] = sources[index]
+    sources[index].isLocalPlayer = index == 11
+end
+sessions[1].combatSources = scrollingSources
+Renderer.Refresh()
+
+local eighthRow = first.body.children[8]
+assertEqual(
+    first.body.mouseWheelEnabled,
+    true,
+    "meter body accepts mouse-wheel scrolling"
+)
+assertEqual(
+    firstRow.mouseWheelEnabled,
+    true,
+    "rows forward mouse-wheel scrolling without a scrollbar"
+)
+assertEqual(firstRow.rank.text, 1, "scrolling starts in Blizzard order")
+assertEqual(
+    eighthRow.rank.text,
+    11,
+    "local player below the viewport remains pinned"
+)
+assertSame(
+    eighthRow.name.text,
+    state.ambiguousOutputs[sources[11].name],
+    "pinned local player keeps the approved name pipeline"
+)
+DM.config.alwaysShowPlayer = false
+Renderer.Refresh()
+assertEqual(
+    eighthRow.rank.text,
+    8,
+    "always-show setting can disable the local-player pin"
+)
+DM.config.alwaysShowPlayer = true
+Renderer.Refresh()
+assertEqual(eighthRow.rank.text, 11, "always-show setting restores the pin")
+
+first.body:RunScript("OnMouseWheel", -1)
+assertEqual(firstRow.rank.text, 2, "wheel down advances one source")
+assertEqual(
+    eighthRow.rank.text,
+    11,
+    "local player stays visible after scrolling"
+)
+firstRow:RunScript("OnMouseWheel", -1)
+first.body:RunScript("OnMouseWheel", -1)
+assertEqual(firstRow.rank.text, 4, "wheel reaches the clamped bottom")
+first.body:RunScript("OnMouseWheel", -1)
+assertEqual(firstRow.rank.text, 4, "wheel cannot pass the session end")
+first.body:RunScript("OnMouseWheel", 1)
+assertEqual(firstRow.rank.text, 3, "wheel up moves toward the top")
+
+Renderer.ClearRuntimeSessions()
+Renderer.Refresh()
+assertEqual(
+    firstRow.rank.text,
+    1,
+    "runtime session clear also clears per-window scroll maps"
+)
+first.body:RunScript("OnMouseWheel", -1)
+first.body:RunScript("OnMouseWheel", -1)
+assertEqual(firstRow.rank.text, 3, "current scroll state rebuilt after clear")
+
+Renderer.SetWindowSession(1, "overall", nil, {sync = false})
+assertEqual(firstRow.rank.text, 1, "new session key starts at the top")
+first.body:RunScript("OnMouseWheel", -1)
+assertEqual(firstRow.rank.text, 2, "new session key scrolls independently")
+Renderer.SetWindowSession(1, "current", nil, {sync = false})
+assertEqual(
+    firstRow.rank.text,
+    3,
+    "returning to a session key restores its own offset"
+)
+
+local damageMeterEventFrame
+for _, frame in ipairs(state.frames) do
+    if frame.events.DAMAGE_METER_CURRENT_SESSION_UPDATED then
+        damageMeterEventFrame = frame
+        break
+    end
+end
+assertEqual(
+    type(damageMeterEventFrame),
+    "table",
+    "Damage Meter event frame found"
+)
+Renderer.SetWindowSession(1, "history", 91, {sync = false})
+first.body:RunScript("OnMouseWheel", -1)
+assertEqual(firstRow.rank.text, 2, "historical viewport has scroll state")
+
+state.availableSessions = {}
+damageMeterEventFrame:RunScript(
+    "OnEvent",
+    "DAMAGE_METER_COMBAT_SESSION_UPDATED"
+)
+state.timers[#state.timers].callback()
+assertEqual(
+    firstRow.rank.text,
+    2,
+    "high-frequency combat-session updates retain scroll position"
+)
+assertEqual(
+    #first.sessionDropdown.items,
+    3,
+    "combat data updates do not rebuild historical metadata"
+)
+first.sessionDropdown.button:RunScript("OnMouseDown", "LeftButton")
+assertEqual(
+    #first.sessionDropdown.items,
+    2,
+    "opening the picker refreshes historical metadata on demand"
+)
+assertEqual(
+    first.sessionDropdown.selectedValue,
+    "current",
+    "opening the picker clears an expired runtime selection"
+)
+assertEqual(
+    firstRow.rank.text,
+    3,
+    "opening the picker refreshes rows for the durable session fallback"
+)
+
+damageMeterEventFrame:RunScript(
+    "OnEvent",
+    "DAMAGE_METER_CURRENT_SESSION_UPDATED"
+)
+state.timers[#state.timers].callback()
+assertEqual(
+    firstRow.rank.text,
+    1,
+    "new current-session identity discards Current scroll position"
+)
+assertEqual(
+    #first.sessionDropdown.items,
+    2,
+    "new current-session identity rebuilds historical metadata"
+)
+
+state.availableSessions = {
+    {
+        durationSeconds = 95,
+        name = "Training Dummy",
+        sessionID = 91,
+    },
+}
+damageMeterEventFrame:RunScript(
+    "OnEvent",
+    "DAMAGE_METER_CURRENT_SESSION_UPDATED"
+)
+state.timers[#state.timers].callback()
+Renderer.SetWindowSession(1, "history", 91, {sync = false})
+assertEqual(
+    firstRow.rank.text,
+    1,
+    "reappearing historical IDs do not inherit stale scroll state"
+)
+Renderer.SetWindowSession(1, "overall", nil, {sync = false})
+assertEqual(
+    firstRow.rank.text,
+    2,
+    "current-session changes leave Overall scroll position intact"
+)
+Renderer.SetWindowSession(1, "current", nil, {sync = false})
+first.body:RunScript("OnMouseWheel", -1)
+damageMeterEventFrame:RunScript("OnEvent", "DAMAGE_METER_RESET")
+state.timers[#state.timers].callback()
+assertEqual(firstRow.rank.text, 1, "explicit meter reset clears offsets")
+
+Renderer.SetWindowSession(1, "overall", nil, {sync = false})
+Renderer.SetWindowSession(1, "history", 91, {sync = false})
+damageMeterEventFrame:RunScript("OnEvent", "DAMAGE_METER_RESET")
+state.timers[#state.timers].callback()
+assertEqual(
+    Renderer.GetWindowSession(1),
+    "overall",
+    "meter reset clears runtime history without changing durable mode"
+)
+Renderer.SetWindowSession(1, "current", nil, {sync = false})
+
+first.body:RunScript("OnMouseWheel", -1)
+first.body:RunScript("OnMouseWheel", -1)
+first.typeDropdown:Select("Dps")
+assertEqual(firstRow.rank.text, 1, "new meter type starts at its own offset")
+first.typeDropdown:Select("DamageDone")
+assertEqual(
+    firstRow.rank.text,
+    1,
+    "explicit meter-type selection resets that type offset"
+)
+
+sessions[2].combatSources = scrollingSources
+Renderer.Refresh()
+second.body:RunScript("OnMouseWheel", -1)
+local secondFirstRow = second.body.children[1]
+assertEqual(
+    secondFirstRow.rank.text,
+    2,
+    "second meter keeps an independent scroll offset"
+)
+assertEqual(firstRow.rank.text, 1, "second meter scroll leaves first unchanged")
+
+first.body:RunScript("OnMouseWheel", -1)
+first.body:RunScript("OnMouseWheel", -1)
+sources[11].isLocalPlayer = false
+sources[1].isLocalPlayer = true
+Renderer.Refresh()
+assertEqual(
+    firstRow.rank.text,
+    1,
+    "local player above the viewport remains pinned"
+)
+assertEqual(
+    first.body.children[2].rank.text,
+    3,
+    "sources after a top pin retain Blizzard order"
+)
+first.body:RunScript("OnMouseWheel", -1)
+first.body:RunScript("OnMouseWheel", -1)
+assertEqual(
+    eighthRow.rank.text,
+    11,
+    "top-pinned player still allows the final source to be reached"
+)
+sources[1].isLocalPlayer = false
+sources[11].isLocalPlayer = true
+
+sessions[10].combatSources = scrollingSources
+first.typeDropdown:Select("Deaths")
+assertEqual(
+    eighthRow.rank.text,
+    8,
+    "types Blizzard does not pin keep the unmodified viewport"
+)
+first.typeDropdown:Select("DamageDone")
+assertEqual(firstRow.rank.text, 1, "type selection resets the active offset")
+
+first.body:RunScript("OnMouseWheel", -1)
+first.body:RunScript("OnMouseWheel", -1)
+first.body:RunScript("OnMouseWheel", -1)
+sessions[1].combatSources = {
+    sources[1],
+    sources[2],
+}
+Renderer.Refresh()
+assertEqual(firstRow.rank.text, 1, "shorter session clamps offset to zero")
+assertEqual(
+    first.body.children[3].shown,
+    false,
+    "shorter session clears rows beyond its source count"
+)
+
+sessions[1].combatSources = {
+    sources[1],
+}
+sessions[2].combatSources = {
+    sources[2],
+}
+sessions[10].combatSources = {
+    sources[10],
+}
+sources[11].isLocalPlayer = false
+Renderer.Refresh()
+assertEqual(state.unsafeOperations, 0, "scrolling never inspects opaque data")
+
+state.currentSessions[11] = nil
+Renderer.Refresh()
+assertEqual(firstRow.shown, false, "missing session safely clears rows")
+state.currentSessions[11] = {
+    maxAmount = sessions[1].maxAmount,
+}
+Renderer.Refresh()
+assertEqual(firstRow.shown, false, "missing source list safely clears rows")
+state.currentSessions[11] = sessions[1]
+Renderer.Refresh()
 
 first.lock:Click()
 assertEqual(DM.config.locked, true, "lock button locks all meters")
@@ -1342,6 +1845,41 @@ assertEqual(
     reloadState.nativeOverrideState.damageMeterNativeEnabledBeforeBFI,
     nil,
     "reload restore metadata clears after disable"
+)
+
+local HistoryRenderer, _, historyState =
+    loadRenderer(nil, nil, 25)
+assertEqual(
+    HistoryRenderer.SetEnabled(true),
+    true,
+    "history retention renderer enables"
+)
+local historyDropdown =
+    historyState.namedFrames.BFIDamageMeterWindow1.sessionDropdown
+assertEqual(
+    #historyDropdown.items,
+    27,
+    "session picker keeps every Blizzard history plus current and overall"
+)
+assertEqual(
+    historyDropdown.items[3].value,
+    "history:1",
+    "history retention preserves Blizzard's first returned session"
+)
+assertEqual(
+    historyDropdown.items[27].value,
+    "history:25",
+    "history retention preserves Blizzard's last returned session"
+)
+assertEqual(
+    historyDropdown.width,
+    120,
+    "history picker width stays balanced"
+)
+assertEqual(
+    HistoryRenderer.SetEnabled(false),
+    true,
+    "history retention renderer disables"
 )
 
 print("damage_meter_renderer_test.lua: ok")

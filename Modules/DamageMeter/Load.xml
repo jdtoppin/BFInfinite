@@ -4,5 +4,6 @@
     <Script file="Data.lua"/>
     <Script file="Native.lua"/>
     <Script file="Renderer.lua"/>
+    <Script file="Automation.lua"/>
     <Script file="DamageMeter.lua"/>
 </Ui>
