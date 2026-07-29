@@ -38,7 +38,7 @@ Use this clean isolated-install sequence:
 Delete and replace both addon folders between pairs. Descendants include their
 ancestors, never sibling integrations; do not merge branches or overlay
 folders to manufacture a test build. PR #91 is validation-only and must never
-be merged.
+be merged. Closed PR #98 is superseded and is not an install input.
 
 For the final stack, use AbstractFramework PR #23, branch
 `codex/secret-unit-identity`, exact head
@@ -143,6 +143,16 @@ row.
 Example: `Pf=2`, `Pm=1`, `Pc=1`, `K=2`, and `numTotal=4` produces six active
 groups in either relation, twelve prebuilt groups, 120 initial reservations,
 and a fresh ceiling of 120. Only one relation presentation may be visible.
+
+Target regression fixtures for #102 are mandatory:
+
+- a single `player` category with `K=7` must report eight maximum active
+  groups, sixteen prebuilt groups, and 160 initial reservations;
+- repeat with a single `notPlayer` category and require the same
+  `8 / 16 / 160` result; and
+- `all` with `K=7` must reject color expansion and keep the gray partition at
+  two maximum active groups, three prebuilt groups, and 30 initial
+  reservations.
 
 Raid example: `P=1`, `K=3`, and `numTotal=8` gives `G=4`, 40 initial
 reservations per indicator, and a fresh ceiling of 40. Forty Raid frames with
@@ -348,16 +358,21 @@ Capture these before and after the full run:
 ```text
 /dump BFInfinite.modules.UnitFrames.GetNativeAuraRuntimeStats()
 /dump BFInfinite.modules.UnitFrames.GetNativeAuraConstructionStats()
+/dump BFI_Target.indicators.buffs:GetNativeAuraState()
+/dump BFI_Target.indicators.debuffs:GetNativeAuraState()
 /dump BFInfinite.modules.BuffsDebuffs.GetCustomAuraContainerState("buffs")
 /dump BFInfinite.modules.BuffsDebuffs.GetCustomAuraContainerConstructionStats()
 ```
 
-The final state must have balanced runtime creation/destruction, no incomplete
+These are tracked BFI state only; they do not inspect a native child or aura.
+The final runtime snapshot must satisfy
+`runtimesCreated - runtimesDestroyed == liveRuntimes`. Require no incomplete
 build, no stranded shell or reservation, no unexpected allocation after
-no-op/live-tuning/provider/unit changes, provider mode `live`, and
-`reloadRequired == false`. Party/Raid totals must match the fixed child count;
-Target totals must include all prebuilt relation variants while only one
-relation is active.
+no-op/live-tuning/provider/unit changes, `providerMode == "live"`, and
+`reloadRequired == false`. Verify the Target state `metrics` against the
+explicit partition fixtures above. Party/Raid totals must match the fixed
+child count; Target totals must include all prebuilt relation variants while
+only one relation is active.
 
 Reload once, log out cleanly, and inspect the error collector and flushed
 `taint.log`.
