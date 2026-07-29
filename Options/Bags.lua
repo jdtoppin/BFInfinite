@@ -26,8 +26,14 @@ local function CreateAppearancePane()
 
     local enabled = AF.CreateCheckButton(appearancePane, L["Enabled"])
     AF.SetPoint(enabled, "TOPLEFT", appearancePane, 15, -30)
+
+    local function UpdateEnabledColor(checked)
+        enabled.label:SetTextColor(AF.GetColorRGB(checked and "softlime" or "firebrick"))
+    end
+
     enabled:SetOnCheck(function(checked)
         B.config.enabled = checked
+        UpdateEnabledColor(checked)
         RefreshBags()
         appearancePane.Load()
         if not checked then
@@ -74,6 +80,7 @@ local function CreateAppearancePane()
 
     function appearancePane.Load()
         local config = B.config
+        UpdateEnabledColor(config.enabled)
         enabled:SetChecked(config.enabled)
         showBagSlots:SetChecked(config.showBagSlots)
         showBlizzardBagBar:SetChecked(config.showBlizzardBagBar)
