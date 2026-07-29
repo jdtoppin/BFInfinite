@@ -14,7 +14,7 @@ local mainHandSlot = GetInventorySlotInfo("MainHandSlot")
 local secondaryHandSlot = GetInventorySlotInfo("SecondaryHandSlot")
 
 local REQUIRED_LEGACY_AF_VERSION = 21
-local REQUIRED_CUSTOM_AF_VERSION = 25
+local REQUIRED_CUSTOM_AF_VERSION = 33
 local RETAIL_12_0_INTERFACE_MIN = 120000
 local RETAIL_12_1_INTERFACE_MIN = 120100
 local RETAIL_12_2_INTERFACE_MIN = 120200
