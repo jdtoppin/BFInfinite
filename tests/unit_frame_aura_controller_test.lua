@@ -857,7 +857,7 @@ local function testGlobalFrameworkRequirement()
     local ok, versionError = pcall(eventHandler.ADDON_LOADED, eventHandler, BFI.name)
     assertEqual(ok, false, "global AF version check stops harness")
     assertEqual(versionError, stopAfterVersionCheck, "global AF version check sentinel")
-    assertEqual(requiredVersion, 24, "global AF minimum")
+    assertEqual(requiredVersion, 29, "global AF minimum")
 end
 
 local function testBuildContract()
