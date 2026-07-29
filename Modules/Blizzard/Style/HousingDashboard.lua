@@ -291,8 +291,7 @@ local function GetCatalogCategoryIcon(frame)
         iconName = catalogCategoryIcons[frame.ID]
     end
 
-    iconName = iconName or catalogAtlasIcons[frame.atlasKey]
-    return iconName and AF.GetIcon(iconName)
+    return iconName or catalogAtlasIcons[frame.atlasKey]
 end
 
 local function IsCatalogEntryPreviewed(frame)
@@ -406,10 +405,14 @@ local function UpdateCatalogCategory(frame, isPressed)
     local customIcon = GetCatalogCategoryIcon(frame)
     local inactiveAtlas = frame.atlasNames and frame.atlasNames["_inactive"]
     if customIcon then
-        frame.BFIHousingGlyph:SetTexture(customIcon)
+        local success = AF.SetHousingIcon
+            and AF.SetHousingIcon(frame.BFIHousingGlyph, customIcon)
+        if not success then
+            frame.BFIHousingGlyph:SetTexture(AF.GetIcon(customIcon))
+        end
         frame.BFIHousingGlyph:SetTexCoord(0, 1, 0, 1)
-        -- The source artwork includes its own optical padding. Fill the
-        -- 30-pixel viewport so the visible mark stays legible at UI scale.
+        -- AF's source artwork uses one normalized internal safe area. Filling
+        -- the viewport keeps the visible mark legible without touching chrome.
         AF.SetSize(frame.BFIHousingGlyph, 30, 30)
     elseif inactiveAtlas then
         frame.BFIHousingGlyph:SetAtlas(inactiveAtlas)
