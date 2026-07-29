@@ -488,7 +488,10 @@ local function LayoutEncounterTabs()
             if previousTab then
                 AF.SetPoint(tab, "TOPLEFT", previousTab, "BOTTOMLEFT", 0, -1)
             else
-                AF.SetPoint(tab, "TOPLEFT", info, "TOPRIGHT", 4, -28)
+                -- Blizzard's inset, encounter, and info frames place this
+                -- edge eight pixels inside the outer journal. Twelve here
+                -- preserves the shared four-pixel side-rail gap.
+                AF.SetPoint(tab, "TOPLEFT", info, "TOPRIGHT", 12, -28)
             end
             previousTab = tab
         end
