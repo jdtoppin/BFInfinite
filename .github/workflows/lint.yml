@@ -71,3 +71,9 @@ jobs:
 
       - name: Test 12.1 Focus aura integration
         run: luajit tests/unit_frame_focus_native_aura_test.lua
+
+      - name: Test secret-safe unit-target routing
+        run: luajit tests/unit_frame_unit_target_routing_test.lua
+
+      - name: Test 12.1 TargetTarget aura integration
+        run: luajit tests/unit_frame_targettarget_native_aura_test.lua
