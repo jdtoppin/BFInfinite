@@ -32,9 +32,11 @@ local unpack = unpack
 -- SetIsEditing, or a secure post-hook) contaminates Blizzard's pooled item
 -- state and file-local caches. This module therefore has a strict boundary:
 -- it never writes a Blizzard Lua field, hooks a Blizzard object, or calls a
--- Cooldown Viewer mixin. It reads only static pool/template state and applies
--- presentation through captured C widget methods. Protected geometry is
--- changed only outside combat and after CheckAllowProtectedFunctions.
+-- Cooldown Viewer mixin. It reads static pool/template state plus the guarded
+-- shown/alpha presentation state of Blizzard's proc-alert Frame; event
+-- payloads and alert-manager tables remain untouched. Presentation is applied
+-- through captured C widget methods. Protected geometry is changed only
+-- outside combat and after CheckAllowProtectedFunctions.
 local viewerDefinitions = {
     essential = {
         globalName = "EssentialCooldownViewer",
@@ -164,6 +166,7 @@ local FrameGetNumPoints = methodFrame.GetNumPoints
 local FrameGetPoint = methodFrame.GetPoint
 local FrameGetRegions = methodFrame.GetRegions
 local FrameGetScale = methodFrame.GetScale
+local FrameIsObjectType = methodFrame.IsObjectType
 local FrameIsMouseMotionEnabled = methodFrame.IsMouseMotionEnabled
 local FrameIsShown = methodFrame.IsShown
 local FrameSetAlpha = methodFrame.SetAlpha
@@ -223,6 +226,7 @@ methodStatusBar:Hide()
 local nativeSkinBorderColor = {AF.GetColorRGB("border")}
 local nativeSkinBackgroundColor = {AF.GetColorRGB("widget_dark")}
 local assistedHighlightColor = {0.1, 0.85, 1, 1}
+local procHighlightColor = {1, 0.82, 0, 1}
 -- Blizzard's CDM swipe has rounded alpha corners. Swap only its texture so
 -- Blizzard remains authoritative for each cooldown's live swipe color.
 local nativeCooldownSwipeTexture =
@@ -236,6 +240,8 @@ local barSkins = setmetatable({}, {__mode = "k"})
 local hotkeyOverlays = setmetatable({}, {__mode = "k"})
 local bfiActionButtonActions = setmetatable({}, {__mode = "k"})
 local assistedHighlights = setmetatable({}, {__mode = "k"})
+local procHighlights = setmetatable({}, {__mode = "k"})
+local nativeProcHighlightAlphas = setmetatable({}, {__mode = "k"})
 local assistedBaseSpellIDs = {}
 local presentationController = CreateFrame("Frame")
 local assistedHighlightController = CreateFrame("Frame")
@@ -352,17 +358,17 @@ local function GetBaseSpellID(spellID)
     return GetNonSecretSpellID(C_Spell.GetBaseSpell(spellID))
 end
 
-local function CreateAssistedHighlightEdge(highlight)
+local function CreateSquareHighlightEdge(highlight, color)
     if not CanChangeGeometry(highlight) then return nil end
 
     local edge = FrameCreateTexture(highlight, nil, "OVERLAY", nil, 7)
     if not CanChangeGeometry(edge) then return nil end
 
-    TextureSetColorTexture(edge, unpack(assistedHighlightColor))
+    TextureSetColorTexture(edge, unpack(color))
     return edge
 end
 
-local function UpdateAssistedHighlightPixels(highlight)
+local function UpdateSquareHighlightPixels(highlight)
     local edges = highlight.Edges
     if not edges
         or not CanChangeGeometry(highlight)
@@ -396,7 +402,7 @@ local function EnsureAssistedHighlight(item, definition)
 
     local highlight = assistedHighlights[item]
     if highlight then
-        UpdateAssistedHighlightPixels(highlight)
+        UpdateSquareHighlightPixels(highlight)
         return highlight
     end
 
@@ -408,10 +414,10 @@ local function EnsureAssistedHighlight(item, definition)
         FrameSetFrameLevel(highlight, min(itemLevel + 10, 10000))
     end
 
-    local top = CreateAssistedHighlightEdge(highlight)
-    local bottom = CreateAssistedHighlightEdge(highlight)
-    local left = CreateAssistedHighlightEdge(highlight)
-    local right = CreateAssistedHighlightEdge(highlight)
+    local top = CreateSquareHighlightEdge(highlight, assistedHighlightColor)
+    local bottom = CreateSquareHighlightEdge(highlight, assistedHighlightColor)
+    local left = CreateSquareHighlightEdge(highlight, assistedHighlightColor)
+    local right = CreateSquareHighlightEdge(highlight, assistedHighlightColor)
     if not top or not bottom or not left or not right then
         FrameHide(highlight)
         return nil
@@ -445,10 +451,71 @@ local function EnsureAssistedHighlight(item, definition)
     FrameClearAllPoints(highlight)
     FrameSetPoint(highlight, "TOPLEFT", item, "TOPLEFT", -2, 2)
     FrameSetPoint(highlight, "BOTTOMRIGHT", item, "BOTTOMRIGHT", 2, -2)
-    UpdateAssistedHighlightPixels(highlight)
+    UpdateSquareHighlightPixels(highlight)
     FrameSetAlpha(highlight, 0)
     FrameShow(highlight)
     assistedHighlights[item] = highlight
+    return highlight
+end
+
+local function EnsureProcHighlight(item, definition)
+    if not definition.assistedHighlight then return nil end
+
+    local highlight = procHighlights[item]
+    if highlight then
+        UpdateSquareHighlightPixels(highlight)
+        return highlight
+    end
+
+    highlight = CreateFrame("Frame", nil, item)
+    if not CanChangeGeometry(highlight) then return nil end
+
+    local itemLevel = FrameGetFrameLevel(item)
+    if IsSafeNumber(itemLevel) then
+        FrameSetFrameLevel(highlight, min(itemLevel + 9, 10000))
+    end
+
+    local top = CreateSquareHighlightEdge(highlight, procHighlightColor)
+    local bottom = CreateSquareHighlightEdge(highlight, procHighlightColor)
+    local left = CreateSquareHighlightEdge(highlight, procHighlightColor)
+    local right = CreateSquareHighlightEdge(highlight, procHighlightColor)
+    if not top or not bottom or not left or not right then
+        FrameHide(highlight)
+        return nil
+    end
+
+    TextureSetPoint(top, "TOPLEFT", highlight, "TOPLEFT", 0, 0)
+    TextureSetPoint(top, "TOPRIGHT", highlight, "TOPRIGHT", 0, 0)
+    TextureSetPoint(bottom, "BOTTOMLEFT", highlight, "BOTTOMLEFT", 0, 0)
+    TextureSetPoint(bottom, "BOTTOMRIGHT", highlight, "BOTTOMRIGHT", 0, 0)
+    TextureSetPoint(left, "TOPLEFT", highlight, "TOPLEFT", 0, 0)
+    TextureSetPoint(left, "BOTTOMLEFT", highlight, "BOTTOMLEFT", 0, 0)
+    TextureSetPoint(right, "TOPRIGHT", highlight, "TOPRIGHT", 0, 0)
+    TextureSetPoint(right, "BOTTOMRIGHT", highlight, "BOTTOMRIGHT", 0, 0)
+    highlight.Edges = {
+        top = top,
+        bottom = bottom,
+        left = left,
+        right = right,
+    }
+
+    local pulse = highlight:CreateAnimationGroup()
+    local alpha = pulse:CreateAnimation("Alpha")
+    alpha:SetFromAlpha(1)
+    alpha:SetToAlpha(0.4)
+    alpha:SetDuration(0.55)
+    pulse:SetLooping("BOUNCE")
+    highlight.Pulse = pulse
+
+    -- Keep the proc signal visible alongside an assisted recommendation:
+    -- gold hugs the item and blue retains its existing outer square.
+    FrameClearAllPoints(highlight)
+    FrameSetPoint(highlight, "TOPLEFT", item, "TOPLEFT", 0, 0)
+    FrameSetPoint(highlight, "BOTTOMRIGHT", item, "BOTTOMRIGHT", 0, 0)
+    UpdateSquareHighlightPixels(highlight)
+    FrameSetAlpha(highlight, 0)
+    FrameShow(highlight)
+    procHighlights[item] = highlight
     return highlight
 end
 
@@ -489,20 +556,69 @@ local function ItemMatchesAssistedHighlight(item)
         and (baseSpellID == assistedHighlightSpellID or baseSpellID == assistedHighlightBaseSpellID)
 end
 
-local function UpdateItemAssistedHighlight(item)
-    local highlight = assistedHighlights[item]
+-- Essential and Utility items also receive Blizzard's separate rounded gold
+-- spell-proc frame. BFI leaves the alert manager and its animations running,
+-- but mutes the native frame while the skin owns a square gold replacement.
+-- Capturing its alpha lets module disable/profile changes restore Blizzard's
+-- presentation without writing manager state or calling an item mixin.
+local function GetNativeProcHighlightShown(item)
+    local alert = item.SpellActivationAlert
+    if not IsValueNonSecret(alert) then return nil end
+    if alert == nil then return false end
+
+    local isFrame = FrameIsObjectType(alert, "Frame")
+    if not IsSafeBoolean(isFrame) then return nil end
+    if not isFrame then return false end
+
+    local shown = FrameIsShown(alert)
+    if not IsSafeBoolean(shown) then return nil end
+    return shown
+end
+
+local function SetNativeProcHighlightSuppressed(item, suppressed)
+    local alert = item.SpellActivationAlert
+    if not IsValueNonSecret(alert) then
+        return false
+    end
+    if alert == nil then
+        return true
+    end
+    local isFrame = FrameIsObjectType(alert, "Frame")
+    if not IsSafeBoolean(isFrame) then
+        return false
+    end
+    if not isFrame then return true end
+
+    local nativeAlpha = nativeProcHighlightAlphas[alert]
+    if nativeAlpha == nil then
+        if not suppressed then return true end
+
+        nativeAlpha = FrameGetAlpha(alert)
+        if not IsSafeNumber(nativeAlpha) then return false end
+        nativeProcHighlightAlphas[alert] = nativeAlpha
+    end
+
+    local currentAlpha = FrameGetAlpha(alert)
+    if not IsSafeNumber(currentAlpha) then return false end
+
+    local desiredAlpha = suppressed and 0 or nativeAlpha
+    if not NearlyEqual(currentAlpha, desiredAlpha) then
+        local allowed = CheckAllowProtectedFunctions(alert, true)
+        if not IsSafeBoolean(allowed) or not allowed then return false end
+        FrameSetAlpha(alert, desiredAlpha)
+    end
+
+    if not suppressed then
+        nativeProcHighlightAlphas[alert] = nil
+    end
+    return true
+end
+
+local function SetProcHighlightShown(highlight, shown)
     if not highlight then return end
 
-    local config = CM.config
-    local shown = config
-        and config.enabled
-        and config.assistedHighlight
-        and ItemMatchesAssistedHighlight(item)
-
-    local inCombat = UnitAffectingCombat("player")
-    inCombat = IsSafeBoolean(inCombat) and inCombat
     local animation = highlight.Pulse
-    if shown and inCombat then
+    if shown then
         if not animation:IsPlaying() then
             animation:Play()
         end
@@ -510,6 +626,68 @@ local function UpdateItemAssistedHighlight(item)
         animation:Stop()
     end
     FrameSetAlpha(highlight, shown and 1 or 0)
+end
+
+local function RestoreItemProcHighlight(item)
+    -- Keep the square replacement visible until Blizzard's alpha has actually
+    -- been restored. A denied/secret write is retried by presentation polling.
+    if not SetNativeProcHighlightSuppressed(item, false) then
+        return false
+    end
+    SetProcHighlightShown(procHighlights[item], false)
+    return true
+end
+
+local function UpdateItemProcHighlight(item)
+    local highlight = procHighlights[item]
+    if not highlight then return end
+
+    local config = CM.config
+    local itemState = itemStates[item]
+    local owner = itemState and itemState.owner
+    local viewerConfigs = config and config.viewers
+    local ownsPresentation = config
+        and config.enabled
+        and config.skin
+        and type(viewerConfigs) == "table"
+        and owner
+        and type(viewerConfigs[owner.key]) == "table"
+        and not itemState.presentationRestored
+    local nativeShown = GetNativeProcHighlightShown(item)
+    local replaceNative = ownsPresentation and nativeShown == true
+
+    if replaceNative then
+        local suppressed = SetNativeProcHighlightSuppressed(item, true)
+        SetProcHighlightShown(highlight, suppressed)
+    else
+        local restored = SetNativeProcHighlightSuppressed(item, false)
+        if restored or nativeShown == false then
+            SetProcHighlightShown(highlight, false)
+        end
+    end
+end
+
+local function UpdateItemAssistedHighlight(item)
+    local highlight = assistedHighlights[item]
+    if highlight then
+        local config = CM.config
+        local shown = config
+            and config.enabled
+            and config.assistedHighlight
+            and ItemMatchesAssistedHighlight(item)
+        local inCombat = UnitAffectingCombat("player")
+        inCombat = IsSafeBoolean(inCombat) and inCombat
+        local animation = highlight.Pulse
+        if shown and inCombat then
+            if not animation:IsPlaying() then
+                animation:Play()
+            end
+        elseif animation:IsPlaying() then
+            animation:Stop()
+        end
+        FrameSetAlpha(highlight, shown and 1 or 0)
+    end
+    UpdateItemProcHighlight(item)
 end
 
 local function RefreshAssistedHighlights()
@@ -576,7 +754,11 @@ local function OnAssistedHighlightEvent(_, event)
         wipe(assistedBaseSpellIDs)
     end
     assistedHighlightUpdateTimeLeft = 0
-    if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
+    if event == "PLAYER_REGEN_DISABLED"
+        or event == "PLAYER_REGEN_ENABLED"
+        or event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW"
+        or event == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE"
+    then
         RefreshAssistedHighlights()
     end
 end
@@ -585,6 +767,8 @@ assistedHighlightController:RegisterEvent("COOLDOWN_VIEWER_DATA_LOADED")
 assistedHighlightController:RegisterEvent("COOLDOWN_VIEWER_TABLE_HOTFIXED")
 assistedHighlightController:RegisterEvent("PLAYER_REGEN_DISABLED")
 assistedHighlightController:RegisterEvent("PLAYER_REGEN_ENABLED")
+assistedHighlightController:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_SHOW")
+assistedHighlightController:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_HIDE")
 assistedHighlightController:SetScript("OnEvent", OnAssistedHighlightEvent)
 CVarCallbackRegistry:RegisterCallback(
     "assistedCombatHighlight",
@@ -1681,11 +1865,15 @@ local function RestoreItemPresentation(item, definition, itemState)
         end
         FrameSetAlpha(highlight, 0)
     end
+    if not RestoreItemProcHighlight(item) then
+        return false
+    end
     HideItemHotkey(item)
     itemState.hotkeyGeneration = nil
     itemState.hotkeyStyleGeneration = nil
     itemState.hotkeyCooldownID = nil
     itemState.presentationGeneration = nil
+    return true
 end
 
 local function CanRestoreItemPresentation(item, definition)
@@ -1726,7 +1914,7 @@ end
 
 local function RestoreItem(item, itemState)
     if not itemState.applied and itemState.presentationRestored then
-        return true
+        return RestoreItemProcHighlight(item)
     end
     if not CanChangeGeometry(item) then
         return false
@@ -1735,7 +1923,9 @@ local function RestoreItem(item, itemState)
         return false
     end
     if not itemState.applied then
-        RestoreItemPresentation(item, itemState.definition, itemState)
+        if not RestoreItemPresentation(item, itemState.definition, itemState) then
+            return false
+        end
         itemState.presentationRestored = true
         itemState.recapturePresentation = true
         return true
@@ -1752,7 +1942,9 @@ local function RestoreItem(item, itemState)
         RestorePoints(bar, itemState.nativeBarPoints)
     end
 
-    RestoreItemPresentation(item, itemState.definition, itemState)
+    if not RestoreItemPresentation(item, itemState.definition, itemState) then
+        return false
+    end
     itemState.applied = nil
     itemState.expected = nil
     itemState.presentationRestored = true
@@ -2243,6 +2435,9 @@ local function ApplyStaticPresentation(item, state, config, itemState)
 
     if state.definition.assistedHighlight and CM.config.assistedHighlight then
         EnsureAssistedHighlight(item, state.definition)
+    end
+    if state.definition.assistedHighlight and CM.config.skin then
+        EnsureProcHighlight(item, state.definition)
     end
 
     local cooldown = GetSafeField(item, "Cooldown")
