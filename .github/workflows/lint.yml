@@ -80,3 +80,6 @@ jobs:
 
       - name: Test 12.1 FocusTarget aura integration
         run: luajit tests/unit_frame_focustarget_native_aura_test.lua
+
+      - name: Test 12.1 PetTarget aura integration
+        run: luajit tests/unit_frame_pettarget_native_aura_test.lua
