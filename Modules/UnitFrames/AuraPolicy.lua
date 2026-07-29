@@ -137,10 +137,12 @@ function UF.CompileNativeAuraPolicy(baseFilter, filters)
                 groups[#groups + 1] = {
                     key = rule.key,
                     filterString = concat(parts, "|"),
-                    -- Target's prebuilt hostile relation variants split
-                    -- these compiler-owned groups without reading the unit.
+                    -- Relation-aware integrations can split these
+                    -- compiler-owned groups without reading the unit.
                     playerScope = rule.key == "player" and "player"
+                        or rule.key == "notPlayer" and "notPlayer"
                         or enabled.player and "notPlayer"
+                        or enabled.notPlayer and "player"
                         or "any",
                 }
                 precedingExclusionTokens[

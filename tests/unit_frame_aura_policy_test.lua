@@ -307,6 +307,56 @@ local function testLegacyTruthTable()
     )
 end
 
+local function testRelationScopeMetadata()
+    local all = compile("HARMFUL", {
+        all = true,
+    })
+    assertEqual(
+        all.groups[1].playerScope,
+        "any",
+        "all category relation scope"
+    )
+
+    local split = compile("HELPFUL", {
+        player = true,
+        raidInCombat = true,
+    })
+    assertEqual(
+        split.groups[1].playerScope,
+        "player",
+        "player category relation scope"
+    )
+    assertEqual(
+        split.groups[2].playerScope,
+        "notPlayer",
+        "category after player relation scope"
+    )
+
+    local inverseSplit = compile("HELPFUL", {
+        notPlayer = true,
+        raidInCombat = true,
+    })
+    assertEqual(
+        inverseSplit.groups[1].playerScope,
+        "notPlayer",
+        "not-player category relation scope"
+    )
+    assertEqual(
+        inverseSplit.groups[2].playerScope,
+        "player",
+        "category after not-player relation scope"
+    )
+
+    local unsplit = compile("HELPFUL", {
+        raidInCombat = true,
+    })
+    assertEqual(
+        unsplit.groups[1].playerScope,
+        "any",
+        "standalone category relation scope"
+    )
+end
+
 local function testLegacySourceResolutionExhaustive()
     local function enabled(mask, bitIndex)
         return math.floor(mask / (2 ^ bitIndex)) % 2 == 1
@@ -932,6 +982,7 @@ end
 testInvalidInputs()
 testEmptyPoliciesStayEmpty()
 testLegacyTruthTable()
+testRelationScopeMetadata()
 testLegacySourceResolutionExhaustive()
 testCanonicalDisjointOrder()
 testNotPlayerDisjointOrderAndAllCollapse()

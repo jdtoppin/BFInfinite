@@ -1791,6 +1791,8 @@ local function testHoveredTransitionDefers()
 
     assertEqual(#harness.events, 0, "hovered transition mutations")
     assertEqual(holder.alpha, 0, "hovered transition alpha curtain")
+    assertEqual(controller:IsPresentationApplied(), false,
+        "hovered transition presentation state")
     assertEqual(#harness.timerCallbacks, 1, "hover retry count")
     assertEqual(#harness.containers, 1, "hovered container count")
     assertEqual(container.enabled, true, "hovered container enabled")
@@ -1805,6 +1807,8 @@ local function testHoveredTransitionDefers()
         "completed hovered tuning")
     assertEqual(holder.shown, true, "completed holder visibility")
     assertEqual(holder.alpha, 1, "completed holder alpha")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "completed hovered presentation state")
     assertEqual(harness.events[1].name, "holder.shown", "hover-safe hide order")
     assertEqual(harness.events[1].args[2], false, "hover-safe hide state")
     assertEqual(harness.events[#harness.events].name, "holder.shown",
@@ -1835,6 +1839,38 @@ local function testHoveredHideCurtainsImmediately()
 
     assertEqual(holder.shown, false, "recovered hide visibility")
     assertEqual(holder.alpha, 1, "recovered hidden holder alpha")
+end
+
+local function testHoveredHideReversalUsesLatestRequest()
+    local harness = makeHarness()
+    local controller = harness.UF.CreateNativeAuraContainerController(
+        {},
+        "BFIHoveredReversalAuraHolder",
+        completeSpec("target", true)
+    )
+    local holder = controller:GetFrame()
+
+    clearEvents(harness)
+    holder.mouseOver = true
+    controller:SetShown(false)
+
+    assertEqual(holder.alpha, 0, "hovered hide alpha curtain")
+    assertEqual(holder.shown, true, "hovered hide physical deferral")
+    assertEqual(controller:IsPresentationApplied(), false,
+        "hovered hide presentation state")
+    assertEqual(#harness.timerCallbacks, 1, "hovered hide retry count")
+
+    controller:SetShown(true)
+    assertEqual(holder.alpha, 1, "reversed hover alpha restoration")
+    assertEqual(holder.shown, true, "reversed hover visibility")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "reversed hover presentation state")
+
+    holder.mouseOver = false
+    harness:RunNextTimer()
+    assertEqual(holder.shown, true, "stale retry keeps latest visibility")
+    assertEqual(holder.alpha, 1, "stale retry keeps latest alpha")
+    assertEqual(#harness.timerCallbacks, 0, "stale retry drained")
 end
 
 local function testAbortedHolderWriteDefers()
@@ -2767,6 +2803,7 @@ testMidBuildFailureIsOneShot()
 testPartialAddFailureDiagnostics()
 testHoveredTransitionDefers()
 testHoveredHideCurtainsImmediately()
+testHoveredHideReversalUsesLatestRequest()
 testAbortedHolderWriteDefers()
 testHoveredDestroyCurtainsUntilCompletion()
 testMaxFrameCountContract()

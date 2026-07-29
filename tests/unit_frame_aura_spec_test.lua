@@ -2778,6 +2778,43 @@ local function testPartitionColorBudgetUsesMaxActiveVariant()
         false,
         "partition exact budget accepted"
     )
+    assertEqual(
+        #exactDescriptor.completeSpec.groups,
+        8,
+        "partition exact friendly groups"
+    )
+
+    local inverse = copy(exact)
+    inverse.filters = {
+        notPlayer = true,
+    }
+    local inverseDescriptor =
+        compile("target", "HARMFUL", inverse)
+    assertEqual(
+        inverseDescriptor.metrics.requestedColorExpandedGroupCount,
+        8,
+        "not-player partition exact requested max-active groups"
+    )
+    assertEqual(
+        inverseDescriptor.metrics.colorGroupBudgetExceeded,
+        false,
+        "not-player partition exact budget accepted"
+    )
+    assertEqual(
+        inverseDescriptor.metrics.maxActiveGroupCount,
+        8,
+        "not-player partition exact max-active budget"
+    )
+    assertEqual(
+        inverseDescriptor.metrics.prebuiltGroupCount,
+        16,
+        "not-player partition exact prebuilt groups"
+    )
+    assertEqual(
+        #inverseDescriptor.completeSpec.groups,
+        8,
+        "not-player partition exact friendly groups"
+    )
 
     local duplicated = copy(exact)
     duplicated.filters = {
@@ -2866,13 +2903,18 @@ local function testPartitionColorBudgetPreservesLargeGrayBaseline()
         compile("target", "HELPFUL", baseline)
     assertEqual(
         baselineDescriptor.metrics.maxActiveGroupCount,
-        14,
+        7,
         "large gray baseline active groups"
     )
     assertEqual(
         baselineDescriptor.metrics.prebuiltGroupCount,
-        21,
+        14,
         "large gray baseline prebuilt groups"
+    )
+    assertEqual(
+        #baselineDescriptor.completeSpec.groups,
+        7,
+        "large gray friendly baseline groups"
     )
     assertEqual(
         baselineDescriptor.metrics.colorGroupBudgetExceeded,
@@ -2888,7 +2930,7 @@ local function testPartitionColorBudgetPreservesLargeGrayBaseline()
         compile("target", "HELPFUL", colored)
     assertEqual(
         fallbackDescriptor.metrics.requestedColorExpandedGroupCount,
-        28,
+        14,
         "large baseline requested color groups"
     )
     assertEqual(
@@ -2898,12 +2940,12 @@ local function testPartitionColorBudgetPreservesLargeGrayBaseline()
     )
     assertEqual(
         fallbackDescriptor.metrics.maxActiveGroupCount,
-        14,
+        7,
         "large fallback keeps baseline active groups"
     )
     assertEqual(
         fallbackDescriptor.metrics.prebuiltGroupCount,
-        21,
+        14,
         "large fallback keeps baseline prebuilt groups"
     )
     assertDeepEqual(
@@ -2920,6 +2962,16 @@ local function testPartitionColorBudgetPreservesLargeGrayBaseline()
         fallbackDescriptor.partition.hostile.complement.completeSpec,
         baselineDescriptor.partition.hostile.complement.completeSpec,
         "large fallback hostile-complement baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.tuningSpec,
+        baselineDescriptor.tuningSpec,
+        "large fallback keeps tuning baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.constructionKey,
+        baselineDescriptor.constructionKey,
+        "large fallback keeps construction baseline"
     )
     assertEqual(
         fallbackDescriptor.visibility
