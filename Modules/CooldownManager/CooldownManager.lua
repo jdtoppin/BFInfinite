@@ -359,14 +359,27 @@ local function EnsureAssistedHighlight(item, definition)
     highlight = CreateFrame("Frame", nil, item, "ActionBarButtonAssistedCombatHighlightTemplate")
     assistedHighlights[item] = highlight
     highlight:ClearAllPoints()
-    highlight:SetPoint("CENTER")
+    highlight:SetAllPoints(item)
 
     local itemLevel = FrameGetFrameLevel(item)
     if IsSafeNumber(itemLevel) then
         FrameSetFrameLevel(highlight, min(itemLevel + 10, 10000))
     end
 
-    highlight:SetScale(min(definition.itemWidth, definition.itemHeight) / 45)
+    -- Match BFI action buttons: keep the highlight frame square with the
+    -- cooldown item and size the higher-resolution ants atlas around its
+    -- actual edges instead of scaling the 45x45 template as a whole.
+    local scaleX = definition.itemWidth / 45
+    local scaleY = definition.itemHeight / 45
+    local flipbookWidth = 66 * scaleX
+    local flipbookHeight = 66 * scaleY
+    local offsetX = (definition.itemWidth - flipbookWidth) / 2 - 1
+    local offsetY = (definition.itemHeight - flipbookHeight) / 2 - 1
+
+    highlight.Flipbook:SetAtlas("RotationHelper_Ants_Flipbook_2x")
+    highlight.Flipbook:ClearAllPoints()
+    highlight.Flipbook:SetPoint("TOPLEFT", highlight, offsetX, -offsetY)
+    highlight.Flipbook:SetPoint("BOTTOMRIGHT", highlight, -offsetX, offsetY)
     highlight.Flipbook.Anim:Play()
     highlight.Flipbook.Anim:Stop()
     highlight:SetAlpha(0)
