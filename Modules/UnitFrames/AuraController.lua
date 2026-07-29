@@ -423,8 +423,22 @@ function ControllerMixin:_QueueRegenDispatch()
     end)
 end
 
+local function SetHolderCurtained(controller, curtained)
+    local alpha = curtained and 0 or 1
+    if controller._holderAlpha == alpha then return end
+
+    -- This is BFI's own plain holder, never a native aura container or
+    -- restricted child. Alpha provides an immediate fail-closed curtain when
+    -- a hovered descendant makes the corresponding visibility write wait.
+    controller.frame:SetAlpha(alpha)
+    controller._holderAlpha = alpha
+end
+
 local function SetHolderShownSafe(controller, shown)
     local holder = controller.frame
+    if not shown then
+        SetHolderCurtained(controller, true)
+    end
     if holder:IsShown() == shown then
         return true
     end
@@ -477,6 +491,7 @@ local function SetControllerShownSafe(controller, shown)
     -- not to BFI's plain holder. Hide it explicitly before hiding the holder;
     -- show it only after the holder is restored. No native visibility is
     -- read: _containerShown tracks only BFI's own successful writes.
+    SetHolderCurtained(controller, true)
     if not shown and not SetExternalContainerShownSafe(controller, false) then
         return false
     end
@@ -486,6 +501,7 @@ local function SetControllerShownSafe(controller, shown)
     if shown and not SetExternalContainerShownSafe(controller, true) then
         return false
     end
+    SetHolderCurtained(controller, false)
     return true
 end
 
@@ -1180,8 +1196,11 @@ local function SyncPartitionVisibility(controller)
     local shown = spec ~= nil and spec.enabled and spec.shown
     local variant = controller._variant or PARTITION_FRIENDLY
 
+    SetHolderCurtained(controller, true)
+
     -- A relation swap while any restricted descendant is hovered must keep
-    -- the old presentation intact until hover ends. Never expose both.
+    -- the old presentation opaque until hover ends. Never expose both or
+    -- leave the stale relation visible behind the deferred swap.
     if controller.frame:IsShown()
         and controller.frame:IsMouseOver()
         and (
@@ -1201,6 +1220,7 @@ local function SyncPartitionVisibility(controller)
             SetPartitionChildShown(controller[key], false)
         end
         controller._shownVariant = nil
+        SetHolderCurtained(controller, false)
         return true
     end
 
@@ -1233,6 +1253,7 @@ local function SyncPartitionVisibility(controller)
         return false
     end
     controller._shownVariant = variant
+    SetHolderCurtained(controller, false)
     return true
 end
 

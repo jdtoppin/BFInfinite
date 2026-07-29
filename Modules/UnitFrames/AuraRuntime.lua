@@ -439,18 +439,29 @@ end
 local function SyncLifecycle(runtime)
     if runtime._reloadRequired then
         QuiesceForReload(runtime)
-        return
+        return false
     end
 
     if not runtime._built then
         SyncWatcher(runtime)
-        return
+        return false
     end
 
     local enabled = runtime._state == STATE_READY
         and ShouldEnableNative(runtime)
     local shown = enabled and ShouldShowNative(runtime)
 
+    if not shown then
+        runtime._controller:SetShown(false)
+        runtime._controller:SetEnabled(enabled)
+        if runtime._partitionCapable then
+            runtime._partitionVariant = nil
+        end
+        SyncWatcher(runtime)
+        return false
+    end
+
+    runtime._controller:SetEnabled(enabled)
     if runtime._partitionCapable
         and runtime._state == STATE_READY
         and runtime._descriptor
@@ -461,14 +472,9 @@ local function SyncLifecycle(runtime)
     elseif runtime._partitionCapable then
         runtime._partitionVariant = nil
     end
-    if not shown then
-        runtime._controller:SetShown(false)
-    end
-    runtime._controller:SetEnabled(enabled)
-    if shown then
-        runtime._controller:SetShown(true)
-    end
+    runtime._controller:SetShown(true)
     SyncWatcher(runtime)
+    return true
 end
 
 local BuildControllerDescriptor
@@ -1072,8 +1078,9 @@ local function NativeAuras_Enable(self)
     if unitChanged or self._configDirty or self._deferredCommit then
         ScheduleCommit(self, true)
     else
-        SyncLifecycle(self)
-        if self._built
+        local displayPermitted = SyncLifecycle(self)
+        if displayPermitted
+            and self._built
             and self._state == STATE_READY
             and not providerUsesTestData
         then
@@ -1115,8 +1122,9 @@ local function NativeAuras_Update(self)
         return
     end
 
-    SyncLifecycle(self)
-    if self._built
+    local displayPermitted = SyncLifecycle(self)
+    if displayPermitted
+        and self._built
         and self._state == STATE_READY
         and not self._reloadRequired
         and not providerUsesTestData

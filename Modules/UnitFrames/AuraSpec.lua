@@ -12,9 +12,10 @@ local format, sub = string.format, string.sub
 -- CustomAuraContainer buttons in batches of ten. Keep the constant here as
 -- audit metadata only; this compiler never creates a frame.
 local NATIVE_BUTTON_BATCH_SIZE = 10
--- Preserve #90's existing ceiling of eight policy groups (80 initial
--- restricted-button reservations per runtime). Colour expansion falls back
--- as a whole rather than exceeding that established construction budget.
+-- Preserve #90's existing ceiling of eight groups in any active native row.
+-- Target may prebuild mutually exclusive relation variants; budget colour
+-- expansion against the larger friendly or hostile active presentation, not
+-- the sum of hidden prebuilt variants.
 local MAX_NATIVE_COLOR_EXPANDED_GROUPS = 8
 
 local ANCHOR_POINTS = {
@@ -1038,13 +1039,34 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     end
 
     local empty = policy.empty
+    local partitionActive = not empty and partition ~= nil
     local requestedColorBucketCount =
         spellColorsRequested and #spellColorBuckets or 0
-    local requestedColorExpandedGroupCount =
+    local requestedColorMultiplier =
+        requestedColorBucketCount + 1
+    local requestedFriendlyColorGroupCount =
         spellColorsRequested
-        and #policy.groups
-            * (requestedColorBucketCount + 1)
+        and #policy.groups * requestedColorMultiplier
         or 0
+    local requestedHostileColorGroupCount = 0
+    if spellColorsRequested and partitionActive then
+        local hostilePolicyGroupCount = 0
+        for _, policyGroup in ipairs(policy.groups) do
+            hostilePolicyGroupCount = hostilePolicyGroupCount
+                + (
+                    policyGroup.playerScope == "any"
+                    and 2
+                    or 1
+                )
+        end
+        requestedHostileColorGroupCount =
+            hostilePolicyGroupCount * requestedColorMultiplier
+    end
+    local requestedColorExpandedGroupCount =
+        max(
+            requestedFriendlyColorGroupCount,
+            requestedHostileColorGroupCount
+        )
     local requestedColorExpandedCapacity =
         requestedColorExpandedGroupCount * config.numTotal
     local colorGroupBudgetExceeded =
@@ -1064,7 +1086,6 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         and config.auraTypeColor ~= nil
         and (config.auraTypeColor.castByMe == true
             or config.auraTypeColor.dispellable == true)
-    local partitionActive = not empty and partition ~= nil
     local degradations = Copy(policy.degradations)
     degradations.defaultSortPriority = not empty
     degradations.fixedHolderExtent = not empty

@@ -95,6 +95,10 @@ local function newFrame(harness, name, parent)
         record(harness, "holder.shown", self, shown)
     end
 
+    function frame:SetAlpha(alpha)
+        self.alpha = alpha
+    end
+
     function frame:IsShown()
         return self.shown == true
     end

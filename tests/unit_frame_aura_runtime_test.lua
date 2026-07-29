@@ -836,6 +836,7 @@ local function testOptInRelationPartitionRuntime()
     runtime:LoadConfig(validConfig({
         testState = "partition",
         tag = "partition-a",
+        spellIDFilterRequiresPublicAssist = true,
     }))
     runtime:Enable()
 
@@ -879,6 +880,30 @@ local function testOptInRelationPartitionRuntime()
         "hostile relation placement count")
     assertEqual(countEvents(harness, "controller.unit"), 0,
         "hostile relation retarget count")
+
+    harness:ClearEvents()
+    harness.assistResult = {secret = true}
+    harness:Fire("UNIT_FACTION", "party1")
+    harness:RunTimers(0.05)
+    assertEqual(controller.shown, false,
+        "secret spell-gated partition visibility")
+    assertEqual(controller.variant, "hostile",
+        "hidden partition does not drive a replacement variant")
+    assertEqual(runtime:GetNativeAuraState().partitionVariant, nil,
+        "hidden partition state suppresses variant")
+    assertEqual(countEvents(harness, "controller.refresh"), 0,
+        "secret spell-gated partition refresh count")
+
+    harness:ClearEvents()
+    harness.assistResult = true
+    harness:Fire("UNIT_FACTION", "party1")
+    harness:RunTimers(0.05)
+    assertEqual(controller.shown, true,
+        "public spell-gated partition recovery")
+    assertEqual(controller.variant, "hostile",
+        "recovered partition relation")
+    assertEqual(countEvents(harness, "controller.refresh"), 1,
+        "recovered partition refresh count")
 
     harness:ClearEvents()
     harness.attackResult = {secret = true}
@@ -1842,11 +1867,14 @@ local function testSpellIDReactionGatesAndProviderBypass()
         assertEqual(countEvents(harness, "uf.register"), 9,
             "helpful spell-ID watcher registrations")
 
+        harness:ClearEvents()
         harness.assistResult = false
         harness:Fire("UNIT_FACTION", "party1")
         harness:RunTimers(0.05)
         assertEqual(controller.shown, false,
             "helpful public non-assist rejection")
+        assertEqual(countEvents(harness, "controller.refresh"), 0,
+            "helpful rejected refresh count")
 
         harness.assistResult = {secret = true}
         harness:ClearEvents()
@@ -1854,6 +1882,8 @@ local function testSpellIDReactionGatesAndProviderBypass()
         harness:RunTimers(0.05)
         assertEqual(controller.shown, false,
             "helpful secret reaction fail-closed")
+        assertEqual(countEvents(harness, "controller.refresh"), 0,
+            "helpful secret refresh count")
         assertTrue(countEvents(harness, "secret.check") >= 1,
             "helpful secret reaction check")
 

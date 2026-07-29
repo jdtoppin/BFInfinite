@@ -95,7 +95,14 @@ local environment = {
     },
     AuraContainerSortDirection = SORT_DIRECTION,
     AuraContainerSortMethod = SORT_METHOD,
+    AuraUtil = {
+        AuraFilters = {
+            Important = "IMPORTANT",
+            Dispellable = "DISPELLABLE",
+        },
+    },
     CustomAuraContainerAuraProcessingPolicy = PROCESSING_POLICY,
+    GetCVar = function() return nil end,
     assert = assert,
     error = error,
     ipairs = ipairs,
@@ -118,6 +125,7 @@ setmetatable(environment, {
 })
 
 for _, path in ipairs({
+    "Utils.lua",
     "Modules/UnitFrames/AuraPolicy.lua",
     "Modules/UnitFrames/AuraSpec.lua",
     "Modules/UnitFrames/Presets.lua",
@@ -195,9 +203,7 @@ local function assertPartyContract(preset)
         preset.id .. " debuff empty")
 
     local expectedFilters = {
-        "HARMFUL|PLAYER",
-        "HARMFUL|RAID_IN_COMBAT|!PLAYER",
-        "HARMFUL|RAID_PLAYER_DISPELLABLE|!PLAYER|!RAID_IN_COMBAT",
+        "HARMFUL",
     }
     assertEqual(#debuffDescriptor.completeSpec.groups, #expectedFilters,
         preset.id .. " debuff group count")
@@ -215,21 +221,21 @@ local function assertPartyContract(preset)
 
     assertEqual(debuffDescriptor.completeSpec.holder.width, 59,
         preset.id .. " debuff holder width")
-    assertEqual(debuffDescriptor.completeSpec.holder.height, 119,
+    assertEqual(debuffDescriptor.completeSpec.holder.height, 39,
         preset.id .. " debuff holder height")
-    assertEqual(debuffDescriptor.visibility.requiresVisible, true,
+    assertEqual(debuffDescriptor.visibility.requiresVisible, false,
         preset.id .. " debuff visible gate")
     assertEqual(debuffDescriptor.visibility.requiresAssist, false,
         preset.id .. " debuff assist gate")
     assertEqual(debuffDescriptor.metrics.legacyMaxFrameCount, 6,
         preset.id .. " debuff legacy capacity")
-    assertEqual(debuffDescriptor.metrics.nativeVisibleCapacity, 18,
+    assertEqual(debuffDescriptor.metrics.nativeVisibleCapacity, 6,
         preset.id .. " debuff native capacity")
-    assertEqual(debuffDescriptor.metrics.initialRestrictedButtonCount, 30,
+    assertEqual(debuffDescriptor.metrics.initialRestrictedButtonCount, 10,
         preset.id .. " debuff initial buttons")
     assertEqual(
         debuffDescriptor.metrics.freshContainerRestrictedButtonCountCeiling,
-        30,
+        10,
         preset.id .. " debuff button ceiling"
     )
     assertEqual(

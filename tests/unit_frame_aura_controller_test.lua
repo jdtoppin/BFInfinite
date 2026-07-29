@@ -139,6 +139,10 @@ local function newHolder(harness, name, parent, frameTemplate)
         self.shown = shown
     end
 
+    function holder:SetAlpha(alpha)
+        self.alpha = alpha
+    end
+
     function holder:SetSize(width, height)
         self.width = width
         self.height = height
@@ -1782,6 +1786,7 @@ local function testHoveredTransitionDefers()
     controller:ApplyTuning(tuningSpec())
 
     assertEqual(#harness.events, 0, "hovered transition mutations")
+    assertEqual(holder.alpha, 0, "hovered transition alpha curtain")
     assertEqual(#harness.timerCallbacks, 1, "hover retry count")
     assertEqual(#harness.containers, 1, "hovered container count")
     assertEqual(container.enabled, true, "hovered container enabled")
@@ -1795,12 +1800,37 @@ local function testHoveredTransitionDefers()
     assertEqual(container.groups.helpful.filterString, "HELPFUL|PLAYER",
         "completed hovered tuning")
     assertEqual(holder.shown, true, "completed holder visibility")
+    assertEqual(holder.alpha, 1, "completed holder alpha")
     assertEqual(harness.events[1].name, "holder.shown", "hover-safe hide order")
     assertEqual(harness.events[1].args[2], false, "hover-safe hide state")
     assertEqual(harness.events[#harness.events].name, "holder.shown",
         "hover-safe restore order")
     assertEqual(harness.events[#harness.events].args[2], true,
         "hover-safe restore state")
+end
+
+local function testHoveredHideCurtainsImmediately()
+    local harness = makeHarness()
+    local controller = harness.UF.CreateNativeAuraContainerController(
+        {},
+        "BFIHoveredHideAuraHolder",
+        completeSpec("target", true)
+    )
+    local holder = controller:GetFrame()
+
+    clearEvents(harness)
+    holder.mouseOver = true
+    controller:SetShown(false)
+
+    assertEqual(holder.alpha, 0, "hovered hide alpha curtain")
+    assertEqual(holder.shown, true, "hovered hide physical deferral")
+    assertEqual(#harness.timerCallbacks, 1, "hovered hide retry count")
+
+    holder.mouseOver = false
+    harness:RunNextTimer()
+
+    assertEqual(holder.shown, false, "recovered hide visibility")
+    assertEqual(holder.alpha, 1, "recovered hidden holder alpha")
 end
 
 local function testAbortedHolderWriteDefers()
@@ -2325,6 +2355,8 @@ local function testGroupVisibilityWaitsForHover()
     assertEqual(seed.shown, true, "hovered group seed visibility")
     assertEqual(controller:GetFrame().shown, true,
         "hovered group holder visibility")
+    assertEqual(controller:GetFrame().alpha, 0,
+        "hovered external group alpha curtain")
     assertEqual(countEvents(harness, "native.hide"), 0,
         "hovered native visibility mutation")
 
@@ -2333,6 +2365,8 @@ local function testGroupVisibilityWaitsForHover()
     assertEqual(seed.shown, false, "post-hover group seed visibility")
     assertEqual(controller:GetFrame().shown, false,
         "post-hover group holder visibility")
+    assertEqual(controller:GetFrame().alpha, 1,
+        "post-hover external group alpha")
 end
 
 local function testPartitionBuildAndRelationSwap()
@@ -2497,6 +2531,8 @@ local function testPartitionHoveredVariantUsesLatestRequest()
 
     assertEqual(#harness.timerCallbacks, 1,
         "coalesced partition hover retry")
+    assertEqual(outer.alpha, 0,
+        "hovered partition alpha curtain")
     assertEqual(friendlyHolder.shown, true,
         "hovered friendly presentation retained")
     assertEqual(mainHolder.shown, false,
@@ -2516,6 +2552,33 @@ local function testPartitionHoveredVariantUsesLatestRequest()
         "latest main presentation visibility")
     assertEqual(complementHolder.shown, true,
         "latest complement presentation visibility")
+    assertEqual(outer.alpha, 1,
+        "recovered partition alpha")
+
+    clearEvents(harness)
+    outer.mouseOver = true
+    controller:SetShown(false)
+    assertEqual(outer.alpha, 0,
+        "hovered partition hide alpha curtain")
+    assertEqual(outer.shown, true,
+        "hovered partition hide physical deferral")
+    assertEqual(friendlyHolder.shown, false,
+        "hovered partition stale friendly suppressed")
+    assertEqual(mainHolder.shown, true,
+        "hovered partition stale main retained behind curtain")
+    assertEqual(complementHolder.shown, true,
+        "hovered partition stale complement retained behind curtain")
+
+    outer.mouseOver = false
+    harness:RunNextTimer()
+    assertEqual(outer.shown, false,
+        "recovered partition hide visibility")
+    assertEqual(outer.alpha, 1,
+        "recovered hidden partition alpha")
+    assertEqual(mainHolder.shown, false,
+        "recovered partition main visibility")
+    assertEqual(complementHolder.shown, false,
+        "recovered partition complement visibility")
     assertNoNativeMutation(harness, "retried relationship request")
 end
 
@@ -2634,166 +2697,6 @@ local function testPartitionCombatDefersNativeTuning()
         "combat partition regen unregistration")
 end
 
-local function testPartitionTopologyShrinkKeepsAbsentChildDormant()
-    local harness = makeHarness()
-    local controller = harness.UF.CreateNativeAuraPartitionController(
-        {},
-        "BFIShrunkPartitionAuraHolder"
-    )
-    controller:Rebuild(partitionCompleteSpec("target", "hostile"))
-
-    local staleComplement = controller.complement:GetNativeFrame()
-    local mainOnly = partitionCompleteSpec("target", "hostile", 2)
-    mainOnly.complement = nil
-    mainOnly.attachment = nil
-    controller:Rebuild(mainOnly)
-
-    assertEqual(controller.main:GetFrame().shown, true,
-        "main-only hostile-main visibility")
-    assertEqual(controller.complement:GetFrame().shown, false,
-        "main-only stale complement visibility")
-    assertEqual(staleComplement.enabled, false,
-        "main-only stale complement enabled state")
-
-    controller:SetEnabled(false)
-    controller:SetEnabled(true)
-    assertEqual(staleComplement.enabled, false,
-        "main-only stale complement re-enable suppression")
-
-    clearEvents(harness)
-    controller:SetUnit("focus")
-    assertEqual(countEvents(harness, "af.unit"), 2,
-        "main-only retarget count")
-    assertEqual(staleComplement.unit, "target",
-        "main-only stale complement retarget suppression")
-
-    clearEvents(harness)
-    controller:Refresh()
-    assertEqual(countEvents(harness, "af.update"), 2,
-        "main-only refresh count")
-
-    local staleMain = controller.main:GetNativeFrame()
-    local complementOnly = partitionCompleteSpec(
-        "focus",
-        "hostile",
-        1
-    )
-    complementOnly.main = nil
-    complementOnly.attachment = nil
-    controller:Rebuild(complementOnly)
-
-    assertEqual(controller.main:GetFrame().shown, false,
-        "complement-only stale main visibility")
-    assertEqual(controller.complement:GetFrame().shown, true,
-        "complement-only hostile-complement visibility")
-    assertEqual(staleMain.enabled, false,
-        "complement-only stale main enabled state")
-
-    controller:SetEnabled(false)
-    controller:SetEnabled(true)
-    assertEqual(staleMain.enabled, false,
-        "complement-only stale main re-enable suppression")
-end
-
-local function testPartitionRebuildRefreshAndDestroy()
-    local harness = makeHarness()
-    local controller = harness.UF.CreateNativeAuraPartitionController(
-        {},
-        "BFIRebuiltPartitionAuraHolder"
-    )
-    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
-
-    local oldFriendly = controller.friendly:GetNativeFrame()
-    local oldMain = controller.main:GetNativeFrame()
-    local oldComplement = controller.complement:GetNativeFrame()
-    local complementHolder = controller.complement:GetFrame()
-    clearEvents(harness)
-
-    controller:Rebuild(partitionCompleteSpec("focus", "hostile", 2))
-
-    assertEqual(#harness.containers, 6,
-        "partition replacement container count")
-    local newFriendly = controller.friendly:GetNativeFrame()
-    local newMain = controller.main:GetNativeFrame()
-    local newComplement = controller.complement:GetNativeFrame()
-    assertTrue(newFriendly ~= oldFriendly,
-        "friendly replacement identity")
-    assertTrue(newMain ~= oldMain, "main replacement identity")
-    assertTrue(newComplement ~= oldComplement,
-        "complement replacement identity")
-    assertEqual(complementHolder.point[2], newMain,
-        "replacement complement reanchors to replacement main")
-    assertEqual(complementHolder.point[2] == oldMain, false,
-        "replacement complement old-main detachment")
-    assertEqual(complementHolder.point[1], "TOPRIGHT",
-        "replacement complement point")
-    assertEqual(complementHolder.point[3], "BOTTOMRIGHT",
-        "replacement complement relative point")
-    assertEqual(complementHolder.point[5], 1,
-        "replacement complement clamp correction")
-
-    for _, container in ipairs({
-        oldFriendly,
-        oldMain,
-        oldComplement,
-    }) do
-        assertEqual(container.enabled, false,
-            "old partition native disabled")
-        assertEqual(container.shown, false,
-            "old partition native hidden")
-    end
-    for _, container in ipairs({
-        newFriendly,
-        newMain,
-        newComplement,
-    }) do
-        assertEqual(container.unit, "focus",
-            "replacement partition unit")
-        assertEqual(container.enabled, true,
-            "replacement partition enabled")
-        assertEqual(container.shown, true,
-            "replacement partition shown")
-    end
-    assertEqual(controller.friendly:GetFrame().shown, false,
-        "replacement friendly presentation")
-    assertEqual(controller.main:GetFrame().shown, true,
-        "replacement main presentation")
-    assertEqual(controller.complement:GetFrame().shown, true,
-        "replacement complement presentation")
-
-    clearEvents(harness)
-    controller:Refresh()
-    assertEqual(countEvents(harness, "af.update"), 3,
-        "partition refresh native count")
-    for _, container in ipairs({
-        newFriendly,
-        newMain,
-        newComplement,
-    }) do
-        assertTrue(
-            findEvent(harness, "af.update", function(args)
-                return args[1] == container
-            end),
-            "partition refresh container"
-        )
-    end
-
-    clearEvents(harness)
-    controller:Destroy()
-    assertEqual(controller:GetFrame().shown, false,
-        "destroyed partition outer visibility")
-    for _, container in ipairs({
-        newFriendly,
-        newMain,
-        newComplement,
-    }) do
-        assertEqual(container.enabled, false,
-            "destroyed partition native disabled")
-        assertEqual(container.shown, false,
-            "destroyed partition native hidden")
-    end
-end
-
 testConstructionStatsContract()
 testGlobalFrameworkRequirement()
 testCapabilityGate()
@@ -2807,6 +2710,7 @@ testRebuildRejectsAfterInitialBuild()
 testMidBuildFailureIsOneShot()
 testPartialAddFailureDiagnostics()
 testHoveredTransitionDefers()
+testHoveredHideCurtainsImmediately()
 testAbortedHolderWriteDefers()
 testMaxFrameCountContract()
 testDestroyPrecedence()

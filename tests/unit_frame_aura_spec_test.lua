@@ -2737,6 +2737,111 @@ local function testGlobalSpellColorGroupBudget()
     }, "over-budget diagnostics")
 end
 
+local function testPartitionColorBudgetUsesMaxActiveVariant()
+    local exact = baseConfig()
+    exact.cooldownStyle = "block_vertical"
+    exact.filters = {
+        player = true,
+    }
+    exact.spellColors = makeDistinctSpellColors(7)
+    exact.subFrame = {
+        enabled = true,
+        desaturated = true,
+        filter = "notCastByMe",
+        width = 8,
+        height = 7,
+    }
+
+    local exactDescriptor = compile("target", "HARMFUL", exact)
+    assertEqual(
+        exactDescriptor.metrics.maxActiveGroupCount,
+        8,
+        "partition exact max-active budget"
+    )
+    assertEqual(
+        exactDescriptor.metrics.prebuiltGroupCount,
+        16,
+        "partition exact prebuilt groups"
+    )
+    assertEqual(
+        exactDescriptor.metrics.initialRestrictedButtonCount,
+        160,
+        "partition exact prebuilt reservations"
+    )
+    assertEqual(
+        exactDescriptor.metrics.requestedColorExpandedGroupCount,
+        8,
+        "partition exact requested max-active groups"
+    )
+    assertEqual(
+        exactDescriptor.metrics.colorGroupBudgetExceeded,
+        false,
+        "partition exact budget accepted"
+    )
+
+    local duplicated = copy(exact)
+    duplicated.filters = {
+        all = true,
+    }
+    local duplicatedDescriptor =
+        compile("target", "HARMFUL", duplicated)
+    local hostile = duplicatedDescriptor.partition.hostile
+    assertEqual(
+        duplicatedDescriptor.metrics.requestedColorExpandedGroupCount,
+        16,
+        "any-scope hostile requested groups"
+    )
+    assertEqual(
+        duplicatedDescriptor.metrics.colorGroupBudgetExceeded,
+        true,
+        "any-scope hostile budget fallback"
+    )
+    assertEqual(
+        duplicatedDescriptor.metrics.maxActiveGroupCount,
+        2,
+        "any-scope gray max-active groups"
+    )
+    assertEqual(
+        duplicatedDescriptor.metrics.prebuiltGroupCount,
+        3,
+        "any-scope gray prebuilt groups"
+    )
+    assertEqual(
+        duplicatedDescriptor.metrics.initialRestrictedButtonCount,
+        30,
+        "any-scope gray prebuilt reservations"
+    )
+    for _, groups in ipairs({
+        duplicatedDescriptor.completeSpec.groups,
+        hostile.main.completeSpec.groups,
+        hostile.complement.completeSpec.groups,
+    }) do
+        assertEqual(#groups, 1, "any-scope gray group count")
+        assertEqual(
+            groups[1].buttonStyle.blockColor,
+            nil,
+            "any-scope fallback has no partial color"
+        )
+        assertEqual(
+            groups[1].candidateFilters,
+            nil,
+            "any-scope fallback has no identity map"
+        )
+    end
+    assertEqual(
+        duplicatedDescriptor.visibility
+            .spellIDFilterRequiresPublicAssist,
+        false,
+        "unused partition colors do not add assist gate"
+    )
+    assertEqual(
+        duplicatedDescriptor.visibility
+            .spellIDFilterRequiresPublicNonAssist,
+        false,
+        "unused partition colors do not add non-assist gate"
+    )
+end
+
 local function testGlobalSpellColorConstructionBoundary()
     local original = onePolicyBlockConfig()
     original.spellColors = {
@@ -3514,6 +3619,7 @@ testGlobalSpellColorFamiliesAndReactions()
 testTargetPartitionPreservesSpellColorFamilies()
 testGlobalSpellColorCandidateComposition()
 testGlobalSpellColorGroupBudget()
+testPartitionColorBudgetUsesMaxActiveVariant()
 testGlobalSpellColorConstructionBoundary()
 testInvalidInputs()
 testConstructionBoundary()
