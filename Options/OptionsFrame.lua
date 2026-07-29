@@ -121,8 +121,8 @@ local function BuildList()
         end
 
         if last then
-            AF.SetPoint(item, "TOPLEFT", last, "BOTTOMLEFT", 0, -5)
-            AF.SetPoint(item, "TOPRIGHT", last, "BOTTOMRIGHT", 0, -5)
+            AF.SetPoint(item, "TOPLEFT", last, "BOTTOMLEFT", 0, -4)
+            AF.SetPoint(item, "TOPRIGHT", last, "BOTTOMRIGHT", 0, -4)
         else
             AF.SetPoint(item, "TOPLEFT", 7, -15)
             AF.SetPoint(item, "TOPRIGHT", -7, -15)
