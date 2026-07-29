@@ -5,4 +5,5 @@
     <Script file="NativeAuraFrames.lua"/>
     <Script file="BuffsDebuffs.lua"/>
     <Script file="CustomAuraContainer.lua"/>
+    <Script file="CustomBuffs.lua"/>
 </Ui>

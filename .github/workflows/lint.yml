@@ -26,6 +26,9 @@ jobs:
       - name: Check Buffs & Debuffs custom aura controller
         run: lua5.1 tests/buffs_debuffs_custom_aura_controller_test.lua
 
+      - name: Check Buffs & Debuffs custom Buffs compiler
+        run: lua5.1 tests/buffs_debuffs_custom_buffs_spec_test.lua
+
       - name: Check Lua and policy
         shell: bash
         env:
