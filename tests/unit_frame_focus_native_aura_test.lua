@@ -68,7 +68,11 @@ local function contains(values, expected)
     return false
 end
 
-local function makeHarness()
+local function makeHarness(nativeBackendAvailable)
+    if nativeBackendAvailable == nil then
+        nativeBackendAvailable = true
+    end
+
     local harness = {
         callbacks = {},
         configMode = {},
@@ -76,6 +80,7 @@ local function makeHarness()
         disableCalls = {},
         events = {},
         frames = {},
+        legacyConstructions = {},
         nativeConstructions = {},
         setupCalls = {},
     }
@@ -193,10 +198,19 @@ local function makeHarness()
     end
 
     function UF.CreateAuras(parent, name, auraFilter)
-        return newIndicator(parent, name, auraFilter, "auras")
+        local indicator = newIndicator(parent, name, auraFilter, "auras")
+        harness.legacyConstructions[
+            #harness.legacyConstructions + 1
+        ] = indicator
+        record("legacy.create", indicator, parent, auraFilter)
+        return indicator
     end
 
     function UF.CreateNativeAuras(parent, name, auraFilter)
+        if not nativeBackendAvailable then
+            return UF.CreateAuras(parent, name, auraFilter)
+        end
+
         local indicator =
             newIndicator(parent, name, auraFilter, "nativeAuras")
         harness.nativeConstructions[
@@ -501,15 +515,17 @@ local function testFocusActivationAndConstructionOrder()
     assertEqual(#harness.frames, 1, "Focus frame creation count")
     assertEqual(#harness.createIndicatorCalls, 1,
         "Focus indicator creation count")
-    assertEqual(#harness.nativeConstructions, 1,
+    assertEqual(#harness.nativeConstructions, 2,
         "Focus native controller prebuild count")
+    assertEqual(#harness.legacyConstructions, 0,
+        "Focus native path legacy construction count")
     assertEqual(#harness.setupCalls, 1, "Focus setup count")
     assertEqual(harness.setupCalls[1].skip, false,
         "first Focus setup skipped indicators")
     assertEqual(harness:CountEvents("watch.register"), 1,
         "Focus initial unit-watch registration")
     assertTrue(
-        harness:EventIndex("native.create")
+        harness:EventIndex("native.create", 2)
             < harness:EventIndex("setup"),
         "Focus native controller was not prebuilt before setup"
     )
@@ -540,19 +556,27 @@ local function testFocusActivationAndConstructionOrder()
         "Focus config-mode group")
     assertEqual(harness.configMode[1].frame, frame,
         "Focus config-mode frame")
-    assertEqual(buffs[1], "auras", "Focus buffs legacy builder")
+    assertEqual(buffs[1], "nativeAuras", "Focus buffs native builder")
     assertEqual(buffs[3], "HELPFUL", "Focus buffs filter")
     assertEqual(debuffs[1], "nativeAuras",
         "Focus debuffs native builder")
     assertEqual(debuffs[3], "HARMFUL", "Focus debuffs filter")
     assertEqual(harness.nativeConstructions[1],
-        frame.indicators.debuffs, "Focus native controller")
+        frame.indicators.buffs, "Focus native buffs controller")
+    assertEqual(harness.nativeConstructions[2],
+        frame.indicators.debuffs, "Focus native debuffs controller")
+    assertEqual(frame.indicators.buffs.root, frame,
+        "Focus native buffs controller parent")
+    assertEqual(frame.indicators.buffs.auraFilter, "HELPFUL",
+        "Focus native buffs controller filter")
     assertEqual(frame.indicators.debuffs.root, frame,
-        "Focus native controller parent")
+        "Focus native debuffs controller parent")
     assertEqual(frame.indicators.debuffs.auraFilter, "HARMFUL",
-        "Focus native controller filter")
-    assertEqual(frame.indicators.buffs.builder, "auras",
-        "Focus legacy buffs construction")
+        "Focus native debuffs controller filter")
+    assertEqual(frame.indicators.buffs.builder, "nativeAuras",
+        "Focus native buffs construction")
+    assertEqual(frame.indicators.debuffs.builder, "nativeAuras",
+        "Focus native debuffs construction")
 end
 
 local function testFocusDisableAndReenableLifecycle()
@@ -565,6 +589,8 @@ local function testFocusDisableAndReenableLifecycle()
     harness:ClearEvents()
     update(nil, "unitFrames", "focus", true)
     assertEqual(#harness.frames, 1, "Focus frame recreated on update")
+    assertEqual(#harness.nativeConstructions, 2,
+        "Focus repeated-update native construction count")
     assertEqual(#harness.setupCalls, 2, "Focus repeated setup count")
     assertEqual(harness.setupCalls[2].skip, true,
         "enabled Focus skip-indicator flag")
@@ -594,13 +620,44 @@ local function testFocusDisableAndReenableLifecycle()
     assertEqual(#harness.setupCalls, 3, "Focus re-enable setup count")
     assertEqual(harness.setupCalls[3].skip, false,
         "Focus re-enable skipped disabled indicators")
-    assertEqual(#harness.nativeConstructions, 1,
+    assertEqual(#harness.nativeConstructions, 2,
         "Focus re-enable native construction count")
     assertEqual(harness:CountEvents("watch.register"), 1,
         "Focus re-enable unit-watch registration")
     assertEqual(frame.enabled, true, "Focus re-enabled state")
     assertEqual(frame.unitWatchRegistered, true,
         "Focus re-enabled unit watch")
+end
+
+local function testFocusLegacyAuraFallback()
+    local harness = makeHarness(false)
+    local update = harness.callbacks.BFI_UpdateModule
+
+    update(nil, "unitFrames", "focus")
+    local frame = harness.frames[1]
+
+    assertEqual(#harness.nativeConstructions, 0,
+        "12.0.7 Focus native construction count")
+    assertEqual(#harness.legacyConstructions, 2,
+        "12.0.7 Focus legacy construction count")
+    assertEqual(frame.indicators.buffs.builder, "auras",
+        "12.0.7 Focus buffs fallback")
+    assertEqual(frame.indicators.buffs.auraFilter, "HELPFUL",
+        "12.0.7 Focus buffs filter")
+    assertEqual(frame.indicators.debuffs.builder, "auras",
+        "12.0.7 Focus debuffs fallback")
+    assertEqual(frame.indicators.debuffs.auraFilter, "HARMFUL",
+        "12.0.7 Focus debuffs filter")
+
+    update(nil, "unitFrames", "focus", true)
+    harness.UF.config.focus.general.enabled = false
+    update(nil, "unitFrames", "focus")
+    harness.UF.config.focus.general.enabled = true
+    update(nil, "unitFrames", "focus", true)
+    assertEqual(#harness.frames, 1,
+        "12.0.7 Focus fallback frame growth")
+    assertEqual(#harness.legacyConstructions, 2,
+        "12.0.7 Focus fallback indicator growth")
 end
 
 local function testFocusConfigModeGuardsAreLocal()
@@ -659,6 +716,8 @@ local function testFocusConfigModeGuardsAreLocal()
     )
     assertEqual(harness:CountEvents("watch.register"), 0,
         "Focus config-mode re-enable unit watch")
+    assertEqual(#harness.nativeConstructions, 2,
+        "Focus config-mode native construction count")
     for _, indicator in pairs(frame.indicators) do
         assertEqual(indicator.configMode, true,
             "re-enabled Focus indicator preview state")
@@ -758,6 +817,7 @@ end
 testFocusActivationAndConstructionOrder()
 testFocusDisableAndReenableLifecycle()
 testFocusConfigModeGuardsAreLocal()
+testFocusLegacyAuraFallback()
 testShippedFocusPresetBounds()
 
 print("unit_frame_focus_native_aura_test.lua: ok")

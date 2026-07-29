@@ -23,7 +23,7 @@ local indicators = {
     "targetHighlight",
     "mouseoverHighlight",
     "threatGlow",
-    {"auras", "buffs", "HELPFUL"},
+    {"nativeAuras", "buffs", "HELPFUL"},
     {"nativeAuras", "debuffs", "HARMFUL"},
 }
 
