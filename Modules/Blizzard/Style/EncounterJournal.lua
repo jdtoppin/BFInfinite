@@ -560,6 +560,79 @@ local function StyleInstanceHeaderIcon()
     S.StyleIcon(icon, true)
 end
 
+local function LayoutInstanceOverview()
+    local instance = EncounterJournal.encounter.instance
+    local mapButton = instance.mapButton
+    local loreFont = instance.LoreScrollingFont
+
+    -- The removed lore artwork occupied the entire space between the title
+    -- and this bottom-anchored text box. Use that space for the description.
+    AF.ClearPoints(mapButton)
+    AF.SetPoint(mapButton, "BOTTOMLEFT", instance, "BOTTOMLEFT", 33, 6)
+
+    AF.ClearPoints(loreFont)
+    AF.SetPoint(loreFont, "TOPLEFT", instance, "TOPLEFT", 35, -92)
+    AF.SetPoint(
+        loreFont,
+        "BOTTOMRIGHT",
+        instance,
+        "BOTTOMRIGHT",
+        -40,
+        mapButton:IsShown() and 44 or 5
+    )
+
+    local scrollBar = instance.LoreScrollBar
+    AF.ClearPoints(scrollBar)
+    AF.SetPoint(scrollBar, "TOPLEFT", loreFont, "TOPRIGHT", 9, -5)
+    AF.SetPoint(scrollBar, "BOTTOMLEFT", loreFont, "BOTTOMRIGHT", 9, 5)
+    scrollBar:SetShown(loreFont:HasScrollableExtent())
+end
+
+local function LayoutEncounterLoot()
+    local lootContainer = EncounterJournal.encounter.info.LootContainer
+    local scrollBox = lootContainer.ScrollBox
+
+    -- Blizzard shifts the top-left one pixel when the class strip appears,
+    -- while retaining a different bottom-right anchor. Keep a fixed 325px
+    -- lane and reserve the native 20px scrollbar column in both states.
+    AF.ClearPoints(scrollBox)
+    AF.SetPoint(
+        scrollBox,
+        "TOPLEFT",
+        lootContainer,
+        "TOPLEFT",
+        0,
+        lootContainer.classClearFilter:IsShown() and -20 or 0
+    )
+    AF.SetPoint(scrollBox, "BOTTOMRIGHT", lootContainer, "BOTTOMRIGHT", -20, 1)
+end
+
+local function StyleEncounterClassFilter()
+    local lootContainer = EncounterJournal.encounter.info.LootContainer
+    local clearFilter = lootContainer.classClearFilter
+    if clearFilter._BFIEncounterClassFilterStyled then return end
+    clearFilter._BFIEncounterClassFilterStyled = true
+
+    S.RemoveTextures(clearFilter, true)
+    S.CreateBackdrop(clearFilter, nil, nil, -1)
+    clearFilter.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget_dark"))
+    clearFilter.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
+    AF.SetSize(clearFilter, 325, 20)
+    AF.ClearPoints(clearFilter)
+    AF.SetPoint(clearFilter, "TOPLEFT", lootContainer, "TOPLEFT")
+
+    local clearFilterButton = _G[clearFilter:GetName() .. "ExitButton"]
+    S.StyleIconButton(clearFilterButton, AF.GetIcon("Close"), 12, nil, "red")
+    AF.ClearPoints(clearFilterButton)
+    AF.SetPoint(clearFilterButton, "RIGHT", clearFilter, "RIGHT", -4, 0)
+
+    AF.ClearPoints(clearFilter.text)
+    AF.SetPoint(clearFilter.text, "LEFT", clearFilter, "LEFT", 8, 0)
+    AF.SetPoint(clearFilter.text, "RIGHT", clearFilterButton, "LEFT", -6, 0)
+    clearFilter.text:SetJustifyH("LEFT")
+    SetTextColor(clearFilter.text, "gray")
+end
+
 local function UpdateGreatVaultButton(button)
     if not button.BFIIcon then return end
 
@@ -589,10 +662,11 @@ local function StyleEncounterControls()
     StyleEncounterDropdown(info.difficulty)
     StyleEncounterDropdown(info.LootContainer.filter)
     StyleEncounterDropdown(info.LootContainer.slotFilter)
-    local clearFilter = info.LootContainer.classClearFilter
-    local clearFilterButton = _G[clearFilter:GetName() .. "ExitButton"]
-    S.StyleIconButton(clearFilterButton, AF.GetIcon("Close"), 12, nil, "red")
+    info.LootContainer.ScrollBox:GetView():SetPadding(0, 0, 2, 2, 0)
+    StyleEncounterClassFilter()
+    LayoutEncounterLoot()
     S.StyleIconButton(EncounterJournal.encounter.instance.mapButton, AF.GetIcon("World"), 18)
+    LayoutInstanceOverview()
 
     StyleEncounterBackgrounds()
     StyleInstanceHeaderIcon()
@@ -1160,6 +1234,7 @@ local function RegisterHooks()
     hooksecurefunc("EncounterJournal_DisplayInstance", function()
         StyleEncounterBackgrounds()
         StyleInstanceHeaderIcon()
+        LayoutInstanceOverview()
         LayoutEncounterTabs()
     end)
     hooksecurefunc("EncounterJournal_DisplayEncounter", function()
@@ -1177,6 +1252,7 @@ local function RegisterHooks()
             StyleEncounterBullet(bullet)
         end
     end)
+    hooksecurefunc("EncounterJournal_UpdateFilterString", LayoutEncounterLoot)
     hooksecurefunc("EncounterJournal_ShowCreatures", StyleCreatureButtons)
     hooksecurefunc("EncounterJournal_CheckAndDisplaySuggestedContentTab", LayoutBottomTabs)
     hooksecurefunc("EncounterJournal_CheckAndDisplayTradingPostTab", LayoutBottomTabs)
