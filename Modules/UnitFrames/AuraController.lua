@@ -14,7 +14,8 @@ local ipairs, next, pairs, pcall, type = ipairs, next, pairs, pcall, type
 -- groups/slots add-only and restricts their buttons after initialization.
 -- This controller owns only configuration-derived state and never reads aura
 -- data, live buttons, native container geometry, or native visibility.
-local REQUIRED_AF_VERSION = 30
+-- AF #18/r31 adds the construction ledgers consumed by observability.
+local REQUIRED_AF_VERSION = 31
 local NATIVE_GROUP_AURA_TEMPLATE = "CustomAuraContainerTemplate"
 -- CustomAuraContainerConstants.FrameCreationBatchSize in the pinned build.
 local NATIVE_INITIAL_GROUP_RESERVATIONS = 10
