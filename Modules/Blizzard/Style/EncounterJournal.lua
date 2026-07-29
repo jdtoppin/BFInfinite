@@ -592,9 +592,9 @@ local function LayoutEncounterLoot()
     local lootContainer = EncounterJournal.encounter.info.LootContainer
     local scrollBox = lootContainer.ScrollBox
 
-    -- Blizzard shifts the top-left one pixel when the class strip appears,
-    -- while retaining a different bottom-right anchor. Keep a fixed 325px
-    -- lane and reserve the native 20px scrollbar column in both states.
+    -- Blizzard shifts the top-left one pixel when the class strip appears.
+    -- Keep a fixed 370px lane and reserve the native 20px scrollbar column
+    -- in both states.
     AF.ClearPoints(scrollBox)
     AF.SetPoint(
         scrollBox,
@@ -607,6 +607,25 @@ local function LayoutEncounterLoot()
     AF.SetPoint(scrollBox, "BOTTOMRIGHT", lootContainer, "BOTTOMRIGHT", -20, 1)
 end
 
+local function LayoutEncounterLootPanes()
+    local info = EncounterJournal.encounter.info
+    local lootContainer = info.LootContainer
+
+    -- Blizzard's two-page artwork reserved a wide book-spine gutter. Match
+    -- the 390px instance/model pane now that the journal uses a flat surface.
+    AF.SetSize(lootContainer, 390, 382)
+    AF.ClearPoints(lootContainer)
+    AF.SetPoint(lootContainer, "BOTTOMRIGHT", info, "BOTTOMRIGHT", -1, 1)
+
+    AF.ClearPoints(lootContainer.filter)
+    AF.SetPoint(lootContainer.filter, "BOTTOMLEFT", lootContainer, "TOPLEFT", 2, 4)
+
+    -- The boss list also retained 20px of parchment-era right padding.
+    local bossesScrollBox = info.BossesScrollBox
+    bossesScrollBox:GetView():SetPadding(10, 0, 0, 0, 15)
+    bossesScrollBox:Update(true)
+end
+
 local function StyleEncounterClassFilter()
     local lootContainer = EncounterJournal.encounter.info.LootContainer
     local clearFilter = lootContainer.classClearFilter
@@ -617,7 +636,7 @@ local function StyleEncounterClassFilter()
     S.CreateBackdrop(clearFilter, nil, nil, -1)
     clearFilter.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget_dark"))
     clearFilter.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
-    AF.SetSize(clearFilter, 325, 20)
+    AF.SetSize(clearFilter, 370, 20)
     AF.ClearPoints(clearFilter)
     AF.SetPoint(clearFilter, "TOPLEFT", lootContainer, "TOPLEFT")
 
@@ -662,6 +681,7 @@ local function StyleEncounterControls()
     StyleEncounterDropdown(info.difficulty)
     StyleEncounterDropdown(info.LootContainer.filter)
     StyleEncounterDropdown(info.LootContainer.slotFilter)
+    LayoutEncounterLootPanes()
     info.LootContainer.ScrollBox:GetView():SetPadding(0, 0, 2, 2, 0)
     StyleEncounterClassFilter()
     LayoutEncounterLoot()
@@ -736,7 +756,7 @@ local function StyleEncounterItem(button)
         button._BFIEncounterItemStyled = true
         KeepTextureHidden(button.bossTexture)
         KeepTextureHidden(button.bosslessTexture)
-        S.CreateBackdrop(button)
+        S.CreateBackdrop(button, nil, nil, -1)
         button.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget"))
         button:HookScript("OnEnter", function(self)
             self.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("BFI", 0.35))
@@ -946,6 +966,37 @@ local function UpdateMonthlyCollapseIndicator(button)
     indicator:Show()
 end
 
+local monthlyActivityArtwork = {
+    "Coin",
+    "Mask",
+    "Ribbon",
+    "RibbonStacked",
+}
+
+local function SuppressMonthlyActivityArtwork(button)
+    -- Button state textures can be made drawable internally without invoking
+    -- their Lua Show hooks. Keep their atlases for active-state detection, but
+    -- make the native parchment fully transparent after every state refresh.
+    local normalTexture = button:GetNormalTexture()
+    local highlightTexture = button:GetHighlightTexture()
+    if normalTexture then
+        normalTexture:SetAlpha(0)
+        normalTexture:Hide()
+    end
+    if highlightTexture then
+        highlightTexture:SetAlpha(0)
+        highlightTexture:Hide()
+    end
+
+    for _, name in ipairs(monthlyActivityArtwork) do
+        local texture = button[name]
+        if texture then
+            texture:SetAlpha(0)
+            texture:Hide()
+        end
+    end
+end
+
 local function StyleMonthlyActivityButton(button)
     if not button._BFIMonthlyActivityStyled then
         button._BFIMonthlyActivityStyled = true
@@ -982,6 +1033,7 @@ local function StyleMonthlyActivityButton(button)
 
     UpdateMonthlyActivityState(button)
     UpdateMonthlyCollapseIndicator(button)
+    SuppressMonthlyActivityArtwork(button)
 end
 
 local function SetMonthlyFilterState(button, selected)
