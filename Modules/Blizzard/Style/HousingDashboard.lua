@@ -579,6 +579,12 @@ local function HideCatalogPreviewChrome(preview)
     preview.PreviewCornerRight:Hide()
 end
 
+local function HideCatalogDivider(frame)
+    if not frame.Divider then return end
+    frame.Divider:SetAlpha(0)
+    frame.Divider:Hide()
+end
+
 local function UpdatePreviewedCatalogEntry(preview, entryInfo)
     local catalog = preview._BFIHousingCatalog
     if not catalog then return end
@@ -592,8 +598,8 @@ end
 local function StyleCatalog(catalog)
     catalog.Background:SetAlpha(0)
     catalog.Background:Hide()
-    catalog.Divider:SetColorTexture(AF.GetColorRGB("border", 0.65))
-    AF.SetWidth(catalog.Divider, 1)
+    HideCatalogDivider(catalog)
+    catalog:HookScript("OnShow", HideCatalogDivider)
 
     S.StyleDropdownButton(catalog.Filters.FilterDropdown)
     catalog.Filters.FilterDropdown.displacedRegions = nil
@@ -715,6 +721,9 @@ local function StyleVisibleBlueprintRows(scrollBox)
 end
 
 local function StyleCollection(collection)
+    HideCatalogDivider(collection)
+    collection:HookScript("OnShow", HideCatalogDivider)
+
     local categories = collection.Categories
     if categories and categories.CategoryPlaceholder then
         StyleCatalogCategory(categories.CategoryPlaceholder)
