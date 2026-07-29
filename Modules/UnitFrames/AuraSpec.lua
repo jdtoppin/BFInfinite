@@ -2,7 +2,8 @@
 local BFI = select(2, ...)
 local UF = BFI.modules.UnitFrames
 
-local ceil, floor, huge, min = math.ceil, math.floor, math.huge, math.min
+local ceil, floor, huge, max, min =
+    math.ceil, math.floor, math.huge, math.max, math.min
 local ipairs, next, pairs, rawget, sort, type =
     ipairs, next, pairs, rawget, table.sort, type
 local format, sub = string.format, string.sub
@@ -11,10 +12,10 @@ local format, sub = string.format, string.sub
 -- CustomAuraContainer buttons in batches of ten. Keep the constant here as
 -- audit metadata only; this compiler never creates a frame.
 local NATIVE_BUTTON_BATCH_SIZE = 10
--- Preserve #90's existing ceiling of eight groups in one active native row.
--- Integrations that prebuild mutually exclusive relation variants account
--- those physical copies separately; colour expansion still falls back as a
--- whole rather than exceeding the active-row layout budget.
+-- Cap only the extra groups requested by spell-colour expansion. A baseline
+-- policy may already require more than eight active groups after a relation
+-- partition duplicates any-scope categories; that exact gray policy remains
+-- intact. Colour expansion falls back as a whole and never drops categories.
 local MAX_NATIVE_COLOR_EXPANDED_GROUPS = 8
 
 local ANCHOR_POINTS = {
@@ -677,13 +678,34 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     end
 
     local empty = policy.empty
+    local partitionActive = not empty and partition ~= nil
     local requestedColorBucketCount =
         spellColorsRequested and #spellColorBuckets or 0
-    local requestedColorExpandedGroupCount =
+    local requestedColorMultiplier =
+        requestedColorBucketCount + 1
+    local requestedFriendlyColorGroupCount =
         spellColorsRequested
-        and #policy.groups
-            * (requestedColorBucketCount + 1)
+        and #policy.groups * requestedColorMultiplier
         or 0
+    local requestedHostileColorGroupCount = 0
+    if spellColorsRequested and partitionActive then
+        local hostilePolicyGroupCount = 0
+        for _, policyGroup in ipairs(policy.groups) do
+            hostilePolicyGroupCount = hostilePolicyGroupCount
+                + (
+                    policyGroup.playerScope == "any"
+                    and 2
+                    or 1
+                )
+        end
+        requestedHostileColorGroupCount =
+            hostilePolicyGroupCount * requestedColorMultiplier
+    end
+    local requestedColorExpandedGroupCount =
+        max(
+            requestedFriendlyColorGroupCount,
+            requestedHostileColorGroupCount
+        )
     local requestedColorExpandedCapacity =
         requestedColorExpandedGroupCount * config.numTotal
     local colorGroupBudgetExceeded =

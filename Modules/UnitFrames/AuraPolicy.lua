@@ -119,6 +119,7 @@ function UF.CompileNativeAuraPolicy(baseFilter, filters)
         groups[1] = {
             key = "all",
             filterString = baseFilter,
+            playerScope = "any",
         }
     else
         -- The selected categories are an OR-union. Adding the logical
@@ -136,6 +137,11 @@ function UF.CompileNativeAuraPolicy(baseFilter, filters)
                 groups[#groups + 1] = {
                     key = rule.key,
                     filterString = concat(parts, "|"),
+                    -- Relation-aware integrations can split these
+                    -- compiler-owned groups without reading the unit.
+                    playerScope = rule.key == "player" and "player"
+                        or enabled.player and "notPlayer"
+                        or "any",
                 }
                 precedingExclusionTokens[
                     #precedingExclusionTokens + 1
