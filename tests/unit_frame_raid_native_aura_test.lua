@@ -569,6 +569,9 @@ local function makeHarness(
                 return key
             end,
         }),
+        funcs = {
+            LoadPosition = AF.LoadPosition,
+        },
         modules = {
             UnitFrames = UF,
         },
