@@ -456,6 +456,14 @@ local function LoadIndicatorConfig(t)
     end
 end
 
+local function RefreshOptionPaneHeight(parent, pane)
+    if not pane.index or not parent._contentHeights then return end
+
+    parent._contentHeights[pane.index] =
+        tostring(pane:GetHeight())
+    AF.ReSize(parent)
+end
+
 local function LoadIndicatorPosition(t)
     -- Aura placement is part of the compiled layout contract. Moving only
     -- the holder leaves legacy subframe flow and native container flow based
@@ -3236,6 +3244,20 @@ builder["auraBaseFilters"] = function(parent)
     local tip = AF.CreateFontString(pane, L["The aura will show if any enabled filter is met"])
     tip:SetColor("tip")
     AF.SetPoint(tip, "TOPLEFT", 15, -8)
+    AF.SetPoint(tip, "TOPRIGHT", pane, -15, -8)
+    tip:SetJustifyH("LEFT")
+    tip:SetJustifyV("TOP")
+    tip:SetWordWrap(true)
+
+    local function UpdateRetailPaneHeight()
+        local extraHeight =
+            tip:GetStringHeight() - tip:GetLineHeight()
+        if extraHeight < 0 then
+            extraHeight = 0
+        end
+        pane:SetHeight(117 + ceil(extraHeight))
+        RefreshOptionPaneHeight(parent, pane)
+    end
 
     local allAuras = AF.CreateCheckButton(pane, L["All Auras"])
     allAuras:SetOnCheck(function(checked)
@@ -3389,7 +3411,14 @@ builder["auraBaseFilters"] = function(parent)
 
     local function LayoutRetailFilters()
         ClearFilterPoints()
-        AF.SetPoint(allAuras, "TOPLEFT", 15, -30)
+        AF.SetPoint(
+            allAuras,
+            "TOPLEFT",
+            tip,
+            "BOTTOMLEFT",
+            0,
+            -10
+        )
         AF.SetPoint(castByMe, "TOPLEFT", allAuras, 185, 0)
         AF.SetPoint(
             notPlayer,
@@ -3466,6 +3495,7 @@ builder["auraBaseFilters"] = function(parent)
             tip:SetText(
                 L["Retail uses Blizzard-defined categories; All Auras overrides narrower categories"]
             )
+            RunNextFrame(UpdateRetailPaneHeight)
             allAuras:Show()
             notPlayer:Show()
             castByMe:SetText(L["Player, Pet, or Vehicle"])
@@ -3582,8 +3612,24 @@ builder["auraBlackListWhitelist"] = function(parent)
     mode:SetItems(legacyModeItems)
 
     local tip = AF.CreateFontString(pane, AF.GetIconString("MouseLeftClick") .. L["Edit"] .. "  " .. AF.GetIconString("MouseRightClick") .. L["Delete"])
-    AF.SetPoint(tip, "LEFT", mode, "RIGHT", 8, 0)
     tip:SetColor("tip")
+    tip:SetJustifyH("LEFT")
+    tip:SetJustifyV("TOP")
+    if AF.isRetail then
+        AF.SetPoint(
+            tip,
+            "TOPLEFT",
+            mode,
+            "BOTTOMLEFT",
+            0,
+            -8
+        )
+        AF.SetPoint(tip, "TOPRIGHT", pane, -15, -36)
+        tip:SetWordWrap(true)
+    else
+        AF.SetPoint(tip, "LEFT", mode, "RIGHT", 8, 0)
+        tip:SetWordWrap(false)
+    end
 
     local buttons = {}
     local editBox
@@ -3738,7 +3784,25 @@ builder["auraBlackListWhitelist"] = function(parent)
             b:Show()
 
             if i == 1 then
-                AF.SetPoint(b, "TOPLEFT", mode, "BOTTOMLEFT", 0, -8)
+                if AF.isRetail then
+                    AF.SetPoint(
+                        b,
+                        "TOPLEFT",
+                        tip,
+                        "BOTTOMLEFT",
+                        0,
+                        -8
+                    )
+                else
+                    AF.SetPoint(
+                        b,
+                        "TOPLEFT",
+                        mode,
+                        "BOTTOMLEFT",
+                        0,
+                        -8
+                    )
+                end
             elseif i % 2 == 1 then
                 AF.SetPoint(b, "TOPLEFT", buttons[i - 2], "BOTTOMLEFT", 0, -5)
             else
@@ -3746,9 +3810,30 @@ builder["auraBlackListWhitelist"] = function(parent)
             end
         end
 
-        AF.SetListHeight(pane, ceil((num + 1) / 2), 20, 5, 8 + 20 + 8, 8)
-        parent._contentHeights[pane.index] = tostring(pane:GetHeight()) -- update height
-        AF.ReSize(parent) -- call AF.SetScrollContentHeight
+        local rows = ceil((num + 1) / 2)
+        if AF.isRetail then
+            RunNextFrame(function()
+                AF.SetListHeight(
+                    pane,
+                    rows,
+                    20,
+                    5,
+                    36 + tip:GetStringHeight() + 8,
+                    8
+                )
+                RefreshOptionPaneHeight(parent, pane)
+            end)
+        else
+            AF.SetListHeight(
+                pane,
+                rows,
+                20,
+                5,
+                8 + 20 + 8,
+                8
+            )
+            RefreshOptionPaneHeight(parent, pane)
+        end
     end
 
     return pane

@@ -50,6 +50,19 @@ local LEGACY_FIELDS = {
     "canBeDispelled",
 }
 
+local function updateMockStringHeight(widget)
+    if widget.kind ~= "fontString" then return end
+
+    local length = #(widget.text or "")
+    if not widget.wordWrap or length <= 60 then
+        widget.stringHeight = 12
+    elseif length <= 120 then
+        widget.stringHeight = 24
+    else
+        widget.stringHeight = 36
+    end
+end
+
 local function makeWidget(kind, harness, parent, text)
     local widget = {
         enabled = true,
@@ -65,6 +78,14 @@ local function makeWidget(kind, harness, parent, text)
 
     function widget:GetParent()
         return self.parent
+    end
+
+    function widget:GetLineHeight()
+        return 12
+    end
+
+    function widget:GetStringHeight()
+        return self.stringHeight or 12
     end
 
     function widget:Hide()
@@ -107,10 +128,12 @@ local function makeWidget(kind, harness, parent, text)
         self.items = items
     end
 
-    function widget:SetJustifyH()
+    function widget:SetJustifyH(value)
+        self.justifyH = value
     end
 
-    function widget:SetJustifyV()
+    function widget:SetJustifyV(value)
+        self.justifyV = value
     end
 
     function widget:SetLabel(value)
@@ -150,6 +173,7 @@ local function makeWidget(kind, harness, parent, text)
 
     function widget:SetText(value)
         self.text = value
+        updateMockStringHeight(self)
     end
 
     function widget:SetTextJustifyH()
@@ -167,6 +191,11 @@ local function makeWidget(kind, harness, parent, text)
         self.value = value
     end
 
+    function widget:SetWordWrap(value)
+        self.wordWrap = value
+        updateMockStringHeight(self)
+    end
+
     function widget:Show()
         self.shown = true
     end
@@ -175,6 +204,7 @@ local function makeWidget(kind, harness, parent, text)
     if parent and parent.widgets then
         parent.widgets[#parent.widgets + 1] = widget
     end
+    updateMockStringHeight(widget)
     return widget
 end
 
@@ -198,12 +228,28 @@ local function findWidget(pane, kind, field, value)
     end
 end
 
+local function hasPoint(widget, point, relativeTo, relativePoint)
+    for _, values in ipairs(widget.points or {}) do
+        if values[1] == point
+            and (relativeTo == nil or values[2] == relativeTo)
+            and (
+                relativePoint == nil
+                or values[3] == relativePoint
+            )
+        then
+            return true
+        end
+    end
+    return false
+end
+
 local function makeHarness(isRetail, hasNativeBackend)
     local harness = {
         configLoads = {},
         panes = {},
         setCalls = {},
         widgets = {},
+        resizeCalls = 0,
     }
     local UF = {}
     local AF = {
@@ -388,6 +434,10 @@ local function makeHarness(isRetail, hasNativeBackend)
             return self.height
         end
 
+        function pane:SetHeight(value)
+            self.height = value
+        end
+
         function pane:SetOnHide(callback)
             self.onHide = callback
         end
@@ -484,6 +534,7 @@ local function makeHarness(isRetail, hasNativeBackend)
     end
 
     function AF.ReSize()
+        harness.resizeCalls = harness.resizeCalls + 1
     end
 
     function AF.Remove(values, expected)
@@ -501,8 +552,19 @@ local function makeHarness(isRetail, hasNativeBackend)
         end
     end
 
-    function AF.SetListHeight(pane, _, _, _, height)
-        pane.height = height
+    function AF.SetListHeight(
+        pane,
+        itemNum,
+        itemHeight,
+        itemSpacing,
+        topPadding,
+        bottomPadding
+    )
+        pane.listTopPadding = topPadding
+        pane.height = itemNum * itemHeight
+            + (itemNum - 1) * itemSpacing
+            + topPadding
+            + bottomPadding
     end
 
     function AF.SetPoint(widget, ...)
@@ -569,6 +631,9 @@ local function makeHarness(isRetail, hasNativeBackend)
         tinsert = table.insert,
         tostring = tostring,
         type = type,
+        RunNextFrame = function(callback)
+            callback()
+        end,
         wipe = function(value)
             for key in pairs(value) do
                 value[key] = nil
@@ -737,8 +802,9 @@ end
 local function testRetailCanonicalFilters(hasNativeBackend)
     local version = hasNativeBackend and "12.1" or "12.0.7"
     local harness = makeHarness(true, hasNativeBackend)
+    local parent = makeParent()
     local pane =
-        harness.builders.auraBaseFilters(makeParent())
+        harness.builders.auraBaseFilters(parent)
     local info = newInfo("buffs", "boss", {
         castByMe = true,
         castByOthers = false,
@@ -816,6 +882,39 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         tip.text,
         "All Auras overrides",
         version .. " category explanation"
+    )
+    assertEqual(tip.wordWrap, true,
+        version .. " category explanation word wrap")
+    assertEqual(tip.justifyH, "LEFT",
+        version .. " category explanation horizontal alignment")
+    assertEqual(tip.justifyV, "TOP",
+        version .. " category explanation vertical alignment")
+    assertTrue(
+        hasPoint(tip, "TOPLEFT")
+            and hasPoint(tip, "TOPRIGHT"),
+        version .. " category explanation width bounds"
+    )
+    assertTrue(
+        hasPoint(
+            allAuras,
+            "TOPLEFT",
+            tip,
+            "BOTTOMLEFT"
+        ),
+        version .. " category controls follow explanation"
+    )
+    assertTrue(
+        pane.height > 117,
+        version .. " category pane wrapped height"
+    )
+    assertEqual(
+        parent._contentHeights[pane.index],
+        tostring(pane.height),
+        version .. " category scroll height"
+    )
+    assertTrue(
+        harness.resizeCalls > 0,
+        version .. " category scroll recalculation"
     )
     assertEqual(retiredDispellable.shown, false,
         version .. " legacy dispellable visibility")
@@ -978,9 +1077,8 @@ end
 local function testRetailSpellLists(hasNativeBackend)
     local version = hasNativeBackend and "12.1" or "12.0.7"
     local harness = makeHarness(true, hasNativeBackend)
-    local pane = harness.builders.auraBlackListWhitelist(
-        makeParent()
-    )
+    local parent = makeParent()
+    local pane = harness.builders.auraBlackListWhitelist(parent)
     local info = newInfo(
         hasNativeBackend and "debuffs" or "buffs",
         "target"
@@ -1005,6 +1103,39 @@ local function testRetailSpellLists(hasNativeBackend)
         version .. " spell-list add enabled state")
     assertEqual(spellButton.enabled, false,
         version .. " spell-list entry enabled state")
+    assertEqual(tip.wordWrap, true,
+        version .. " spell-list explanation word wrap")
+    assertEqual(tip.justifyH, "LEFT",
+        version .. " spell-list explanation horizontal alignment")
+    assertEqual(tip.justifyV, "TOP",
+        version .. " spell-list explanation vertical alignment")
+    assertTrue(
+        hasPoint(tip, "TOPLEFT")
+            and hasPoint(tip, "TOPRIGHT"),
+        version .. " spell-list explanation width bounds"
+    )
+    assertTrue(
+        hasPoint(
+            spellButton,
+            "TOPLEFT",
+            tip,
+            "BOTTOMLEFT"
+        ),
+        version .. " spell-list controls follow explanation"
+    )
+    assertTrue(
+        pane.listTopPadding > 36,
+        version .. " spell-list wrapped top padding"
+    )
+    assertEqual(
+        parent._contentHeights[pane.index],
+        tostring(pane.height),
+        version .. " spell-list scroll height"
+    )
+    assertTrue(
+        harness.resizeCalls > 0,
+        version .. " spell-list scroll recalculation"
+    )
     assertEqual(mode.items[1].text,
         "Exclude Spell IDs (Reaction-Limited)",
         version .. " blacklist label")
@@ -1077,8 +1208,9 @@ local LEGACY_BUFF_OWNERS = {
 
 local function testRetailIndicatorAwareNativeWording()
     local harness = makeHarness(true, true)
+    local spellParent = makeParent()
     local spellPane =
-        harness.builders.auraBlackListWhitelist(makeParent())
+        harness.builders.auraBlackListWhitelist(spellParent)
     local arrangementPane =
         harness.builders.auraArrangement(makeParent())
     local mode = findWidget(
@@ -1099,6 +1231,7 @@ local function testRetailIndicatorAwareNativeWording()
         "initialText",
         "Max Displayed"
     )
+    local nativeTopPadding
 
     local function assertNativePresentation(
         id,
@@ -1123,6 +1256,20 @@ local function testRetailIndicatorAwareNativeWording()
             tip.text,
             "not applied here",
             label .. " inactive spell-list message"
+        )
+        if nativeTopPadding then
+            assertEqual(
+                spellPane.listTopPadding,
+                nativeTopPadding,
+                label .. " repeated native wrapped height"
+            )
+        else
+            nativeTopPadding = spellPane.listTopPadding
+        end
+        assertEqual(
+            spellParent._contentHeights[spellPane.index],
+            tostring(spellPane.height),
+            label .. " native scroll height"
         )
 
         arrangementPane.Load(info)
@@ -1172,6 +1319,15 @@ local function testRetailIndicatorAwareNativeWording()
             tip.text,
             "can apply saved spell-ID lists",
             label .. " native spell-list message"
+        )
+        assertTrue(
+            spellPane.listTopPadding < nativeTopPadding,
+            label .. " inactive wrapped height shrinks"
+        )
+        assertEqual(
+            spellParent._contentHeights[spellPane.index],
+            tostring(spellPane.height),
+            label .. " inactive scroll height"
         )
 
         arrangementPane.Load(info)
