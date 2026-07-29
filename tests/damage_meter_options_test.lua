@@ -238,7 +238,7 @@ local function createHarness()
         classColor = true,
         enabled = false,
         headerHeight = 25,
-        height = 277,
+        locked = true,
         numberMode = "perSecond",
         padding = 6,
         showSpecIcon = false,
@@ -250,6 +250,11 @@ local function createHarness()
             "DamageDone",
             "HealingDone",
             "DamageTaken",
+        },
+        windowHeights = {
+            277,
+            288,
+            299,
         },
     }
     local damageMeter = {
@@ -353,6 +358,11 @@ end
 local width = state.controls["Frame Width"]
 local windowCount = state.controls["Window Count"]
 local firstMeterType = state.controls["Meter 1 Type"]
+local secondMeterType = state.controls["Meter 2 Type"]
+local firstMeterHeight = state.controls["Meter 1 Height"]
+local secondMeterHeight = state.controls["Meter 2 Height"]
+local thirdMeterHeight = state.controls["Meter 3 Height"]
+local lockMeters = state.controls["Lock Meters"]
 local texture = state.controls["Bar Texture"]
 local enabled = state.controls["Enable BFI Damage Meter"]
 assertTrue(width and width:IsShown(), "Frame Width control visible")
@@ -364,10 +374,58 @@ assertEqual(
     "DamageDone",
     "first meter type loaded value"
 )
+assertEqual(#firstMeterType.items, 11, "all Blizzard meter types exposed")
+local expectedMeterTypes = {
+    DamageDone = true,
+    Dps = true,
+    HealingDone = true,
+    Hps = true,
+    Absorbs = true,
+    Interrupts = true,
+    Dispels = true,
+    DamageTaken = true,
+    AvoidableDamageTaken = true,
+    Deaths = true,
+    EnemyDamageTaken = true,
+}
+for _, item in ipairs(firstMeterType.items) do
+    expectedMeterTypes[item.value] = nil
+end
+assertEqual(
+    next(expectedMeterTypes),
+    nil,
+    "every Blizzard meter type has a dropdown item"
+)
+assertEqual(firstMeterHeight.value, 277, "first meter height loaded")
+assertEqual(secondMeterHeight.value, 288, "second meter height loaded")
+assertEqual(thirdMeterHeight.value, 299, "third meter height loaded")
+assertEqual(lockMeters.checked, true, "lock state loaded")
+assertEqual(
+    state.controls["Frame Height"],
+    nil,
+    "shared frame height control removed"
+)
 assertEqual(texture.selectedValue, "TestTexture", "texture loaded value")
 assertEqual(texture.selectedText, "Test Texture", "texture visible text")
 assertEqual(enabled.checked, false, "enabled state loaded")
 assertTrue(enabled.enabled, "enabled control remains writable")
+
+firstMeterType.onSelect("Deaths")
+assertEqual(DM.config.windowTypes[1], "Deaths", "meter type writes live")
+secondMeterHeight.afterValueChanged(345)
+assertEqual(
+    DM.config.windowHeights[2],
+    345,
+    "per-window height writes live"
+)
+lockMeters.onCheck(false)
+assertEqual(DM.config.locked, false, "lock setting writes live")
+windowCount.onSelect(1)
+assertEqual(secondMeterType.enabled, false, "hidden meter type disabled")
+assertEqual(secondMeterHeight.enabled, false, "hidden meter height disabled")
+windowCount.onSelect(3)
+assertEqual(secondMeterType.enabled, true, "shown meter type enabled")
+assertEqual(secondMeterHeight.enabled, true, "shown meter height enabled")
 
 enabled:SetChecked(true)
 enabled.onCheck(true)

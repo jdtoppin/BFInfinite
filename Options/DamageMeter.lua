@@ -14,10 +14,13 @@ local appearancePane
 local actionsPane
 local statusText
 local windowCount
+local lockMeters
 local windowTypeDropdowns = {}
+local windowHeightSliders = {}
+local CreateSlider
 
 local CONTENT_WIDTH = 530
-local CONTENT_HEIGHT = 720
+local CONTENT_HEIGHT = 780
 local SECTION_GAP = 12
 local GENERAL_HEIGHT = 60
 local GENERAL_STATUS_HEIGHT = 80
@@ -25,10 +28,70 @@ local CONTROL_WIDTH = 150
 local WIDE_CONTROL_WIDTH = 240
 local SLIDER_WIDTH = 140
 
+local function GetMeterTypeText(globalName, fallback)
+    return _G[globalName] or L[fallback]
+end
+
 local METER_TYPE_ITEMS = {
-    {text = L["Damage Done"], value = "DamageDone"},
-    {text = L["Healing Done"], value = "HealingDone"},
-    {text = L["Damage Taken"], value = "DamageTaken"},
+    {
+        text = GetMeterTypeText(
+            "DAMAGE_METER_TYPE_DAMAGE_DONE",
+            "Damage Done"
+        ),
+        value = "DamageDone",
+    },
+    {
+        text = GetMeterTypeText("DAMAGE_METER_TYPE_DPS", "Damage Per Second"),
+        value = "Dps",
+    },
+    {
+        text = GetMeterTypeText(
+            "DAMAGE_METER_TYPE_DAMAGE_TAKEN",
+            "Damage Taken"
+        ),
+        value = "DamageTaken",
+    },
+    {
+        text = GetMeterTypeText(
+            "DAMAGE_METER_TYPE_AVOIDABLE_DAMAGE_TAKEN",
+            "Avoidable Damage Taken"
+        ),
+        value = "AvoidableDamageTaken",
+    },
+    {
+        text = GetMeterTypeText(
+            "DAMAGE_METER_TYPE_ENEMY_DAMAGE_TAKEN",
+            "Enemy Damage Taken"
+        ),
+        value = "EnemyDamageTaken",
+    },
+    {
+        text = GetMeterTypeText(
+            "DAMAGE_METER_TYPE_HEALING_DONE",
+            "Healing Done"
+        ),
+        value = "HealingDone",
+    },
+    {
+        text = GetMeterTypeText("DAMAGE_METER_TYPE_HPS", "Healing Per Second"),
+        value = "Hps",
+    },
+    {
+        text = GetMeterTypeText("DAMAGE_METER_TYPE_ABSORBS", "Absorbs"),
+        value = "Absorbs",
+    },
+    {
+        text = GetMeterTypeText("DAMAGE_METER_TYPE_INTERRUPTS", "Interrupts"),
+        value = "Interrupts",
+    },
+    {
+        text = GetMeterTypeText("DAMAGE_METER_TYPE_DISPELS", "Dispels"),
+        value = "Dispels",
+    },
+    {
+        text = GetMeterTypeText("DAMAGE_METER_TYPE_DEATHS", "Deaths"),
+        value = "Deaths",
+    },
 }
 
 local NUMBER_MODE_ITEMS = {
@@ -155,6 +218,7 @@ local function SetWindowControlState()
     local count = DM.config.windowCount
     for index, dropdown in ipairs(windowTypeDropdowns) do
         dropdown:SetEnabled(index <= count)
+        windowHeightSliders[index]:SetEnabled(index <= count)
     end
 end
 
@@ -171,12 +235,30 @@ local function CreateWindowTypeDropdown(parent, index, x, y)
     return dropdown
 end
 
+local function CreateWindowHeightSlider(parent, index, x, y)
+    local slider = CreateSlider(
+        parent,
+        L["Meter %d Height"]:format(index),
+        x,
+        y,
+        120,
+        520,
+        1
+    )
+    slider:SetAfterValueChanged(function(value)
+        DM.config.windowHeights[index] = value
+        RefreshDamageMeter()
+    end)
+    windowHeightSliders[index] = slider
+    return slider
+end
+
 local function CreateWindowsPane()
     windowsPane = AF.CreateTitledPane(
         scroll.scrollContent,
         L["Meters"],
         CONTENT_WIDTH,
-        165
+        275
     )
     AF.SetPoint(
         windowsPane,
@@ -206,20 +288,33 @@ local function CreateWindowsPane()
         RefreshDamageMeter()
     end)
 
-    CreateWindowTypeDropdown(windowsPane, 1, 190, -50)
-    CreateWindowTypeDropdown(windowsPane, 2, 15, -115)
-    CreateWindowTypeDropdown(windowsPane, 3, 280, -115)
+    lockMeters = AF.CreateCheckButton(windowsPane, L["Lock Meters"])
+    AF.SetPoint(lockMeters, "TOPLEFT", windowsPane, 190, -50)
+    lockMeters:SetOnCheck(function(checked)
+        DM.config.locked = checked
+        RefreshDamageMeter()
+    end)
+
+    for index = 1, 3 do
+        local y = -105 - ((index - 1) * 65)
+        CreateWindowTypeDropdown(windowsPane, index, 15, y)
+        CreateWindowHeightSlider(windowsPane, index, 280, y)
+    end
 
     function windowsPane.Load()
         windowCount:SetSelectedValue(DM.config.windowCount)
+        lockMeters:SetChecked(DM.config.locked)
         for index, dropdown in ipairs(windowTypeDropdowns) do
             dropdown:SetSelectedValue(DM.config.windowTypes[index])
+            windowHeightSliders[index]:SetValue(
+                DM.config.windowHeights[index]
+            )
         end
         SetWindowControlState()
     end
 end
 
-local function CreateSlider(
+CreateSlider = function(
     parent,
     label,
     x,
@@ -248,7 +343,7 @@ local function CreateAppearancePane()
         scroll.scrollContent,
         L["Appearance"],
         CONTENT_WIDTH,
-        325
+        285
     )
     AF.SetPoint(
         appearancePane,
@@ -272,16 +367,8 @@ local function CreateAppearancePane()
         RefreshDamageMeter()
     end)
 
-    local height = CreateSlider(
-        appearancePane, L["Frame Height"], 190, -55, 120, 520, 1
-    )
-    height:SetAfterValueChanged(function(value)
-        DM.config.height = value
-        RefreshDamageMeter()
-    end)
-
     local headerHeight = CreateSlider(
-        appearancePane, L["Header Height"], 365, -55, 18, 36, 1
+        appearancePane, L["Header Height"], 190, -55, 18, 36, 1
     )
     headerHeight:SetAfterValueChanged(function(value)
         DM.config.headerHeight = value
@@ -289,7 +376,7 @@ local function CreateAppearancePane()
     end)
 
     local barHeight = CreateSlider(
-        appearancePane, L["Bar Height"], 15, -120, 14, 36, 1
+        appearancePane, L["Bar Height"], 365, -55, 14, 36, 1
     )
     barHeight:SetAfterValueChanged(function(value)
         DM.config.barHeight = value
@@ -297,7 +384,7 @@ local function CreateAppearancePane()
     end)
 
     local spacing = CreateSlider(
-        appearancePane, L["Bar Spacing"], 190, -120, 0, 8, 1
+        appearancePane, L["Bar Spacing"], 15, -120, 0, 8, 1
     )
     spacing:SetAfterValueChanged(function(value)
         DM.config.spacing = value
@@ -305,7 +392,7 @@ local function CreateAppearancePane()
     end)
 
     local padding = CreateSlider(
-        appearancePane, L["Padding"], 365, -120, 0, 12, 1
+        appearancePane, L["Padding"], 190, -120, 0, 12, 1
     )
     padding:SetAfterValueChanged(function(value)
         DM.config.padding = value
@@ -315,8 +402,8 @@ local function CreateAppearancePane()
     local backgroundAlpha = CreateSlider(
         appearancePane,
         L["Background Opacity"],
-        15,
-        -185,
+        365,
+        -120,
         0,
         1,
         0.01,
@@ -330,7 +417,7 @@ local function CreateAppearancePane()
     local barAlpha = CreateSlider(
         appearancePane,
         L["Bar Opacity"],
-        190,
+        15,
         -185,
         0,
         1,
@@ -347,7 +434,7 @@ local function CreateAppearancePane()
         CONTROL_WIDTH
     )
     texture:SetLabel(L["Bar Texture"])
-    AF.SetPoint(texture, "TOPLEFT", appearancePane, 365, -185)
+    AF.SetPoint(texture, "TOPLEFT", appearancePane, 190, -185)
     texture:SetItems(AF.LSM_GetBarTextureDropdownItems())
     texture:SetOnSelect(function(value)
         DM.config.texture = value
@@ -359,7 +446,7 @@ local function CreateAppearancePane()
         CONTROL_WIDTH
     )
     numberMode:SetLabel(L["Number Format"])
-    AF.SetPoint(numberMode, "TOPLEFT", appearancePane, 15, -250)
+    AF.SetPoint(numberMode, "TOPLEFT", appearancePane, 365, -185)
     numberMode:SetItems(NUMBER_MODE_ITEMS)
     numberMode:SetOnSelect(function(value)
         DM.config.numberMode = value
@@ -370,7 +457,7 @@ local function CreateAppearancePane()
         appearancePane,
         L["Show Specialization Icons"]
     )
-    AF.SetPoint(showSpecIcon, "TOPLEFT", appearancePane, 190, -250)
+    AF.SetPoint(showSpecIcon, "TOPLEFT", appearancePane, 15, -250)
     showSpecIcon:SetOnCheck(function(checked)
         DM.config.showSpecIcon = checked
         RefreshDamageMeter()
@@ -380,7 +467,7 @@ local function CreateAppearancePane()
         appearancePane,
         L["Use Class Colors"]
     )
-    AF.SetPoint(classColor, "TOPLEFT", appearancePane, 380, -250)
+    AF.SetPoint(classColor, "TOPLEFT", appearancePane, 200, -250)
     classColor:SetOnCheck(function(checked)
         DM.config.classColor = checked
         RefreshDamageMeter()
@@ -390,7 +477,7 @@ local function CreateAppearancePane()
         appearancePane,
         L["Accent Header"]
     )
-    AF.SetPoint(accentHeader, "TOPLEFT", appearancePane, 15, -292)
+    AF.SetPoint(accentHeader, "TOPLEFT", appearancePane, 390, -250)
     accentHeader:SetOnCheck(function(checked)
         DM.config.accentHeader = checked
         RefreshDamageMeter()
@@ -399,7 +486,6 @@ local function CreateAppearancePane()
     function appearancePane.Load()
         local config = DM.config
         width:SetValue(config.width)
-        height:SetValue(config.height)
         headerHeight:SetValue(config.headerHeight)
         barHeight:SetValue(config.barHeight)
         spacing:SetValue(config.spacing)

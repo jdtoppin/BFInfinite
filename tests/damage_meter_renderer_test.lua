@@ -125,14 +125,47 @@ local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
     function frameMethods:SetSize(width, height)
         self.width = width
         self.height = height
+        if self.scripts.OnSizeChanged then
+            self.scripts.OnSizeChanged(self, width, height)
+        end
     end
 
     function frameMethods:SetWidth(width)
         self.width = width
+        if self.scripts.OnSizeChanged then
+            self.scripts.OnSizeChanged(self, width, self.height)
+        end
     end
 
     function frameMethods:SetHeight(height)
         self.height = height
+        if self.scripts.OnSizeChanged then
+            self.scripts.OnSizeChanged(self, self.width, height)
+        end
+    end
+
+    function frameMethods:GetWidth()
+        return self.width
+    end
+
+    function frameMethods:GetHeight()
+        return self.height
+    end
+
+    function frameMethods:GetLeft()
+        return self.left
+    end
+
+    function frameMethods:GetBottom()
+        return self.bottom
+    end
+
+    function frameMethods:GetCenter()
+        return self.centerX, self.centerY
+    end
+
+    function frameMethods:GetEffectiveScale()
+        return self.effectiveScale or 1
     end
 
     function frameMethods:SetShown(shown)
@@ -157,6 +190,10 @@ local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
 
     function frameMethods:SetMovable(movable)
         self.movable = movable
+    end
+
+    function frameMethods:SetResizable(resizable)
+        self.resizable = resizable
     end
 
     function frameMethods:SetFrameStrata(strata)
@@ -191,6 +228,29 @@ local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
 
     function frameMethods:SetScript(scriptName, callback)
         self.scripts[scriptName] = callback
+    end
+
+    function frameMethods:GetScript(scriptName)
+        return self.scripts[scriptName]
+    end
+
+    function frameMethods:HookScript(scriptName, callback)
+        local previous = self.scripts[scriptName]
+        self.scripts[scriptName] = function(...)
+            if previous then previous(...) end
+            callback(...)
+        end
+    end
+
+    function frameMethods:RunScript(scriptName, ...)
+        local callback = self.scripts[scriptName]
+        if callback then
+            callback(self, ...)
+        end
+    end
+
+    function frameMethods:IsMouseOver()
+        return self.mouseOver == true
     end
 
     function frameMethods:RegisterEvent(event)
@@ -313,6 +373,39 @@ local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
         return newFrame("Button", parent, name, width, height)
     end
 
+    function AF.CreateDropdown(parent, width)
+        local dropdown = newFrame("Dropdown", parent, nil, width, 20)
+
+        function dropdown:SetItems(items)
+            self.items = items
+        end
+
+        function dropdown:SetSelectedValue(value)
+            self.selectedValue = value
+        end
+
+        function dropdown:SetOnSelect(callback)
+            self.onSelect = callback
+        end
+
+        function dropdown:Select(value)
+            self.selectedValue = value
+            self.onSelect(value)
+        end
+
+        return dropdown
+    end
+
+    function AF.CreateResizeButton(target)
+        local resize = newFrame("ResizeButton", target, nil, 16, 16)
+        target:SetResizable(true)
+        return resize
+    end
+
+    function AF.CloseDropdown()
+        state.closedDropdowns = (state.closedDropdowns or 0) + 1
+    end
+
     function AF.ApplyDefaultBackdrop_NoBorder(frame)
         frame.hasBorderlessBackdrop = true
     end
@@ -396,6 +489,7 @@ local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
         enabled = true,
         headerHeight = 22,
         height = 220,
+        locked = false,
         numberMode = "both",
         padding = 4,
         showSpecIcon = true,
@@ -403,6 +497,34 @@ local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
         texture = "AF",
         width = 300,
         windowCount = 3,
+        windowAnchors = {
+            {
+                relativeTo = 0,
+                point = "BOTTOMRIGHT",
+                relativePoint = "BOTTOMRIGHT",
+                x = -4,
+                y = 4,
+            },
+            {
+                relativeTo = 1,
+                point = "BOTTOMRIGHT",
+                relativePoint = "TOPRIGHT",
+                x = 0,
+                y = 4,
+            },
+            {
+                relativeTo = 2,
+                point = "BOTTOMRIGHT",
+                relativePoint = "TOPRIGHT",
+                x = 0,
+                y = 4,
+            },
+        },
+        windowHeights = {
+            220,
+            220,
+            220,
+        },
         windowTypes = {
             "DamageDone",
             "HealingDone",
@@ -490,10 +612,21 @@ local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
         Enum = {
             DamageMeterType = {
                 DamageDone = 11,
+                Dps = 12,
                 HealingDone = 22,
+                Hps = 23,
+                Absorbs = 24,
+                Interrupts = 25,
+                Dispels = 26,
                 DamageTaken = 33,
+                AvoidableDamageTaken = 34,
+                Deaths = 35,
+                EnemyDamageTaken = 36,
             },
         },
+        GetCursorPosition = function()
+            return state.cursorX or 0, state.cursorY or 0
+        end,
         HEALING = "Healing",
         InCombatLockdown = function()
             return false
@@ -514,6 +647,14 @@ local function loadRenderer(initialNativeEnabled, savedRestoreEnabled)
         11,
         22,
         33,
+        12,
+        23,
+        24,
+        25,
+        26,
+        34,
+        35,
+        36,
     }
     for index, meterType in ipairs(meterTypes) do
         local source = {
@@ -577,9 +718,9 @@ assertPoint(
     1,
     "BOTTOMRIGHT",
     first,
-    "BOTTOMLEFT",
-    -4,
+    "TOPRIGHT",
     0,
+    4,
     "second default anchor"
 )
 assertPoint(
@@ -587,9 +728,9 @@ assertPoint(
     1,
     "BOTTOMRIGHT",
     second,
-    "BOTTOMLEFT",
-    -4,
+    "TOPRIGHT",
     0,
+    4,
     "third default anchor"
 )
 
@@ -639,7 +780,7 @@ assertSame(
     "opaque total reaches approved formatter unchanged"
 )
 assertSame(
-    state.formatInputs[2],
+    state.formatInputs[3],
     sources[1].amountPerSecond,
     "opaque rate reaches approved formatter unchanged"
 )
@@ -653,6 +794,42 @@ assertSame(
     state.formatOutputs[sources[1].amountPerSecond],
     "formatted rate reaches number sink unchanged"
 )
+assertSame(
+    state.ambiguousInputs[2].value,
+    sources[1].name,
+    "hover title uses a separate approved name pipeline"
+)
+assertSame(
+    firstRow.hoverCard.title.text,
+    state.ambiguousOutputs[sources[1].name],
+    "hover title receives approved name output"
+)
+assertSame(
+    state.formatInputs[2],
+    sources[1].totalAmount,
+    "hover total uses a separate approved number pipeline"
+)
+assertSame(
+    state.formatInputs[4],
+    sources[1].amountPerSecond,
+    "hover rate uses a separate approved number pipeline"
+)
+assertSame(
+    firstRow.hoverCard.totalValue.text,
+    state.formatOutputs[sources[1].totalAmount],
+    "hover total reaches its FontString sink"
+)
+assertSame(
+    firstRow.hoverCard.perSecondValue.text,
+    state.formatOutputs[sources[1].amountPerSecond],
+    "hover rate reaches its FontString sink"
+)
+firstRow:RunScript("OnEnter")
+assertEqual(firstRow.highlight.shown, true, "row hover highlight shown")
+assertEqual(firstRow.hoverCard.shown, true, "row hover card shown")
+firstRow:RunScript("OnLeave")
+assertEqual(firstRow.highlight.shown, false, "row hover highlight hidden")
+assertEqual(firstRow.hoverCard.shown, false, "row hover card hidden")
 assertEqual(state.unsafeOperations, 0, "opaque values never inspected")
 
 assertEqual(
@@ -694,6 +871,334 @@ assertEqual(
     "settings gear opens Damage Meter section"
 )
 
+assertEqual(
+    #first.typeDropdown.items,
+    11,
+    "in-window filter exposes every 12.1 meter type"
+)
+assertEqual(
+    first.typeDropdown.items[1].value,
+    "DamageDone",
+    "filter starts with damage done"
+)
+assertEqual(
+    first.typeDropdown.items[5].value,
+    "EnemyDamageTaken",
+    "filter includes enemy damage taken"
+)
+assertEqual(
+    first.typeDropdown.items[11].value,
+    "Deaths",
+    "filter follows Blizzard's category ordering"
+)
+first.typeDropdown:Select("Dps")
+assertEqual(DM.config.windowTypes[1], "Dps", "filter selection persists")
+assertEqual(
+    first.typeDropdown.selectedValue,
+    "Dps",
+    "filter selection stays visible"
+)
+assertSame(
+    firstRow.perSecond.points[1].relativeTo,
+    firstRow,
+    "DPS places rate in the primary right column"
+)
+assertSame(
+    firstRow.total.points[1].relativeTo,
+    firstRow.perSecond,
+    "DPS places total in the secondary column"
+)
+first.typeDropdown:Select("Interrupts")
+assertEqual(
+    firstRow.total.shown,
+    true,
+    "interrupts keep their total count"
+)
+assertEqual(
+    firstRow.perSecond.shown,
+    false,
+    "interrupts suppress meaningless rates"
+)
+assertEqual(
+    firstRow.hoverCard.perSecondValue.shown,
+    false,
+    "interrupt hover card also suppresses rates"
+)
+first.typeDropdown:Select("EnemyDamageTaken")
+assertEqual(
+    firstRow.iconHolder.shown,
+    false,
+    "enemy damage suppresses source icons"
+)
+first.typeDropdown:Select("DamageDone")
+assertEqual(
+    firstRow.iconHolder.shown,
+    true,
+    "regular views restore configured icons"
+)
+
+first.lock:Click()
+assertEqual(DM.config.locked, true, "lock button locks all meters")
+assertEqual(first.resizable, false, "lock disables first resize")
+assertEqual(second.resizable, false, "lock disables second resize")
+assertEqual(first.resize.shown, false, "lock hides first resize grip")
+first.dragGrip:RunScript("OnDragStart")
+assertEqual(first.moving, nil, "locked drag grip cannot start moving")
+second.lock:Click()
+assertEqual(DM.config.locked, false, "any lock button unlocks all")
+assertEqual(first.resizable, true, "unlock restores first resize")
+assertEqual(third.resize.shown, true, "unlock restores resize grips")
+
+first:SetSize(410, 275)
+first.resize:RunScript("OnMouseUp", "LeftButton")
+assertEqual(DM.config.width, 410, "resize stores shared width")
+assertEqual(
+    DM.config.windowHeights[1],
+    275,
+    "resize stores first independent height"
+)
+assertEqual(first.width, 410, "resized window keeps shared width")
+assertEqual(second.width, 410, "second receives shared width")
+assertEqual(third.width, 410, "third receives shared width")
+assertEqual(second.height, 220, "second height remains independent")
+
+first.mouseOver = true
+first.centerY = 300
+state.cursorY = 350
+assertEqual(
+    third.dragGrip.dragButton,
+    "LeftButton",
+    "dedicated grip is draggable"
+)
+third.dragGrip:RunScript("OnDragStart")
+assertEqual(
+    #third.points,
+    1,
+    "drag start preserves the current screen position"
+)
+third:RunScript("OnUpdate")
+assertEqual(first.dockPreview.shown, true, "top docking preview shown")
+assertEqual(
+    first.dockPreview.points[1].point,
+    "TOPLEFT",
+    "top preview covers target top half"
+)
+third.dragGrip:RunScript("OnDragStop")
+assertEqual(first.dockPreview.shown, false, "preview clears on drop")
+assertEqual(
+    DM.config.windowAnchors[3].relativeTo,
+    1,
+    "dropped meter persists target window"
+)
+assertEqual(
+    DM.config.windowAnchors[3].point,
+    "BOTTOMRIGHT",
+    "top drop persists above anchor"
+)
+assertEqual(
+    DM.config.windowAnchors[2].relativeTo,
+    3,
+    "occupied docking side inserts the dropped meter into the stack"
+)
+assertPoint(
+    third,
+    1,
+    "BOTTOMRIGHT",
+    first,
+    "TOPRIGHT",
+    0,
+    4,
+    "top docking anchor"
+)
+assertPoint(
+    second,
+    1,
+    "BOTTOMRIGHT",
+    third,
+    "TOPRIGHT",
+    0,
+    4,
+    "existing neighbor moves above the inserted meter"
+)
+
+state.cursorY = 250
+third.header:RunScript("OnDragStart")
+third:RunScript("OnUpdate")
+assertEqual(first.dockPreview.shown, true, "bottom docking preview shown")
+assertEqual(
+    first.dockPreview.points[1].relativePoint,
+    "LEFT",
+    "bottom preview starts at target midpoint"
+)
+third.header:RunScript("OnDragStop")
+assertEqual(
+    DM.config.windowAnchors[3].point,
+    "TOPRIGHT",
+    "bottom drop persists below anchor"
+)
+assertEqual(
+    DM.config.windowAnchors[2].relativeTo,
+    1,
+    "moving a middle meter closes its previous stack gap"
+)
+assertPoint(
+    third,
+    1,
+    "TOPRIGHT",
+    first,
+    "BOTTOMRIGHT",
+    0,
+    -4,
+    "bottom docking anchor"
+)
+assertPoint(
+    second,
+    1,
+    "BOTTOMRIGHT",
+    first,
+    "TOPRIGHT",
+    0,
+    4,
+    "old neighbor remains in the original stack without overlap"
+)
+
+first.mouseOver = false
+third.header:RunScript("OnDragStart")
+third.left = 111
+third.bottom = 222
+third:RunScript("OnUpdate")
+third.header:RunScript("OnDragStop")
+assertEqual(
+    DM.config.windowAnchors[3].relativeTo,
+    0,
+    "free move detaches from another meter"
+)
+assertEqual(
+    DM.config.windowAnchors[3].point,
+    "BOTTOMLEFT",
+    "free move stores a screen anchor"
+)
+assertEqual(DM.config.windowAnchors[3].x, 111, "free move stores x")
+assertEqual(DM.config.windowAnchors[3].y, 222, "free move stores y")
+assertPoint(
+    third,
+    1,
+    "BOTTOMLEFT",
+    uiParent,
+    "BOTTOMLEFT",
+    111,
+    222,
+    "free move reapplies persisted screen anchor"
+)
+
+DM.config.windowAnchors[1] = {
+    relativeTo = 2,
+    point = "CENTER",
+    relativePoint = "CENTER",
+    x = 0,
+    y = 0,
+}
+DM.config.windowAnchors[2] = {
+    relativeTo = 1,
+    point = "CENTER",
+    relativePoint = "CENTER",
+    x = 0,
+    y = 0,
+}
+assertEqual(Renderer.ApplySettings(), true, "cyclic anchors are repaired")
+assertEqual(
+    DM.config.windowAnchors[1].relativeTo,
+    0,
+    "cyclic anchor falls back to UIParent"
+)
+assertEqual(
+    DM.config.windowAnchors[1].point,
+    "CENTER",
+    "cyclic anchor uses safe center fallback"
+)
+assertEqual(Renderer.ResetPosition(), true, "reset restores default stack")
+assertPoint(
+    second,
+    1,
+    "BOTTOMRIGHT",
+    first,
+    "TOPRIGHT",
+    0,
+    4,
+    "reset restores vertical stack"
+)
+
+first.mouseOver = false
+second.mouseOver = true
+second.centerY = 300
+state.cursorY = 250
+third.header:RunScript("OnDragStart")
+third:RunScript("OnUpdate")
+third.header:RunScript("OnDragStop")
+assertEqual(
+    DM.config.windowAnchors[3].relativeTo,
+    1,
+    "drop beneath a target occupies the target's previous stack slot"
+)
+assertEqual(
+    DM.config.windowAnchors[2].relativeTo,
+    3,
+    "target moves above an inserted meter when its parent occupied the side"
+)
+assertPoint(
+    third,
+    1,
+    "BOTTOMRIGHT",
+    first,
+    "TOPRIGHT",
+    0,
+    4,
+    "parent-side insertion places the dragged meter between neighbors"
+)
+assertPoint(
+    second,
+    1,
+    "BOTTOMRIGHT",
+    third,
+    "TOPRIGHT",
+    0,
+    4,
+    "parent-side insertion keeps the target on the far side"
+)
+
+Renderer.ResetPosition()
+DM.config.windowAnchors[3] = {
+    relativeTo = 0,
+    point = "CENTER",
+    relativePoint = "CENTER",
+    x = 250,
+    y = 100,
+}
+Renderer.ApplySettings()
+second.mouseOver = false
+third.mouseOver = true
+third.centerY = 300
+state.cursorY = 250
+first.header:RunScript("OnDragStart")
+assertEqual(
+    DM.config.windowAnchors[2].relativeTo,
+    0,
+    "moving a screen-rooted meter rehomes its docked neighbor"
+)
+first:RunScript("OnUpdate")
+first.header:RunScript("OnDragStop")
+assertEqual(
+    DM.config.windowAnchors[1].relativeTo,
+    3,
+    "screen-rooted meter can dock without carrying its old stack"
+)
+assertEqual(
+    DM.config.windowAnchors[2].relativeTo,
+    0,
+    "old stack stays rooted independently after the move"
+)
+Renderer.ResetPosition()
+
 assertEqual(Renderer.SetEnabled(false), true, "renderer disable")
 assertEqual(state.nativeEnabled, true, "native preference restored")
 assertEqual(
@@ -711,9 +1216,13 @@ assertEqual(Renderer.SetEnabled(true), true, "renderer re-enable")
 assertEqual(state.nativeEnabled, false, "native hidden after re-enable")
 local originalFirstWindow = first
 local nativeCallsBeforeLiveApply = #state.nativeSetCalls
+local thirdRow = third.body.children[1]
+thirdRow:RunScript("OnEnter")
+assertEqual(thirdRow.hoverCard.shown, true, "third hover card precondition")
 
 DM.config.width = 360
-DM.config.height = 260
+DM.config.windowHeights[1] = 260
+DM.config.windowHeights[2] = 240
 DM.config.headerHeight = 26
 DM.config.barHeight = 24
 DM.config.spacing = 4
@@ -735,6 +1244,7 @@ assertSame(
 )
 assertEqual(first.width, 360, "live width")
 assertEqual(first.height, 260, "live height")
+assertEqual(second.height, 240, "second window keeps its own height")
 assertEqual(first.header.height, 26, "live header height")
 assertEqual(firstRow.height, 24, "live bar height")
 assertEqual(firstRow.points[1].x, 6, "live horizontal padding")
@@ -755,6 +1265,11 @@ assertEqual(first.body.backdropColor.a, 0.65, "live background alpha")
 assertEqual(second.shown, true, "second remains shown")
 assertEqual(third.shown, false, "window count applies live")
 assertEqual(
+    thirdRow.hoverCard.shown,
+    false,
+    "window count reduction clears independent hover cards"
+)
+assertEqual(
     #state.nativeSetCalls,
     nativeCallsBeforeLiveApply,
     "live appearance does not rewrite native CVar"
@@ -768,10 +1283,16 @@ assertEqual(Renderer.Refresh(), true, "empty session refresh")
 assertEqual(firstRow.shown, false, "empty session clears stale row")
 
 state.available = false
+firstRow:RunScript("OnEnter")
 assertEqual(Renderer.Refresh(), false, "unavailable API refresh")
 assertEqual(first.shown, false, "unavailable API hides first window")
 assertEqual(second.shown, false, "unavailable API hides second window")
 assertEqual(third.shown, false, "unavailable API hides third window")
+assertEqual(
+    firstRow.hoverCard.shown,
+    false,
+    "unavailable API clears active hover cards"
+)
 assertEqual(state.nativeEnabled, true, "unavailable API restores native")
 
 state.available = true
@@ -784,11 +1305,17 @@ assertEqual(state.nativeEnabled, false, "recovery hides native again")
 assertEqual(firstRow.shown, true, "recovery repopulates rows")
 assertEqual(state.unsafeOperations, 0, "recovery remains opaque-safe")
 
+firstRow:RunScript("OnEnter")
 assertEqual(Renderer.SetEnabled(false), true, "final renderer disable")
 assertEqual(state.nativeEnabled, true, "final disable restores native")
 assertEqual(first.shown, false, "disable hides first window")
 assertEqual(second.shown, false, "disable hides second window")
 assertEqual(third.shown, false, "disable hides third window")
+assertEqual(
+    firstRow.hoverCard.shown,
+    false,
+    "disable clears active hover cards"
+)
 
 local ReloadRenderer, _, reloadState = loadRenderer(false, true)
 assertEqual(

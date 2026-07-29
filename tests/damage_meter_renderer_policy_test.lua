@@ -122,6 +122,16 @@ assertContains(
 )
 assertContains(
     options,
+    "DM.config.windowHeights[index] = value",
+    "each BFI meter exposes a live independent height"
+)
+assertContains(
+    options,
+    "DM.config.locked = checked",
+    "BFI meter movement and resizing expose a shared live lock"
+)
+assertContains(
+    options,
     'pane.tips:SetTipsPosition("BOTTOMRIGHT", 0, 0)',
     "right-edge help must expand inward inside the settings viewport"
 )

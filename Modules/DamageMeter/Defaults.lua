@@ -13,8 +13,36 @@ local defaults = {
         "HealingDone",
         "DamageTaken",
     },
+    windowHeights = {
+        220,
+        220,
+        220,
+    },
+    windowAnchors = {
+        {
+            relativeTo = 0,
+            point = "BOTTOMRIGHT",
+            relativePoint = "BOTTOMRIGHT",
+            x = -4,
+            y = 4,
+        },
+        {
+            relativeTo = 1,
+            point = "BOTTOMRIGHT",
+            relativePoint = "TOPRIGHT",
+            x = 0,
+            y = 4,
+        },
+        {
+            relativeTo = 2,
+            point = "BOTTOMRIGHT",
+            relativePoint = "TOPRIGHT",
+            x = 0,
+            y = 4,
+        },
+    },
+    locked = false,
     width = 300,
-    height = 220,
     headerHeight = 22,
     barHeight = 20,
     spacing = 2,
@@ -30,14 +58,34 @@ local defaults = {
 
 local validWindowTypes = {
     DamageDone = true,
+    Dps = true,
     HealingDone = true,
+    Hps = true,
+    Absorbs = true,
+    Interrupts = true,
+    Dispels = true,
     DamageTaken = true,
+    AvoidableDamageTaken = true,
+    Deaths = true,
+    EnemyDamageTaken = true,
 }
 
 local validNumberModes = {
     total = true,
     perSecond = true,
     both = true,
+}
+
+local validAnchorPoints = {
+    TOPLEFT = true,
+    TOP = true,
+    TOPRIGHT = true,
+    LEFT = true,
+    CENTER = true,
+    RIGHT = true,
+    BOTTOMLEFT = true,
+    BOTTOM = true,
+    BOTTOMRIGHT = true,
 }
 
 local function CopyWindowTypes(source)
@@ -48,14 +96,32 @@ local function CopyWindowTypes(source)
     return copy
 end
 
+local function CopyWindowHeights(source)
+    local copy = {}
+    for index = 1, 3 do
+        copy[index] = source[index]
+    end
+    return copy
+end
+
+local function CopyWindowAnchors(source)
+    local copy = {}
+    for index = 1, 3 do
+        copy[index] = AF.Copy(source[index])
+    end
+    return copy
+end
+
 local function CopyDefaults()
     local copy = AF.Copy(defaults)
     copy.windowTypes = CopyWindowTypes(defaults.windowTypes)
+    copy.windowHeights = CopyWindowHeights(defaults.windowHeights)
+    copy.windowAnchors = CopyWindowAnchors(defaults.windowAnchors)
     return copy
 end
 
 local function NormalizeNumber(value, default, minimum, maximum, integer)
-    if type(value) ~= "number" then
+    if type(value) ~= "number" or value ~= value then
         return default
     end
 
@@ -64,6 +130,60 @@ local function NormalizeNumber(value, default, minimum, maximum, integer)
         value = math.floor(value + 0.5)
     end
     return value
+end
+
+local function HasAnchorCycle(anchors)
+    for start = 1, 3 do
+        local seen = {}
+        local current = start
+        while current ~= 0 do
+            if seen[current] then
+                return true
+            end
+            seen[current] = true
+            current = anchors[current].relativeTo
+        end
+    end
+    return false
+end
+
+local function NormalizeWindowAnchors(config)
+    if type(config.windowAnchors) ~= "table" then
+        config.windowAnchors = CopyWindowAnchors(defaults.windowAnchors)
+        return
+    end
+
+    for index = 1, 3 do
+        local anchor = config.windowAnchors[index]
+        local default = defaults.windowAnchors[index]
+        if type(anchor) ~= "table" then
+            anchor = AF.Copy(default)
+            config.windowAnchors[index] = anchor
+        end
+
+        anchor.relativeTo = NormalizeNumber(
+            anchor.relativeTo,
+            default.relativeTo,
+            0,
+            3,
+            true
+        )
+        if anchor.relativeTo == index then
+            anchor.relativeTo = default.relativeTo
+        end
+        if not validAnchorPoints[anchor.point] then
+            anchor.point = default.point
+        end
+        if not validAnchorPoints[anchor.relativePoint] then
+            anchor.relativePoint = default.relativePoint
+        end
+        anchor.x = NormalizeNumber(anchor.x, default.x, -4096, 4096)
+        anchor.y = NormalizeNumber(anchor.y, default.y, -4096, 4096)
+    end
+
+    if HasAnchorCycle(config.windowAnchors) then
+        config.windowAnchors = CopyWindowAnchors(defaults.windowAnchors)
+    end
 end
 
 local function NormalizeConfig(config)
@@ -88,17 +208,36 @@ local function NormalizeConfig(config)
             config.windowTypes[index] = defaults.windowTypes[index]
         end
     end
+
+    local legacyHeight = NormalizeNumber(
+        config.height,
+        defaults.windowHeights[1],
+        120,
+        520,
+        true
+    )
+    config.height = nil
+    if type(config.windowHeights) ~= "table" then
+        config.windowHeights = {}
+    end
+    for index = 1, 3 do
+        config.windowHeights[index] = NormalizeNumber(
+            config.windowHeights[index],
+            legacyHeight,
+            120,
+            520,
+            true
+        )
+    end
+    NormalizeWindowAnchors(config)
+    if type(config.locked) ~= "boolean" then
+        config.locked = defaults.locked
+    end
+
     config.width = NormalizeNumber(
         config.width,
         defaults.width,
         220,
-        520,
-        true
-    )
-    config.height = NormalizeNumber(
-        config.height,
-        defaults.height,
-        120,
         520,
         true
     )
@@ -162,16 +301,6 @@ end
 AF.RegisterCallback("BFI_UpdateProfile", function(_, profile)
     if type(profile.damageMeter) ~= "table" then
         profile.damageMeter = CopyDefaults()
-    else
-        for key, value in next, defaults do
-            if profile.damageMeter[key] == nil then
-                if type(value) == "table" then
-                    profile.damageMeter[key] = CopyWindowTypes(value)
-                else
-                    profile.damageMeter[key] = value
-                end
-            end
-        end
     end
 
     NormalizeConfig(profile.damageMeter)
@@ -185,5 +314,4 @@ end
 function DM.ResetToDefaults()
     wipe(DM.config)
     AF.Merge(DM.config, CopyDefaults())
-    DM.config.windowTypes = CopyWindowTypes(defaults.windowTypes)
 end
