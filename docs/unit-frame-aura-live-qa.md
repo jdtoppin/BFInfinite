@@ -22,6 +22,13 @@ branch onto another. Each integration leaf contains its own required
 ancestors, but it does not contain sibling frame integrations; use the
 aggregate only after the isolated leaves pass.
 
+Use this clean isolated-install sequence: AF #19 with BFInfinite #90, then AF
+#22 with BFInfinite #101, then AF #23 with the disposable #91 aggregate.
+Delete and replace both addon folders between pairs. Descendants include their
+ancestors, never sibling integrations; do not merge branches or overlay
+folders to manufacture a test build. PR #91 is validation-only and must never
+be merged.
+
 For the final stack, use AbstractFramework PR #23, branch
 `codex/secret-unit-identity`, exact head
 `43f79cf2e9e91c47c9142c3546c900baf8fe092f` (r35).
@@ -97,6 +104,8 @@ families:
 
 ```text
 G = P * (K + 1)
+initial reservations = 10 * G
+fresh ceiling = G * ceil(numTotal / 10) * 10
 ```
 
 Color expansion is accepted only when `G <= 8`. Otherwise the whole row keeps
@@ -119,10 +128,13 @@ prebuilt variants. If it exceeds eight, all variants retain their full
 baseline gray groups. Never drop a category and never color only part of a
 row.
 
-Example: `P=2`, `K=2`, and `numTotal=4`, with one friendly group and one group
-on each hostile side, produces six active groups in either relation, twelve
-prebuilt groups, 120 initial reservations, and a fresh ceiling of 120. Only
-one relation presentation may be visible.
+Example: `Pf=2`, `Pm=1`, `Pc=1`, `K=2`, and `numTotal=4` produces six active
+groups in either relation, twelve prebuilt groups, 120 initial reservations,
+and a fresh ceiling of 120. Only one relation presentation may be visible.
+
+Raid example: `P=1`, `K=3`, and `numTotal=8` gives `G=4`, 40 initial
+reservations per indicator, and a fresh ceiling of 40. Forty Raid frames with
+two rows each therefore prebuild 320 groups and 3,200 initial reservations.
 
 ## Clean setup and evidence
 
@@ -175,6 +187,15 @@ Mutate every supported setting for both Buffs and Debuffs:
 - same-value changes, multiple changes before commit, changes in combat, and
   changes while hovered.
 
+Exercise Global Colors as a complete CRUD surface: add, inspect, search,
+change, and delete exact IDs; cancel without mutation; confirm exactly one
+mutation; reset and restore defaults; import/export valid maps; and reject or
+normalize malformed IDs, RGBA values, and imported structures according to
+the documented policy. Repeat search, empty-state, validation, confirm/cancel,
+reset, and import in every available locale. Long rows and explanations must
+wrap without clipping. Confirm the old #98 per-indicator Block Fill Color
+picker is absent; color ownership lives only in Global Colors.
+
 Verify that live-tunable values update without allocation and that
 construction-owned values produce one reload-required state. Reverting to the
 exact applied construction clears the prompt. The newest saved mutation wins.
@@ -186,6 +207,20 @@ hours, and days correctly, with permanent auras blank.
 
 ### 3. Filters, overlap, and exact colors
 
+- Temporarily enable Blizzard's nonpersistent tooltip spell-ID display. Run
+  the first command before choosing fixtures and the second after the gate:
+
+  ```text
+  /run BFIQAOldSpellIDs=GetCVar("tooltipShowAuraSpellIDs");SetCVar("tooltipShowAuraSpellIDs",1)
+  /run SetCVar("tooltipShowAuraSpellIDs",BFIQAOldSpellIDs);BFIQAOldSpellIDs=nil
+  ```
+
+  From visible tooltips, record fixtures outside addon code: A1 and A2 use
+  exactly the same green `{0, 1, 0, 1}`, A3 uses pink
+  `{1, 0.25, 0.6, 1}`, a related but unentered spell remains gray, and
+  unrelated U1 remains gray. Add optional hostile D1 when a permitted harmful
+  fixture is available. Never add addon logging or aura inspection to discover
+  or verify an identity.
 - Test each supported native category alone and in overlapping combinations.
 - Confirm OR-unions are compiled as disjoint groups and do not duplicate an
   aura.
@@ -195,6 +230,10 @@ hours, and days correctly, with permanent auras blank.
   and an unlisted gray spell.
 - Change IDs inside one family and confirm live tuning. Add a new family and
   confirm the reload boundary.
+- Add and remove families repeatedly. Native groups must remain compact and
+  contiguous, with no `AuraSlots` or blank-slot gaps. Confirm each group's cap
+  and sort are independent; combined row capacity and cross-family ordering
+  must not be mistaken for one global cap or sort.
 - Test exactly eight color-expanded active groups and an over-budget case.
   The latter must preserve the complete baseline gray policy with no reaction
   gate added by the unused colors.
@@ -226,7 +265,9 @@ seeded containers. Include a failed/deferred holder write, reload quiesce, and
 destroy while hovered. The implementation may read only BFInfinite's plain
 holder state and its own tracked configuration. It must not read native
 visibility, children, buttons, aura data, or tooltip ownership, and must not
-drive a tooltip to force hover to end.
+drive a tooltip to force hover to end. `GameTooltip` may remain visible while
+the alpha curtain applies; BFInfinite must neither inspect nor dismiss it, and
+the transition must produce no error or taint.
 
 ### 5. Unit and roster churn
 
@@ -266,9 +307,14 @@ or expose private identity, spell, duration, count, or source.
 - Verify provider entry/exit does not construct a duplicate container,
   retarget to a test identity, apply reaction gates to Blizzard test data, or
   mutate settings.
+- On one already-built live-to-test-to-live cycle, require exactly two added
+  provider-switch events, one test-provider activation, one live-provider
+  restoration, and no container, group, or button allocation.
 - Exit Edit Mode and confirm the newest live unit, relation, and roster appear.
 - Cover private and boss-aura fixtures supplied by Blizzard without reading
   their protected data.
+- BFI Config Mode is not a spell-identity provider: its preview remains gray
+  and must not consume or infer a Global Colors entry.
 
 ### 8. Upper-right Buffs and Debuffs
 
@@ -315,6 +361,9 @@ Do not rerun the 12.1 native matrix on 12.0.7.
    switch, export, reload, and re-import.
 4. Confirm legacy unit-frame Block rows remain gray. The saved 12.1 map must
    not be applied, inferred, normalized into fewer colors, or discarded.
+   The old raw `auraData.spellId` lookup must not be restored on 12.0.7; that
+   active-aura read is secret-unsafe even though the static saved map is
+   preserved.
 5. Confirm legacy upper-right Buffs/Debuffs still load without a
    12.1-only `CreateFrame` path or error.
 6. Return the exported profile to 12.1 and confirm the exact families and IDs
