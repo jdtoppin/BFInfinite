@@ -483,6 +483,9 @@ local function makeHarness(hasNativeBackend)
                 return key
             end,
         }),
+        funcs = {
+            LoadPosition = AF.LoadPosition,
+        },
         modules = {
             UnitFrames = UF,
         },
