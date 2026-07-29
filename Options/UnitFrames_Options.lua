@@ -294,16 +294,28 @@ local function IsAuraIndicator(t)
 end
 
 local nativeHelpfulOwners = {
+    boss = true,
+    focus = true,
+    focustarget = true,
     player = true,
     pet = true,
+    pettarget = true,
     party = true,
     raid = true,
+    target = true,
+    targettarget = true,
 }
 
 local function HasNativeAuraContainerBackend()
     return AF.isRetail
         and type(UF.HasNativeAuraContainerBackend) == "function"
         and UF.HasNativeAuraContainerBackend()
+end
+
+local function HasAuraFilterToken(key, token)
+    local auraFilters = AuraUtil and AuraUtil.AuraFilters
+    return type(auraFilters) == "table"
+        and auraFilters[key] == token
 end
 
 local nativeAuraReloadDialog
@@ -3249,19 +3261,47 @@ builder["auraBaseFilters"] = function(parent)
     tip:SetJustifyV("TOP")
     tip:SetWordWrap(true)
 
+    local retailBaseHeight = 117
+    local function SetRetailAuraFilter(
+        baseFilter,
+        config,
+        field,
+        checked
+    )
+        if not F.SetUnitFrameAuraFilter(
+            baseFilter,
+            config,
+            field,
+            checked
+        ) then
+            return false
+        end
+
+        -- A supported edit is the explicit migration boundary for profiles
+        -- copied back from a newer client. Retire only fields this client
+        -- cannot express so a hidden selection cannot keep widening the row.
+        if not HasAuraFilterToken("Important", "IMPORTANT") then
+            config.important = false
+        end
+        if not HasAuraFilterToken("Dispellable", "DISPELLABLE") then
+            config.anyDispellable = false
+        end
+        return true
+    end
+
     local function UpdateRetailPaneHeight()
         local extraHeight =
             tip:GetStringHeight() - tip:GetLineHeight()
         if extraHeight < 0 then
             extraHeight = 0
         end
-        pane:SetHeight(117 + ceil(extraHeight))
+        pane:SetHeight(retailBaseHeight + ceil(extraHeight))
         RefreshOptionPaneHeight(parent, pane)
     end
 
     local allAuras = AF.CreateCheckButton(pane, L["All Auras"])
     allAuras:SetOnCheck(function(checked)
-        if not F.SetUnitFrameAuraFilter(
+        if not SetRetailAuraFilter(
             pane.t.id == "buffs" and "HELPFUL" or "HARMFUL",
             pane.t.cfg.filters,
             "all",
@@ -3277,7 +3317,7 @@ builder["auraBaseFilters"] = function(parent)
         if AF.isRetail then
             local baseFilter =
                 pane.t.id == "buffs" and "HELPFUL" or "HARMFUL"
-            if not F.SetUnitFrameAuraFilter(
+            if not SetRetailAuraFilter(
                 baseFilter,
                 pane.t.cfg.filters,
                 "player",
@@ -3296,7 +3336,7 @@ builder["auraBaseFilters"] = function(parent)
         L["Not Player, Pet, or Vehicle"]
     )
     notPlayer:SetOnCheck(function(checked)
-        if not F.SetUnitFrameAuraFilter(
+        if not SetRetailAuraFilter(
             pane.t.id == "buffs" and "HELPFUL" or "HARMFUL",
             pane.t.cfg.filters,
             "notPlayer",
@@ -3310,7 +3350,7 @@ builder["auraBaseFilters"] = function(parent)
     local castByOthers = AF.CreateCheckButton(pane, L["Cast By Others"])
     castByOthers:SetOnCheck(function(checked)
         if AF.isRetail then
-            if not F.SetUnitFrameAuraFilter(
+            if not SetRetailAuraFilter(
                 "HELPFUL",
                 pane.t.cfg.filters,
                 "bigDefensive",
@@ -3327,7 +3367,7 @@ builder["auraBaseFilters"] = function(parent)
     local castByUnit = AF.CreateCheckButton(pane, L["Cast By Unit"])
     castByUnit:SetOnCheck(function(checked)
         if AF.isRetail then
-            if not F.SetUnitFrameAuraFilter(
+            if not SetRetailAuraFilter(
                 "HELPFUL",
                 pane.t.cfg.filters,
                 "externalDefensive",
@@ -3346,7 +3386,7 @@ builder["auraBaseFilters"] = function(parent)
         if AF.isRetail then
             local baseFilter =
                 pane.t.id == "buffs" and "HELPFUL" or "HARMFUL"
-            if not F.SetUnitFrameAuraFilter(
+            if not SetRetailAuraFilter(
                 baseFilter,
                 pane.t.cfg.filters,
                 "raidInCombat",
@@ -3365,7 +3405,7 @@ builder["auraBaseFilters"] = function(parent)
         if AF.isRetail then
             local baseFilter =
                 pane.t.id == "buffs" and "HELPFUL" or "HARMFUL"
-            if not F.SetUnitFrameAuraFilter(
+            if not SetRetailAuraFilter(
                 baseFilter,
                 pane.t.cfg.filters,
                 "raidPlayerDispellable",
@@ -3384,16 +3424,30 @@ builder["auraBaseFilters"] = function(parent)
         if AF.isRetail then
             local baseFilter =
                 pane.t.id == "buffs" and "HELPFUL" or "HARMFUL"
-            if not F.SetUnitFrameAuraFilter(
+            if not SetRetailAuraFilter(
                 baseFilter,
                 pane.t.cfg.filters,
-                "raidPlayerDispellable",
+                "anyDispellable",
                 checked
             ) then
                 return
             end
         else
             pane.t.cfg.filters.dispellable = checked
+        end
+        LoadIndicatorConfig(pane.t)
+    end)
+
+    local important =
+        AF.CreateCheckButton(pane, L["Important Enemy Buffs"])
+    important:SetOnCheck(function(checked)
+        if not SetRetailAuraFilter(
+            "HELPFUL",
+            pane.t.cfg.filters,
+            "important",
+            checked
+        ) then
+            return
         end
         LoadIndicatorConfig(pane.t)
     end)
@@ -3407,9 +3461,13 @@ builder["auraBaseFilters"] = function(parent)
         AF.ClearPoints(castByNPC)
         AF.ClearPoints(castByBoss)
         AF.ClearPoints(dispellable)
+        AF.ClearPoints(important)
     end
 
-    local function LayoutRetailFilters()
+    local function LayoutRetailFilters(
+        hasImportant,
+        hasAnyDispellable
+    )
         ClearFilterPoints()
         AF.SetPoint(
             allAuras,
@@ -3437,15 +3495,44 @@ builder["auraBaseFilters"] = function(parent)
             0,
             -7
         )
-        AF.SetPoint(castByOthers, "TOPLEFT", castByBoss, 185, 0)
-        AF.SetPoint(
-            castByUnit,
-            "TOPLEFT",
-            castByBoss,
-            "BOTTOMLEFT",
-            0,
-            -7
-        )
+        if hasAnyDispellable then
+            AF.SetPoint(dispellable, "TOPLEFT", castByBoss, 185, 0)
+            AF.SetPoint(
+                castByOthers,
+                "TOPLEFT",
+                castByBoss,
+                "BOTTOMLEFT",
+                0,
+                -7
+            )
+            AF.SetPoint(castByUnit, "TOPLEFT", castByOthers, 185, 0)
+            if hasImportant then
+                AF.SetPoint(
+                    important,
+                    "TOPLEFT",
+                    castByOthers,
+                    "BOTTOMLEFT",
+                    0,
+                    -7
+                )
+            end
+        else
+            AF.SetPoint(castByOthers, "TOPLEFT", castByBoss, 185, 0)
+            AF.SetPoint(
+                castByUnit,
+                "TOPLEFT",
+                castByBoss,
+                "BOTTOMLEFT",
+                0,
+                -7
+            )
+            if hasImportant then
+                AF.SetPoint(important, "TOPLEFT", castByUnit, 185, 0)
+            end
+        end
+
+        retailBaseHeight =
+            hasImportant and hasAnyDispellable and 142 or 117
     end
 
     local function LayoutLegacyFilters()
@@ -3470,6 +3557,7 @@ builder["auraBaseFilters"] = function(parent)
             -7
         )
         AF.SetPoint(dispellable, "TOPLEFT", castByBoss, 185, 0)
+        important:Hide()
     end
 
     function pane.Load(t)
@@ -3482,6 +3570,17 @@ builder["auraBaseFilters"] = function(parent)
                 F.ResolveUnitFrameAuraFilters(baseFilter, t.cfg.filters)
             filters = filters or {}
             migration = migration or {}
+            local usesNative = UsesNativeAuraContainer(t)
+            local hasImportant =
+                HasAuraFilterToken("Important", "IMPORTANT")
+            local hasAnyDispellable =
+                HasAuraFilterToken("Dispellable", "DISPELLABLE")
+            local unsupportedPtr7Selection =
+                (filters.important and not hasImportant)
+                or (
+                    filters.anyDispellable
+                    and not hasAnyDispellable
+                )
             local friendlyHelpful =
                 t.id == "buffs"
                 and (
@@ -3491,9 +3590,17 @@ builder["auraBaseFilters"] = function(parent)
                     or t.owner == "raid"
                 )
 
-            LayoutRetailFilters()
+            LayoutRetailFilters(hasImportant, hasAnyDispellable)
             tip:SetText(
                 L["Retail uses Blizzard-defined categories; All Auras overrides narrower categories"]
+                    .. (
+                        unsupportedPtr7Selection
+                        and (
+                            "\n"
+                            .. L["This profile selects a 12.1 aura category unavailable on this client. The legacy renderer safely widens the row to All Auras; changing any supported category retires the unavailable selection"]
+                        )
+                        or ""
+                    )
             )
             RunNextFrame(UpdateRetailPaneHeight)
             allAuras:Show()
@@ -3504,7 +3611,18 @@ builder["auraBaseFilters"] = function(parent)
             castByUnit:SetText(L["External Defensive"])
             castByNPC:SetText(L["Raid In Combat"])
             castByBoss:SetText(L["Raid Player-Dispellable"])
-            dispellable:Hide()
+            dispellable:SetText(L["Any Dispel Type"])
+            important:SetText(L["Important Enemy Buffs"])
+            if hasAnyDispellable then
+                dispellable:Show()
+            else
+                dispellable:Hide()
+            end
+            if hasImportant then
+                important:Show()
+            else
+                important:Hide()
+            end
 
             allAuras:SetTooltip(
                 L["All Auras"],
@@ -3518,6 +3636,48 @@ builder["auraBaseFilters"] = function(parent)
                 L["Raid In Combat"],
                 L["Legacy Cast By Boss is approximated by Blizzard's curated RAID_IN_COMBAT category; it is not an exact boss-aura predicate"]
             )
+            if HasNativeAuraContainerBackend() then
+                castByBoss:SetTooltip(
+                    L["Raid Player-Dispellable"],
+                    L["Shows auras someone in your raid can dispel, including helpful enrages on enemies"]
+                )
+            else
+                castByBoss:SetTooltip(
+                    L["Raid Player-Dispellable"],
+                    L["Shows auras your character can dispel"]
+                )
+            end
+            if usesNative then
+                dispellable:SetTooltip(
+                    L["Any Dispel Type"],
+                    L["Shows any aura with a dispel type, whether or not anyone in your raid can dispel it"]
+                )
+                if t.id ~= "buffs" then
+                    important:SetTooltip(
+                        L["Important Enemy Buffs"],
+                        L["IMPORTANT is a helpful-aura category and is unavailable for debuff indicators"]
+                    )
+                elseif friendlyHelpful then
+                    important:SetTooltip(
+                        L["Important Enemy Buffs"],
+                        L["IMPORTANT is intended for helpful auras on units that may be hostile"]
+                    )
+                else
+                    important:SetTooltip(
+                        L["Important Enemy Buffs"],
+                        L["Shows helpful auras Blizzard flags as important, including non-stealable auras shown on enemy nameplates"]
+                    )
+                end
+            else
+                dispellable:SetTooltip(
+                    L["Native Aura Container Required"],
+                    L["This legacy Retail aura list widens the selection to all auras of this type"]
+                )
+                important:SetTooltip(
+                    L["Native Aura Container Required"],
+                    L["This legacy Retail aura list widens the selection to all auras of this type"]
+                )
+            end
             if migration.legacySourceFilterUsesSuperset then
                 allAuras:SetTooltip(
                     L["Conservative Legacy Migration"],
@@ -3530,14 +3690,52 @@ builder["auraBaseFilters"] = function(parent)
                     L["Legacy Cast By Boss is shown through Blizzard's curated RAID_IN_COMBAT category, not an exact boss-aura predicate"]
                 )
             end
+            if migration.legacyDispellableUsesRaidPlayerDispellable then
+                castByBoss:SetTooltip(
+                    L["Conservative Legacy Migration"],
+                    L["Legacy Dispellable now uses Blizzard's RAID_PLAYER_DISPELLABLE category; on 12.1 this means someone in your raid can dispel the aura"]
+                )
+            end
+            if unsupportedPtr7Selection then
+                allAuras:SetTooltip(
+                    L["Newer Aura Category Fallback"],
+                    L["This profile selects a 12.1 aura category unavailable on this client. The legacy renderer safely widens the row to All Auras; changing any supported category retires the unavailable selection"]
+                )
+            end
 
-            allAuras:SetChecked(filters.all)
-            castByMe:SetChecked(filters.player)
-            notPlayer:SetChecked(filters.notPlayer)
-            castByOthers:SetChecked(filters.bigDefensive)
-            castByUnit:SetChecked(filters.externalDefensive)
-            castByNPC:SetChecked(filters.raidInCombat)
-            castByBoss:SetChecked(filters.raidPlayerDispellable)
+            allAuras:SetChecked(
+                filters.all or unsupportedPtr7Selection
+            )
+            castByMe:SetChecked(
+                not unsupportedPtr7Selection and filters.player
+            )
+            notPlayer:SetChecked(
+                not unsupportedPtr7Selection and filters.notPlayer
+            )
+            castByOthers:SetChecked(
+                not unsupportedPtr7Selection
+                and filters.bigDefensive
+            )
+            castByUnit:SetChecked(
+                not unsupportedPtr7Selection
+                and filters.externalDefensive
+            )
+            castByNPC:SetChecked(
+                not unsupportedPtr7Selection
+                and filters.raidInCombat
+            )
+            castByBoss:SetChecked(
+                not unsupportedPtr7Selection
+                and filters.raidPlayerDispellable
+            )
+            dispellable:SetChecked(
+                not unsupportedPtr7Selection
+                and filters.anyDispellable
+            )
+            important:SetChecked(
+                not unsupportedPtr7Selection
+                and filters.important
+            )
 
             allAuras:SetEnabled(true)
             castByMe:SetEnabled(true)
@@ -3546,12 +3744,22 @@ builder["auraBaseFilters"] = function(parent)
             castByUnit:SetEnabled(t.id == "buffs")
             castByNPC:SetEnabled(true)
             castByBoss:SetEnabled(not friendlyHelpful)
+            dispellable:SetEnabled(
+                hasAnyDispellable and usesNative
+            )
+            important:SetEnabled(
+                hasImportant
+                and usesNative
+                and t.id == "buffs"
+                and not friendlyHelpful
+            )
             return
         end
 
         LayoutLegacyFilters()
         allAuras:Hide()
         notPlayer:Hide()
+        important:Hide()
         dispellable:Show()
         castByMe:SetChecked(t.cfg.filters.castByMe)
         castByOthers:SetChecked(t.cfg.filters.castByOthers)
@@ -3731,12 +3939,14 @@ builder["auraBlackListWhitelist"] = function(parent)
 
     function pane.Load(t)
         pane.t = t
+        local canEdit = not AF.isRetail
         if AF.isRetail then
             HideEditBox()
             if UsesNativeAuraContainer(t) then
+                canEdit = true
                 mode:SetItems(retailModeItems)
                 tip:SetText(
-                    L["12.1 can apply saved spell-ID lists to friendly buffs and enemy debuffs; other reactions require a Never Secret aura. Editing stays disabled pending live reaction and secret validation"]
+                    L["12.1 native aura containers apply spell-ID lists to friendly buffs and enemy debuffs. On other unit reactions, only auras classified NeverSecret are filtered; secret auras bypass both include and exclude lists. BFI therefore hides this aura row unless the unit reaction is public and matches that safe direction"]
                 )
             elseif HasNativeAuraContainerBackend() then
                 mode:SetItems(inactiveRetailModeItems)
@@ -3754,8 +3964,8 @@ builder["auraBlackListWhitelist"] = function(parent)
         end
 
         mode:SetSelectedValue(t.cfg.mode)
-        mode:SetEnabled(not AF.isRetail)
-        addButton:SetEnabled(not AF.isRetail)
+        mode:SetEnabled(canEdit)
+        addButton:SetEnabled(canEdit)
 
         pane.list = t.cfg.mode == "blacklist" and t.cfg.blacklist or t.cfg.whitelist
 
@@ -3780,7 +3990,7 @@ builder["auraBlackListWhitelist"] = function(parent)
             end
 
             buttons[i] = b
-            b:SetEnabled(not AF.isRetail)
+            b:SetEnabled(canEdit)
             b:Show()
 
             if i == 1 then

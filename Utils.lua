@@ -123,6 +123,8 @@ local unitFrameAuraFilterFields = {
     "raidPlayerDispellable",
     "bigDefensive",
     "externalDefensive",
+    "important",
+    "anyDispellable",
 }
 
 local unitFrameAuraFilterFieldSet = {}
@@ -155,14 +157,17 @@ local function NewUnitFrameAuraFilterMigration()
         legacy = false,
         legacySourceFilterUsesSuperset = false,
         bossAuraUsesCuratedRaidInCombat = false,
+        legacyDispellableUsesRaidPlayerDispellable = false,
     }
 end
 
 -- Retail 12.0.7 and 12.1 can both express the base aura set, PLAYER, the
--- C-side complement of PLAYER, and these five curated categories. Legacy
--- source-oriented saved keys are accepted only as a compatibility input; once
--- a Retail control is changed, the full canonical state is materialized so
--- retired aliases cannot silently affect the result.
+-- C-side complement of PLAYER, and the original curated categories. PTR 5
+-- adds IMPORTANT and DISPELLABLE; their settings are exposed only when the
+-- client advertises those exact AuraUtil tokens. Legacy source-oriented saved
+-- keys are accepted only as a compatibility input; once a Retail control is
+-- changed, the full canonical state is materialized so retired aliases cannot
+-- silently affect the result.
 function F.ResolveUnitFrameAuraFilters(baseFilter, config)
     if baseFilter ~= "HELPFUL" and baseFilter ~= "HARMFUL" then return nil end
     if type(config) ~= "table" then return nil end
@@ -208,6 +213,13 @@ function F.ResolveUnitFrameAuraFilters(baseFilter, config)
                 not all
                 and baseFilter == "HELPFUL"
                 and config.externalDefensive == true,
+            important =
+                not all
+                and baseFilter == "HELPFUL"
+                and config.important == true,
+            anyDispellable =
+                not all
+                and config.anyDispellable == true,
         }, NewUnitFrameAuraFilterMigration()
     end
 
@@ -226,6 +238,12 @@ function F.ResolveUnitFrameAuraFilters(baseFilter, config)
             or (all and not exactAll),
         bossAuraUsesCuratedRaidInCombat =
             not all and config.isBossAura == true,
+        legacyDispellableUsesRaidPlayerDispellable =
+            not all
+            and (
+                config.dispellable == true
+                or config.canBeDispelled == true
+            ),
     }
 
     if all then
@@ -237,6 +255,8 @@ function F.ResolveUnitFrameAuraFilters(baseFilter, config)
             raidPlayerDispellable = false,
             bigDefensive = false,
             externalDefensive = false,
+            important = false,
+            anyDispellable = false,
         }, migration
     end
 
@@ -250,6 +270,8 @@ function F.ResolveUnitFrameAuraFilters(baseFilter, config)
             or config.canBeDispelled == true,
         bigDefensive = false,
         externalDefensive = false,
+        important = false,
+        anyDispellable = false,
     }, migration
 end
 
@@ -257,7 +279,11 @@ function F.SetUnitFrameAuraFilter(baseFilter, config, field, value)
     if not unitFrameAuraFilterFieldSet[field] then return false end
     if type(value) ~= "boolean" then return false end
     if baseFilter ~= "HELPFUL"
-        and (field == "bigDefensive" or field == "externalDefensive")
+        and (
+            field == "bigDefensive"
+            or field == "externalDefensive"
+            or field == "important"
+        )
     then
         return false
     end
@@ -336,6 +362,14 @@ function F.GetSecretSafeUnitFrameAuraMatchFilters(baseFilter, config)
     if not resolved then return nil end
 
     if resolved.all then
+        return {baseFilter}
+    end
+
+    -- IMPORTANT and DISPELLABLE are 12.1-only native-container choices.
+    -- A 12.0.7 or explicitly legacy unit-frame row cannot represent them
+    -- faithfully, so widen to the base aura type instead of passing an
+    -- unknown token or silently dropping every requested aura.
+    if resolved.important or resolved.anyDispellable then
         return {baseFilter}
     end
 

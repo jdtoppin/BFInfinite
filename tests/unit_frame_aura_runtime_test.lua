@@ -126,6 +126,8 @@ local function validConfig(overrides)
         tag = "initial",
         requiresVisible = false,
         requiresAssist = false,
+        spellIDFilterRequiresPublicAssist = false,
+        spellIDFilterRequiresPublicNonAssist = false,
     }
     for key, value in pairs(overrides or {}) do
         config[key] = value
@@ -328,6 +330,10 @@ local function makeHarness(options)
             visibility = {
                 requiresVisible = config.requiresVisible == true,
                 requiresAssist = config.requiresAssist == true,
+                spellIDFilterRequiresPublicAssist =
+                    config.spellIDFilterRequiresPublicAssist == true,
+                spellIDFilterRequiresPublicNonAssist =
+                    config.spellIDFilterRequiresPublicNonAssist == true,
             },
             partition = partitioned and {
                 filter = "notCastByMe",
@@ -1356,6 +1362,157 @@ local function testSecretSafeWholeHolderGates()
         "inactive settled refresh count")
 end
 
+local function testSpellIDReactionGatesAndProviderBypass()
+    do
+        local harness = makeHarness()
+        local root = newRoot("HelpfulSpellIDGate", "party1")
+        local runtime, controller = createRuntime(harness, root)
+
+        harness:ClearEvents()
+        harness.assistResult = true
+        runtime:LoadConfig(validConfig({
+            spellIDFilterRequiresPublicAssist = true,
+        }))
+        runtime:Enable()
+
+        local visibility = runtime:GetNativeAuraState().visibility
+        assertEqual(
+            visibility.spellIDFilterRequiresPublicAssist,
+            true,
+            "helpful spell-ID assist requirement"
+        )
+        assertEqual(
+            visibility.spellIDFilterRequiresPublicNonAssist,
+            false,
+            "helpful spell-ID non-assist requirement"
+        )
+        assertEqual(controller.shown, true,
+            "helpful public assist gate")
+        assertEqual(countEvents(harness, "uf.register"), 9,
+            "helpful spell-ID watcher registrations")
+
+        harness.assistResult = false
+        harness:Fire("UNIT_FACTION", "party1")
+        harness:RunTimers(0.05)
+        assertEqual(controller.shown, false,
+            "helpful public non-assist rejection")
+
+        harness.assistResult = {secret = true}
+        harness:ClearEvents()
+        harness:Fire("UNIT_FACTION", "party1")
+        harness:RunTimers(0.05)
+        assertEqual(controller.shown, false,
+            "helpful secret reaction fail-closed")
+        assertTrue(countEvents(harness, "secret.check") >= 1,
+            "helpful secret reaction check")
+
+        harness.assistResult = nil
+        harness:Fire("UNIT_FACTION", "party1")
+        harness:RunTimers(0.05)
+        assertEqual(controller.shown, false,
+            "helpful indeterminate reaction fail-closed")
+
+        harness.assistResult = true
+        harness:Fire("UNIT_FACTION", "party1")
+        harness:RunTimers(0.05)
+        assertEqual(controller.shown, true,
+            "helpful public assist recovery")
+
+        harness.assistResult = {secret = true}
+        harness:Fire("UNIT_FACTION", "party1")
+        harness:RunTimers(0.05)
+        assertEqual(controller.shown, false,
+            "helpful provider setup gate")
+
+        harness:ClearEvents()
+        harness:Fire("AURA_DATA_PROVIDER_SWITCH", false)
+        assertEqual(controller.shown, true,
+            "test provider reaction-gate bypass")
+        assertEqual(countEvents(harness, "wow.assist"), 0,
+            "test provider reaction-gate call count")
+        assertEqual(countEvents(harness, "uf.unregister"), 9,
+            "test provider spell-ID watcher cleanup")
+        assertProviderObserverOnly(
+            harness,
+            "test provider spell-ID watcher state"
+        )
+    end
+
+    do
+        local harness = makeHarness()
+        local root = newRoot("HarmfulSpellIDGate", "party2")
+        local runtime = harness.UF.CreateNativeAuraIndicator(
+            root,
+            "HarmfulSpellIDGate_Auras",
+            "HARMFUL",
+            false
+        )
+        assertTrue(runtime, "harmful native runtime was not created")
+        runtime.enabled = true
+        root.indicators.debuffs = runtime
+
+        harness:ClearEvents()
+        harness.assistResult = false
+        runtime:LoadConfig(validConfig({
+            spellIDFilterRequiresPublicNonAssist = true,
+        }))
+        runtime:Enable()
+
+        local visibility = runtime:GetNativeAuraState().visibility
+        assertEqual(
+            visibility.spellIDFilterRequiresPublicAssist,
+            false,
+            "harmful spell-ID assist requirement"
+        )
+        assertEqual(
+            visibility.spellIDFilterRequiresPublicNonAssist,
+            true,
+            "harmful spell-ID non-assist requirement"
+        )
+        local controller = harness.controllers[#harness.controllers]
+        assertEqual(controller.shown, true,
+            "harmful public non-assist gate")
+        assertEqual(countEvents(harness, "uf.register"), 9,
+            "harmful spell-ID watcher registrations")
+
+        harness.assistResult = true
+        harness:Fire("UNIT_FACTION", "party2")
+        harness:RunTimers(0.05)
+        assertEqual(controller.shown, false,
+            "harmful public assist rejection")
+
+        harness.assistResult = {secret = true}
+        harness:ClearEvents()
+        harness:Fire("UNIT_FACTION", "party2")
+        harness:RunTimers(0.05)
+        assertEqual(controller.shown, false,
+            "harmful secret reaction fail-closed")
+        assertTrue(countEvents(harness, "secret.check") >= 1,
+            "harmful secret reaction check")
+
+        harness.assistResult = nil
+        harness:Fire("UNIT_FACTION", "party2")
+        harness:RunTimers(0.05)
+        assertEqual(controller.shown, false,
+            "harmful indeterminate reaction fail-closed")
+
+        harness.assistResult = false
+        harness:Fire("UNIT_FACTION", "party2")
+        harness:RunTimers(0.05)
+        assertEqual(controller.shown, true,
+            "harmful public non-assist recovery")
+
+        harness:ClearEvents()
+        runtime:Disable()
+        assertEqual(countEvents(harness, "uf.unregister"), 9,
+            "harmful spell-ID watcher cleanup")
+        assertProviderObserverOnly(
+            harness,
+            "harmful spell-ID watcher state"
+        )
+    end
+end
+
 local function testConfigModeNeverRetargetsPlayer()
     local harness = makeHarness()
     local root = newRoot("ConfigMode", "target")
@@ -2352,6 +2509,7 @@ testUngatedFocusWatcher()
 testWatcherRoutesUnitSignals()
 testQuiesceAndRecovery()
 testSecretSafeWholeHolderGates()
+testSpellIDReactionGatesAndProviderBypass()
 testConfigModeNeverRetargetsPlayer()
 testDisabledConfigModePreviewCannotEscape()
 testWaitingUnitAndTerminalDestroy()

@@ -292,13 +292,35 @@ local function PassesVisibility(runtime)
     local visibility = descriptor.visibility
     -- The compiler exposes aggregate group requirements, so a definite gate
     -- failure intentionally hides the whole plain holder. The native
-    -- container remains enabled, and secret/uncertain results fail open.
+    -- container remains enabled. The ordinary visibility/category gates fail
+    -- open on secret results; spell-ID reaction gates below must fail closed
+    -- because Blizzard can otherwise bypass both include and exclude maps.
     if visibility.requiresVisible
         and not PassesGate(UnitIsVisible(unit))
     then
         return false
     end
-    if visibility.requiresAssist
+    if visibility.spellIDFilterRequiresPublicAssist
+        or visibility.spellIDFilterRequiresPublicNonAssist
+    then
+        local canAssist = UnitCanAssist("player", unit)
+        -- Blizzard skips both include and exclude spell-ID maps in the
+        -- opposite reaction direction, except for NeverSecret spells. A
+        -- secret or indeterminate reaction therefore has to fail closed.
+        if not F.isValueNonSecret(canAssist) then
+            return false
+        end
+        if visibility.spellIDFilterRequiresPublicAssist
+            and canAssist ~= true
+        then
+            return false
+        end
+        if visibility.spellIDFilterRequiresPublicNonAssist
+            and canAssist ~= false
+        then
+            return false
+        end
+    elseif visibility.requiresAssist
         and not PassesGate(UnitCanAssist("player", unit))
     then
         return false
@@ -322,6 +344,8 @@ local function SyncWatcher(runtime)
         and (
             visibility.requiresVisible
             or visibility.requiresAssist
+            or visibility.spellIDFilterRequiresPublicAssist
+            or visibility.spellIDFilterRequiresPublicNonAssist
         )
     local hasDynamicUnit = runtime._unit == "target"
         or runtime._unit == "focus"
