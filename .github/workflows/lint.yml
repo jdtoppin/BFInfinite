@@ -20,6 +20,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes lua-check lua5.1 ripgrep
 
+      - name: Check Buffs & Debuffs backend selection
+        run: lua5.1 tests/buffs_debuffs_backend_selector_test.lua
+
       - name: Check Lua and policy
         shell: bash
         env:
