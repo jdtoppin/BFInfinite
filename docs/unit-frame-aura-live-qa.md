@@ -22,8 +22,17 @@ branch onto another. Each integration leaf contains its own required
 ancestors, but it does not contain sibling frame integrations; use the
 aggregate only after the isolated leaves pass.
 
-Use this clean isolated-install sequence: AF #19 with BFInfinite #90, then AF
-#22 with BFInfinite #101, then AF #23 with the disposable #91 aggregate.
+Use this clean isolated-install sequence:
+
+1. AF #19 at `d6858f3997a1014a7ab9ce05ddaaf53efe4df9c6` with BFInfinite
+   #90 at `adad69628fff7419aef513276322d377bed2b3b0`.
+2. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
+   #101 at `3a0d80a38247f6487dbbff2371f681672a61adc8`.
+3. AF #23 at `43f79cf2e9e91c47c9142c3546c900baf8fe092f` with the exact
+   checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
+   validation SHA. Record that full branch-head SHA immediately before
+   installation.
+
 Delete and replace both addon folders between pairs. Descendants include their
 ancestors, never sibling integrations; do not merge branches or overlay
 folders to manufacture a test build. PR #91 is validation-only and must never
