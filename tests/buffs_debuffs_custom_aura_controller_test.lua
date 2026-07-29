@@ -288,6 +288,11 @@ local function NewHarness()
     })
     local BFI = {
         L = L,
+        funcs = {
+            LoadPosition = function(frame, position)
+                record("BFI.LoadPosition", frame.label, position)
+            end,
+        },
         modules = {
             BuffsDebuffs = BD,
         },
@@ -509,6 +514,11 @@ do
         "AF.CreateCustomAuraContainer",
         buildStart
     )
+    local loadPositionCall = findCall(
+        buildCalls,
+        "BFI.LoadPosition",
+        buildStart
+    )
     local _, addItemIndex = findCall(
         buildCalls,
         "AF.AddCustomItemEnchantment",
@@ -551,6 +561,16 @@ do
     )
 
     assertTrue(restoreIndex < createIndex, "restore precedes construction")
+    assertTrue(loadPositionCall ~= nil,
+        "holder uses BFI position compatibility loader")
+    assertEqual(loadPositionCall.args[2][1], "TOPRIGHT",
+        "holder compatibility position point")
+    assertEqual(loadPositionCall.args[2][2], -4,
+        "holder compatibility position X")
+    assertEqual(loadPositionCall.args[2][3], -4,
+        "holder compatibility position Y")
+    assertEqual(countCalls(buildCalls, "AF.LoadPosition"), 0,
+        "holder bypasses raw AF position loader")
     assertTrue(createIndex < addItemIndex, "container precedes enchantments")
     assertTrue(addItemIndex < addGroupIndex, "enchantments precede group")
     assertTrue(addGroupIndex < unitIndex, "all add-only sources precede unit")

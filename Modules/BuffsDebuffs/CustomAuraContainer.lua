@@ -208,7 +208,7 @@ local function ApplyHolder(controller, descriptor)
                 descriptor.positionSave or descriptor.position
             )
         end
-        AF.LoadPosition(holder, descriptor.position)
+        BFI.funcs.LoadPosition(holder, descriptor.position)
     end
 
     holder.enabled = descriptor.enabled
