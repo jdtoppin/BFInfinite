@@ -3,6 +3,7 @@
     <Script file="Presets.lua"/>
     <Script file="UnitButton.lua"/>
     <Include file="UnitButton.xml"/>
+    <Script file="AuraController.lua"/>
     <!-- indicators -->
     <Script file="Indicators\Auras.lua"/>
     <Script file="Indicators\HealthBar.lua"/>
