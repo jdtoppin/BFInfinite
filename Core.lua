@@ -5,7 +5,8 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local REQUIRED_AF_VERSION = 29
+-- AF #23/r35 rejects PTR 7 secret UnitClass values before they reach BFI.
+local REQUIRED_AF_VERSION = 35
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar

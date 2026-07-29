@@ -36,5 +36,11 @@ jobs:
       - name: Test unit-frame status timer lockdown
         run: luajit tests/unit_frame_status_timer_test.lua
 
+      - name: Test PTR 7 unit-frame identity secrecy
+        run: luajit tests/unit_frame_secret_identity_test.lua
+
+      - name: Test PTR 7 unit-button identity boundary
+        run: luajit tests/unit_frame_secret_identity_unit_button_test.lua
+
       - name: Test protected tooltip-owner anchoring
         run: luajit tests/tooltip_anchor_taint_test.lua
