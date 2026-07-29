@@ -41,6 +41,9 @@ local state = {
     deathTimeLost = 5,
     deathDataAvailable = true,
     timerAvailable = true,
+    dragPoint = "TOPLEFT",
+    dragX = 42,
+    dragY = -73,
 }
 
 local function newRegion(name)
@@ -125,6 +128,28 @@ local function newRegion(name)
     function region:SetFrameStrata(strata)
         self.strata = strata
     end
+    function region:SetClampedToScreen(value)
+        self.clampedToScreen = value
+    end
+    function region:SetMovable(value)
+        self.movable = value
+    end
+    function region:RegisterForDrag(...)
+        self.dragButtons = {...}
+    end
+    function region:SetMouseClickEnabled(value)
+        self.mouseClickEnabled = value
+    end
+    function region:StartMoving()
+        self.moving = true
+    end
+    function region:StopMovingOrSizing()
+        self.moving = false
+        self.stopMovingCalls = (self.stopMovingCalls or 0) + 1
+    end
+    function region:SetUserPlaced(value)
+        self.userPlaced = value
+    end
     function region:SetJustifyH(justify)
         self.justifyH = justify
     end
@@ -148,6 +173,7 @@ local function newRegion(name)
 end
 
 local callbacks = {}
+local fires = {}
 local frames = {}
 local eventFrame
 local timerFrame
@@ -205,14 +231,34 @@ function AF.CreateBlizzardStatusBar(_, minimum, maximum, width, height)
     return bar
 end
 function AF.CreateFontString()
-    return newRegion()
+    local text = newRegion()
+    text.pixelRoundWidth = true
+    return text
 end
-function AF.CreateMover()
+function AF.CreateMover(owner, _, _, save)
+    owner.moverSave = save
+end
+function AF.SetDraggable(frame, target, notUserPlaced, onStart, onStop)
+    target = target or frame
+    target:SetMovable(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetMouseClickEnabled(true)
+    frame:SetScript("OnDragStart", function()
+        if onStart then onStart(target) end
+        target:StartMoving(true)
+        if notUserPlaced then
+            target:SetUserPlaced(false)
+        end
+    end)
+    frame:SetScript("OnDragStop", function()
+        target:StopMovingOrSizing()
+        if onStop then onStop(target) end
+    end)
 end
 function AF.SetFont()
 end
 function AF.SetWidth(region, width)
-    region:SetWidth(width)
+    region:SetWidth(region.pixelRoundWidth and math.ceil(width) or width)
 end
 function AF.SetHeight(region, height)
     region:SetHeight(height)
@@ -255,12 +301,24 @@ function AF.ApplyDefaultTexCoord()
 end
 function AF.HideTooltip()
 end
-function AF.TruncateFontStringByWidth(text, _, _, _, value)
-    text:SetText(value)
+function AF.TruncateFontStringByWidth(text, width, _, _, value)
+    text.truncateWidth = width
+    if text:GetWidth() > width then
+        text:SetText(value:sub(1, 1) .. "...")
+    else
+        text:SetText(value)
+    end
 end
-function AF.UpdateMoverSave()
+function AF.UpdateMoverSave(owner, save)
+    owner.moverSave = save
 end
 function AF.LoadPosition()
+end
+function AF.CalcPoint()
+    return state.dragPoint, state.dragX, state.dragY
+end
+function AF.Fire(...)
+    fires[#fires + 1] = {...}
 end
 function AF.GetColorRGB()
     return 1, 1, 1, 1
@@ -623,6 +681,44 @@ assertTrue(
     eventFrame.events.DAMAGE_METER_COMBAT_SESSION_UPDATED,
     "Overall meter update event registers"
 )
+assertEqual(type(timerFrame.moverSave), "function",
+    "standard AF mover keeps synchronized position saving")
+timerFrame.moverSave("TOPRIGHT", -5, -205)
+assertEqual(W.config.mythicPlus.position[2], -5,
+    "standard AF mover saves its X coordinate")
+assertEqual(W.config.mythicPlus.position[3], -205,
+    "standard AF mover saves its Y coordinate")
+
+MP.SetPreview(true)
+assertEqual(timerFrame.width, 320,
+    "preview opens at the readable default width")
+assertEqual(timerFrame.title.text, "Mythic+ Preview  +13",
+    "preview title remains available in full")
+assertEqual(timerFrame.title.truncateWidth, timerFrame.title.width,
+    "preview truncation uses the pixel-snapped title width")
+assertEqual(timerFrame.info.truncateWidth, timerFrame.info.width,
+    "preview truncation uses the pixel-snapped stats width")
+assertEqual(timerFrame.mouseEnabled, true,
+    "preview enables direct window dragging")
+assertEqual(timerFrame.dragButtons[1], "LeftButton",
+    "preview uses the standard left drag button")
+timerFrame.scripts.OnDragStart(timerFrame)
+assertEqual(timerFrame.moving, true, "preview drag begins")
+timerFrame.scripts.OnDragStop(timerFrame)
+assertEqual(timerFrame.moving, false, "preview drag stops")
+assertEqual(W.config.mythicPlus.position[1], "TOPLEFT",
+    "preview drag saves its anchor")
+assertEqual(W.config.mythicPlus.position[2], 42,
+    "preview drag saves its X coordinate")
+assertEqual(W.config.mythicPlus.position[3], -73,
+    "preview drag saves its Y coordinate")
+assertEqual(fires[#fires][1], "BFI_RefreshOptions",
+    "preview drag refreshes the visible position options")
+MP.SetPreview(false)
+assertEqual(timerFrame.mouseEnabled, false,
+    "closing the preview disables direct dragging")
+assertEqual(timerFrame.dragButtons[1], nil,
+    "closing the preview unregisters direct drag input")
 
 state.challengeActive = true
 eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_START", 399)
@@ -632,6 +728,8 @@ assertEqual(run.mapID, 399, "active map captured")
 assertEqual(run.partialObservation, nil, "on-time start is complete")
 assertEqual(tracker.shown, false, "Blizzard tracker is hidden for the key")
 assertEqual(timerFrame.shown, true, "custom timer is visible")
+assertEqual(timerFrame.mouseEnabled, false,
+    "live timer does not capture drag input")
 assertEqual(timerFrame.enabled, true,
     "enabled timer participates in AF mover visibility")
 assertEqual(timerFrame.affixIcons[1].texture, 1009,
@@ -661,7 +759,7 @@ W.config.mythicPlus.showThresholds = false
 callbacks.BFI_UpdateModule(nil, "uiWidgets", "mythicPlus")
 assertEqual(timerFrame.timerBar.width, 244,
     "AF bar width follows the inset content width")
-assertNear(timerFrame.title.width, 244 * 0.62, 0.000001,
+assertEqual(timerFrame.title.width, math.ceil(244 * 0.62),
     "title column uses responsive content width")
 assertTrue(timerFrame.objectiveRows[1].height > 15,
     "row height follows the configured AF font size")

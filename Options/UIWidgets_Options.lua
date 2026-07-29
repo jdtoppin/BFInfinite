@@ -11,6 +11,20 @@ local created = {}
 local builder = {}
 local options = {}
 
+local function AlignSliderLabelLeft(slider)
+    if not slider or not slider.label then return end
+    AF.ClearPoints(slider.label)
+    AF.SetPoint(
+        slider.label,
+        "BOTTOMLEFT",
+        slider,
+        "TOPLEFT",
+        2,
+        2
+    )
+    slider.label:SetJustifyH("LEFT")
+end
+
 ---------------------------------------------------------------------
 -- settings
 ---------------------------------------------------------------------
@@ -376,20 +390,57 @@ builder["mythicPlusWidth"] = function(parent)
         parent,
         "BFI_UIWidgetOption_MythicPlusWidth",
         nil,
-        55
+        103
     )
     created["mythicPlusWidth"] = pane
 
     local width = AF.CreateSlider(pane, L["Width"], 150, 260, 500, 1, nil, true)
-    AF.SetPoint(width, "LEFT", 15, 0)
+    AF.SetPoint(width, "TOPLEFT", 15, -25)
+    AlignSliderLabelLeft(width)
     width:SetOnValueChanged(function(value)
         pane.t.cfg.width = value
+        AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
+    end)
+
+    local xOffset = AF.CreateSlider(
+        pane,
+        L["X Offset"],
+        150,
+        -2000,
+        2000,
+        1,
+        nil,
+        true
+    )
+    AF.SetPoint(xOffset, "TOPLEFT", width, 185, 0)
+    AlignSliderLabelLeft(xOffset)
+    xOffset:SetAfterValueChanged(function(value)
+        pane.t.cfg.position[2] = value
+        AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
+    end)
+
+    local yOffset = AF.CreateSlider(
+        pane,
+        L["Y Offset"],
+        150,
+        -2000,
+        2000,
+        1,
+        nil,
+        true
+    )
+    AF.SetPoint(yOffset, "TOPLEFT", width, "BOTTOMLEFT", 0, -25)
+    AlignSliderLabelLeft(yOffset)
+    yOffset:SetAfterValueChanged(function(value)
+        pane.t.cfg.position[3] = value
         AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
     end)
 
     function pane.Load(t)
         pane.t = t
         width:SetValue(t.cfg.width)
+        xOffset:SetValue(t.cfg.position[2])
+        yOffset:SetValue(t.cfg.position[3])
     end
 
     return pane
@@ -421,7 +472,8 @@ builder["mythicPlusExtendedRun"] = function(parent)
         nil,
         true
     )
-    AF.SetPoint(cutoff, "LEFT", 15, 0)
+    AF.SetPoint(cutoff, "TOPLEFT", 15, -25)
+    AlignSliderLabelLeft(cutoff)
     cutoff:SetOnValueChanged(function(value)
         pane.t.cfg.extendedRunMultiplier = value
         AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)

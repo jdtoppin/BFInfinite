@@ -1730,6 +1730,17 @@ local function createHoverRow(parent)
     return row
 end
 
+local function saveTimerPosition(point, x, y)
+    if not config or not point then return end
+    if type(config.position) ~= "table" then
+        config.position = {}
+    end
+    config.position[1] = point
+    config.position[2] = x
+    config.position[3] = y
+    AF.Fire("BFI_RefreshOptions", "uiWidgets")
+end
+
 local function createTimerFrame()
     timerFrame = AF.CreateBorderedFrame(
         AF.UIParent,
@@ -1740,13 +1751,22 @@ local function createTimerFrame()
         "border"
     )
     timerFrame:SetFrameStrata("MEDIUM")
+    timerFrame:SetClampedToScreen(true)
     timerFrame:Hide()
     timerFrame._onUpdate = onTimerUpdate
+    AF.SetDraggable(timerFrame, nil, true, nil, function(self)
+        local point, x, y = AF.CalcPoint(self)
+        saveTimerPosition(point, x, y)
+        AF.LoadPosition(self, config.position)
+    end)
+    timerFrame:RegisterForDrag()
+    timerFrame:EnableMouse(false)
 
     AF.CreateMover(
         timerFrame,
         "BFI: " .. L["UI Widgets"],
-        L["Mythic+ Timer"]
+        L["Mythic+ Timer"],
+        saveTimerPosition
     )
 
     timerFrame.title = createText(timerFrame, "LEFT")
@@ -1885,7 +1905,7 @@ local function applyFrameConfig()
     AF.SetWidth(timerFrame, config.width)
     AF.SetWidth(timerFrame.timerBar, config.width - 16)
     AF.SetWidth(timerFrame.forcesBar, config.width - 16)
-    AF.UpdateMoverSave(timerFrame, config.position)
+    AF.UpdateMoverSave(timerFrame, saveTimerPosition)
     AF.LoadPosition(timerFrame, config.position)
     timerFrame.timerBar._bfiColor = nil
     timerFrame.forcesBar._bfiColor = nil
@@ -1961,9 +1981,13 @@ local function setTruncatedText(
     alignment
 )
     AF.SetWidth(text, width)
+    local snappedWidth = text:GetWidth()
+    if not isFiniteNumber(snappedWidth) or snappedWidth <= 0 then
+        snappedWidth = width
+    end
     AF.TruncateFontStringByWidth(
         text,
-        width,
+        snappedWidth,
         alignment or "left",
         true,
         value
@@ -2943,6 +2967,13 @@ end
 RefreshDisplay = function()
     if not timerFrame or not config or not config.enabled then return end
     local run = currentRun or previewRun
+    local previewDraggable = previewRun ~= nil and currentRun == nil
+    timerFrame:EnableMouse(previewDraggable)
+    if previewDraggable then
+        timerFrame:RegisterForDrag("LeftButton")
+    else
+        timerFrame:RegisterForDrag()
+    end
     if run then
         renderRun(run)
     else

@@ -138,11 +138,15 @@ end
 function AF.CreateSlider(_, label, width, minimum, maximum, step)
     local slider = {
         labelText = label,
+        label = {},
         width = width,
         minimum = minimum,
         maximum = maximum,
         step = step,
     }
+    function slider.label:SetJustifyH(value)
+        self.justifyH = value
+    end
     function slider:SetOnValueChanged(callback)
         self.onValueChanged = callback
     end
@@ -204,7 +208,12 @@ function AF.Fire(...)
     fires[#fires + 1] = {...}
 end
 
-function AF.SetPoint()
+function AF.ClearPoints(region)
+    region.point = nil
+end
+
+function AF.SetPoint(region, ...)
+    region.point = {...}
 end
 
 function AF.LSM_GetFontDropdownItems()
@@ -382,11 +391,39 @@ local width = findByLabel(sliders, "Width")
 assertTrue(width, "Mythic+ width slider")
 assertEqual(width.minimum, 260, "width minimum")
 assertEqual(width.maximum, 500, "width maximum")
+assertEqual(width.label.justifyH, "LEFT",
+    "width title follows left-aligned AF option labels")
+assertEqual(width.label.point[1], "BOTTOMLEFT",
+    "width title uses the AF option-label anchor")
+assertEqual(width.label.point[4], 2,
+    "width title uses the AF option-label inset")
 width.onValueChanged(410)
 assertEqual(info.cfg.width, 410, "width setting")
 
+local xOffset = findByLabel(sliders, "X Offset")
+local yOffset = findByLabel(sliders, "Y Offset")
+assertTrue(xOffset and yOffset, "Mythic+ position sliders")
+xOffset.afterValueChanged(42)
+yOffset.afterValueChanged(-73)
+assertEqual(info.cfg.position[2], 42, "X position setting")
+assertEqual(info.cfg.position[3], -73, "Y position setting")
+assertEqual(fires[#fires][1], "BFI_UpdateModule",
+    "position edits reload the Mythic+ frame")
+assertEqual(xOffset.label.justifyH, "LEFT",
+    "X position title follows left-aligned AF option labels")
+assertEqual(yOffset.label.justifyH, "LEFT",
+    "Y position title follows left-aligned AF option labels")
+assertEqual(xOffset.label.point[1], "BOTTOMLEFT",
+    "X position title uses the AF option-label anchor")
+assertEqual(yOffset.label.point[1], "BOTTOMLEFT",
+    "Y position title uses the AF option-label anchor")
+
 local cutoff = findByLabel(sliders, "Extended-run Baseline Cutoff")
 assertTrue(cutoff, "extended-run cutoff slider")
+assertEqual(cutoff.label.justifyH, "LEFT",
+    "extended-run title follows left-aligned AF option labels")
+assertEqual(cutoff.label.point[1], "BOTTOMLEFT",
+    "extended-run title uses the AF option-label anchor")
 assertTrue(cutoff.tooltip and #cutoff.tooltip == 3,
     "extended-run guidance uses the AF slider tooltip")
 cutoff.onValueChanged(1.75)
