@@ -12,10 +12,10 @@ local format, sub = string.format, string.sub
 -- CustomAuraContainer buttons in batches of ten. Keep the constant here as
 -- audit metadata only; this compiler never creates a frame.
 local NATIVE_BUTTON_BATCH_SIZE = 10
--- Preserve #90's existing ceiling of eight groups in any active native row.
--- Target may prebuild mutually exclusive relation variants; budget colour
--- expansion against the larger friendly or hostile active presentation, not
--- the sum of hidden prebuilt variants.
+-- Preserve #90's existing ceiling of eight groups in one active native row.
+-- Integrations that prebuild mutually exclusive relation variants account
+-- those physical copies separately; colour expansion still falls back as a
+-- whole rather than exceeding the active-row layout budget.
 local MAX_NATIVE_COLOR_EXPANDED_GROUPS = 8
 
 local ANCHOR_POINTS = {
