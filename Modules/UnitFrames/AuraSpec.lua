@@ -12,10 +12,10 @@ local format, sub = string.format, string.sub
 -- CustomAuraContainer buttons in batches of ten. Keep the constant here as
 -- audit metadata only; this compiler never creates a frame.
 local NATIVE_BUTTON_BATCH_SIZE = 10
--- Preserve #90's existing ceiling of eight groups in one active native row.
--- Integrations that prebuild mutually exclusive relation variants account
--- those physical copies separately; colour expansion still falls back as a
--- whole rather than exceeding the active-row layout budget.
+-- Cap only the extra groups requested by spell-colour expansion. A baseline
+-- policy may already require more than eight active groups after a relation
+-- partition duplicates any-scope categories; that exact gray policy remains
+-- intact. Colour expansion falls back as a whole and never drops categories.
 local MAX_NATIVE_COLOR_EXPANDED_GROUPS = 8
 
 local ANCHOR_POINTS = {

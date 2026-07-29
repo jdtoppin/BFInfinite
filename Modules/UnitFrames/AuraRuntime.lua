@@ -474,7 +474,10 @@ local function SyncLifecycle(runtime)
     end
     runtime._controller:SetShown(true)
     SyncWatcher(runtime)
-    return true
+    -- This answer comes only from BFI-owned tracked presentation state. A
+    -- desired show may still be hover-deferred behind an alpha curtain, in
+    -- which case stable-unit refresh must not drive the stale native row.
+    return runtime._controller:IsPresentationApplied()
 end
 
 local BuildControllerDescriptor

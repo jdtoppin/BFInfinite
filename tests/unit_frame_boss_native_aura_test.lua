@@ -342,6 +342,7 @@ local function makeHarness(nativeBackendAvailable)
                 return key
             end,
         }),
+        funcs = {},
         modules = {
             UnitFrames = UF,
         },
@@ -460,6 +461,7 @@ local function makePresetCompiler()
                 return key
             end,
         }),
+        funcs = {},
         modules = {
             UnitFrames = UF,
         },
@@ -485,9 +487,16 @@ local function makePresetCompiler()
         AuraContainerSortDirection = {
             Normal = 401,
         },
+        AuraUtil = {
+            AuraFilters = {
+                Important = "IMPORTANT",
+                Dispellable = "DISPELLABLE",
+            },
+        },
         CustomAuraContainerAuraProcessingPolicy = {
             None = 501,
         },
+        GetCVar = function() return nil end,
         assert = assert,
         error = error,
         ipairs = ipairs,
@@ -515,6 +524,7 @@ local function makePresetCompiler()
     })
 
     for _, path in ipairs({
+        "Utils.lua",
         "Modules/UnitFrames/Presets.lua",
         "Modules/UnitFrames/AuraPolicy.lua",
         "Modules/UnitFrames/AuraSpec.lua",
@@ -863,40 +873,30 @@ local function testShippedBossPresetBounds()
         assertEqual(indicators.debuffs.enabled, true,
             id .. " default debuffs state")
 
-        assertEqual(buffs.metrics.groupCount, 4,
+        assertEqual(buffs.metrics.groupCount, 1,
             id .. " buffs group count")
         assertEqual(buffs.migrationReady, true,
             id .. " buffs migration readiness")
         assertEqual(buffs.metrics.legacyMaxFrameCount, 3,
             id .. " buffs legacy capacity")
-        assertEqual(buffs.metrics.nativeVisibleCapacity, 12,
+        assertEqual(buffs.metrics.nativeVisibleCapacity, 3,
             id .. " buffs native capacity")
-        assertEqual(buffs.metrics.initialRestrictedButtonCount, 40,
+        assertEqual(buffs.metrics.initialRestrictedButtonCount, 10,
             id .. " buffs initial native buttons")
         assertEqual(
             buffs.metrics.freshContainerRestrictedButtonCountCeiling,
-            40,
+            10,
             id .. " buffs native button ceiling"
         )
         assertEqual(buffs.completeSpec.holder.width, 59,
             id .. " buffs holder width")
-        assertEqual(buffs.completeSpec.holder.height, 79,
+        assertEqual(buffs.completeSpec.holder.height, 19,
             id .. " buffs holder height")
         assertEqual(buffs.completeSpec.groups[1].filterString,
-            "HELPFUL|PLAYER", id .. " buffs player filter")
-        assertEqual(buffs.completeSpec.groups[2].filterString,
-            "HELPFUL|RAID_IN_COMBAT|!PLAYER",
-            id .. " buffs raid filter")
-        assertEqual(buffs.completeSpec.groups[3].filterString,
-            "HELPFUL|BIG_DEFENSIVE|!PLAYER|!RAID_IN_COMBAT",
-            id .. " buffs big-defensive filter")
-        assertEqual(buffs.completeSpec.groups[4].filterString,
-            "HELPFUL|EXTERNAL_DEFENSIVE|!PLAYER|!RAID_IN_COMBAT"
-                .. "|!BIG_DEFENSIVE",
-            id .. " buffs external-defensive filter")
-        assertEqual(buffs.visibility.requiresVisible, true,
+            "HELPFUL", id .. " buffs filter")
+        assertEqual(buffs.visibility.requiresVisible, false,
             id .. " buffs visibility gate")
-        assertEqual(buffs.visibility.requiresAssist, true,
+        assertEqual(buffs.visibility.requiresAssist, false,
             id .. " buffs assist gate")
 
         assertEqual(debuffs.migrationReady, true,

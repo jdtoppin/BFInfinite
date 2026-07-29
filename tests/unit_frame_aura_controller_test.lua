@@ -190,6 +190,10 @@ local function newContainer(harness, parent)
         record(harness, "native.show", self)
     end
 
+    function container:SetAlpha(alpha)
+        self.alpha = alpha
+    end
+
     function container:ClearAllPoints()
         self.point = nil
         record(harness, "native.clear-points", self)
@@ -1143,12 +1147,12 @@ local function testGlobalFrameworkRequirement()
     assertTrue(chunk, loadError)
     setfenv(chunk, environment)
     chunk("BFInfinite", BFI)
-    assertEqual(BFI.requiredAFVersion, 34, "published global AF minimum")
+    assertEqual(BFI.requiredAFVersion, 35, "published global AF minimum")
 
     local ok, versionError = pcall(eventHandler.ADDON_LOADED, eventHandler, BFI.name)
     assertEqual(ok, false, "global AF version check stops harness")
     assertEqual(versionError, stopAfterVersionCheck, "global AF version check sentinel")
-    assertEqual(requiredVersion, 34, "global AF minimum")
+    assertEqual(requiredVersion, 35, "global AF minimum")
 end
 
 local function testBuildContract()
@@ -1852,6 +1856,9 @@ local function testAbortedHolderWriteDefers()
     assertEqual(#harness.timerCallbacks, 1, "aborted-write retry count")
     assertEqual(#harness.containers, 1, "aborted-write container count")
     assertEqual(holder.shown, true, "aborted-write holder state")
+    assertEqual(holder.alpha, 0, "aborted-write alpha curtain")
+    assertEqual(controller:IsPresentationApplied(), false,
+        "aborted-write presentation state")
 
     holder.blockSetShown = nil
     harness:RunNextTimer()
@@ -1861,6 +1868,37 @@ local function testAbortedHolderWriteDefers()
         "HELPFUL|PLAYER",
         "retried tuning group"
     )
+    assertEqual(holder.alpha, 1, "retried-write alpha restoration")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "retried-write presentation state")
+end
+
+local function testHoveredDestroyCurtainsUntilCompletion()
+    local harness = makeHarness()
+    local controller = harness.UF.CreateNativeAuraContainerController(
+        {},
+        "BFIHoveredDestroyAuraHolder",
+        completeSpec("target", true)
+    )
+    local holder = controller:GetFrame()
+
+    clearEvents(harness)
+    holder.mouseOver = true
+    controller:Destroy()
+
+    assertEqual(holder.alpha, 0, "hovered destroy alpha curtain")
+    assertEqual(holder.shown, true, "hovered destroy physical deferral")
+    assertEqual(controller:IsPresentationApplied(), false,
+        "hovered destroy presentation state")
+    assertEqual(#harness.timerCallbacks, 1,
+        "hovered destroy retry count")
+
+    holder.mouseOver = false
+    harness:RunNextTimer()
+    assertEqual(holder.shown, false,
+        "hovered destroy completion visibility")
+    assertEqual(holder.alpha, 1,
+        "hovered destroy completion alpha")
 end
 
 local function testMaxFrameCountContract()
@@ -2357,6 +2395,10 @@ local function testGroupVisibilityWaitsForHover()
         "hovered group holder visibility")
     assertEqual(controller:GetFrame().alpha, 0,
         "hovered external group alpha curtain")
+    assertEqual(seed.alpha, 0,
+        "hovered external container alpha curtain")
+    assertEqual(controller:IsPresentationApplied(), false,
+        "hovered external presentation state")
     assertEqual(countEvents(harness, "native.hide"), 0,
         "hovered native visibility mutation")
 
@@ -2367,6 +2409,10 @@ local function testGroupVisibilityWaitsForHover()
         "post-hover group holder visibility")
     assertEqual(controller:GetFrame().alpha, 1,
         "post-hover external group alpha")
+    assertEqual(seed.alpha, 1,
+        "post-hover external container alpha")
+    assertEqual(controller:IsPresentationApplied(), false,
+        "post-hover hidden external presentation state")
 end
 
 local function testPartitionBuildAndRelationSwap()
@@ -2526,7 +2572,15 @@ local function testPartitionHoveredVariantUsesLatestRequest()
     outer.mouseOver = true
 
     controller:SetVariant("hostile")
+    assertEqual(outer.alpha, 0,
+        "initial hovered partition alpha curtain")
+    assertEqual(controller:IsPresentationApplied(), false,
+        "initial hovered partition presentation state")
     controller:SetVariant("friendly")
+    assertEqual(outer.alpha, 1,
+        "reversed partition alpha restoration")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "reversed partition presentation state")
     controller:SetVariant("hostile")
 
     assertEqual(#harness.timerCallbacks, 1,
@@ -2554,6 +2608,8 @@ local function testPartitionHoveredVariantUsesLatestRequest()
         "latest complement presentation visibility")
     assertEqual(outer.alpha, 1,
         "recovered partition alpha")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "recovered partition presentation state")
 
     clearEvents(harness)
     outer.mouseOver = true
@@ -2712,6 +2768,7 @@ testPartialAddFailureDiagnostics()
 testHoveredTransitionDefers()
 testHoveredHideCurtainsImmediately()
 testAbortedHolderWriteDefers()
+testHoveredDestroyCurtainsUntilCompletion()
 testMaxFrameCountContract()
 testDestroyPrecedence()
 testOutOfBandOOCFlushUnregisters()

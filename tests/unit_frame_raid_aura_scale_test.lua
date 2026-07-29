@@ -134,6 +134,10 @@ local function newContainer(harness, parent)
         record(harness, "container.show", self)
     end
 
+    function container:SetAlpha(alpha)
+        self.alpha = alpha
+    end
+
     function container:ClearAllPoints()
         assertOutOfCombat(harness, "container point clear")
         self.point = nil

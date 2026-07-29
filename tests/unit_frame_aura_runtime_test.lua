@@ -277,6 +277,7 @@ local function makeHarness(options)
             self.enabled = spec.enabled
             self.shown = spec.shown
             self.frame.shown = spec.shown
+            self.presentationApplied = true
             record(harness, "controller.rebuild", self, spec)
         end
         function controller:ApplyTuning(tuning)
@@ -300,6 +301,9 @@ local function makeHarness(options)
             self.shown = shown
             if not (self.deferPhysicalHide and shown == false) then
                 self.frame.shown = shown
+                self.presentationApplied = true
+            else
+                self.presentationApplied = false
             end
             if self.spec then self.spec.shown = shown end
             record(harness, "controller.shown", self, shown)
@@ -307,8 +311,15 @@ local function makeHarness(options)
         function controller:SetVariant(variant)
             if self.variant == variant then return end
             self.variant = variant
+            self.presentationApplied =
+                not self.deferVariantVisibility
             if self.spec then self.spec.variant = variant end
             record(harness, "controller.variant", self, variant)
+        end
+        function controller:IsPresentationApplied()
+            return self.presentationApplied == true
+                and self.shown == true
+                and self.enabled == true
         end
         function controller:Refresh()
             self.refreshCount = (self.refreshCount or 0) + 1
@@ -861,6 +872,7 @@ local function testOptInRelationPartitionRuntime()
 
     harness:ClearEvents()
     harness.attackResult = true
+    controller.deferVariantVisibility = true
     harness:SetCombat(true)
     harness:Fire("UNIT_FACTION", "party1")
     harness:RunTimers(0.05)
@@ -870,8 +882,8 @@ local function testOptInRelationPartitionRuntime()
         "hostile state variant")
     assertEqual(countEvents(harness, "controller.variant"), 1,
         "hostile visibility switch count")
-    assertEqual(countEvents(harness, "controller.refresh"), 1,
-        "hostile stable-token refresh count")
+    assertEqual(countEvents(harness, "controller.refresh"), 0,
+        "hover-deferred hostile refresh count")
     assertEqual(countEvents(harness, "controller.rebuild"), 0,
         "hostile relation rebuild count")
     assertEqual(countEvents(harness, "controller.tuning"), 0,
@@ -880,6 +892,13 @@ local function testOptInRelationPartitionRuntime()
         "hostile relation placement count")
     assertEqual(countEvents(harness, "controller.unit"), 0,
         "hostile relation retarget count")
+
+    controller.deferVariantVisibility = nil
+    controller.presentationApplied = true
+    harness:ClearEvents()
+    runtime:Update()
+    assertEqual(countEvents(harness, "controller.refresh"), 1,
+        "post-hover hostile refresh count")
 
     harness:ClearEvents()
     harness.assistResult = {secret = true}

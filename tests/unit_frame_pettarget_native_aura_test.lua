@@ -545,6 +545,10 @@ local function makeEventRuntimeHarness(
             self.frame.shown = spec.shown
             self.rebuildCount = (self.rebuildCount or 0) + 1
         end
+        function controller:IsPresentationApplied()
+            return self.shown == true and self.enabled == true
+        end
+
         function controller:Refresh()
             self.refreshCount = (self.refreshCount or 0) + 1
         end
@@ -609,6 +613,20 @@ local function makeEventRuntimeHarness(
             #harness.legacyConstructions + 1
         ] = indicator
         return indicator
+    end
+
+    function UF.GetPublicUnitIdentityValue(value)
+        return value, true
+    end
+
+    function UF.GetPublicUnitIdentitySnapshot(unit)
+        return {
+            name = unit,
+            class = nil,
+            guid = "guid:" .. tostring(unit),
+            isPlayer = false,
+            inVehicle = false,
+        }
     end
 
     function UF.LoadIndicatorPosition(frame, position, anchorTo)
@@ -681,6 +699,9 @@ local function makeEventRuntimeHarness(
         UnitCanAssist = function()
             return true
         end,
+        UnitCanAttack = function()
+            return false
+        end,
         UnitClass = function()
             return nil
         end,
@@ -708,6 +729,7 @@ local function makeEventRuntimeHarness(
         print = function()
         end,
         select = select,
+        setmetatable = setmetatable,
         strfind = string.find,
         string = string,
         strmatch = string.match,
@@ -856,6 +878,7 @@ local function makePresetCompiler()
                 return key
             end,
         }),
+        funcs = {},
         modules = {
             UnitFrames = UF,
         },
@@ -881,9 +904,16 @@ local function makePresetCompiler()
         AuraContainerSortDirection = {
             Normal = 401,
         },
+        AuraUtil = {
+            AuraFilters = {
+                Important = "IMPORTANT",
+                Dispellable = "DISPELLABLE",
+            },
+        },
         CustomAuraContainerAuraProcessingPolicy = {
             None = 501,
         },
+        GetCVar = function() return nil end,
         assert = assert,
         error = error,
         ipairs = ipairs,
@@ -915,6 +945,7 @@ local function makePresetCompiler()
     })
 
     for _, path in ipairs({
+        "Utils.lua",
         "Modules/UnitFrames/Presets.lua",
         "Modules/UnitFrames/AuraPolicy.lua",
         "Modules/UnitFrames/AuraSpec.lua",
@@ -1438,30 +1469,16 @@ end
 
 local function testShippedPetTargetPresetBounds()
     local UF = makePresetCompiler()
-    local helpfulFilters = {
-        "HELPFUL|PLAYER",
-        "HELPFUL|RAID_IN_COMBAT|!PLAYER",
-        "HELPFUL|RAID_PLAYER_DISPELLABLE|!PLAYER"
-            .. "|!RAID_IN_COMBAT",
-        "HELPFUL|BIG_DEFENSIVE|!PLAYER|!RAID_IN_COMBAT"
-            .. "|!RAID_PLAYER_DISPELLABLE",
-        "HELPFUL|EXTERNAL_DEFENSIVE|!PLAYER|!RAID_IN_COMBAT"
-            .. "|!RAID_PLAYER_DISPELLABLE|!BIG_DEFENSIVE",
-    }
-    local harmfulFilters = {
-        "HARMFUL|PLAYER",
-        "HARMFUL|RAID_IN_COMBAT|!PLAYER",
-        "HARMFUL|RAID_PLAYER_DISPELLABLE|!PLAYER"
-            .. "|!RAID_IN_COMBAT",
-    }
+    local helpfulFilters = {"HELPFUL"}
+    local harmfulFilters = {"HARMFUL"}
     local diagnostics = {
         "NATIVE_DEFAULT_SORT_ADDS_PRIORITY",
         "NATIVE_HOLDER_USES_MAXIMUM_EXTENT",
         "AURA_TYPE_COLOR_SOURCE_RULES_IGNORED",
     }
     local degradations = {
-        perGroupLimit = true,
-        perGroupSort = true,
+        perGroupLimit = false,
+        perGroupSort = false,
         privateAuraSourceUnseparable = true,
         defaultSortPriority = true,
         fixedHolderExtent = true,
@@ -1501,21 +1518,21 @@ local function testShippedPetTargetPresetBounds()
         assertEqual(buffs.partition, nil,
             id .. " buffs partition")
         assertMetrics(buffs.metrics, {
-            groupCount = 5,
+            groupCount = 1,
             legacyMaxFrameCount = 22,
-            nativeVisibleCapacity = 110,
+            nativeVisibleCapacity = 22,
             nativeBatchSize = 10,
-            initialRestrictedButtonCount = 50,
-            freshContainerRestrictedButtonCountCeiling = 150,
+            initialRestrictedButtonCount = 10,
+            freshContainerRestrictedButtonCountCeiling = 30,
         }, id .. " buffs metrics")
         assertEqual(buffs.completeSpec.holder.width, 219,
             id .. " buffs holder width")
-        assertEqual(buffs.completeSpec.holder.height, 199,
+        assertEqual(buffs.completeSpec.holder.height, 39,
             id .. " buffs holder height")
         assertFilters(buffs, helpfulFilters, id .. " buffs filters")
-        assertEqual(buffs.visibility.requiresVisible, true,
+        assertEqual(buffs.visibility.requiresVisible, false,
             id .. " buffs visibility gate")
-        assertEqual(buffs.visibility.requiresAssist, true,
+        assertEqual(buffs.visibility.requiresAssist, false,
             id .. " buffs assist gate")
         assertEqual(#buffs.diagnostics, #diagnostics,
             id .. " buffs diagnostic count")
@@ -1533,20 +1550,20 @@ local function testShippedPetTargetPresetBounds()
         assertEqual(debuffs.partition, nil,
             id .. " debuffs partition")
         assertMetrics(debuffs.metrics, {
-            groupCount = 3,
+            groupCount = 1,
             legacyMaxFrameCount = 3,
-            nativeVisibleCapacity = 9,
+            nativeVisibleCapacity = 3,
             nativeBatchSize = 10,
-            initialRestrictedButtonCount = 30,
-            freshContainerRestrictedButtonCountCeiling = 30,
+            initialRestrictedButtonCount = 10,
+            freshContainerRestrictedButtonCountCeiling = 10,
         }, id .. " debuffs metrics")
         assertEqual(debuffs.completeSpec.holder.width, 59,
             id .. " debuffs holder width")
-        assertEqual(debuffs.completeSpec.holder.height, 59,
+        assertEqual(debuffs.completeSpec.holder.height, 19,
             id .. " debuffs holder height")
         assertFilters(debuffs, harmfulFilters,
             id .. " debuffs filters")
-        assertEqual(debuffs.visibility.requiresVisible, true,
+        assertEqual(debuffs.visibility.requiresVisible, false,
             id .. " debuffs visibility gate")
         assertEqual(debuffs.visibility.requiresAssist, false,
             id .. " debuffs assist gate")

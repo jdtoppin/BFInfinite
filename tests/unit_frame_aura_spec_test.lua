@@ -2842,6 +2842,93 @@ local function testPartitionColorBudgetUsesMaxActiveVariant()
     )
 end
 
+local function testPartitionColorBudgetPreservesLargeGrayBaseline()
+    local baseline = baseConfig()
+    baseline.cooldownStyle = "block_vertical"
+    baseline.filters = {
+        notPlayer = true,
+        raidInCombat = true,
+        raidPlayerDispellable = true,
+        bigDefensive = true,
+        externalDefensive = true,
+        important = true,
+        anyDispellable = true,
+    }
+    baseline.subFrame = {
+        enabled = true,
+        desaturated = true,
+        filter = "notCastByMe",
+        width = 8,
+        height = 7,
+    }
+
+    local baselineDescriptor =
+        compile("target", "HELPFUL", baseline)
+    assertEqual(
+        baselineDescriptor.metrics.maxActiveGroupCount,
+        14,
+        "large gray baseline active groups"
+    )
+    assertEqual(
+        baselineDescriptor.metrics.prebuiltGroupCount,
+        21,
+        "large gray baseline prebuilt groups"
+    )
+    assertEqual(
+        baselineDescriptor.metrics.colorGroupBudgetExceeded,
+        false,
+        "large gray baseline is not a color-budget failure"
+    )
+
+    local colored = copy(baseline)
+    colored.spellColors = {
+        [1001] = {0.1, 0.2, 0.3, 1},
+    }
+    local fallbackDescriptor =
+        compile("target", "HELPFUL", colored)
+    assertEqual(
+        fallbackDescriptor.metrics.requestedColorExpandedGroupCount,
+        28,
+        "large baseline requested color groups"
+    )
+    assertEqual(
+        fallbackDescriptor.metrics.colorGroupBudgetExceeded,
+        true,
+        "large baseline color fallback"
+    )
+    assertEqual(
+        fallbackDescriptor.metrics.maxActiveGroupCount,
+        14,
+        "large fallback keeps baseline active groups"
+    )
+    assertEqual(
+        fallbackDescriptor.metrics.prebuiltGroupCount,
+        21,
+        "large fallback keeps baseline prebuilt groups"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.completeSpec,
+        baselineDescriptor.completeSpec,
+        "large fallback friendly baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.partition.hostile.main.completeSpec,
+        baselineDescriptor.partition.hostile.main.completeSpec,
+        "large fallback hostile-main baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.partition.hostile.complement.completeSpec,
+        baselineDescriptor.partition.hostile.complement.completeSpec,
+        "large fallback hostile-complement baseline"
+    )
+    assertEqual(
+        fallbackDescriptor.visibility
+            .spellIDFilterRequiresPublicAssist,
+        false,
+        "large fallback adds no reaction gate"
+    )
+end
+
 local function testGlobalSpellColorConstructionBoundary()
     local original = onePolicyBlockConfig()
     original.spellColors = {
@@ -3620,6 +3707,7 @@ testTargetPartitionPreservesSpellColorFamilies()
 testGlobalSpellColorCandidateComposition()
 testGlobalSpellColorGroupBudget()
 testPartitionColorBudgetUsesMaxActiveVariant()
+testPartitionColorBudgetPreservesLargeGrayBaseline()
 testGlobalSpellColorConstructionBoundary()
 testInvalidInputs()
 testConstructionBoundary()

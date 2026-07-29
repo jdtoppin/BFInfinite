@@ -87,6 +87,21 @@ local function makeHarness()
         )
     end
 
+    function UF.GetPublicUnitIdentityValue(value)
+        return value, true
+    end
+
+    function UF.GetPublicUnitIdentitySnapshot(unit)
+        return {
+            name = "Name-" .. tostring(unit),
+            class = nil,
+            guid = harness.guidByUnit[unit]
+                or "GUID-" .. tostring(unit),
+            isPlayer = true,
+            inVehicle = false,
+        }
+    end
+
     local BFI = {
         funcs = F,
         modules = {
