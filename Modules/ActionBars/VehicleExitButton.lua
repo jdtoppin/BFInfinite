@@ -112,7 +112,7 @@ local function UpdateButton(_, module, which)
     AF.UpdateMoverSave(vehicleExitHolder, config.position)
 
     -- load config
-    AF.LoadPosition(vehicleExitHolder, config.position)
+    BFI.funcs.LoadPosition(vehicleExitHolder, config.position)
     AF.SetSize(vehicleExitHolder, config.size, config.size)
     vehicleExitHolder:SetFrameStrata(AB.config.general.frameStrata)
     vehicleExitHolder:SetFrameLevel(AB.config.general.frameLevel)

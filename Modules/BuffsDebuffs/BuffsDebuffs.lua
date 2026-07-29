@@ -356,7 +356,7 @@ local function EnableHeader(which, header, createHeader, config)
     header.enabled = true
     SetupHeader(header, config)
     AF.UpdateMoverSave(header, config.position)
-    AF.LoadPosition(header, config.position)
+    BFI.funcs.LoadPosition(header, config.position)
 
     if not BD.SetNativePublicAurasSuppressed(which, true) then
         header.enabled = false

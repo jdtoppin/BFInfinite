@@ -45,7 +45,7 @@ local function UpdateThreat(_, module, which)
     threatFrame.enabled = true
 
     AF.UpdateMoverSave(threatFrame, config.position)
-    AF.LoadPosition(threatFrame, config.position)
+    BFI.funcs.LoadPosition(threatFrame, config.position)
     AF.SetSize(threatFrame, config.width, config.height)
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateThreat)

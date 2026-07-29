@@ -23,6 +23,7 @@ BFI.name = "BFInfinite"
 ---@field Bags Bags
 ---@field BuffsDebuffs BuffsDebuffs
 ---@field Chat Chat
+---@field CooldownManager CooldownManager
 ---@field DataBars DataBars
 ---@field DamageMeter DamageMeter
 ---@field Maps Maps
@@ -81,6 +82,9 @@ BFI.modules.DamageMeter = {}
 
 BFI.modules.Chat = {}
 AF.AddEventHandler(BFI.modules.Chat)
+
+BFI.modules.CooldownManager = {}
+AF.AddEventHandler(BFI.modules.CooldownManager)
 
 BFI.modules.Tooltip = {}
 AF.AddEventHandler(BFI.modules.Tooltip)

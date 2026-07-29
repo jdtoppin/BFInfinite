@@ -263,7 +263,7 @@ function UF.SetupUnitFrame(frame, config, indicators, skipIndicatorUpdates)
 
     -- size & position
     AF.SetSize(frame, config.general.width, config.general.height)
-    AF.LoadPosition(frame, config.general.position)
+    BFI.funcs.LoadPosition(frame, config.general.position)
 
     -- out of range alpha
     frame.oorAlpha = config.general.oorAlpha
@@ -285,7 +285,7 @@ function UF.SetupUnitGroup(group, config, indicators, skipIndicatorUpdates)
     AF.UpdateMoverSave(group, config.general.position)
 
     -- position
-    AF.LoadPosition(group, config.general.position)
+    BFI.funcs.LoadPosition(group, config.general.position)
 
     -- container size
     if config.general.orientation == "top_to_bottom" or config.general.orientation == "bottom_to_top" then

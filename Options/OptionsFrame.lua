@@ -27,9 +27,10 @@ local list = {
     -- "social",
     "SEPARATOR",
     "unitFrames",
-    "-nameplates",
+    "nameplates",
     "actionBars",
     "bags",
+    "cooldownManager",
     buffsDebuffsAvailable and "buffsDebuffs" or "-buffsDebuffs",
     "tooltip",
     "uiWidgets",
@@ -224,6 +225,7 @@ local function CreateOptionsFrame()
     AF.ApplyCombatProtectionToWidget(editModeButton)
     editModeButton:SetOnClick(function()
         optionsFrame:Hide()
+        F.PrepareEditModePositions()
         AF.ShowMovers()
     end)
 

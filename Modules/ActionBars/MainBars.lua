@@ -328,7 +328,7 @@ local function UpdateBar(bar, general, specific)
 
     -- bar
     AB.ReArrange(bar, specific.width, specific.height, specific.spacingX, specific.spacingY, specific.buttonsPerLine, specific.num, specific.orientation)
-    AF.LoadPosition(bar, specific.position)
+    BFI.funcs.LoadPosition(bar, specific.position)
 
     bar:SetFrameStrata(general.frameStrata)
     bar:SetFrameLevel(general.frameLevel)

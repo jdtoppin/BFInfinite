@@ -4,95 +4,152 @@ local BFI = select(2, ...)
 local AF = _G.AbstractFramework
 local NP = BFI.modules.Nameplates
 
----------------------------------------------------------------------
--- local functions
----------------------------------------------------------------------
-local UnitName = UnitName
-local UnitIsConnected = UnitIsConnected
-local UnitIsSameServer = UnitIsSameServer
-local UnitClassBase = AF.UnitClassBase
+local INSIDE_POSITION = {"CENTER", "CENTER", 0, 0}
+local INSIDE_LENGTH = 0.9
 
----------------------------------------------------------------------
--- name
----------------------------------------------------------------------
-local function UpdateName(self, event, unitId)
-    local unit = self.root.unit
-    if unitId and unit ~= unitId then return end
-
-    local name = UnitName(unit)
-    if not name then return end
-
-    local class = UnitClassBase(unit)
-
-    -- length
-    AF.SetText(self, name, self.length, nil, (self.showOtherServerSign and not UnitIsSameServer(unit)) and "*")
-
-    -- color
-    local r, g, b
-    if self.color.type == "class_color" then
-        if AF.UnitIsPlayer(unit) then
-            r, g, b = AF.GetClassColor(class)
-        else
-            r, g, b = AF.GetReactionColor(unit)
+local function ApplyConfiguredFont(region, font, enabled, config)
+    if enabled and config and config.enabled then
+        local shadow = config.shadow
+        if shadow == nil then
+            shadow = font[4]
         end
+
+        AF.SetFont(
+            region,
+            font[1],
+            math.max(1, font[2] + (config.sizeDelta or 0)),
+            config.outline or font[3],
+            shadow
+        )
     else
-        if AF.UnitIsPlayer(unit) then
-            if not UnitIsConnected(unit) then
-                r, g, b = AF.GetClassColor(class)
-            else
-                r, g, b = unpack(self.color.rgb)
-            end
-        else
-            r, g, b = unpack(self.color.rgb)
-        end
+        AF.SetFont(
+            region,
+            font[1],
+            font[2],
+            font[3],
+            font[4]
+        )
     end
-    self:SetTextColor(r, g, b)
 end
 
----------------------------------------------------------------------
--- update
----------------------------------------------------------------------
 local function NameText_Update(self)
-    UpdateName(self)
+    self:UpdateName()
+    self.threatOverlay:UpdateName()
+    self.threatIndicator:Refresh()
 end
 
----------------------------------------------------------------------
--- enable
----------------------------------------------------------------------
 local function NameText_Enable(self)
-    self:RegisterUnitEvent("UNIT_NAME_UPDATE", self.root.unit, UpdateName)
-    self:RegisterUnitEvent("UNIT_FACTION", self.root.unit, UpdateName)
-
+    self:SetUnit(self.root.unit)
+    self.threatOverlay:SetUnit(self.root.unit)
+    self.threatOverlay:Show()
+    self.threatIndicator:Refresh()
     self:Show()
-    self:Update()
 end
 
----------------------------------------------------------------------
--- load
----------------------------------------------------------------------
+local function NameText_Disable(self)
+    self:SetTargetEmphasis(false)
+    self.threatOverlay:ClearUnit()
+    self.threatOverlay:Hide()
+    self:ClearUnit()
+    self:Hide()
+end
+
+local function NameText_SetTargetEmphasis(self, enabled, config)
+    local font = self.configuredFont
+    if not font then return end
+
+    ApplyConfiguredFont(self, font, enabled, config)
+    ApplyConfiguredFont(
+        self.threatOverlay,
+        font,
+        enabled,
+        config
+    )
+end
+
 local function NameText_LoadConfig(self, config)
-    AF.SetFont(self, unpack(config.font))
-    NP.LoadIndicatorPosition(self, config.position, config.anchorTo, config.parent)
+    self.configuredFont = {
+        config.font[1],
+        config.font[2],
+        config.font[3],
+        config.font[4],
+    }
+    self:SetTargetEmphasis(false)
 
-    self.length = config.length
-    self.color = config.color
-    self.showOtherServerSign = config.showOtherServerSign
+    local position = config.position
+    local anchorTo = config.anchorTo
+    local parent = config.parent
+    local length = config.length
+
+    if config.placement == "inside" then
+        position = INSIDE_POSITION
+        anchorTo = "healthBar"
+        length = INSIDE_LENGTH
+
+        -- A friendly name-only plate keeps the text visible even though its
+        -- health bar is disabled. When a bar is active, parent to it so the
+        -- centered text draws above the status-bar texture.
+        parent = NP.GetIndicator(self.root, "healthBar", true)
+            and "healthBar"
+            or "root"
+    end
+
+    NP.LoadIndicatorPosition(
+        self,
+        position,
+        anchorTo,
+        parent
+    )
+    self:SetLength(length)
+    NP.LoadIndicatorPosition(
+        self.threatOverlay,
+        position,
+        anchorTo,
+        parent
+    )
+    self.threatOverlay:SetLength(length)
+    ApplyConfiguredFont(
+        self.threatOverlay,
+        self.configuredFont,
+        false
+    )
+
+    if config.color.type == "custom_color" then
+        self.color = {
+            type = "custom_color",
+            rgb = config.color.rgb,
+        }
+    else
+        self.color = {type = "selection_color"}
+    end
 end
 
----------------------------------------------------------------------
--- create
----------------------------------------------------------------------
 function NP.CreateNameText(parent, name)
-    local text = parent:CreateFontString(name, "OVERLAY")
+    local text = AF.CreateSecretNameText(parent, name)
     text.root = parent
     text:Hide()
 
-    -- events
-    AF.AddEventHandler(text)
+    -- A dedicated duplicate keeps the configured name presentation intact
+    -- underneath it. Its secret unit name remains inside AF's native text
+    -- sink, while the threat carrier controls only color and visibility.
+    local threatOverlay = AF.CreateSecretNameText(
+        parent,
+        name .. "ThreatOverlay"
+    )
+    threatOverlay.root = parent
+    threatOverlay.indicatorName = "nameText"
+    threatOverlay.UpdateColor = AF.noop
+    threatOverlay:Hide()
+    text.threatOverlay = threatOverlay
 
-    -- functions
-    text.Enable = NameText_Enable
+    local healthBar = parent.indicators.healthBar
+    text.threatIndicator = healthBar.threatIndicator
+    text.threatIndicator:SetNameOverlay(threatOverlay)
+
     text.Update = NameText_Update
+    text.Enable = NameText_Enable
+    text.Disable = NameText_Disable
+    text.SetTargetEmphasis = NameText_SetTargetEmphasis
     text.LoadConfig = NameText_LoadConfig
 
     return text
