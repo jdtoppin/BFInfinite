@@ -1483,9 +1483,6 @@ function NP.CreateAuraOptionsPreview(parent)
                     18
                 )
             end
-            aura:SetCooldownStyle(
-                auraConfig.cooldownStyle or "none"
-            )
             local durationText =
                 auraConfig.durationText or {}
             local durationFont =
@@ -1557,6 +1554,12 @@ function NP.CreateAuraOptionsPreview(parent)
                 index == 1 and 60 or 90,
                 index == 2 and 2 or "",
                 auraIcons[index]
+            )
+            -- Bind the simulated timer before applying presentation. Native
+            -- cooldown and duration-bar setters may refresh their child
+            -- regions, so the selected style must be the final authority.
+            aura:SetCooldownStyle(
+                auraConfig.cooldownStyle or "none"
             )
         end
 
