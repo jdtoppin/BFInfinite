@@ -129,7 +129,7 @@ local function NewHarness(options)
 
     local AF = {
         isRetail = options.isRetail ~= false,
-        versionNum = options.afVersion or 25,
+        versionNum = options.afVersion or 33,
         UIParent = {},
     }
     if options.customMethods ~= false then
@@ -239,7 +239,7 @@ end
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 25,
+        afVersion = 33,
         registerCustomBackend = true,
     })
     local BD = harness.BD
@@ -274,7 +274,7 @@ end
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 25,
+        afVersion = 33,
     })
     local BD = harness.BD
 
@@ -288,21 +288,21 @@ end
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 24,
+        afVersion = 32,
         registerCustomBackend = true,
     })
     local BD = harness.BD
 
-    assertEqual(BD.HasCustomAuraContainerCapability(), false, "AF r24 custom capability")
-    assertEqual(BD.GetAuraBackend("buffs"), nil, "AF r24 12.1 backend")
+    assertEqual(BD.HasCustomAuraContainerCapability(), false, "AF r32 custom capability")
+    assertEqual(BD.GetAuraBackend("buffs"), nil, "AF r32 12.1 backend")
     harness.update()
-    assertEqual(harness.getCreateFrameCalls(), 0, "AF r24 12.1 legacy fallback")
+    assertEqual(harness.getCreateFrameCalls(), 0, "AF r32 12.1 legacy fallback")
 end
 
 do
     local harness = NewHarness({
         interfaceVersion = 120200,
-        afVersion = 25,
+        afVersion = 33,
         registerCustomBackend = true,
     })
     local BD = harness.BD
@@ -317,7 +317,7 @@ end
 for _, missingMethod in ipairs(REQUIRED_CUSTOM_AF_METHODS) do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 25,
+        afVersion = 33,
         missingCustomMethod = missingMethod,
         registerCustomBackend = true,
     })
@@ -349,7 +349,7 @@ end
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 25,
+        afVersion = 33,
         registerCustomBackend = true,
     })
     local BD = harness.BD
