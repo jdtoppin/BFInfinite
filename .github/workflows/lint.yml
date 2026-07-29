@@ -65,3 +65,6 @@ jobs:
 
       - name: Test 12.1 Player aura integration
         run: luajit tests/unit_frame_player_native_aura_test.lua
+
+      - name: Test 12.1 Boss aura integration
+        run: luajit tests/unit_frame_boss_native_aura_test.lua
