@@ -423,8 +423,47 @@ function ControllerMixin:_QueueRegenDispatch()
     end)
 end
 
+local function SetHolderCurtained(controller, curtained)
+    local alpha = curtained and 0 or 1
+    if curtained then
+        controller._presentationApplied = nil
+    end
+    if controller._holderAlpha == alpha then return end
+
+    -- This is BFI's own plain holder, never a native aura container or
+    -- restricted child. Alpha provides an immediate fail-closed curtain when
+    -- a hovered descendant makes the corresponding visibility write wait.
+    controller.frame:SetAlpha(alpha)
+    controller._holderAlpha = alpha
+end
+
+local function SetExternalContainerCurtained(controller, curtained)
+    if not controller._containerIsExternal or not controller._container then
+        return
+    end
+
+    local alpha = curtained and 0 or 1
+    if controller._containerAlpha == alpha then return end
+
+    -- A seeded container is not parented to the plain holder, so curtain its
+    -- inherited Frame alpha separately. The 12.1.0.68914/d3915c78
+    -- SimpleRegion contract permits this constant SetAlpha write. This
+    -- remains a write-only gate: BFI never reads native visibility, children,
+    -- or aura state.
+    controller._container:SetAlpha(alpha)
+    controller._containerAlpha = alpha
+end
+
+local function SetPresentationCurtained(controller, curtained)
+    SetHolderCurtained(controller, curtained)
+    SetExternalContainerCurtained(controller, curtained)
+end
+
 local function SetHolderShownSafe(controller, shown)
     local holder = controller.frame
+    if not shown then
+        SetHolderCurtained(controller, true)
+    end
     if holder:IsShown() == shown then
         return true
     end
@@ -477,6 +516,7 @@ local function SetControllerShownSafe(controller, shown)
     -- not to BFI's plain holder. Hide it explicitly before hiding the holder;
     -- show it only after the holder is restored. No native visibility is
     -- read: _containerShown tracks only BFI's own successful writes.
+    SetPresentationCurtained(controller, true)
     if not shown and not SetExternalContainerShownSafe(controller, false) then
         return false
     end
@@ -486,15 +526,20 @@ local function SetControllerShownSafe(controller, shown)
     if shown and not SetExternalContainerShownSafe(controller, true) then
         return false
     end
+    SetPresentationCurtained(controller, false)
     return true
 end
 
 local function RestoreControllerVisibility(controller)
     local spec = controller._spec
-    return SetControllerShownSafe(
+    local applied = SetControllerShownSafe(
         controller,
         spec ~= nil and spec.enabled and spec.shown
     )
+    if applied then
+        controller._presentationApplied = true
+    end
+    return applied
 end
 
 local function PositionContainer(container, holder, point)
@@ -599,6 +644,7 @@ function ControllerMixin:_Build()
         self._container = container
         self._containerIsExternal = true
         self._containerShown = false
+        self._containerAlpha = nil
         MarkBuildShellStranded(self)
     end
 
@@ -611,6 +657,7 @@ function ControllerMixin:_Build()
         self._container = container
         self._containerIsExternal = false
         self._containerShown = false
+        self._containerAlpha = nil
         MarkBuildShellStranded(self)
     end
     container:Hide()
@@ -763,6 +810,7 @@ function ControllerMixin:_ApplyPending()
         end
         self._containerIsExternal = nil
         self._containerShown = nil
+        self._containerAlpha = nil
         self._nativeShellStranded = nil
         self._knownInitialReservations = nil
         self._spec = nil
@@ -868,6 +916,16 @@ end
 
 function ControllerMixin:GetFrame()
     return self.frame
+end
+
+function ControllerMixin:IsPresentationApplied()
+    local spec = self._spec
+    return self._presentationApplied == true
+        and not self._destroyed
+        and not self._destroyRequested
+        and spec ~= nil
+        and spec.enabled
+        and spec.shown
 end
 
 -- Queue the latest configuration-only holder mutation behind the same

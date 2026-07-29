@@ -138,6 +138,10 @@ local function newHolder(harness, name, parent)
         self.shown = shown
     end
 
+    function holder:SetAlpha(alpha)
+        self.alpha = alpha
+    end
+
     function holder:SetSize(width, height)
         self.width = width
         self.height = height
@@ -164,6 +168,10 @@ local function newContainer(harness, parent)
     function container:Show()
         self.shown = true
         record(harness, "native.show", self)
+    end
+
+    function container:SetAlpha(alpha)
+        self.alpha = alpha
     end
 
     function container:ClearAllPoints()
@@ -1461,6 +1469,9 @@ local function testHoveredTransitionDefers()
     controller:ApplyTuning(tuningSpec())
 
     assertEqual(#harness.events, 0, "hovered transition mutations")
+    assertEqual(holder.alpha, 0, "hovered transition alpha curtain")
+    assertEqual(controller:IsPresentationApplied(), false,
+        "hovered transition presentation state")
     assertEqual(#harness.timerCallbacks, 1, "hover retry count")
     assertEqual(#harness.containers, 1, "hovered container count")
     assertEqual(container.enabled, true, "hovered container enabled")
@@ -1474,12 +1485,47 @@ local function testHoveredTransitionDefers()
     assertEqual(container.groups.helpful.filterString, "HELPFUL|PLAYER",
         "completed hovered tuning")
     assertEqual(holder.shown, true, "completed holder visibility")
+    assertEqual(holder.alpha, 1, "completed holder alpha")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "completed hovered presentation state")
     assertEqual(harness.events[1].name, "holder.shown", "hover-safe hide order")
     assertEqual(harness.events[1].args[2], false, "hover-safe hide state")
     assertEqual(harness.events[#harness.events].name, "holder.shown",
         "hover-safe restore order")
     assertEqual(harness.events[#harness.events].args[2], true,
         "hover-safe restore state")
+end
+
+local function testHoveredHideReversalUsesLatestRequest()
+    local harness = makeHarness()
+    local controller = harness.UF.CreateNativeAuraContainerController(
+        {},
+        "BFIHoveredReversalAuraHolder",
+        completeSpec("target", true)
+    )
+    local holder = controller:GetFrame()
+
+    clearEvents(harness)
+    holder.mouseOver = true
+    controller:SetShown(false)
+
+    assertEqual(holder.alpha, 0, "hovered hide alpha curtain")
+    assertEqual(holder.shown, true, "hovered hide physical deferral")
+    assertEqual(controller:IsPresentationApplied(), false,
+        "hovered hide presentation state")
+    assertEqual(#harness.timerCallbacks, 1, "hovered hide retry count")
+
+    controller:SetShown(true)
+    assertEqual(holder.alpha, 1, "reversed hover alpha restoration")
+    assertEqual(holder.shown, true, "reversed hover visibility")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "reversed hover presentation state")
+
+    holder.mouseOver = false
+    harness:RunNextTimer()
+    assertEqual(holder.shown, true, "stale retry keeps latest visibility")
+    assertEqual(holder.alpha, 1, "stale retry keeps latest alpha")
+    assertEqual(#harness.timerCallbacks, 0, "stale retry drained")
 end
 
 local function testAbortedHolderWriteDefers()
@@ -1501,6 +1547,9 @@ local function testAbortedHolderWriteDefers()
     assertEqual(#harness.timerCallbacks, 1, "aborted-write retry count")
     assertEqual(#harness.containers, 1, "aborted-write container count")
     assertEqual(holder.shown, true, "aborted-write holder state")
+    assertEqual(holder.alpha, 0, "aborted-write alpha curtain")
+    assertEqual(controller:IsPresentationApplied(), false,
+        "aborted-write presentation state")
 
     holder.blockSetShown = nil
     harness:RunNextTimer()
@@ -1510,6 +1559,37 @@ local function testAbortedHolderWriteDefers()
         "HELPFUL|PLAYER",
         "retried tuning group"
     )
+    assertEqual(holder.alpha, 1, "retried-write alpha restoration")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "retried-write presentation state")
+end
+
+local function testHoveredDestroyCurtainsUntilCompletion()
+    local harness = makeHarness()
+    local controller = harness.UF.CreateNativeAuraContainerController(
+        {},
+        "BFIHoveredDestroyAuraHolder",
+        completeSpec("target", true)
+    )
+    local holder = controller:GetFrame()
+
+    clearEvents(harness)
+    holder.mouseOver = true
+    controller:Destroy()
+
+    assertEqual(holder.alpha, 0, "hovered destroy alpha curtain")
+    assertEqual(holder.shown, true, "hovered destroy physical deferral")
+    assertEqual(controller:IsPresentationApplied(), false,
+        "hovered destroy presentation state")
+    assertEqual(#harness.timerCallbacks, 1,
+        "hovered destroy retry count")
+
+    holder.mouseOver = false
+    harness:RunNextTimer()
+    assertEqual(holder.shown, false,
+        "hovered destroy completion visibility")
+    assertEqual(holder.alpha, 1,
+        "hovered destroy completion alpha")
 end
 
 local function testMaxFrameCountContract()
@@ -2004,6 +2084,12 @@ local function testGroupVisibilityWaitsForHover()
     assertEqual(seed.shown, true, "hovered group seed visibility")
     assertEqual(controller:GetFrame().shown, true,
         "hovered group holder visibility")
+    assertEqual(controller:GetFrame().alpha, 0,
+        "hovered external group alpha curtain")
+    assertEqual(seed.alpha, 0,
+        "hovered external container alpha curtain")
+    assertEqual(controller:IsPresentationApplied(), false,
+        "hovered external presentation state")
     assertEqual(countEvents(harness, "native.hide"), 0,
         "hovered native visibility mutation")
 
@@ -2012,6 +2098,12 @@ local function testGroupVisibilityWaitsForHover()
     assertEqual(seed.shown, false, "post-hover group seed visibility")
     assertEqual(controller:GetFrame().shown, false,
         "post-hover group holder visibility")
+    assertEqual(controller:GetFrame().alpha, 1,
+        "post-hover external group alpha")
+    assertEqual(seed.alpha, 1,
+        "post-hover external container alpha")
+    assertEqual(controller:IsPresentationApplied(), false,
+        "post-hover hidden external presentation state")
 end
 
 testConstructionStatsContract()
@@ -2026,7 +2118,9 @@ testRebuildRejectsAfterInitialBuild()
 testMidBuildFailureIsOneShot()
 testPartialAddFailureDiagnostics()
 testHoveredTransitionDefers()
+testHoveredHideReversalUsesLatestRequest()
 testAbortedHolderWriteDefers()
+testHoveredDestroyCurtainsUntilCompletion()
 testMaxFrameCountContract()
 testDestroyPrecedence()
 testOutOfBandOOCFlushUnregisters()

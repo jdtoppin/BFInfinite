@@ -401,12 +401,12 @@ end
 local function SyncLifecycle(runtime)
     if runtime._reloadRequired then
         QuiesceForReload(runtime)
-        return
+        return false
     end
 
     if not runtime._built then
         SyncWatcher(runtime)
-        return
+        return false
     end
 
     local enabled = runtime._state == STATE_READY
@@ -415,12 +415,17 @@ local function SyncLifecycle(runtime)
 
     if not shown then
         runtime._controller:SetShown(false)
+        runtime._controller:SetEnabled(enabled)
+        SyncWatcher(runtime)
+        return false
     end
     runtime._controller:SetEnabled(enabled)
-    if shown then
-        runtime._controller:SetShown(true)
-    end
+    runtime._controller:SetShown(true)
     SyncWatcher(runtime)
+    -- This answer comes only from BFI-owned tracked presentation state. A
+    -- desired show may still be hover-deferred behind an alpha curtain, in
+    -- which case stable-unit refresh must not drive the stale native row.
+    return runtime._controller:IsPresentationApplied()
 end
 
 local function Compile(runtime, unit)
@@ -929,8 +934,9 @@ local function NativeAuras_Enable(self)
     if unitChanged or self._configDirty or self._deferredCommit then
         ScheduleCommit(self, true)
     else
-        SyncLifecycle(self)
-        if self._built
+        local displayPermitted = SyncLifecycle(self)
+        if displayPermitted
+            and self._built
             and self._state == STATE_READY
             and not providerUsesTestData
         then
@@ -972,8 +978,9 @@ local function NativeAuras_Update(self)
         return
     end
 
-    SyncLifecycle(self)
-    if self._built
+    local displayPermitted = SyncLifecycle(self)
+    if displayPermitted
+        and self._built
         and self._state == STATE_READY
         and not self._reloadRequired
         and not providerUsesTestData

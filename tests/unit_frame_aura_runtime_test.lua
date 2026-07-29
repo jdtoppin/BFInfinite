@@ -274,6 +274,8 @@ local function makeHarness(options)
             self.enabled = spec.enabled
             self.shown = spec.shown
             self.frame.shown = spec.shown
+            self.presentationApplied =
+                spec.enabled and spec.shown or false
             record(harness, "controller.rebuild", self, spec)
         end
         function controller:ApplyTuning(tuning)
@@ -290,6 +292,9 @@ local function makeHarness(options)
             if self.enabled == enabled then return end
             self.enabled = enabled
             if self.spec then self.spec.enabled = enabled end
+            if not enabled then
+                self.presentationApplied = false
+            end
             record(harness, "controller.enabled", self, enabled)
         end
         function controller:SetShown(shown)
@@ -297,9 +302,18 @@ local function makeHarness(options)
             self.shown = shown
             if not (self.deferPhysicalHide and shown == false) then
                 self.frame.shown = shown
+                self.presentationApplied =
+                    shown and self.enabled or false
+            else
+                self.presentationApplied = false
             end
             if self.spec then self.spec.shown = shown end
             record(harness, "controller.shown", self, shown)
+        end
+        function controller:IsPresentationApplied()
+            return self.presentationApplied == true
+                and self.enabled == true
+                and self.shown == true
         end
         function controller:Refresh()
             self.refreshCount = (self.refreshCount or 0) + 1
@@ -787,6 +801,32 @@ local function testLifecycleAndUnitRefresh()
     runtime:Enable()
     assertEqual(controller.enabled, true, "re-enabled native state")
     assertEqual(controller.shown, true, "re-enabled holder state")
+end
+
+local function testPendingPresentationSuppressesStableRefresh()
+    local harness = makeHarness()
+    local root = newRoot("PendingPresentation", "target")
+    local runtime, controller = createRuntime(harness, root)
+
+    runtime:LoadConfig(validConfig())
+    runtime:Enable()
+
+    harness:ClearEvents()
+    controller.presentationApplied = false
+    runtime:Update()
+    assertEqual(
+        countEvents(harness, "controller.refresh"),
+        0,
+        "pending presentation suppresses refresh"
+    )
+
+    controller.presentationApplied = true
+    runtime:Update()
+    assertEqual(
+        countEvents(harness, "controller.refresh"),
+        1,
+        "applied presentation permits refresh"
+    )
 end
 
 local function testDebounceAndConstructionReuse()
@@ -2639,6 +2679,7 @@ end
 
 testDormancyAndFallback()
 testLifecycleAndUnitRefresh()
+testPendingPresentationSuppressesStableRefresh()
 testDebounceAndConstructionReuse()
 testPostBuildConstructionRequiresReload()
 testCombatConstructionReloadLatestWins()
