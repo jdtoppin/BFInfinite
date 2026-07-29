@@ -5,6 +5,16 @@ local S = BFI.modules.Style
 local AF = _G.AbstractFramework
 
 local EncounterJournal
+local encounterDropdowns = {}
+local encounterDropdownMenusRegistered
+local encounterDropdownMenuTags = {
+    "MENU_EJ_EXPANSION",
+    "MENU_EJ_DIFFICULTY",
+    "MENU_EJ_LOOT_SLOT_FILTER",
+    "MENU_EJ_LOOT_JOURNAL",
+    "MENU_LOOT_JOURNAL_POWER",
+    "MENU_CLASS_FILTER",
+}
 
 -- Retail 12.0.7.68887, Gethe/wow-ui-source 4383ced30106d51b27e3e86d1987f1552f0d259d
 -- and PTR 12.1.0.68914, d3915c78aba77a7a9be76acbfa35c674bbb6abe9.
@@ -81,7 +91,7 @@ local function SetTextColor(region, color)
 end
 
 local function StyleEncounterRadio(frame)
-    S.StyleMenuSelection(frame, 7)
+    S.StyleMenuSelection(frame)
 end
 
 local function StyleEncounterRadioDescriptions(parentDescription)
@@ -93,8 +103,26 @@ local function StyleEncounterRadioDescriptions(parentDescription)
     end
 end
 
-local function StyleEncounterRadioMenu(_, rootDescription)
-    StyleEncounterRadioDescriptions(rootDescription)
+local function StyleEncounterDropdownMenu(owner, rootDescription)
+    -- MENU_CLASS_FILTER is shared by several Blizzard panels. Restrict the
+    -- initializer to dropdowns registered by this Encounter Journal skin.
+    if encounterDropdowns[owner] then
+        StyleEncounterRadioDescriptions(rootDescription)
+    end
+end
+
+local function StyleEncounterDropdown(dropdown)
+    S.StyleDropdownButton(dropdown)
+    encounterDropdowns[dropdown] = true
+end
+
+local function RegisterEncounterDropdownMenus()
+    if encounterDropdownMenusRegistered or not _G.Menu then return end
+    encounterDropdownMenusRegistered = true
+
+    for _, menuTag in ipairs(encounterDropdownMenuTags) do
+        _G.Menu.ModifyMenu(menuTag, StyleEncounterDropdownMenu)
+    end
 end
 
 local function CreateHoverOverlay(frame, alpha)
@@ -431,13 +459,13 @@ end
 
 local function StyleLootJournals()
     local runeforge = EncounterJournal.LootJournal
-    S.StyleDropdownButton(EncounterJournal.LootJournalViewDropdown)
-    S.StyleDropdownButton(runeforge.ClassDropdown)
-    S.StyleDropdownButton(runeforge.RuneforgePowerDropdown)
+    StyleEncounterDropdown(EncounterJournal.LootJournalViewDropdown)
+    StyleEncounterDropdown(runeforge.ClassDropdown)
+    StyleEncounterDropdown(runeforge.RuneforgePowerDropdown)
     S.StyleScrollBar(runeforge.ScrollBar)
 
     local itemSets = EncounterJournal.LootJournalItems.ItemSetsFrame
-    S.StyleDropdownButton(itemSets.ClassDropdown)
+    StyleEncounterDropdown(itemSets.ClassDropdown)
     S.StyleScrollBar(itemSets.ScrollBar)
 end
 
@@ -545,7 +573,7 @@ end
 
 local function StyleEncounterControls()
     local instanceSelect = EncounterJournal.instanceSelect
-    S.StyleDropdownButton(instanceSelect.ExpansionDropdown)
+    StyleEncounterDropdown(instanceSelect.ExpansionDropdown)
     S.StyleScrollBar(instanceSelect.ScrollBar)
     StyleGreatVaultButton(instanceSelect.GreatVaultButton)
 
@@ -555,12 +583,9 @@ local function StyleEncounterControls()
     S.StyleScrollBar(info.overviewScroll.ScrollBar)
     S.StyleScrollBar(info.LootContainer.ScrollBar)
     S.StyleScrollBar(EncounterJournal.encounter.instance.LoreScrollBar)
-    S.StyleDropdownButton(info.difficulty)
-    S.StyleDropdownButton(info.LootContainer.filter)
-    S.StyleDropdownButton(info.LootContainer.slotFilter)
-    if _G.Menu then
-        _G.Menu.ModifyMenu("MENU_EJ_DIFFICULTY", StyleEncounterRadioMenu)
-    end
+    StyleEncounterDropdown(info.difficulty)
+    StyleEncounterDropdown(info.LootContainer.filter)
+    StyleEncounterDropdown(info.LootContainer.slotFilter)
     local clearFilter = info.LootContainer.classClearFilter
     local clearFilterButton = _G[clearFilter:GetName() .. "ExitButton"]
     S.StyleIconButton(clearFilterButton, AF.GetIcon("Close"), 12, nil, "red")
@@ -1194,6 +1219,7 @@ local function StyleBlizzard()
     if not EncounterJournal then return end
 
     StyleShell()
+    RegisterEncounterDropdownMenus()
     RegisterHooks()
 
     StyleInstanceList()
