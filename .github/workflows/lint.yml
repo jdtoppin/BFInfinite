@@ -20,6 +20,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes lua-check lua5.1 luajit ripgrep
 
+      - name: Check Buffs & Debuffs backend selection
+        run: lua5.1 tests/buffs_debuffs_backend_selector_test.lua
+
+      - name: Check Buffs & Debuffs native aura frame suppression
+        run: lua5.1 tests/buffs_debuffs_native_aura_frames_test.lua
+
+      - name: Check Buffs & Debuffs custom aura controller
+        run: lua5.1 tests/buffs_debuffs_custom_aura_controller_test.lua
+
+      - name: Check Buffs & Debuffs custom Buffs compiler
+        run: lua5.1 tests/buffs_debuffs_custom_buffs_spec_test.lua
+
+      - name: Check Buffs & Debuffs profile normalization
+        run: lua5.1 tests/buffs_debuffs_profile_normalization_test.lua
+
+      - name: Check Buffs & Debuffs options policy
+        run: lua5.1 tests/buffs_debuffs_options_policy_test.lua
+
       - name: Check Lua and policy
         shell: bash
         env:

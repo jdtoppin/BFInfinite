@@ -7,25 +7,170 @@ local BD = BFI.modules.BuffsDebuffs
 local AF = _G.AbstractFramework
 
 local GetUnitAuraInstanceIDs = C_UnitAuras.GetUnitAuraInstanceIDs
+local GetBuildInfo = GetBuildInfo
 local GetWeaponEnchantInfo = GetWeaponEnchantInfo
 local InCombatLockdown = InCombatLockdown
 local mainHandSlot = GetInventorySlotInfo("MainHandSlot")
 local secondaryHandSlot = GetInventorySlotInfo("SecondaryHandSlot")
 
-local REQUIRED_AF_VERSION = 21
+local REQUIRED_LEGACY_AF_VERSION = 21
+local REQUIRED_CUSTOM_AF_VERSION = 33
+local RETAIL_12_0_INTERFACE_MIN = 120000
+local RETAIL_12_1_INTERFACE_MIN = 120100
+local RETAIL_12_2_INTERFACE_MIN = 120200
+local SECURE_AURA_HEADER_BACKEND = "secureAuraHeader"
+local CUSTOM_AURA_CONTAINER_BACKEND = "customAuraContainer"
+
+local REQUIRED_CUSTOM_AF_METHODS = {
+    "AddCustomAuraGroup",
+    "AddCustomItemEnchantment",
+    "CreateCustomAuraContainer",
+    "GetCustomAuraContainerConstructionStats",
+    "GetCustomAuraContainerConstructionTotals",
+    "HasCustomAuraContainer",
+    "ResetCustomItemEnchantmentLayout",
+    "SetCustomAuraContainerEnabled",
+    "SetCustomAuraContainerFlowLayout",
+    "SetCustomAuraContainerProcessingPolicy",
+    "SetCustomAuraContainerUnit",
+    "SetCustomAuraGroupCandidateFilters",
+    "SetCustomAuraGroupFilterString",
+    "SetCustomAuraGroupLayout",
+    "SetCustomAuraGroupMaxFrameCount",
+    "SetCustomAuraGroupSortMethod",
+    "SetCustomItemEnchantmentLayout",
+    "SetCustomItemEnchantmentSortMethod",
+    "UpdateCustomAuraContainer",
+}
+
+BD.SECURE_AURA_HEADER_BACKEND = SECURE_AURA_HEADER_BACKEND
+BD.CUSTOM_AURA_CONTAINER_BACKEND = CUSTOM_AURA_CONTAINER_BACKEND
+
+local function GetRetailInterfaceVersion()
+    return tonumber(select(4, GetBuildInfo()))
+end
 
 -- Retail 12.0.7 loads the implementation and template together from
--- Blizzard_RestrictedAddOnEnvironment/SecureGroupHeaders. Retail 12.1 only
--- loads the replacement SecureAuraHeader files for Classic clients.
+-- Blizzard_RestrictedAddOnEnvironment/SecureGroupHeaders. Retail 12.1.0.68914
+-- (wow-ui-source d3915c78) marks SecureAuraHeader.lua/xml Classic-only. Keep an
+-- explicit interface boundary because Lua function globals cannot prove that
+-- SecureAuraHeaderTemplate is constructible.
 function BD.HasSecureAuraHeaderBackend()
+    local interfaceVersion = GetRetailInterfaceVersion()
     return AF.isRetail
-        and (tonumber(AF.versionNum) or 0) >= REQUIRED_AF_VERSION
+        and interfaceVersion ~= nil
+        and interfaceVersion >= RETAIL_12_0_INTERFACE_MIN
+        and interfaceVersion < RETAIL_12_1_INTERFACE_MIN
+        and (tonumber(AF.versionNum) or 0) >= REQUIRED_LEGACY_AF_VERSION
         and type(_G.SecureAuraHeader_Update) == "function"
         and type(_G.SecureAuraHeader_UpdateEventRegistrations) == "function"
         and type(GetUnitAuraInstanceIDs) == "function"
         and type(GetWeaponEnchantInfo) == "function"
         and type(BD.CanSuppressNativePublicAuras) == "function"
         and type(BD.SetNativePublicAurasSuppressed) == "function"
+end
+
+local function HasCustomAuraContainerSchema()
+    local anchorUtil = _G.AnchorUtil
+    local flowAxis = anchorUtil and anchorUtil.FlowLayoutAxis
+    local flowDirection = anchorUtil and anchorUtil.FlowDirection
+    local sortMethod = _G.AuraContainerSortMethod
+    local sortDirection = _G.AuraContainerSortDirection
+    local enchantmentSlot = _G.AuraContainerItemEnchantmentSlot
+    local enchantmentSortMethod = _G.AuraContainerItemEnchantmentSortMethod
+    local processingPolicy = _G.CustomAuraContainerAuraProcessingPolicy
+    local enchantmentPlacement = _G.CustomAuraContainerItemEnchantmentPlacement
+
+    return type(flowAxis) == "table"
+        and flowAxis.Horizontal ~= nil
+        and flowAxis.Vertical ~= nil
+        and type(flowDirection) == "table"
+        and flowDirection.Left ~= nil
+        and flowDirection.Right ~= nil
+        and flowDirection.Up ~= nil
+        and flowDirection.Down ~= nil
+        and type(sortMethod) == "table"
+        and sortMethod.Default ~= nil
+        and sortMethod.ExpirationOnly ~= nil
+        and sortMethod.NameOnly ~= nil
+        and sortMethod.AuraInstanceIDOnly ~= nil
+        and type(sortDirection) == "table"
+        and sortDirection.Normal ~= nil
+        and sortDirection.Reverse ~= nil
+        and type(enchantmentSlot) == "table"
+        and enchantmentSlot.MainHand ~= nil
+        and enchantmentSlot.OffHand ~= nil
+        and enchantmentSlot.Ranged ~= nil
+        and type(enchantmentSortMethod) == "table"
+        and enchantmentSortMethod.Slot ~= nil
+        and enchantmentSortMethod.Duration ~= nil
+        and type(processingPolicy) == "table"
+        and processingPolicy.None ~= nil
+        and type(enchantmentPlacement) == "table"
+        and enchantmentPlacement.BeforeAuraGroups ~= nil
+        and enchantmentPlacement.AfterAuraGroups ~= nil
+end
+
+-- AF owns construction and pre-restriction button styling. This predicate
+-- verifies every adapter method and schema member needed by the planned
+-- upper-right containers without creating a frame as a capability probe.
+function BD.HasCustomAuraContainerCapability()
+    local interfaceVersion = GetRetailInterfaceVersion()
+    if not AF.isRetail
+        or interfaceVersion == nil
+        or interfaceVersion < RETAIL_12_1_INTERFACE_MIN
+        or interfaceVersion >= RETAIL_12_2_INTERFACE_MIN
+        or (tonumber(AF.versionNum) or 0) < REQUIRED_CUSTOM_AF_VERSION
+        or not HasCustomAuraContainerSchema()
+    then
+        return false
+    end
+
+    for _, methodName in ipairs(REQUIRED_CUSTOM_AF_METHODS) do
+        if type(AF[methodName]) ~= "function" then
+            return false
+        end
+    end
+
+    return AF.HasCustomAuraContainer() == true
+        and type(BD.CanSuppressNativePublicAuras) == "function"
+        and type(BD.SetNativePublicAurasSuppressed) == "function"
+end
+
+local function HasRegisteredCustomAuraContainerBackend(which)
+    return type(BD.IsCustomAuraContainerAvailable) == "function"
+        and type(BD.UpdateCustomAuraContainer) == "function"
+        and type(BD.DisableCustomAuraContainer) == "function"
+        and BD.IsCustomAuraContainerAvailable(which) == true
+end
+
+function BD.GetAuraBackend(which)
+    if which == nil then
+        return BD.GetAuraBackend("buffs") or BD.GetAuraBackend("debuffs")
+    elseif which ~= "buffs" and which ~= "debuffs" then
+        return nil
+    end
+
+    local interfaceVersion = GetRetailInterfaceVersion()
+    if interfaceVersion ~= nil and interfaceVersion >= RETAIL_12_1_INTERFACE_MIN then
+        if BD.HasCustomAuraContainerCapability()
+            and HasRegisteredCustomAuraContainerBackend(which)
+        then
+            return CUSTOM_AURA_CONTAINER_BACKEND
+        end
+
+        -- Never fall back to SecureAuraHeaderTemplate on 12.1 or later. If the
+        -- complete custom backend is unavailable, Blizzard remains visible.
+        return nil
+    end
+
+    if BD.HasSecureAuraHeaderBackend() then
+        return SECURE_AURA_HEADER_BACKEND
+    end
+end
+
+function BD.HasAuraBackend(which)
+    return BD.GetAuraBackend(which) ~= nil
 end
 
 ---------------------------------------------------------------------
@@ -319,6 +464,24 @@ end
 local updatePending
 local pendingWhich
 local UpdateBuffsDebuffs
+local pendingOptionsSignature
+
+function BD.IsBuffsDebuffsUpdatePending(which)
+    if not updatePending then return false end
+    return pendingWhich == nil
+        or which == nil
+        or pendingWhich == which
+end
+
+local function NotifyPendingOptions()
+    local signature = updatePending
+        and (pendingWhich or "*")
+        or ""
+    if signature == pendingOptionsSignature then return end
+
+    pendingOptionsSignature = signature
+    AF.Fire("BFI_RefreshOptions", "buffsDebuffs")
+end
 
 local function RetryBuffsDebuffsUpdate()
     BD:UnregisterEvent("PLAYER_REGEN_ENABLED", RetryBuffsDebuffsUpdate)
@@ -327,14 +490,16 @@ local function RetryBuffsDebuffsUpdate()
     updatePending = nil
     pendingWhich = nil
     UpdateBuffsDebuffs(nil, "buffsDebuffs", which)
+    NotifyPendingOptions()
 end
 
 local function DisableHeader(which, header)
-    if not BD.SetNativePublicAurasSuppressed(which, false) then return end
+    if not BD.SetNativePublicAurasSuppressed(which, false) then return false end
     if header then
         header.enabled = false
         header:Hide()
     end
+    return true
 end
 
 local function EnableHeader(which, header, createHeader, config)
@@ -365,10 +530,34 @@ local function EnableHeader(which, header, createHeader, config)
     return header
 end
 
+local function UpdatePane(which, config, header, createHeader)
+    local backend = BD.GetAuraBackend(which)
+    if backend == CUSTOM_AURA_CONTAINER_BACKEND then
+        -- Restore Blizzard first. The custom backend may suppress it again
+        -- only after its replacement has completed construction.
+        if not DisableHeader(which, header) then return header end
+        BD.UpdateCustomAuraContainer(which, config)
+    elseif backend == SECURE_AURA_HEADER_BACKEND then
+        if type(BD.DisableCustomAuraContainer) == "function" then
+            BD.DisableCustomAuraContainer(which)
+        end
+        if config.enabled then
+            header = EnableHeader(which, header, createHeader, config)
+        else
+            DisableHeader(which, header)
+        end
+    else
+        if type(BD.DisableCustomAuraContainer) == "function" then
+            BD.DisableCustomAuraContainer(which)
+        end
+        DisableHeader(which, header)
+    end
+    return header
+end
+
 UpdateBuffsDebuffs = function(_, module, which)
     if module and module ~= "buffsDebuffs" then return end
     if which and which ~= "buffs" and which ~= "debuffs" then return end
-    if not BD.HasSecureAuraHeaderBackend() then return end
 
     if InCombatLockdown() then
         if not updatePending then
@@ -378,27 +567,20 @@ UpdateBuffsDebuffs = function(_, module, which)
         end
         updatePending = true
         BD:RegisterEvent("PLAYER_REGEN_ENABLED", RetryBuffsDebuffsUpdate)
+        NotifyPendingOptions()
         return
     end
 
     -- buffs
     local config = BD.config.buffs
     if not which or which == "buffs" then
-        if config.enabled then
-            buffFrame = EnableHeader("buffs", buffFrame, CreateBuffHeader, config)
-        else
-            DisableHeader("buffs", buffFrame)
-        end
+        buffFrame = UpdatePane("buffs", config, buffFrame, CreateBuffHeader)
     end
 
     -- debuffs
     config = BD.config.debuffs
     if not which or which == "debuffs" then
-        if config.enabled then
-            debuffFrame = EnableHeader("debuffs", debuffFrame, CreateDebuffHeader, config)
-        else
-            DisableHeader("debuffs", debuffFrame)
-        end
+        debuffFrame = UpdatePane("debuffs", config, debuffFrame, CreateDebuffHeader)
     end
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateBuffsDebuffs)
