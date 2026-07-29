@@ -595,6 +595,43 @@ local function UpdatePreviewedCatalogEntry(preview, entryInfo)
     StyleVisibleCatalogEntries(catalog.OptionsContainer.ScrollBox)
 end
 
+local function StyleModelSceneControlButton(button, icon, fallbackIcon, flipFallback)
+    -- ModelScene rotation starts on mouse-down and stops on mouse-up. Preserve
+    -- those native scripts while replacing only Blizzard's button chrome.
+    S.StyleButton(button, nil, nil, true)
+
+    if AF.hasViewIcons and AF.SetAdaptiveIcon then
+        AF.SetAdaptiveIcon(button.Icon, icon)
+        button.Icon:SetTexCoord(0, 1, 0, 1)
+    else
+        button.Icon:SetTexture(AF.GetIcon(fallbackIcon))
+        button.Icon:SetTexCoord(flipFallback and 1 or 0, flipFallback and 0 or 1, 0, 1)
+    end
+
+    button.Icon:SetAlpha(1)
+    button.Icon:Show()
+    button.Icon:SetVertexColor(AF.GetColorRGB("white"))
+    AF.ClearPoints(button.Icon)
+    AF.SetPoint(button.Icon, "CENTER")
+    AF.SetSize(button.Icon, 18, 18)
+end
+
+local function StyleModelSceneControls(controls)
+    if not controls or controls._BFIHousingStyled then return end
+    controls._BFIHousingStyled = true
+
+    StyleModelSceneControlButton(controls.zoomInButton, "View_ZoomIn", "Plus")
+    StyleModelSceneControlButton(controls.zoomOutButton, "View_ZoomOut", "Minus")
+    StyleModelSceneControlButton(controls.rotateLeftButton, "View_RotateLeft", "Refresh_Round")
+    StyleModelSceneControlButton(controls.rotateRightButton, "View_RotateRight", "Refresh_Round", true)
+    StyleModelSceneControlButton(controls.resetButton, "View_Reset", "Reset_Small")
+
+    -- Blizzard's atlases include broad transparent gutters and overlap by six
+    -- pixels. AF backdrops fill the controls, so leave a clean one-pixel gap.
+    controls.buttonHorizontalPadding = 1
+    controls:UpdateLayout()
+end
+
 local function StyleCatalog(catalog)
     catalog.Background:SetAlpha(0)
     catalog.Background:Hide()
@@ -633,6 +670,7 @@ local function StyleCatalog(catalog)
     preview:HookScript("OnShow", HideCatalogPreviewChrome)
     UpdatePreviewedCatalogEntry(preview, preview.catalogEntryInfo)
 
+    StyleModelSceneControls(preview.ModelSceneControls)
     S.StyleIconButton(preview.VariantLeftButton, AF.GetIcon("ArrowLeft2"), 16)
     S.StyleIconButton(preview.VariantRightButton, AF.GetIcon("ArrowRight2"), 16)
     AF.SetSize(preview.VariantLeftButton, 27, 27)
