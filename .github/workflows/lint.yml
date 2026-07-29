@@ -51,6 +51,9 @@ jobs:
       - name: Test unit-frame aura filter options
         run: luajit tests/unit_frame_aura_filter_options_test.lua
 
+      - name: Test unit-frame aura Block Color defaults
+        run: luajit tests/unit_frame_aura_block_color_defaults_test.lua
+
       - name: Test unit-frame config-mode lifecycle
         run: luajit tests/unit_frame_config_mode_lifecycle_test.lua
 

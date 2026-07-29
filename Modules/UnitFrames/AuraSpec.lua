@@ -139,6 +139,10 @@ local function CopyColor(color)
     return {color[1], color[2], color[3], color[4]}
 end
 
+local function IsBlockCooldownStyle(style)
+    return sub(style, 1, 5) == "block"
+end
+
 local function ValidateDurationText(config)
     return type(config) == "table"
         and type(config.enabled) == "boolean"
@@ -397,7 +401,7 @@ local function NewLayout(index, config, primarySpacing, crossSpacing)
 end
 
 local function NewButtonStyle(baseFilter, config, tooltip)
-    return {
+    local style = {
         noBorder = true,
         width = config.width,
         height = config.height,
@@ -410,6 +414,16 @@ local function NewButtonStyle(baseFilter, config, tooltip)
             and config.auraTypeColor.debuffType == true,
         tooltip = Copy(tooltip),
     }
+
+    -- This is ordinary saved configuration, never aura-derived data. Omit it
+    -- for icon styles so an inactive setting cannot affect native construction.
+    if IsBlockCooldownStyle(config.cooldownStyle)
+        and config.blockColor ~= nil
+    then
+        style.blockColor = CopyColor(config.blockColor)
+    end
+
+    return style
 end
 
 local function AddDiagnostic(diagnostics, code)
@@ -475,6 +489,13 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     end
     if not COOLDOWN_STYLES[config.cooldownStyle] then
         return nil, "INVALID_COOLDOWN_STYLE"
+    end
+    if IsBlockCooldownStyle(config.cooldownStyle)
+        and config.blockColor ~= nil
+        and (not IsColor(config.blockColor)
+            or not IsFiniteNumber(config.blockColor[4]))
+    then
+        return nil, "INVALID_BLOCK_COLOR"
     end
     if not ValidateDurationText(config.durationText) then
         return nil, "INVALID_DURATION_TEXT"

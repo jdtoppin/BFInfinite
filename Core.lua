@@ -5,8 +5,8 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF #19/r32 provides the complement filters used by supported aura controls.
-local REQUIRED_AF_VERSION = 32
+-- AF #22/r34 provides static Block colors on legacy and native aura buttons.
+local REQUIRED_AF_VERSION = 34
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar

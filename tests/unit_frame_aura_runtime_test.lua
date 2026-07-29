@@ -1561,6 +1561,30 @@ local function testPolymorphicGlobalRefreshSource()
         "debuff refresh still calls the legacy implementation")
 end
 
+local function testLegacyBlockColorProjectionSource()
+    local file = assert(io.open(
+        "Modules/UnitFrames/Indicators/Auras.lua",
+        "r"
+    ))
+    local source = file:read("*a")
+    file:close()
+
+    assertTrue(
+        source:find(
+            "aura:SetCooldownStyle%(config.cooldownStyle, blockColor%)"
+        ) ~= nil,
+        "legacy aura does not forward the configured block color"
+    )
+    assertTrue(
+        source:find("and config.blockColor", 1, true) ~= nil,
+        "legacy aura does not gate block color by cooldown style"
+    )
+    assertTrue(
+        source:find("AF.GetColorRGB%(\"BFI\"%)") == nil,
+        "legacy preview still injects the obsolete accent-color argument"
+    )
+end
+
 local function testGroupRuntimeSelectionAndFallback()
     local unavailable = makeHarness({
         backend = false,
@@ -2356,6 +2380,7 @@ testConfigModeNeverRetargetsPlayer()
 testDisabledConfigModePreviewCannotEscape()
 testWaitingUnitAndTerminalDestroy()
 testPolymorphicGlobalRefreshSource()
+testLegacyBlockColorProjectionSource()
 testGroupRuntimeSelectionAndFallback()
 testGroupSeedsPrebuildBeforeCombat()
 testGroupUnitRetargetsBeforePendingCombatConfig()

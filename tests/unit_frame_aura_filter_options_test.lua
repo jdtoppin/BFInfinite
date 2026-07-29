@@ -117,7 +117,18 @@ local function makeWidget(kind, harness, parent, text)
         self.checked = value
     end
 
-    function widget:SetColor()
+    function widget:SetColor(...)
+        local first = ...
+        if select("#", ...) == 1 and type(first) == "table" then
+            self.color = {
+                first[1],
+                first[2],
+                first[3],
+                first[4],
+            }
+        else
+            self.color = {...}
+        end
     end
 
     function widget:SetEnabled(value)
@@ -146,6 +157,10 @@ local function makeWidget(kind, harness, parent, text)
 
     function widget:SetOnClick(callback)
         self.onClick = callback
+    end
+
+    function widget:SetOnConfirm(callback)
+        self.onConfirm = callback
     end
 
     function widget:SetOnEnterPressed(callback)
@@ -459,6 +474,15 @@ local function makeHarness(isRetail, hasNativeBackend)
         )
     end
 
+    function AF.CreateColorPicker(parent, text)
+        return makeWidget(
+            "colorPicker",
+            harness,
+            parent,
+            text
+        )
+    end
+
     function AF.CreateDropdown(parent)
         return makeWidget("dropdown", harness, parent)
     end
@@ -501,6 +525,13 @@ local function makeHarness(isRetail, hasNativeBackend)
     end
 
     function AF.Debug()
+    end
+
+    function AF.FillColorTable(color, r, g, b, a)
+        color[1] = r
+        color[2] = g
+        color[3] = b
+        color[4] = a
     end
 
     function AF.GetColorStr()
@@ -570,6 +601,11 @@ local function makeHarness(isRetail, hasNativeBackend)
     function AF.SetPoint(widget, ...)
         widget.points = widget.points or {}
         widget.points[#widget.points + 1] = {...}
+    end
+
+    function AF.SetTooltip(widget, _, _, _, title, body)
+        widget.tooltipTitle = title
+        widget.tooltipBody = body
     end
 
     function AF.SpellExists()
@@ -733,6 +769,7 @@ local function newInfo(id, owner, filters, runtimeKind)
                 dispellable = true,
             },
             blacklist = {12345},
+            blockColor = {0.5, 0.5, 0.5, 1},
             cooldownStyle = "clock_with_leading_edge",
             filters = filters or {},
             height = 19,
@@ -1499,6 +1536,12 @@ local function testRetailPresentation(hasNativeBackend)
         "kind",
         "dropdown"
     )
+    local blockColor = findWidget(
+        cooldownPane,
+        "colorPicker",
+        "initialText",
+        "Block Fill Color"
+    )
     assertItemValues(
         cooldown,
         COOLDOWN_STYLES,
@@ -1509,6 +1552,29 @@ local function testRetailPresentation(hasNativeBackend)
         "opaque aura duration",
         version .. " cooldown explanation"
     )
+    assertTrue(blockColor, version .. " block color picker")
+    assertEqual(
+        blockColor.enabled,
+        false,
+        version .. " ordinary style block color state"
+    )
+    assertEqual(
+        blockColor.onChange,
+        nil,
+        version .. " block color has no continuous callback"
+    )
+    assertContains(
+        blockColor.tooltipBody,
+        "one static color",
+        version .. " block color scope"
+    )
+    for index, component in ipairs({0.5, 0.5, 0.5, 1}) do
+        assertEqual(
+            blockColor.color[index],
+            component,
+            version .. " block color load " .. index
+        )
+    end
     harness:ClearLoads()
     for _, style in ipairs(COOLDOWN_STYLES) do
         cooldown.onSelect(style)
@@ -1517,12 +1583,33 @@ local function testRetailPresentation(hasNativeBackend)
             style,
             version .. " cooldown callback " .. style
         )
+        assertEqual(
+            blockColor.enabled,
+            style:find("^block") ~= nil,
+            version .. " block color state " .. style
+        )
     end
     assertFanout(
         harness,
         debuffs,
         #COOLDOWN_STYLES,
         version .. " cooldown callback fan-out"
+    )
+
+    harness:ClearLoads()
+    blockColor.onConfirm(0.1, 0.2, 0.3, 0.4)
+    for index, component in ipairs({0.1, 0.2, 0.3, 0.4}) do
+        assertEqual(
+            debuffs.cfg.blockColor[index],
+            component,
+            version .. " block color confirm " .. index
+        )
+    end
+    assertFanout(
+        harness,
+        debuffs,
+        1,
+        version .. " block color callback fan-out"
     )
 end
 
@@ -1663,8 +1750,19 @@ local function testNonRetailSemantics()
     )
     assertContains(
         cooldown.tooltipBody,
-        "Block type",
+        "Block Fill Color",
         "non-Retail cooldown explanation"
+    )
+    local blockColor = findWidget(
+        cooldownPane,
+        "colorPicker",
+        "initialText",
+        "Block Fill Color"
+    )
+    assertEqual(
+        blockColor.enabled,
+        false,
+        "non-Retail ordinary style block color state"
     )
 end
 

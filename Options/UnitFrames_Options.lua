@@ -4116,8 +4116,40 @@ builder["cooldownStyle"] = function(parent)
         {text = L["Clock (With Leading Edge)"], value = "clock_with_leading_edge"},
         {text = L["Block Clock (With Leading Edge)"], value = "block_clock_with_leading_edge"},
     })
+
+    local blockColor = AF.CreateColorPicker(
+        pane,
+        L["Block Fill Color"],
+        true
+    )
+    AF.SetPoint(blockColor, "LEFT", styleDropdown, "RIGHT", 25, 0)
+    AF.SetTooltip(
+        blockColor,
+        "TOPLEFT",
+        0,
+        2,
+        L["Block Fill Color"],
+        L["Applies one static color to every Block-style aura in this Buffs or Debuffs indicator. It does not use per-spell colors."]
+    )
+
+    local function UpdateBlockColor()
+        local style = pane.t.cfg.cooldownStyle
+        blockColor:SetEnabled(
+            type(style) == "string"
+                and style:find("^block") ~= nil
+        )
+    end
+
     styleDropdown:SetOnSelect(function(value)
         pane.t.cfg.cooldownStyle = value
+        UpdateBlockColor()
+        LoadIndicatorConfig(pane.t)
+    end)
+    blockColor:SetOnConfirm(function(r, g, b, a)
+        if type(pane.t.cfg.blockColor) ~= "table" then
+            pane.t.cfg.blockColor = {0.5, 0.5, 0.5, 1}
+        end
+        AF.FillColorTable(pane.t.cfg.blockColor, r, g, b, a)
         LoadIndicatorConfig(pane.t)
     end)
 
@@ -4127,12 +4159,21 @@ builder["cooldownStyle"] = function(parent)
             L["Retail cooldown styles change presentation only; Blizzard's opaque aura duration continues to drive the swipe"]
         )
     else
-        styleDropdown:SetTooltip(L["Cooldown Style"], L["Block type: Recommended for whitelist mode only, and set aura colors in %s"]:format(AF.WrapTextInColor(L["Auras"], "BFI")))
+        styleDropdown:SetTooltip(
+            L["Cooldown Style"],
+            L["Block styles use the Block Fill Color configured here"]
+        )
     end
 
     function pane.Load(t)
         pane.t = t
         styleDropdown:SetSelectedValue(t.cfg.cooldownStyle)
+        blockColor:SetColor(
+            type(t.cfg.blockColor) == "table"
+                and t.cfg.blockColor
+                or {0.5, 0.5, 0.5, 1}
+        )
+        UpdateBlockColor()
     end
 
     return pane

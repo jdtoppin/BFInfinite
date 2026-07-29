@@ -205,6 +205,7 @@ local function baseConfig()
         frameLevel = 7,
         orientation = "left_to_right",
         cooldownStyle = "clock_with_leading_edge",
+        blockColor = {0.25, 0.5, 0.75, 0.9},
         width = 10,
         height = 6,
         spacingX = 2,
@@ -720,12 +721,59 @@ local function testStyleProjection()
         config.cooldownStyle = cooldownStyle
         config.filters.isBossAura = false
         local descriptor = compile("target", "HARMFUL", config)
+        local style = descriptor.completeSpec.groups[1].buttonStyle
         assertEqual(
-            descriptor.completeSpec.groups[1].buttonStyle.cooldownStyle,
+            style.cooldownStyle,
             cooldownStyle,
             "cooldown style " .. cooldownStyle
         )
+        if cooldownStyle:find("^block") then
+            assertDeepEqual(
+                style.blockColor,
+                {0.25, 0.5, 0.75, 0.9},
+                "block color " .. cooldownStyle
+            )
+            assertTrue(
+                style.blockColor ~= config.blockColor,
+                "block color alias " .. cooldownStyle
+            )
+        else
+            assertEqual(
+                style.blockColor,
+                nil,
+                "ordinary style block color " .. cooldownStyle
+            )
+        end
     end
+
+    local defaultBlockColor = baseConfig()
+    defaultBlockColor.cooldownStyle = "block_clock"
+    defaultBlockColor.blockColor = nil
+    defaultBlockColor.filters.isBossAura = false
+    local defaultBlockDescriptor = compile(
+        "target",
+        "HARMFUL",
+        defaultBlockColor
+    )
+    assertEqual(
+        defaultBlockDescriptor.completeSpec.groups[1].buttonStyle.blockColor,
+        nil,
+        "missing block color uses framework default"
+    )
+
+    local ignoredBlockColor = baseConfig()
+    ignoredBlockColor.blockColor = "invalid but inactive"
+    ignoredBlockColor.filters.isBossAura = false
+    local ignoredBlockDescriptor = compile(
+        "target",
+        "HARMFUL",
+        ignoredBlockColor
+    )
+    assertEqual(
+        ignoredBlockDescriptor.completeSpec.groups[1].buttonStyle.blockColor,
+        nil,
+        "ordinary style ignores malformed block color"
+    )
 
     local disabledText = baseConfig()
     disabledText.filters.isBossAura = false
@@ -1540,6 +1588,24 @@ local function testInvalidInputs()
         "INVALID_COOLDOWN_STYLE"
     )
 
+    for _, blockColor in ipairs({
+        "gray",
+        {0.1, 0.2},
+        {0.1, 0.2, 0.3},
+        {0 / 0, 0.2, 0.3, 1},
+        {0.1, math.huge, 0.3, 1},
+    }) do
+        invalid = baseConfig()
+        invalid.cooldownStyle = "block_vertical"
+        invalid.blockColor = blockColor
+        assertCompileError(
+            "target",
+            "HARMFUL",
+            invalid,
+            "INVALID_BLOCK_COLOR"
+        )
+    end
+
     invalid = baseConfig()
     invalid.durationText = nil
     assertCompileError(
@@ -1727,7 +1793,10 @@ local function testConstructionBoundary()
     local constructionMutations = {
         function(config) config.width = 11 end,
         function(config) config.height = 7 end,
-        function(config) config.cooldownStyle = "none" end,
+        function(config)
+            config.cooldownStyle = "block_clock"
+            config.blockColor = {0.25, 0.5, 0.75, 0.9}
+        end,
         function(config) config.durationText.enabled = false end,
         function(config) config.durationText.font[2] = 12 end,
         function(config) config.stackText.color[1] = 0.25 end,
@@ -1748,10 +1817,36 @@ local function testConstructionBoundary()
         assertEqual(same, false, "construction key changed " .. index)
     end
 
+    local activeBlock = baseConfig()
+    activeBlock.cooldownStyle = "block_vertical"
+    local activeBlockKey = compile(
+        "target",
+        "HARMFUL",
+        activeBlock
+    ).constructionKey
+    activeBlock.blockColor = {0.8, 0.7, 0.6, 0.5}
+    local recoloredBlockKey = compile(
+        "target",
+        "HARMFUL",
+        activeBlock
+    ).constructionKey
+    local sameBlockColor = pcall(
+        assertDeepEqual,
+        recoloredBlockKey,
+        activeBlockKey,
+        "active block color construction change"
+    )
+    assertEqual(
+        sameBlockColor,
+        false,
+        "active block color changes construction key"
+    )
+
     local ignored = baseConfig()
     ignored.futureField = {
         shouldNotMatter = true,
     }
+    ignored.blockColor = {0.9, 0.8, 0.7, 0.6}
     ignored.durationText.color.percent.value = 0.1
     ignored.durationText.color.seconds.value = 9
     local ignoredDescriptor = compile("target", "HARMFUL", ignored)
@@ -1840,6 +1935,7 @@ local function testFreshDeterministicOutput()
     local reordered = {}
     local topKeys = {
         "auraTypeColor",
+        "blockColor",
         "whitelist",
         "blacklist",
         "mode",

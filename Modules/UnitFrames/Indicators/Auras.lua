@@ -217,6 +217,10 @@ local function Auras_SetNumSlots(self, numSlots)
 end
 
 local function Auras_SetupAuras(self, config, desaturated)
+    local blockColor = strfind(config.cooldownStyle, "^block")
+        and config.blockColor
+        or nil
+
     for i = 1, self.numSlots do
         local aura = self.slots[i]
         aura.root = self.root
@@ -227,7 +231,7 @@ local function Auras_SetupAuras(self, config, desaturated)
             and config.auraTypeColor.debuffType
         )
         aura:SetDesaturated(desaturated)
-        aura:SetCooldownStyle(config.cooldownStyle)
+        aura:SetCooldownStyle(config.cooldownStyle, blockColor)
         aura:SetupDurationText(config.durationText)
         aura:SetupStackText(config.stackText)
     end
@@ -309,7 +313,6 @@ local function Auras_LoadConfig(self, config)
     self.anchor = config.position[1]
     self.spacingX = config.spacingX
     self.spacingY = config.spacingY
-    self.isBlock = strfind(config.cooldownStyle, "^block")
     self.tooltipEnabled = config.tooltip.enabled
 
     Auras_SetNumSlots(self, config.numTotal)
@@ -377,16 +380,9 @@ end
 ---------------------------------------------------------------------
 local function ConfigMode_RefreshAuras(self)
     local icon = self.auraFilter == "HELPFUL" and 135953 or 136071
-    if self.isBlock then
-        for i = 1, self.numSlots do
-            self.slots[i]:SetCooldown(GetTime(), 15, i, icon, nil, nil, nil, AF.GetColorRGB("BFI"))
-            self.slots[i]:EnableMouse(false)
-        end
-    else
-        for i = 1, self.numSlots do
-            self.slots[i]:SetCooldown(GetTime(), 15, i, icon)
-            self.slots[i]:EnableMouse(false)
-        end
+    for i = 1, self.numSlots do
+        self.slots[i]:SetCooldown(GetTime(), 15, i, icon)
+        self.slots[i]:EnableMouse(false)
     end
     Auras_UpdateSize(self, self.numSlots)
 end
