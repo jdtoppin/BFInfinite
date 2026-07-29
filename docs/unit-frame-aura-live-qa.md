@@ -31,7 +31,7 @@ Use this clean isolated-install sequence:
 3. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
    #102 at `5bbd4948ec55353ab31418f30a39b4c592ae7457`.
 4. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
-   #103 at `8025cd837d40ea476c5086d64d3384f826428b1e`.
+   #103 at `3a15584af39f69cde28d5d00e80a1d29d8934e29`.
 5. AF #23 at `43f79cf2e9e91c47c9142c3546c900baf8fe092f` with the exact
    checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
    validation SHA. Record that full branch-head SHA immediately before
@@ -62,7 +62,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Target partition | `codex/unitframe-aura-target` | `edcb992` |
 | Party | `codex/unitframe-aura-party` | `a354756` |
 | Raid | `codex/unitframe-aura-raid` | `4f370f7` |
-| Upper-right Debuff appearance (#103; includes #99) | `codex/buffs-debuffs-native-debuffs` | `8025cd837d40ea476c5086d64d3384f826428b1e` |
+| Upper-right Debuff appearance (#103; includes #99) | `codex/buffs-debuffs-native-debuffs` | `3a15584af39f69cde28d5d00e80a1d29d8934e29` |
 | Secret identity (#100) | `codex/unitframe-secret-identity` | `b8e1671ed8a1c11657416357875f9c8277051654` |
 
 Test in this order:
@@ -437,7 +437,8 @@ Stop and file a failure with evidence for any of the following:
 
 - Lua error, blocked action, forbidden-access error, or new taint;
 - secret value comparison, logging, caching, or branching;
-- native child/button/aura inspection or tooltip-driving logic;
+- restricted intrinsic AuraButton or aura-state inspection, or
+  tooltip-driving logic;
 - stale wrong-relation content visible during hover or visibility deferral;
 - refresh while presentation is disallowed or still curtained;
 - both Target relation variants visible together;
