@@ -155,6 +155,9 @@ local function CreateOptionsFrame()
     AF.CreateGlow(optionsFrame, "shadow")
 
     optionsFrame:SetOnShow(ReAnchor)
+    optionsFrame:SetOnHide(function()
+        AF.Fire("BFI_HideMythicPlusPreview")
+    end)
 
     --------------------------------------------------
     -- header pane

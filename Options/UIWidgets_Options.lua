@@ -58,6 +58,14 @@ local settings = {
         "height",
         "font",
     },
+    mythicPlus = {
+        "mythicPlusDisplay",
+        "mythicPlusWidth",
+        "mythicPlusExtendedRun",
+        "mythicPlusPreview",
+        "mythicPlusHistory",
+        "font",
+    },
 }
 
 ---------------------------------------------------------------------
@@ -114,6 +122,9 @@ builder["enabled"] = function(parent)
         UpdateColor(checked)
         AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
         pane.t:SetTextColor(checked and "white" or "disabled")
+        if pane.t.id == "mythicPlus" then
+            AF.Fire("BFI_RefreshOptions", "uiWidgets")
+        end
     end)
 
     function pane.Load(t)
@@ -277,6 +288,249 @@ builder["height"] = function(parent)
         height:SetValue(t.cfg.height)
     end
 
+    return pane
+end
+
+---------------------------------------------------------------------
+-- mythicPlusDisplay
+---------------------------------------------------------------------
+builder["mythicPlusDisplay"] = function(parent)
+    if created["mythicPlusDisplay"] then
+        return created["mythicPlusDisplay"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_MythicPlusDisplay",
+        nil,
+        118
+    )
+    created["mythicPlusDisplay"] = pane
+
+    local definitions = {
+        {"hideObjectiveTracker", L["Hide Objective Tracker"]},
+        {"showThresholds", L["Show +2 / +3 Thresholds"]},
+        {"showAffixes", L["Show Affixes"]},
+        {"showObjectives", L["Show Objectives"]},
+        {"showSplits", L["Show Split Comparisons"]},
+        {"showPullCount", L["Show Pull Counter"]},
+        {"showExecution", L["Show Execution Data"]},
+        {"showDebrief", L["Show End-of-Run Debrief"]},
+        {"showPlayerBreakdown", L["Show Player Breakdown"]},
+    }
+    local controls = {}
+
+    local function UpdateDependencies()
+        if controls.showSplits then
+            controls.showSplits:SetEnabled(
+                pane.t.cfg.showObjectives ~= false
+            )
+        end
+        if controls.showPlayerBreakdown then
+            controls.showPlayerBreakdown:SetEnabled(
+                pane.t.cfg.showDebrief ~= false
+            )
+        end
+    end
+
+    local function CreateToggle(key, label, x, y)
+        local control = AF.CreateCheckButton(pane, label)
+        AF.SetPoint(control, "TOPLEFT", x, y)
+        control:SetOnCheck(function(checked)
+            pane.t.cfg[key] = checked
+            UpdateDependencies()
+            AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
+        end)
+        controls[key] = control
+    end
+
+    for index, definition in ipairs(definitions) do
+        local column = (index - 1) % 2
+        local row = math.floor((index - 1) / 2)
+        CreateToggle(
+            definition[1],
+            definition[2],
+            15 + column * 185,
+            -8 - row * 22
+        )
+    end
+
+    function pane.Load(t)
+        pane.t = t
+        for key, control in pairs(controls) do
+            control:SetChecked(t.cfg[key] ~= false)
+        end
+        UpdateDependencies()
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- mythicPlusWidth
+---------------------------------------------------------------------
+builder["mythicPlusWidth"] = function(parent)
+    if created["mythicPlusWidth"] then return created["mythicPlusWidth"] end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_MythicPlusWidth",
+        nil,
+        55
+    )
+    created["mythicPlusWidth"] = pane
+
+    local width = AF.CreateSlider(pane, L["Width"], 150, 260, 500, 1, nil, true)
+    AF.SetPoint(width, "LEFT", 15, 0)
+    width:SetOnValueChanged(function(value)
+        pane.t.cfg.width = value
+        AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
+    end)
+
+    function pane.Load(t)
+        pane.t = t
+        width:SetValue(t.cfg.width)
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- mythicPlusExtendedRun
+---------------------------------------------------------------------
+builder["mythicPlusExtendedRun"] = function(parent)
+    if created["mythicPlusExtendedRun"] then
+        return created["mythicPlusExtendedRun"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_MythicPlusExtendedRun",
+        nil,
+        55
+    )
+    created["mythicPlusExtendedRun"] = pane
+
+    local cutoff = AF.CreateSlider(
+        pane,
+        L["Extended-run Baseline Cutoff"],
+        150,
+        1.25,
+        3,
+        0.05,
+        nil,
+        true
+    )
+    AF.SetPoint(cutoff, "LEFT", 15, 0)
+    cutoff:SetOnValueChanged(function(value)
+        pane.t.cfg.extendedRunMultiplier = value
+        AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
+    end)
+    cutoff:SetTooltip(
+        L["Extended-run Baseline Cutoff"],
+        L["Runs at or above this multiple of the dungeon timer are kept, but excluded from baselines."],
+        L["The default is 1.50× the dungeon timer."]
+    )
+
+    function pane.Load(t)
+        pane.t = t
+        cutoff:SetValue(t.cfg.extendedRunMultiplier)
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- mythicPlusPreview
+---------------------------------------------------------------------
+builder["mythicPlusPreview"] = function(parent)
+    if created["mythicPlusPreview"] then
+        return created["mythicPlusPreview"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_MythicPlusPreview",
+        nil,
+        30
+    )
+    created["mythicPlusPreview"] = pane
+
+    local previewShown = false
+    local preview = AF.CreateCheckButton(pane, L["Show Preview"])
+    AF.SetPoint(preview, "LEFT", 15, 0)
+    local function HidePreview()
+        if not previewShown then return end
+        previewShown = false
+        preview:SetChecked(false)
+        local module = W.MythicPlus
+        if module and type(module.SetPreview) == "function" then
+            module.SetPreview(false)
+        end
+    end
+    preview:SetOnCheck(function(checked)
+        previewShown = checked
+        local module = W.MythicPlus
+        if module and type(module.SetPreview) == "function" then
+            module.SetPreview(checked)
+        end
+    end)
+    AF.RegisterCallback("BFI_HideMythicPlusPreview", HidePreview)
+
+    function pane.Load(t)
+        pane.t = t
+        if not t.cfg.enabled then
+            HidePreview()
+        end
+        preview:SetEnabled(t.cfg.enabled == true)
+        preview:SetChecked(previewShown)
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- mythicPlusHistory
+---------------------------------------------------------------------
+builder["mythicPlusHistory"] = function(parent)
+    if created["mythicPlusHistory"] then
+        return created["mythicPlusHistory"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_MythicPlusHistory",
+        nil,
+        40
+    )
+    created["mythicPlusHistory"] = pane
+
+    local clear = AF.CreateButton(
+        pane,
+        L["Clear Mythic+ History"],
+        "red_hover",
+        160,
+        20
+    )
+    AF.SetPoint(clear, "LEFT", 15, 0)
+    clear:SetOnClick(function()
+        local dialog = AF.GetDialog(
+            BFIOptionsFrame_UIWidgetsPanel,
+            AF.WrapTextInColor(L["Clear Mythic+ history?"], "BFI")
+                .. "\n"
+                .. L["This permanently deletes this character's stored runs and baselines."],
+            300
+        )
+        dialog:SetPoint("TOP", pane, "BOTTOM")
+        dialog:SetOnConfirm(function()
+            local module = W.MythicPlus
+            if module and type(module.ClearHistory) == "function" then
+                module.ClearHistory()
+            end
+        end)
+    end)
+
+    pane.Load = AF.noop
     return pane
 end
 

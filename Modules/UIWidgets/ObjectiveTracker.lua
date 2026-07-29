@@ -17,6 +17,19 @@ local trackerContainer
 
 local GenerateClosure = GenerateClosure
 
+-- Retail 12.0.7.68887 exposes UIParentRightManagedFrameContainer directly.
+-- Retail 12.1.0.68914 replaces it with GetRightManagedFrameContainer().
+local function RemoveTrackerFromRightManagedFrameContainer()
+    local container = _G.UIParentRightManagedFrameContainer
+    if not container and type(_G.GetRightManagedFrameContainer) == "function" then
+        container = _G.GetRightManagedFrameContainer()
+    end
+
+    if container and type(container.RemoveManagedFrame) == "function" then
+        container:RemoveManagedFrame(tracker)
+    end
+end
+
 ---------------------------------------------------------------------
 -- create
 ---------------------------------------------------------------------
@@ -115,7 +128,7 @@ local function SetupTracker()
     tracker.ignoreFramePositionManager = true
     tracker.isManagedFrame = false
     tracker.isRightManagedFrame = false
-    _G.UIParentRightManagedFrameContainer:RemoveManagedFrame(tracker)
+    RemoveTrackerFromRightManagedFrameContainer()
     -- tracker:SetParent(trackerContainer) --! will cause weird issues ... so I give up on making it scrollable
     tracker:ClearAllPoints()
     tracker:SetPoint("TOPRIGHT", trackerContainer)
@@ -401,13 +414,13 @@ local function SetupScenarioObjectiveTracker()
                 widget._BFIHooked = true
 
                 hooksecurefunc(widget.CurrencyContainer, "Layout", function()
-                    local font = W.config.objectiveTracker.font
+                    local currentFont = W.config.objectiveTracker.font
                     for currencyFrame in widget.currencyPool:EnumerateActive() do
-                        AF.SetFont(currencyFrame.Text, font, font[2] + 1, "none", true)
+                        AF.SetFont(currencyFrame.Text, currentFont, currentFont[2] + 1, "none", true)
                     end
                 end)
 
-                hooksecurefunc(widget, "UpdateSpellFrameEffects", function(_, widgetInfo, spellInfo, spellFrame)
+                hooksecurefunc(widget, "UpdateSpellFrameEffects", function(_, updatedWidgetInfo, spellInfo, spellFrame)
                     -- UIWidgetBaseSpellTemplate
                     -- print(spellInfo.spellID)
                     S.StyleIconFrame(spellFrame)
@@ -502,10 +515,10 @@ local function SetupQuestBlock()
         _G.CampaignQuestObjectiveTracker,
     }
 
-    for _, tracker in next, trackers do
-        hooksecurefunc(tracker, "GetProgressBar", UpdateProgressBar)
-        hooksecurefunc(tracker, "GetTimerBar", UpdateTimerBar)
-        hooksecurefunc(tracker, "AddBlock", UpdateBlock)
+    for _, questTracker in next, trackers do
+        hooksecurefunc(questTracker, "GetProgressBar", UpdateProgressBar)
+        hooksecurefunc(questTracker, "GetTimerBar", UpdateTimerBar)
+        hooksecurefunc(questTracker, "AddBlock", UpdateBlock)
     end
 end
 

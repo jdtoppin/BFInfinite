@@ -87,6 +87,22 @@ local defaults = {
         arrangement = "left_to_right_then_up",
         showIfSolo = false,
     },
+    mythicPlus = {
+        enabled = false,
+        position = {"TOPRIGHT", -1, -200},
+        width = 320,
+        font = {"BFI", 12, "none", true},
+        hideObjectiveTracker = true,
+        showThresholds = true,
+        showAffixes = true,
+        showObjectives = true,
+        showSplits = true,
+        showPullCount = true,
+        showExecution = true,
+        showDebrief = true,
+        showPlayerBreakdown = true,
+        extendedRunMultiplier = 1.5,
+    },
     objectiveTracker = {
         enabled = true,
         position = {"TOPRIGHT", -1, -200},
@@ -111,6 +127,13 @@ local defaults = {
 AF.RegisterCallback("BFI_UpdateProfile", function(_, t)
     if not t["uiWidgets"] then
         t["uiWidgets"] = AF.Copy(defaults)
+    elseif not t["uiWidgets"]["mythicPlus"] then
+        t["uiWidgets"]["mythicPlus"] = AF.Copy(defaults.mythicPlus)
+    else
+        AF.MergeMissingKeys(
+            t["uiWidgets"]["mythicPlus"],
+            defaults.mythicPlus
+        )
     end
     W.config = t["uiWidgets"]
 end)

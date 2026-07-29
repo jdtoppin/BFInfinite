@@ -15,10 +15,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install luacheck
+      - name: Install Lua tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes lua-check ripgrep
+          sudo apt-get install --yes lua-check luajit ripgrep
 
       - name: Check Lua and policy
         shell: bash
@@ -32,3 +32,9 @@ jobs:
           else
             ./scripts/lint.sh
           fi
+
+      - name: Test Mythic+ timer and seasonal analysis
+        run: |
+          for test_file in tests/abstract_framework_version_guard_test.lua tests/mythic_plus_*_test.lua tests/objective_tracker_12_1_compat_test.lua; do
+            luajit "$test_file"
+          done

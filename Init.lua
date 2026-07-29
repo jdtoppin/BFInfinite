@@ -4,6 +4,7 @@ _G.BFInfinite = BFI
 
 BFI.prefix = "BFI"
 BFI.name = "BFInfinite"
+BFI.requiredAFVersion = 21
 
 ---@class BFI
 ---@field L table
@@ -43,7 +44,17 @@ AF.RegisterAddon(BFI.name, "BFI")
 ---------------------------------------------------------------------
 BFI.vars = {} -- vars
 BFI.funcs = {} -- functions
-BFI.funcs.isValueNonSecret = AF.funcs.isValueNonSecret
+if type(AF.funcs) == "table"
+    and type(AF.funcs.isValueNonSecret) == "function"
+then
+    BFI.funcs.isValueNonSecret = AF.funcs.isValueNonSecret
+else
+    -- Keep unsupported AF installs safe long enough for Core to show the
+    -- version warning. Treat every value as unsafe instead of inspecting it.
+    BFI.funcs.isValueNonSecret = function()
+        return false
+    end
+end
 BFI.modules = {}
 BFI.libs = {}
 
