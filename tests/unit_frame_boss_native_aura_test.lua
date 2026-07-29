@@ -75,7 +75,11 @@ local function readFile(path)
     return source
 end
 
-local function makeHarness()
+local function makeHarness(nativeBackendAvailable)
+    if nativeBackendAvailable == nil then
+        nativeBackendAvailable = true
+    end
+
     local harness = {
         callbacks = {},
         configMode = {},
@@ -83,6 +87,7 @@ local function makeHarness()
         disableCalls = {},
         events = {},
         frames = {},
+        legacyConstructions = {},
         nativeConstructions = {},
         setupCalls = {},
     }
@@ -209,10 +214,19 @@ local function makeHarness()
     end
 
     function UF.CreateAuras(parent, name, auraFilter)
-        return newIndicator(parent, name, auraFilter, "auras")
+        local indicator = newIndicator(parent, name, auraFilter, "auras")
+        harness.legacyConstructions[
+            #harness.legacyConstructions + 1
+        ] = indicator
+        record("legacy.create", indicator, parent, auraFilter)
+        return indicator
     end
 
     function UF.CreateNativeAuras(parent, name, auraFilter)
+        if not nativeBackendAvailable then
+            return UF.CreateAuras(parent, name, auraFilter)
+        end
+
         local indicator =
             newIndicator(parent, name, auraFilter, "nativeAuras")
         harness.nativeConstructions[
@@ -531,15 +545,17 @@ local function testBossActivationAndConstructionOrder()
     assertEqual(#harness.frames, 9, "Boss frame creation count")
     assertEqual(#harness.createIndicatorCalls, 8,
         "Boss indicator creation count")
-    assertEqual(#harness.nativeConstructions, 8,
+    assertEqual(#harness.nativeConstructions, 16,
         "Boss native controller prebuild count")
+    assertEqual(#harness.legacyConstructions, 0,
+        "Boss native path legacy construction count")
     assertEqual(#harness.setupCalls, 1, "Boss setup count")
     assertEqual(harness:CountEvents("watch.register"), 8,
         "Boss initial unit-watch registrations")
     assertEqual(harness:CountEvents("driver.register"), 1,
         "Boss initial driver registration")
     assertTrue(
-        harness:EventIndex("native.create", 8)
+        harness:EventIndex("native.create", 16)
             < harness:EventIndex("setup"),
         "Boss native controllers were not prebuilt before setup"
     )
@@ -589,24 +605,35 @@ local function testBossActivationAndConstructionOrder()
         assertEqual(frame.unitWatchRegistered, true,
             "Boss child unit watch " .. index)
         assertEqual(
-            harness.nativeConstructions[index],
-            frame.indicators.debuffs,
-            "Boss child native controller " .. index
+            harness.nativeConstructions[(index * 2) - 1],
+            frame.indicators.buffs,
+            "Boss child native buffs controller " .. index
         )
+        assertEqual(
+            harness.nativeConstructions[index * 2],
+            frame.indicators.debuffs,
+            "Boss child native debuffs controller " .. index
+        )
+        assertEqual(frame.indicators.buffs.root, frame,
+            "Boss native buffs controller parent " .. index)
+        assertEqual(frame.indicators.buffs.auraFilter, "HELPFUL",
+            "Boss native buffs controller filter " .. index)
         assertEqual(frame.indicators.debuffs.root, frame,
-            "Boss native controller parent " .. index)
+            "Boss native debuffs controller parent " .. index)
         assertEqual(frame.indicators.debuffs.auraFilter, "HARMFUL",
-            "Boss native controller filter " .. index)
-        assertEqual(frame.indicators.buffs.builder, "auras",
-            "Boss legacy buffs construction " .. index)
+            "Boss native debuffs controller filter " .. index)
+        assertEqual(frame.indicators.buffs.builder, "nativeAuras",
+            "Boss native buffs construction " .. index)
+        assertEqual(frame.indicators.debuffs.builder, "nativeAuras",
+            "Boss native debuffs construction " .. index)
         assertTrue(frame.previewCreated,
             "Boss child preview rectangle " .. index)
         assertEqual(harness.configMode[index + 1].group, "boss",
             "Boss child config-mode group " .. index)
         assertEqual(harness.configMode[index + 1].frame, frame,
             "Boss child config-mode frame " .. index)
-        assertEqual(buffs[1], "auras",
-            "Boss buffs legacy builder " .. index)
+        assertEqual(buffs[1], "nativeAuras",
+            "Boss buffs native builder " .. index)
         assertEqual(buffs[3], "HELPFUL",
             "Boss buffs filter " .. index)
         assertEqual(debuffs[1], "nativeAuras",
@@ -632,6 +659,8 @@ local function testBossDisableAndReenableLifecycle()
     harness:ClearEvents()
     update(nil, "unitFrames", "boss", true)
     assertEqual(#harness.frames, 9, "Boss frame recreated on update")
+    assertEqual(#harness.nativeConstructions, 16,
+        "Boss repeated-update native construction count")
     assertEqual(#harness.setupCalls, 2, "Boss repeated setup count")
     assertEqual(harness.setupCalls[2].skip, true,
         "enabled Boss skip-indicator flag")
@@ -665,6 +694,8 @@ local function testBossDisableAndReenableLifecycle()
     harness:ClearEvents()
     update(nil, "unitFrames", "boss", true)
     assertEqual(#harness.frames, 9, "Boss frame recreated on re-enable")
+    assertEqual(#harness.nativeConstructions, 16,
+        "Boss re-enable native construction count")
     assertEqual(#harness.setupCalls, 3, "Boss re-enable setup count")
     assertEqual(harness.setupCalls[3].skip, false,
         "Boss re-enable skipped disabled indicators")
@@ -679,6 +710,39 @@ local function testBossDisableAndReenableLifecycle()
         assertEqual(boss[index].enabled, true,
             "re-enabled Boss child state " .. index)
     end
+end
+
+local function testBossLegacyAuraFallback()
+    local harness = makeHarness(false)
+    local update = harness.callbacks.BFI_UpdateModule
+
+    update(nil, "unitFrames", "boss")
+    local boss = harness.frames[1]
+
+    assertEqual(#harness.nativeConstructions, 0,
+        "12.0.7 Boss native construction count")
+    assertEqual(#harness.legacyConstructions, 16,
+        "12.0.7 Boss legacy construction count")
+    for index = 1, 8 do
+        assertEqual(boss[index].indicators.buffs.builder, "auras",
+            "12.0.7 Boss buffs fallback " .. index)
+        assertEqual(boss[index].indicators.buffs.auraFilter, "HELPFUL",
+            "12.0.7 Boss buffs filter " .. index)
+        assertEqual(boss[index].indicators.debuffs.builder, "auras",
+            "12.0.7 Boss debuffs fallback " .. index)
+        assertEqual(boss[index].indicators.debuffs.auraFilter, "HARMFUL",
+            "12.0.7 Boss debuffs filter " .. index)
+    end
+
+    update(nil, "unitFrames", "boss", true)
+    harness.UF.config.boss.general.enabled = false
+    update(nil, "unitFrames", "boss")
+    harness.UF.config.boss.general.enabled = true
+    update(nil, "unitFrames", "boss", true)
+    assertEqual(#harness.frames, 9,
+        "12.0.7 Boss fallback frame growth")
+    assertEqual(#harness.legacyConstructions, 16,
+        "12.0.7 Boss fallback indicator growth")
 end
 
 local function testBossConfigModeGuardsAreLocal()
@@ -760,6 +824,8 @@ local function testBossConfigModeGuardsAreLocal()
         "Boss config-mode re-enable unit watches")
     assertEqual(harness:CountEvents("driver.register"), 0,
         "Boss config-mode re-enable visibility driver")
+    assertEqual(#harness.nativeConstructions, 16,
+        "Boss config-mode native construction count")
     for index = 1, 8 do
         for _, indicator in pairs(boss[index].indicators) do
             assertEqual(indicator.configMode, true,
@@ -799,6 +865,35 @@ local function testShippedBossPresetBounds()
 
         assertEqual(buffs.metrics.groupCount, 4,
             id .. " buffs group count")
+        assertEqual(buffs.migrationReady, true,
+            id .. " buffs migration readiness")
+        assertEqual(buffs.metrics.legacyMaxFrameCount, 3,
+            id .. " buffs legacy capacity")
+        assertEqual(buffs.metrics.nativeVisibleCapacity, 12,
+            id .. " buffs native capacity")
+        assertEqual(buffs.metrics.initialRestrictedButtonCount, 40,
+            id .. " buffs initial native buttons")
+        assertEqual(
+            buffs.metrics.freshContainerRestrictedButtonCountCeiling,
+            40,
+            id .. " buffs native button ceiling"
+        )
+        assertEqual(buffs.completeSpec.holder.width, 59,
+            id .. " buffs holder width")
+        assertEqual(buffs.completeSpec.holder.height, 79,
+            id .. " buffs holder height")
+        assertEqual(buffs.completeSpec.groups[1].filterString,
+            "HELPFUL|PLAYER", id .. " buffs player filter")
+        assertEqual(buffs.completeSpec.groups[2].filterString,
+            "HELPFUL|RAID_IN_COMBAT|!PLAYER",
+            id .. " buffs raid filter")
+        assertEqual(buffs.completeSpec.groups[3].filterString,
+            "HELPFUL|BIG_DEFENSIVE|!PLAYER|!RAID_IN_COMBAT",
+            id .. " buffs big-defensive filter")
+        assertEqual(buffs.completeSpec.groups[4].filterString,
+            "HELPFUL|EXTERNAL_DEFENSIVE|!PLAYER|!RAID_IN_COMBAT"
+                .. "|!BIG_DEFENSIVE",
+            id .. " buffs external-defensive filter")
         assertEqual(buffs.visibility.requiresVisible, true,
             id .. " buffs visibility gate")
         assertEqual(buffs.visibility.requiresAssist, true,
@@ -857,6 +952,7 @@ end
 testBossActivationAndConstructionOrder()
 testBossDisableAndReenableLifecycle()
 testBossConfigModeGuardsAreLocal()
+testBossLegacyAuraFallback()
 testShippedBossPresetBounds()
 
 print("unit_frame_boss_native_aura_test.lua: ok")

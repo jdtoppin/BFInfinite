@@ -20,7 +20,7 @@ local indicators = {
     "raidIcon",
     "targetHighlight",
     "mouseoverHighlight",
-    {"auras", "buffs", "HELPFUL"},
+    {"nativeAuras", "buffs", "HELPFUL"},
     {"nativeAuras", "debuffs", "HARMFUL"},
 }
 
