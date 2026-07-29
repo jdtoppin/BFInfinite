@@ -18,7 +18,7 @@ jobs:
       - name: Install Lua tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes lua-check luajit ripgrep
+          sudo apt-get install --yes lua-check lua5.1 luajit ripgrep
 
       - name: Check Lua and policy
         shell: bash

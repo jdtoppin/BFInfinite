@@ -217,7 +217,7 @@ local function UpdateMarkers(_, module, which)
 
     SetupMarkersFrame(config)
     AF.UpdateMoverSave(markersFrame, config.position)
-    AF.LoadPosition(markersFrame, config.position)
+    BFI.funcs.LoadPosition(markersFrame, config.position)
 
     UpdateWorldMarkers()
     markersFrame:RegisterEvent("RAID_TARGET_UPDATE", UpdateWorldMarkers)

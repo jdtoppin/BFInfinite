@@ -414,9 +414,9 @@ local function SetupScenarioObjectiveTracker()
                 widget._BFIHooked = true
 
                 hooksecurefunc(widget.CurrencyContainer, "Layout", function()
-                    local currentFont = W.config.objectiveTracker.font
+                    local currencyFont = W.config.objectiveTracker.font
                     for currencyFrame in widget.currencyPool:EnumerateActive() do
-                        AF.SetFont(currencyFrame.Text, currentFont, currentFont[2] + 1, "none", true)
+                        AF.SetFont(currencyFrame.Text, currencyFont, currencyFont[2] + 1, "none", true)
                     end
                 end)
 
@@ -515,10 +515,10 @@ local function SetupQuestBlock()
         _G.CampaignQuestObjectiveTracker,
     }
 
-    for _, questTracker in next, trackers do
-        hooksecurefunc(questTracker, "GetProgressBar", UpdateProgressBar)
-        hooksecurefunc(questTracker, "GetTimerBar", UpdateTimerBar)
-        hooksecurefunc(questTracker, "AddBlock", UpdateBlock)
+    for _, objectiveTracker in next, trackers do
+        hooksecurefunc(objectiveTracker, "GetProgressBar", UpdateProgressBar)
+        hooksecurefunc(objectiveTracker, "GetTimerBar", UpdateTimerBar)
+        hooksecurefunc(objectiveTracker, "AddBlock", UpdateBlock)
     end
 end
 
@@ -594,6 +594,6 @@ local function UpdateObjectiveTracker(_, module, which)
     AF.UpdateMoverSave(trackerContainer, config.position)
 
     -- position
-    AF.LoadPosition(trackerContainer, config.position)
+    BFI.funcs.LoadPosition(trackerContainer, config.position)
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateObjectiveTracker)

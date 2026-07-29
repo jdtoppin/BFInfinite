@@ -566,7 +566,7 @@ local function UpdateTooltip(_, module)
 
     local config = T.config
     AF.UpdateMoverSave(tooltipAnchor, config.position)
-    AF.LoadPosition(tooltipAnchor, config.position)
+    BFI.funcs.LoadPosition(tooltipAnchor, config.position)
     tooltipAnchor.enabled = config.enabled and config.anchorMode == "fixed"
     if not tooltipAnchor.enabled then
         tooltipAnchor.mover:Hide()

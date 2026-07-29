@@ -26,7 +26,7 @@ local function UpdateWidget(frame, name, anchor, width, height, config)
     end
 
     AF.SetSize(frame._container, width * config.scale, height * config.scale)
-    AF.LoadPosition(frame._container, config.position)
+    BFI.funcs.LoadPosition(frame._container, config.position)
     AF.UpdateMoverSave(frame._container, config.position)
     frame:SetScale(config.scale)
 end

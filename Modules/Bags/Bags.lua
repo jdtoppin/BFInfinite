@@ -217,7 +217,7 @@ local function ApplyPosition()
     if not IsEnabled() or not combinedFrame or not combinedFrame:IsShown() then return end
     if combinedFrame.mover and combinedFrame.mover.isDragging then return end
     combinedFrame:SetScale(layoutScale)
-    AF.LoadPosition(combinedFrame, B.config.position)
+    BFI.funcs.LoadPosition(combinedFrame, B.config.position)
 end
 
 local function GetClassCategory(itemType, itemSubType, classID, subclassID)

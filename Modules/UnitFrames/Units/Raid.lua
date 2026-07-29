@@ -121,7 +121,7 @@ local function UpdateRaid(_, module, which, skipIndicatorUpdates)
     AF.UpdateMoverSave(raid, config.general.position)
 
     -- position
-    AF.LoadPosition(raid, config.general.position)
+    BFI.funcs.LoadPosition(raid, config.general.position)
 
     -- container size
     if strfind(config.general.orientation, "^[top|bottom]") then
@@ -158,7 +158,7 @@ local function UpdateRaid(_, module, which, skipIndicatorUpdates)
     -- header
     header:SetAttribute("_ignore", true) -- skip SecureGroupHeader_OnAttributeChanged -> SecureGroupHeader_Update
 
-    local _, rp, x, y, cs, hp, cp = AF.GetAnchorPoints_GroupHeader(config.general.orientation, config.general.spacingX, config.general.spacingY)
+    local _, _, x, y, cs, hp, cp = AF.GetAnchorPoints_GroupHeader(config.general.orientation, config.general.spacingX, config.general.spacingY)
     header:SetSize(config.general.width, config.general.height)
     header:ClearAllPoints()
     header:SetPoint(config.general.anchor)
