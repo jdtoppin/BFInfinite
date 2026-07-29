@@ -28,7 +28,9 @@ Use this clean isolated-install sequence:
    #90 at `adad69628fff7419aef513276322d377bed2b3b0`.
 2. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
    #101 at `3a0d80a38247f6487dbbff2371f681672a61adc8`.
-3. AF #23 at `43f79cf2e9e91c47c9142c3546c900baf8fe092f` with the exact
+3. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
+   #102 at `5bbd4948ec55353ab31418f30a39b4c592ae7457`.
+4. AF #23 at `43f79cf2e9e91c47c9142c3546c900baf8fe092f` with the exact
    checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
    validation SHA. Record that full branch-head SHA immediately before
    installation.
@@ -47,6 +49,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Coverage | Branch | Exact head |
 |---|---|---|
 | Global exact spell colors (#101) | `codex/unitframe-aura-spell-colors` | `3a0d80a38247f6487dbbff2371f681672a61adc8` |
+| Presentation hardening (#102) | `codex/unitframe-aura-presentation-hardening` | `5bbd4948ec55353ab31418f30a39b4c592ae7457` |
 | Player | `codex/unitframe-aura-player` | `3f0fd66` |
 | Boss | `codex/unitframe-aura-boss` | `241640a` |
 | Focus | `codex/unitframe-aura-focus` | `2217919` |
@@ -64,7 +67,7 @@ Test in this order:
 
 1. Test AF r35 alone, including duration abbreviations and secret identity.
 2. Test the policy, spec, lifecycle/controller, provider/counter, supported
-   filter-control, and spell-color PRs in isolation.
+   filter-control, spell-color, and presentation-hardening PRs in isolation.
 3. Test each of the ten unit-frame integration leaves independently.
 4. Test the upper-right foundation, controller, Buffs, options, and
    forbidden-button branches in their PR order.
