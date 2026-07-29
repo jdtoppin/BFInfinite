@@ -233,7 +233,7 @@ local function makeHarness(options)
     }
     local AF = {
         isRetail = options.isRetail ~= false,
-        versionNum = options.versionNum or 24,
+        versionNum = options.versionNum or 31,
     }
     local UF = {}
     local afConstructionTotals = {
@@ -781,14 +781,18 @@ local function testConstructionStatsContract()
 end
 
 local function testCapabilityGate()
-    local oldAF = makeHarness({versionNum = 23})
-    assertEqual(oldAF.UF.HasNativeAuraContainerBackend(), false, "old AF gate")
+    local oldAF = makeHarness({versionNum = 30})
+    assertEqual(
+        oldAF.UF.HasNativeAuraContainerBackend(),
+        false,
+        "AF r30 observability gate"
+    )
     assertEqual(
         oldAF.UF.CreateNativeAuraContainerController({}, "OldAF"),
         nil,
-        "old AF controller"
+        "AF r30 controller"
     )
-    assertEqual(#oldAF.holders, 0, "old AF holder count")
+    assertEqual(#oldAF.holders, 0, "AF r30 holder count")
 
     local missingMethod = makeHarness({
         missingMethod = "SetCustomAuraSlotSortMethod",
