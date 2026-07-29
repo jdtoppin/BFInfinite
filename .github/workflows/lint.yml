@@ -42,6 +42,15 @@ jobs:
       - name: Test Party shipped aura contracts
         run: luajit tests/unit_frame_party_aura_contract_test.lua
 
+      - name: Test Raid native-aura integration
+        run: luajit tests/unit_frame_raid_native_aura_test.lua
+
+      - name: Test Raid shipped aura contracts
+        run: luajit tests/unit_frame_raid_aura_contract_test.lua
+
+      - name: Test Raid aura-scale lockdown
+        run: luajit tests/unit_frame_raid_aura_scale_test.lua
+
       - name: Test 12.1 unit-frame aura policy
         run: luajit tests/unit_frame_aura_policy_test.lua
 
