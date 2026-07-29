@@ -449,7 +449,7 @@ local function CreateNormalPane()
         end
         durationHint:SetShown(
             which == "duration"
-                and (tonumber(AF.versionNum) or 0) >= 25
+                and (tonumber(AF.versionNum) or 0) >= 33
         )
     end
 

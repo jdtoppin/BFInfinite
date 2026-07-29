@@ -576,7 +576,7 @@ local function NewOptionsUIHarness(customBackend, afVersion)
 end
 
 do
-    local custom = NewOptionsUIHarness(true, 25)
+    local custom = NewOptionsUIHarness(true, 33)
     local config = custom.BD.config.buffs
 
     assertEqual(#custom.events, 0,
@@ -641,7 +641,7 @@ do
 
     custom.textSwitch:SetSelectedValue("duration")
     assertTrue(custom.durationHint.shown,
-        "AF r25 shows abbreviation hint")
+        "AF r33 shows abbreviation hint")
     assertEqual(custom.durationHint.width, 160,
         "duration hint is bounded to its column")
     assertTrue(custom.durationHint.wordWrap,
@@ -649,7 +649,7 @@ do
 end
 
 do
-    local legacy = NewOptionsUIHarness(false, 24)
+    local legacy = NewOptionsUIHarness(false, 32)
     local config = legacy.BD.config.buffs
 
     assertEqual(#legacy.events, 0,
@@ -687,7 +687,7 @@ do
 
     legacy.textSwitch:SetSelectedValue("duration")
     assertFalse(legacy.durationHint.shown,
-        "AF r24 does not promise abbreviation support")
+        "AF r32 does not promise abbreviation support")
 end
 
 do
