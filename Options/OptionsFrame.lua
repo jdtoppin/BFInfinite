@@ -26,7 +26,7 @@ local list = {
     -- "social",
     "SEPARATOR",
     "unitFrames",
-    "-nameplates",
+    "nameplates",
     "actionBars",
     "bags",
     buffsDebuffsAvailable and "buffsDebuffs" or "-buffsDebuffs",

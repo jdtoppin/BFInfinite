@@ -5,7 +5,8 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local REQUIRED_AF_VERSION = 15
+local REQUIRED_AF_VERSION = 29
+BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar
 local SetCVar = SetCVar
@@ -265,28 +266,6 @@ local function InitAndBackupCVars()
         "AutoPushSpellToActionBar",
         -- bags
         "combinedBags",
-        -- nameplates
-        "nameplateOccludedAlphaMult",
-        "nameplateShowOnlyNames",
-        "nameplateGlobalScale",
-        "nameplateLargerScale",
-        "NamePlateHorizontalScale",
-        "NamePlateVerticalScale",
-        "NamePlateClassificationScale",
-        "nameplateMaxScale",
-        "nameplateMinScale",
-        "nameplateSelectedScale",
-        "nameplateOverlapH",
-        "nameplateOverlapV",
-        "nameplateMotion",
-        "nameplateMotionSpeed",
-        "nameplateMaxDistance",
-        "nameplateTargetBehindMaxDistance",
-        "nameplateTargetRadialPosition",
-        "nameplateLargeTopInset",
-        "nameplateLargeBottomInset",
-        "nameplateOtherTopInset",
-        "nameplateOtherBottomInset",
         -- chat
         "chatStyle",
         "whisperMode",

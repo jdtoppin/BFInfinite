@@ -6,6 +6,47 @@ local F = BFI.funcs
 local AF = _G.AbstractFramework
 
 local Auras_UpdateSize, Auras_UpdateSiblings
+
+local function GetEffectivePosition(config, plateConfig)
+    local position = config.position
+    local nameText = plateConfig and plateConfig.nameText
+    local namePosition = nameText and nameText.position
+    if not nameText
+        or nameText.placement ~= "inside"
+        or config.anchorTo ~= "healthBar"
+        or nameText.anchorTo ~= "healthBar"
+        or type(position) ~= "table"
+        or type(position[1]) ~= "string"
+        or type(position[2]) ~= "string"
+        or type(namePosition) ~= "table"
+        or type(namePosition[1]) ~= "string"
+        or type(namePosition[2]) ~= "string"
+        or not position[1]:find("^BOTTOM")
+        or not position[2]:find("^TOP")
+        or not namePosition[1]:find("^BOTTOM")
+        or not namePosition[2]:find("^TOP")
+    then
+        return position
+    end
+
+    local font = nameText.font or {}
+    local reservedHeight = math.max(
+        0,
+        (tonumber(namePosition[4]) or 0)
+            + (tonumber(font[2]) or 12)
+    )
+
+    -- Keep the saved aura offset intact. Inside-name layouts only remove the
+    -- configured footprint of an outside name anchored above this same bar;
+    -- switching back therefore restores the exact configured position.
+    return {
+        position[1],
+        position[2],
+        position[3],
+        (tonumber(position[4]) or 0) - reservedHeight,
+    }
+end
+
 local function Auras_Update(self)
     self:SetUnit(self.root.unit)
 end
@@ -82,7 +123,7 @@ end
 -- config
 ---------------------------------------------------------------------
 function Auras_UpdateSize(self, numAuras)
-    -- if not (self.width and self.height and self.orientation) then return end
+    if not self.numSlots then return end
 
     -- hide unused
     for i = numAuras + 1, self.numSlots do
@@ -226,6 +267,8 @@ local function Auras_SetupAuras(self, config)
     for i = 1, self.numSlots do
         local aura = self.slots[i]
         aura.root = self.root
+        -- Nameplate hit testing remains owned by Blizzard's native plate.
+        aura:EnableMouse(false)
         aura:EnableDispelColor(
             self.auraFilter == "HARMFUL"
             and config.auraTypeColor
@@ -239,17 +282,20 @@ local function Auras_SetupAuras(self, config)
 end
 
 local function Auras_OnHide(self)
+    if not self.numSlots then return end
     for i = 1, self.numSlots do
         self.slots[i]:Hide()
     end
 end
 
-local function Auras_LoadConfig(self, config)
-    AF.SetFrameLevel(self, config.frameLevel, self.root)
-    NP.LoadIndicatorPosition(self, config.position, config.anchorTo)
+local function Auras_LoadConfig(self, config, plateConfig)
+    local position = GetEffectivePosition(config, plateConfig)
 
-    self.position = config.position -- for sibling update
-    self.anchor = config.position[1]
+    AF.SetFrameLevel(self, config.frameLevel, self.root)
+    NP.LoadIndicatorPosition(self, position, config.anchorTo)
+
+    self.position = position -- for sibling update
+    self.anchor = position[1]
     self.spacingX = config.spacingX
     self.spacingY = config.spacingY
     Auras_SetNumSlots(self, config.numTotal)
