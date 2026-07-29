@@ -3791,7 +3791,7 @@ builder["auraBlackListWhitelist"] = function(parent)
     local pane = AF.CreateBorderedFrame(parent, "BFI_UnitFrameOption_AuraBlackListWhitelist", nil, 0)
     created["auraBlackListWhitelist"] = pane
 
-    local mode = AF.CreateDropdown(pane, 150)
+    local mode = AF.CreateDropdown(pane, 220)
     AF.SetPoint(mode, "TOPLEFT", 15, -8)
     local legacyModeItems = {
         {text = L["Blacklist"], value = "blacklist"},
@@ -3799,21 +3799,11 @@ builder["auraBlackListWhitelist"] = function(parent)
     }
     local retailModeItems = {
         {
-            text = L["Exclude Spell IDs (Reaction-Limited)"],
+            text = L["Hide Listed Spells"],
             value = "blacklist",
         },
         {
-            text = L["Include Only Spell IDs (Reaction-Limited)"],
-            value = "whitelist",
-        },
-    }
-    local inactiveRetailModeItems = {
-        {
-            text = L["Saved Blacklist (Not Applied Here)"],
-            value = "blacklist",
-        },
-        {
-            text = L["Saved Whitelist (Not Applied Here)"],
+            text = L["Show Only Listed Spells"],
             value = "whitelist",
         },
     }
@@ -3946,17 +3936,17 @@ builder["auraBlackListWhitelist"] = function(parent)
                 canEdit = true
                 mode:SetItems(retailModeItems)
                 tip:SetText(
-                    L["12.1 native aura containers apply spell-ID lists to friendly buffs and enemy debuffs. On other unit reactions, only auras classified NeverSecret are filtered; secret auras bypass both include and exclude lists. BFI therefore hides this aura row unless the unit reaction is public and matches that safe direction"]
+                    L["Spell lists work for buffs on units you can help and debuffs on units you cannot help. In other or unknown cases, WoW may ignore the list for protected auras, although auras Blizzard always makes available to addons can still be filtered. BFI cannot safely separate those exceptions from the rest, so it hides the whole aura row rather than show the wrong spells"]
                 )
             elseif HasNativeAuraContainerBackend() then
-                mode:SetItems(inactiveRetailModeItems)
+                mode:SetItems(retailModeItems)
                 tip:SetText(
-                    L["This buff indicator uses the legacy Retail aura list; saved spell-ID lists are not applied here. Editing is unavailable"]
+                    L["This aura row uses the older aura system. Your saved spell list is kept, but it is not used or editable here"]
                 )
             else
                 mode:SetItems(retailModeItems)
                 tip:SetText(
-                    L["Spell-ID aura lists require the Retail 12.1 native aura container; editing is unavailable"]
+                    L["Spell lists require WoW 12.1 and a compatible aura display. Your saved list is kept, but it cannot be used or edited here"]
                 )
             end
         else

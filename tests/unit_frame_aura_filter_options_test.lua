@@ -490,8 +490,10 @@ local function makeHarness(
         )
     end
 
-    function AF.CreateDropdown(parent)
-        return makeWidget("dropdown", harness, parent)
+    function AF.CreateDropdown(parent, width)
+        local dropdown = makeWidget("dropdown", harness, parent)
+        dropdown.width = width
+        return dropdown
     end
 
     function AF.CreateFontString(parent, text)
@@ -1440,11 +1442,13 @@ local function testRetailSpellLists(hasNativeBackend)
         version .. " spell-list scroll recalculation"
     )
     assertEqual(mode.items[1].text,
-        "Exclude Spell IDs (Reaction-Limited)",
+        "Hide Listed Spells",
         version .. " blacklist label")
     assertEqual(mode.items[2].text,
-        "Include Only Spell IDs (Reaction-Limited)",
+        "Show Only Listed Spells",
         version .. " whitelist label")
+    assertEqual(mode.width, 220,
+        version .. " spell-list dropdown width")
     assertItemValues(
         mode,
         {"blacklist", "whitelist"},
@@ -1453,33 +1457,33 @@ local function testRetailSpellLists(hasNativeBackend)
     if hasNativeBackend then
         assertContains(
             tip.text,
-            "friendly buffs and enemy debuffs",
+            "buffs on units you can help and debuffs on units you cannot help",
             version .. " spell-list warning"
         )
         assertContains(
             tip.text,
-            "classified NeverSecret",
-            version .. " spell-list reaction warning"
+            "may ignore the list for protected auras",
+            version .. " spell-list limitation warning"
         )
         assertContains(
             tip.text,
-            "bypass both include and exclude lists",
-            version .. " spell-list bypass warning"
+            "always makes available to addons",
+            version .. " spell-list exception warning"
         )
         assertContains(
             tip.text,
-            "hides this aura row",
+            "hides the whole aura row",
             version .. " spell-list conservative holder behavior"
         )
     else
         assertContains(
             tip.text,
-            "require the Retail 12.1 native aura container",
+            "require WoW 12.1",
             version .. " spell-list backend warning"
         )
         assertContains(
             tip.text,
-            "editing is unavailable",
+            "saved list is kept",
             version .. " spell-list read-only warning"
         )
     end
@@ -1549,7 +1553,7 @@ local function testRetailIndicatorAwareNativeWording()
         spellPane.Load(info)
         assertEqual(
             mode.items[1].text,
-            "Exclude Spell IDs (Reaction-Limited)",
+            "Hide Listed Spells",
             label .. " native spell-list label"
         )
         assertEqual(
@@ -1559,22 +1563,22 @@ local function testRetailIndicatorAwareNativeWording()
         )
         assertContains(
             tip.text,
-            "apply spell-ID lists",
+            "Spell lists work",
             label .. " native spell-list message"
         )
         assertContains(
             tip.text,
-            "classified NeverSecret",
-            label .. " native NeverSecret message"
+            "may ignore the list for protected auras",
+            label .. " native limitation message"
         )
         assertContains(
             tip.text,
-            "bypass both include and exclude lists",
-            label .. " native bypass message"
+            "always makes available to addons",
+            label .. " native exception message"
         )
         assertContains(
             tip.text,
-            "hides this aura row",
+            "hides the whole aura row",
             label .. " native holder behavior"
         )
         assertNotContains(
@@ -1622,12 +1626,12 @@ local function testRetailIndicatorAwareNativeWording()
         spellPane.Load(info)
         assertEqual(
             mode.items[1].text,
-            "Saved Blacklist (Not Applied Here)",
+            "Hide Listed Spells",
             label .. " inactive blacklist label"
         )
         assertEqual(
             mode.items[2].text,
-            "Saved Whitelist (Not Applied Here)",
+            "Show Only Listed Spells",
             label .. " inactive whitelist label"
         )
         assertEqual(
@@ -1637,12 +1641,12 @@ local function testRetailIndicatorAwareNativeWording()
         )
         assertContains(
             tip.text,
-            "legacy Retail aura list",
+            "older aura system",
             label .. " legacy implementation message"
         )
         assertContains(
             tip.text,
-            "not applied here",
+            "not used or editable here",
             label .. " inactive spell-list message"
         )
         assertNotContains(
