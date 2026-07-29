@@ -390,7 +390,7 @@ builder["mythicPlusWidth"] = function(parent)
         parent,
         "BFI_UIWidgetOption_MythicPlusWidth",
         nil,
-        103
+        120
     )
     created["mythicPlusWidth"] = pane
 
@@ -406,8 +406,8 @@ builder["mythicPlusWidth"] = function(parent)
         pane,
         L["X Offset"],
         150,
-        -2000,
-        2000,
+        -500,
+        500,
         1,
         nil,
         true
@@ -423,13 +423,13 @@ builder["mythicPlusWidth"] = function(parent)
         pane,
         L["Y Offset"],
         150,
-        -2000,
-        2000,
+        -500,
+        500,
         1,
         nil,
         true
     )
-    AF.SetPoint(yOffset, "TOPLEFT", width, "BOTTOMLEFT", 0, -25)
+    AF.SetPoint(yOffset, "TOPLEFT", width, "BOTTOMLEFT", 0, -40)
     AlignSliderLabelLeft(yOffset)
     yOffset:SetAfterValueChanged(function(value)
         pane.t.cfg.position[3] = value
