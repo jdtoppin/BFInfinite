@@ -14,7 +14,7 @@ local ipairs, next, pairs, pcall, type = ipairs, next, pairs, pcall, type
 -- groups/slots add-only and restricts their buttons after initialization.
 -- This controller owns only configuration-derived state and never reads aura
 -- data, live buttons, native container geometry, or native visibility.
-local REQUIRED_AF_VERSION = 22
+local REQUIRED_AF_VERSION = 30
 local NATIVE_GROUP_AURA_TEMPLATE = "CustomAuraContainerTemplate"
 local REQUIRED_AF_METHODS = {
     "AddCustomAuraGroup",
