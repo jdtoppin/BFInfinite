@@ -231,7 +231,7 @@ local function makeHarness(options)
     }
     local AF = {
         isRetail = options.isRetail ~= false,
-        versionNum = options.versionNum or 22,
+        versionNum = options.versionNum or 30,
     }
     local UF = {}
 
@@ -620,7 +620,7 @@ local function tuningSpec()
 end
 
 local function testCapabilityGate()
-    local oldAF = makeHarness({versionNum = 21})
+    local oldAF = makeHarness({versionNum = 29})
     assertEqual(oldAF.UF.HasNativeAuraContainerBackend(), false, "old AF gate")
     assertEqual(
         oldAF.UF.CreateNativeAuraContainerController({}, "OldAF"),
