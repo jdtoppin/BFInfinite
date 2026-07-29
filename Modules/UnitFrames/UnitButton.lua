@@ -1,16 +1,13 @@
 ---@class BFI
 local BFI = select(2, ...)
-local F = BFI.funcs
 local UF = BFI.modules.UnitFrames
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
 local UnitGUID = UnitGUID
-local GetUnitName = GetUnitName
 local UnitIsPlayer = UnitIsPlayer
 local UnitHasVehicleUI = UnitHasVehicleUI
 local UnitExists = UnitExists
-local UnitClassBase = AF.UnitClassBase
 
 ---------------------------------------------------------------------
 -- states
@@ -19,11 +16,14 @@ local function UnitButton_UpdateStates(self)
     local unit = self.unit
     if not unit then return end
 
-    self.states.name = GetUnitName(unit, true)
-    self.states.class = UnitClassBase(unit)
-    self.states.guid = UnitGUID(unit)
-    self.states.isPlayer = UnitIsPlayer(unit)
-    self.states.inVehicle = UnitHasVehicleUI(unit)
+    local identity = UF.GetPublicUnitIdentitySnapshot(unit)
+    -- Assign every field, including nil, so secret/public transitions cannot
+    -- leave a stale public identity cached on the button.
+    self.states.name = identity.name
+    self.states.class = identity.class
+    self.states.guid = identity.guid
+    self.states.isPlayer = identity.isPlayer
+    self.states.inVehicle = identity.inVehicle
 
     if self.states.inVehicle then
         if unit == "player" then
@@ -39,7 +39,9 @@ local function UnitButton_UpdateStates(self)
     end
 
     if unit == "pet" then
-        if UnitHasVehicleUI("player") then
+        local playerInVehicle =
+            UF.GetPublicUnitIdentityValue(UnitHasVehicleUI("player"))
+        if playerInVehicle then
             self.effectiveUnit = "player"
         else
             self.effectiveUnit = "pet"
@@ -180,13 +182,32 @@ local function UnitButton_OnTick(self)
         self.__tickCount = 0
 
         if self.unit and self.effectiveUnit then
-            self.__effectiveGuid = UnitGUID(self.effectiveUnit)
+            local effectiveGuid =
+                UF.GetPublicUnitIdentityValue(
+                    UnitGUID(self.effectiveUnit)
+                )
+            self.__effectiveGuid = effectiveGuid
 
-            local guid = UnitGUID(self.unit)
+            -- The effective and configured tokens usually identify the same
+            -- unit. Reuse the already-sanitized GUID in that case so opaque
+            -- values are never compared and no duplicate secret query occurs.
+            local guid = effectiveGuid
+            if self.effectiveUnit ~= self.unit then
+                guid =
+                    UF.GetPublicUnitIdentityValue(
+                        UnitGUID(self.unit)
+                    )
+            end
 
             -- NOTE: player GUID is non-secret, but be careful with "(enemy)target" units
-            if F.isValueNonSecret(guid) and UnitIsPlayer(self.unit) and not self._skipDataCache then
-                if guid and guid ~= self.__unitGuid then
+            if guid and not self._skipDataCache then
+                -- Preserve the old GUID short-circuit: do not make a second
+                -- identity call after the public boundary rejected the GUID.
+                local isPlayer =
+                    UF.GetPublicUnitIdentityValue(
+                        UnitIsPlayer(self.unit)
+                    )
+                if isPlayer and guid ~= self.__unitGuid then
                     -- NOTE: unit entity changed
                     self.__unitGuid = guid
 

@@ -15,7 +15,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Lua checks
+      - name: Install Lua tools
         run: |
           sudo apt-get update
           sudo apt-get install --yes lua-check lua5.1 luajit ripgrep
@@ -125,3 +125,15 @@ jobs:
 
       - name: Test 12.1 Pet aura integration
         run: luajit tests/unit_frame_pet_native_aura_test.lua
+
+      - name: Test unit-frame status timer lockdown
+        run: luajit tests/unit_frame_status_timer_test.lua
+
+      - name: Test PTR 7 unit-frame identity secrecy
+        run: luajit tests/unit_frame_secret_identity_test.lua
+
+      - name: Test PTR 7 unit-button identity boundary
+        run: luajit tests/unit_frame_secret_identity_unit_button_test.lua
+
+      - name: Test protected tooltip-owner anchoring
+        run: luajit tests/tooltip_anchor_taint_test.lua

@@ -5,8 +5,9 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF #22/r34 provides caller-supplied static Block colors for native groups.
-local REQUIRED_AF_VERSION = 34
+-- AF #23/r35 includes caller-supplied native Block colors and rejects PTR 7
+-- secret UnitClass values before they reach BFI.
+local REQUIRED_AF_VERSION = 35
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar
