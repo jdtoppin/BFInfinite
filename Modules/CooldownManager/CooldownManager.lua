@@ -8,6 +8,7 @@ local AF = _G.AbstractFramework
 
 local _G = _G
 local CheckAllowProtectedFunctions = C_RestrictedActions.CheckAllowProtectedFunctions
+local IsAddOnRestrictionActive = C_RestrictedActions.IsAddOnRestrictionActive
 local GetBindingKey = GetBindingKey
 local GetCVar = GetCVar
 local GetCVarBool = GetCVarBool
@@ -133,6 +134,13 @@ local verticalJustification = {
     BOTTOM = "BOTTOM",
     BOTTOMRIGHT = "BOTTOM",
 }
+local addonRestrictionTypes = {
+    Enum.AddOnRestrictionType.Combat,
+    Enum.AddOnRestrictionType.Encounter,
+    Enum.AddOnRestrictionType.ChallengeMode,
+    Enum.AddOnRestrictionType.PvPMatch,
+    Enum.AddOnRestrictionType.Map,
+}
 
 -- AbstractFramework captures these methods from plain widgets before any
 -- addon can replace a method on a Blizzard frame. Use the captured closures
@@ -223,10 +231,11 @@ methodStatusBar:Hide()
 local nativeSkinBorderColor = {AF.GetColorRGB("border")}
 local nativeSkinBackgroundColor = {AF.GetColorRGB("widget_dark")}
 -- Blizzard's CDM swipe has rounded alpha corners. Swap only its texture so
--- Blizzard remains authoritative for each cooldown's live swipe color.
-local nativeCooldownSwipeTexture =
-    "Interface\\HUD\\UI-HUD-CoolDownManager-Icon-Swipe"
-local squareCooldownSwipeTexture = AF.GetPlainTexture()
+-- Blizzard remains authoritative for each cooldown's live swipe color. File
+-- data IDs avoid passing addon-owned texture path strings into native
+-- cooldowns that can carry secret state.
+local nativeCooldownSwipeTexture = 6731092 -- UI-HUD-CoolDownManager-Icon-Swipe
+local squareCooldownSwipeTexture = 130871 -- Interface/Buttons/WHITE8X8
 local viewerStates = {}
 local viewerStateByKey = {}
 local itemStates = setmetatable({}, {__mode = "k"})
@@ -257,6 +266,21 @@ end
 
 local function IsSafeString(value)
     return IsValueNonSecret(value) and type(value) == "string"
+end
+
+local function CanCreateWidgets()
+    local locked = InCombatLockdown()
+    if not IsSafeBoolean(locked) or locked then
+        return false
+    end
+
+    for _, restrictionType in ipairs(addonRestrictionTypes) do
+        local active = IsAddOnRestrictionActive(restrictionType)
+        if not IsSafeBoolean(active) or active then
+            return false
+        end
+    end
+    return true
 end
 
 local function GetSafeField(owner, key)
@@ -355,6 +379,9 @@ local function EnsureAssistedHighlight(item, definition)
 
     local highlight = assistedHighlights[item]
     if highlight then return highlight end
+    if not CanCreateWidgets() or not CanChangeGeometry(item) then
+        return nil
+    end
 
     highlight = CreateFrame("Frame", nil, item, "ActionBarButtonAssistedCombatHighlightTemplate")
     assistedHighlights[item] = highlight
@@ -464,7 +491,9 @@ local function PollAssistedHighlight(_, elapsed)
     assistedHighlightUpdateTimeLeft = assistedHighlightUpdateTimeLeft - elapsed
     if assistedHighlightUpdateTimeLeft > 0 then return end
 
-    local updateRate = tonumber(GetCVar("assistedCombatIconUpdateRate")) or 0
+    local rawUpdateRate = GetCVar("assistedCombatIconUpdateRate")
+    local updateRate = IsSafeString(rawUpdateRate) and tonumber(rawUpdateRate)
+    updateRate = IsSafeNumber(updateRate) and updateRate or 0.1
     assistedHighlightUpdateTimeLeft = max(0, min(updateRate, 1))
     SetAssistedHighlightSpell(C_AssistedCombat.GetNextCastSpell(false))
     RefreshAssistedHighlights()
@@ -726,6 +755,9 @@ local function EnsureHotkeyOverlay(item, definition)
     if overlay and overlay.frame and overlay.text and overlay.anchored then
         return overlay, target
     end
+    if not CanCreateWidgets() then
+        return nil, target
+    end
     if not CanChangeGeometry(item) or not CanChangeGeometry(target) then
         return nil, target
     end
@@ -867,6 +899,7 @@ end
 
 local function EnsureHolder(state)
     if state.holder then return state.holder end
+    if not CanCreateWidgets() then return nil end
 
     local holder = CreateFrame("Frame", state.definition.holderName, AF.UIParent)
     holder:SetSize(1, 1)
@@ -948,6 +981,7 @@ end
 
 local function BindHolderPosition(state, config)
     local holder = EnsureHolder(state)
+    if not holder then return nil end
     local position = GetViewerPosition(config, state.definition)
     local isDragging = holder.mover and holder.mover.isDragging
     local positioned = HolderPositionMatches(holder, position, isDragging)
@@ -1114,6 +1148,9 @@ end
 local function EnsurePreviewFrame(state, index)
     local preview = state.previewFrames[index]
     if preview then return preview end
+    if not CanCreateWidgets() or not CanChangeGeometry(state.holder) then
+        return nil
+    end
 
     preview = AF.CreateBorderedFrame(state.holder)
     preview:SetBackdropColor(AF.GetColorRGB("widget_dark", 0.65))
@@ -1151,6 +1188,7 @@ local function UpdateHolderPreview(state, layout, firstItem, config)
 
     for index = 1, previewCount do
         local preview = EnsurePreviewFrame(state, index)
+        if not preview then return false end
         local x, y = GetLayoutPosition(layout, index)
         FrameSetSize(preview, layout.width * scaleRatio, layout.height * scaleRatio)
         FrameClearAllPoints(preview)
@@ -1282,6 +1320,7 @@ local function UpdateHolderPreview(state, layout, firstItem, config)
     for index = previewCount + 1, #state.previewFrames do
         FrameHide(state.previewFrames[index])
     end
+    return true
 end
 
 ---------------------------------------------------------------------
@@ -1685,7 +1724,10 @@ local function CreateNativeSkinLayer(parent, target, levelOffset)
     -- Do not use BackdropTemplate here. This layer inherits secret dimensions
     -- from the native cooldown widget; BackdropMixin's Lua OnSizeChanged path
     -- performs arithmetic on those values and is unsafe in addon execution.
-    if not CanChangeGeometry(parent) or not CanChangeGeometry(target) then
+    if not CanCreateWidgets()
+        or not CanChangeGeometry(parent)
+        or not CanChangeGeometry(target)
+    then
         return nil
     end
 
@@ -1703,7 +1745,7 @@ local function CreateNativeSkinLayer(parent, target, levelOffset)
 end
 
 local function CreateSolidTexture(parent, drawLayer, subLevel, color)
-    if not CanChangeGeometry(parent) then
+    if not CanCreateWidgets() or not CanChangeGeometry(parent) then
         return nil
     end
 
@@ -2053,6 +2095,9 @@ local function CanApplyStaticPresentation(item, state, itemState)
     if not CanChangeGeometry(item) then
         return false
     end
+    if CM.config.skin and not CanCreateWidgets() then
+        return false
+    end
 
     local definition = state.definition
     local itemIcon = GetSafeField(item, "Icon")
@@ -2257,6 +2302,12 @@ end
 
 local function ApplyRuntimePresentation(item, config, itemState)
     CapturePresentationDefaults(item, itemState.definition, itemState)
+
+    if itemState.definition.assistedHighlight
+        and CM.config.assistedHighlight
+    then
+        EnsureAssistedHighlight(item, itemState.definition)
+    end
 
     if itemState.nativeAlpha ~= nil then
         local desiredAlpha = GetPresentationAlpha(config)
