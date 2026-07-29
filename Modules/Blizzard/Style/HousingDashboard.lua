@@ -278,6 +278,10 @@ local catalogAtlasIcons = {
 }
 
 local function GetCatalogCategoryIcon(frame)
+    if not AF.hasHousingIcons then
+        return
+    end
+
     local iconName
     if frame.atlasKey == "category-icons_all" then
         iconName = "Housing_All"
@@ -288,7 +292,7 @@ local function GetCatalogCategoryIcon(frame)
     end
 
     iconName = iconName or catalogAtlasIcons[frame.atlasKey]
-    return iconName and AF.GetIcon(iconName, BFI.name)
+    return iconName and AF.GetIcon(iconName)
 end
 
 local function IsCatalogEntryPreviewed(frame)
