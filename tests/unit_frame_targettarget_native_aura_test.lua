@@ -61,7 +61,11 @@ local function findIndicator(indicators, name)
     end
 end
 
-local function makeIntegrationHarness()
+local function makeIntegrationHarness(nativeBackendAvailable)
+    if nativeBackendAvailable == nil then
+        nativeBackendAvailable = true
+    end
+
     local harness = {
         callbacks = {},
         configMode = {},
@@ -69,6 +73,7 @@ local function makeIntegrationHarness()
         disableCalls = {},
         events = {},
         frames = {},
+        legacyConstructions = {},
         nativeConstructions = {},
         setupCalls = {},
     }
@@ -189,10 +194,19 @@ local function makeIntegrationHarness()
     end
 
     function UF.CreateAuras(parent, name, auraFilter)
-        return newIndicator(parent, name, auraFilter, "auras")
+        local indicator = newIndicator(parent, name, auraFilter, "auras")
+        harness.legacyConstructions[
+            #harness.legacyConstructions + 1
+        ] = indicator
+        record("legacy.create", indicator, parent, auraFilter)
+        return indicator
     end
 
     function UF.CreateNativeAuras(parent, name, auraFilter)
+        if not nativeBackendAvailable then
+            return UF.CreateAuras(parent, name, auraFilter)
+        end
+
         local indicator =
             newIndicator(parent, name, auraFilter, "nativeAuras")
         harness.nativeConstructions[
@@ -744,20 +758,34 @@ local function makeEventRuntimeHarness()
     end
 
     environment.BFIUnitButton_OnLoad(root)
-    local native = UF.CreateNativeAuraIndicator(
+    local buffs = UF.CreateNativeAuraIndicator(
+        root,
+        "BFI_TargetTarget_Buffs",
+        "HELPFUL"
+    )
+    buffs.enabled = true
+    root.indicators.buffs = buffs
+    buffs:LoadConfig({
+        enabled = true,
+    })
+
+    local debuffs = UF.CreateNativeAuraIndicator(
         root,
         "BFI_TargetTarget_Debuffs",
         "HARMFUL"
     )
-    native.enabled = true
-    root.indicators.debuffs = native
-    native:LoadConfig({
+    debuffs.enabled = true
+    root.indicators.debuffs = debuffs
+    debuffs:LoadConfig({
         enabled = true,
     })
 
     harness.BFI = BFI
     harness.environment = environment
-    harness.native = native
+    harness.natives = {
+        buffs = buffs,
+        debuffs = debuffs,
+    }
     harness.root = root
     harness.UF = UF
 
@@ -880,15 +908,17 @@ local function testTargetTargetActivationAndConstructionOrder()
         "TargetTarget frame creation count")
     assertEqual(#harness.createIndicatorCalls, 1,
         "TargetTarget indicator creation count")
-    assertEqual(#harness.nativeConstructions, 1,
+    assertEqual(#harness.nativeConstructions, 2,
         "TargetTarget native controller prebuild count")
+    assertEqual(#harness.legacyConstructions, 0,
+        "TargetTarget native path legacy construction count")
     assertEqual(#harness.setupCalls, 1, "TargetTarget setup count")
     assertEqual(harness.setupCalls[1].skip, false,
         "first TargetTarget setup skipped indicators")
     assertEqual(harness:CountEvents("watch.register"), 1,
         "TargetTarget initial unit-watch registration")
     assertTrue(
-        harness:EventIndex("native.create")
+        harness:EventIndex("native.create", 2)
             < harness:EventIndex("setup"),
         "TargetTarget native controller was not prebuilt before setup"
     )
@@ -929,22 +959,31 @@ local function testTargetTargetActivationAndConstructionOrder()
         "TargetTarget config-mode group")
     assertEqual(harness.configMode[1].frame, frame,
         "TargetTarget config-mode frame")
-    assertEqual(buffs[1], "auras",
-        "TargetTarget buffs legacy builder")
+    assertEqual(buffs[1], "nativeAuras",
+        "TargetTarget buffs native builder")
     assertEqual(buffs[3], "HELPFUL", "TargetTarget buffs filter")
     assertEqual(debuffs[1], "nativeAuras",
         "TargetTarget debuffs native builder")
     assertEqual(debuffs[3], "HARMFUL",
         "TargetTarget debuffs filter")
     assertEqual(harness.nativeConstructions[1],
+        frame.indicators.buffs,
+        "TargetTarget native buffs controller")
+    assertEqual(harness.nativeConstructions[2],
         frame.indicators.debuffs,
-        "TargetTarget native controller")
+        "TargetTarget native debuffs controller")
+    assertEqual(frame.indicators.buffs.root, frame,
+        "TargetTarget native buffs controller parent")
+    assertEqual(frame.indicators.buffs.auraFilter, "HELPFUL",
+        "TargetTarget native buffs controller filter")
     assertEqual(frame.indicators.debuffs.root, frame,
-        "TargetTarget native controller parent")
+        "TargetTarget native debuffs controller parent")
     assertEqual(frame.indicators.debuffs.auraFilter, "HARMFUL",
-        "TargetTarget native controller filter")
-    assertEqual(frame.indicators.buffs.builder, "auras",
-        "TargetTarget legacy buffs construction")
+        "TargetTarget native debuffs controller filter")
+    assertEqual(frame.indicators.buffs.builder, "nativeAuras",
+        "TargetTarget native buffs construction")
+    assertEqual(frame.indicators.debuffs.builder, "nativeAuras",
+        "TargetTarget native debuffs construction")
 end
 
 local function testTargetTargetDisableAndReenableLifecycle()
@@ -958,6 +997,8 @@ local function testTargetTargetDisableAndReenableLifecycle()
     update(nil, "unitFrames", "targettarget", 1)
     assertEqual(#harness.frames, 1,
         "TargetTarget frame recreated on update")
+    assertEqual(#harness.nativeConstructions, 2,
+        "TargetTarget repeated-update native construction count")
     assertEqual(#harness.setupCalls, 2,
         "TargetTarget repeated setup count")
     assertEqual(harness.setupCalls[2].skip, false,
@@ -999,7 +1040,7 @@ local function testTargetTargetDisableAndReenableLifecycle()
         "TargetTarget re-enable setup count")
     assertEqual(harness.setupCalls[4].skip, false,
         "TargetTarget re-enable skipped disabled indicators")
-    assertEqual(#harness.nativeConstructions, 1,
+    assertEqual(#harness.nativeConstructions, 2,
         "TargetTarget re-enable native construction count")
     assertEqual(harness:CountEvents("watch.register"), 1,
         "TargetTarget re-enable unit-watch registration")
@@ -1007,6 +1048,37 @@ local function testTargetTargetDisableAndReenableLifecycle()
         "TargetTarget re-enabled state")
     assertEqual(frame.unitWatchRegistered, true,
         "TargetTarget re-enabled unit watch")
+end
+
+local function testTargetTargetLegacyAuraFallback()
+    local harness = makeIntegrationHarness(false)
+    local update = harness.callbacks.BFI_UpdateModule
+
+    update(nil, "unitFrames", "targettarget")
+    local frame = harness.frames[1]
+
+    assertEqual(#harness.nativeConstructions, 0,
+        "12.0.7 TargetTarget native construction count")
+    assertEqual(#harness.legacyConstructions, 2,
+        "12.0.7 TargetTarget legacy construction count")
+    assertEqual(frame.indicators.buffs.builder, "auras",
+        "12.0.7 TargetTarget buffs fallback")
+    assertEqual(frame.indicators.buffs.auraFilter, "HELPFUL",
+        "12.0.7 TargetTarget buffs filter")
+    assertEqual(frame.indicators.debuffs.builder, "auras",
+        "12.0.7 TargetTarget debuffs fallback")
+    assertEqual(frame.indicators.debuffs.auraFilter, "HARMFUL",
+        "12.0.7 TargetTarget debuffs filter")
+
+    update(nil, "unitFrames", "targettarget", true)
+    harness.UF.config.targettarget.general.enabled = false
+    update(nil, "unitFrames", "targettarget")
+    harness.UF.config.targettarget.general.enabled = true
+    update(nil, "unitFrames", "targettarget", true)
+    assertEqual(#harness.frames, 1,
+        "12.0.7 TargetTarget fallback frame growth")
+    assertEqual(#harness.legacyConstructions, 2,
+        "12.0.7 TargetTarget fallback indicator growth")
 end
 
 local function testTargetTargetConfigModeGuardsAreLocal()
@@ -1065,6 +1137,8 @@ local function testTargetTargetConfigModeGuardsAreLocal()
     )
     assertEqual(harness:CountEvents("watch.register"), 0,
         "TargetTarget config-mode re-enable unit watch")
+    assertEqual(#harness.nativeConstructions, 2,
+        "TargetTarget config-mode native construction count")
     for _, indicator in pairs(frame.indicators) do
         assertEqual(indicator.configMode, true,
             "re-enabled TargetTarget indicator preview state")
@@ -1076,9 +1150,12 @@ end
 local function testTargetTargetUnitEventsRefreshNativeRuntime()
     local harness = makeEventRuntimeHarness()
     local root = harness.root
-    local native = harness.native
-    local controller = harness.controllers[1]
-    local nativeUpdate = native.Update
+    local buffs = harness.natives.buffs
+    local debuffs = harness.natives.debuffs
+    local buffController = harness.controllers[1]
+    local debuffController = harness.controllers[2]
+    local buffsUpdate = buffs.Update
+    local debuffsUpdate = debuffs.Update
     local commonUpdateIndicators = harness.UF.UpdateIndicators
 
     root.hooks.OnShow(root)
@@ -1086,40 +1163,96 @@ local function testTargetTargetUnitEventsRefreshNativeRuntime()
         "TargetTarget PLAYER_TARGET_CHANGED registration")
     assertEqual(harness.frameEvents.UNIT_TARGET, "target",
         "TargetTarget UNIT_TARGET registration")
-    assertEqual(#harness.compiles, 1,
+    assertEqual(#harness.compiles, 2,
         "TargetTarget initial runtime compile count")
     assertEqual(harness.compiles[1].unit, "targettarget",
-        "TargetTarget runtime compile unit")
-    assertEqual(controller.rebuildCount, 1,
-        "TargetTarget runtime construction count")
+        "TargetTarget buffs runtime compile unit")
+    assertEqual(harness.compiles[1].auraFilter, "HELPFUL",
+        "TargetTarget buffs runtime compile filter")
+    assertEqual(harness.compiles[2].unit, "targettarget",
+        "TargetTarget debuffs runtime compile unit")
+    assertEqual(harness.compiles[2].auraFilter, "HARMFUL",
+        "TargetTarget debuffs runtime compile filter")
+    assertEqual(buffController.rebuildCount, 1,
+        "TargetTarget buffs runtime construction count")
+    assertEqual(debuffController.rebuildCount, 1,
+        "TargetTarget debuffs runtime construction count")
 
-    local initialRefreshCount = controller.refreshCount or 0
-    local initialSetUnitCount = controller.setUnitCount or 0
+    local initialBuffRefreshCount = buffController.refreshCount or 0
+    local initialDebuffRefreshCount = debuffController.refreshCount or 0
+    local initialBuffSetUnitCount = buffController.setUnitCount or 0
+    local initialDebuffSetUnitCount = debuffController.setUnitCount or 0
     root.scripts.OnEvent(root, "PLAYER_TARGET_CHANGED")
-    assertEqual(controller.refreshCount, initialRefreshCount + 1,
-        "PLAYER_TARGET_CHANGED native refresh count")
-    assertEqual(#harness.compiles, 1,
+    assertEqual(
+        buffController.refreshCount,
+        initialBuffRefreshCount + 1,
+        "PLAYER_TARGET_CHANGED buffs refresh count"
+    )
+    assertEqual(
+        debuffController.refreshCount,
+        initialDebuffRefreshCount + 1,
+        "PLAYER_TARGET_CHANGED debuffs refresh count"
+    )
+    assertEqual(#harness.compiles, 2,
         "PLAYER_TARGET_CHANGED recompiled stable runtime")
-    assertEqual(controller.rebuildCount, 1,
-        "PLAYER_TARGET_CHANGED rebuilt stable runtime")
-    assertEqual(controller.setUnitCount or 0, initialSetUnitCount,
-        "PLAYER_TARGET_CHANGED retargeted stable runtime")
+    assertEqual(buffController.rebuildCount, 1,
+        "PLAYER_TARGET_CHANGED rebuilt stable buffs runtime")
+    assertEqual(debuffController.rebuildCount, 1,
+        "PLAYER_TARGET_CHANGED rebuilt stable debuffs runtime")
+    assertEqual(
+        buffController.setUnitCount or 0,
+        initialBuffSetUnitCount,
+        "PLAYER_TARGET_CHANGED retargeted stable buffs runtime"
+    )
+    assertEqual(
+        debuffController.setUnitCount or 0,
+        initialDebuffSetUnitCount,
+        "PLAYER_TARGET_CHANGED retargeted stable debuffs runtime"
+    )
 
     root.scripts.OnEvent(root, "UNIT_TARGET", "target")
-    assertEqual(controller.refreshCount, initialRefreshCount + 2,
-        "UNIT_TARGET native refresh count")
-    assertEqual(#harness.compiles, 1,
+    assertEqual(
+        buffController.refreshCount,
+        initialBuffRefreshCount + 2,
+        "UNIT_TARGET buffs refresh count"
+    )
+    assertEqual(
+        debuffController.refreshCount,
+        initialDebuffRefreshCount + 2,
+        "UNIT_TARGET debuffs refresh count"
+    )
+    assertEqual(#harness.compiles, 2,
         "UNIT_TARGET recompiled stable runtime")
-    assertEqual(controller.rebuildCount, 1,
-        "UNIT_TARGET rebuilt stable runtime")
-    assertEqual(controller.setUnitCount or 0, initialSetUnitCount,
-        "UNIT_TARGET retargeted stable runtime")
+    assertEqual(buffController.rebuildCount, 1,
+        "UNIT_TARGET rebuilt stable buffs runtime")
+    assertEqual(debuffController.rebuildCount, 1,
+        "UNIT_TARGET rebuilt stable debuffs runtime")
+    assertEqual(
+        buffController.setUnitCount or 0,
+        initialBuffSetUnitCount,
+        "UNIT_TARGET retargeted stable buffs runtime"
+    )
+    assertEqual(
+        debuffController.setUnitCount or 0,
+        initialDebuffSetUnitCount,
+        "UNIT_TARGET retargeted stable debuffs runtime"
+    )
 
     root.scripts.OnEvent(root, "UNIT_TARGET", "focus")
-    assertEqual(controller.refreshCount, initialRefreshCount + 2,
-        "unrelated UNIT_TARGET native refresh count")
-    assertEqual(native.Update, nativeUpdate,
-        "TargetTarget native Update method identity")
+    assertEqual(
+        buffController.refreshCount,
+        initialBuffRefreshCount + 2,
+        "unrelated UNIT_TARGET buffs refresh count"
+    )
+    assertEqual(
+        debuffController.refreshCount,
+        initialDebuffRefreshCount + 2,
+        "unrelated UNIT_TARGET debuffs refresh count"
+    )
+    assertEqual(buffs.Update, buffsUpdate,
+        "TargetTarget buffs Update method identity")
+    assertEqual(debuffs.Update, debuffsUpdate,
+        "TargetTarget debuffs Update method identity")
     assertEqual(harness.UF.UpdateIndicators, commonUpdateIndicators,
         "TargetTarget shared UpdateIndicators identity")
 end
@@ -1258,6 +1391,7 @@ end
 testTargetTargetActivationAndConstructionOrder()
 testTargetTargetDisableAndReenableLifecycle()
 testTargetTargetConfigModeGuardsAreLocal()
+testTargetTargetLegacyAuraFallback()
 testTargetTargetUnitEventsRefreshNativeRuntime()
 testShippedTargetTargetPresetBounds()
 
