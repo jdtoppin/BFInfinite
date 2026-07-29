@@ -5,6 +5,7 @@ local BD = BFI.modules.BuffsDebuffs
 
 local hooksecurefunc = hooksecurefunc
 local InCombatLockdown = InCombatLockdown
+local hasRestrictedAuraButtons = _G.C_AuraContainerUtil ~= nil
 
 local suppressedStates = {}
 local suppressedRoots = {}
@@ -105,6 +106,12 @@ local function ResolveNativePublicAuraFrame(which)
 end
 
 local function HidePublicAuraOverlays(frame, publicParent)
+    -- Retail 12.1 AuraButtons deny tainted access whenever aura data is
+    -- secret. Never enumerate or call methods on those children, including
+    -- from the UpdateAuraButtons hook below. Hiding the owning native
+    -- container uses Blizzard's PTR 7 hover-safe visibility path instead.
+    if hasRestrictedAuraButtons then return end
+
     local auraFrames = frame.auraFrames
     if type(auraFrames) ~= "table" then return end
 
@@ -134,6 +141,8 @@ local function HideTargetOverlays(target)
 end
 
 local function InstallOverlayCleanupHook(target)
+    if hasRestrictedAuraButtons then return end
+
     local frame = target.frame
     if hookedRoots[frame] then return end
 
