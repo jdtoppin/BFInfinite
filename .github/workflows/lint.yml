@@ -15,10 +15,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install luacheck
+      - name: Install Lua checks
         run: |
           sudo apt-get update
-          sudo apt-get install --yes lua-check ripgrep
+          sudo apt-get install --yes lua-check lua5.1 ripgrep
 
       - name: Check Lua and policy
         shell: bash

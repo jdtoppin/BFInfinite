@@ -28,6 +28,7 @@ local moduleNames = {
     bags = {localized = L["Bags"], class = "Bags"},
     buffsDebuffs = {localized = L["Buffs & Debuffs"], class = "BuffsDebuffs"},
     chat = {localized = L["Chat"], class = "Chat"},
+    cooldownManager = {localized = L["Cooldown Manager"], class = "CooldownManager"},
     dataBars = {localized = L["Data Bars"], class = "DataBars"},
     maps = {localized = L["Maps"], class = "Maps"},
     nameplates = {localized = L["Nameplates"], class = "Nameplates"},
@@ -65,6 +66,7 @@ function F.GetProfileModuleClassNames()
         "Bags",
         "BuffsDebuffs",
         "Chat",
+        "CooldownManager",
         "DataBars",
         "Maps",
         "Nameplates",
@@ -203,6 +205,52 @@ function F.DisableEditMode(region)
     -- region.ClearHighlight = AF.noop -- TAINT!
     if not (region.HighlightSystem or region.ClearHighlight) then return end
     hooksecurefunc(region, "HighlightSystem", region.ClearHighlight)
+end
+
+---------------------------------------------------------------------
+-- AbstractFramework position compatibility
+---------------------------------------------------------------------
+function F.LoadPosition(region, position, relativeTo)
+    if type(position) == "table"
+        and type(position[2]) == "number"
+        and type(position[3]) == "number"
+    then
+        -- AF movers persist {point, x, y}. Affected AF releases pass
+        -- an explicit nil fourth table field and misread x as relativePoint.
+        -- Expand only the transient value, leaving the saved table canonical.
+        AF.LoadPosition(
+            region,
+            {position[1], position[1], position[2], position[3]},
+            relativeTo
+        )
+    else
+        AF.LoadPosition(region, position, relativeTo)
+    end
+end
+
+function F.PrepareEditModePositions()
+    if InCombatLockdown() then return end
+
+    -- AFPopupParent is the framework's only production mover owner. It uses
+    -- the same affected three-field table path, so repair that known owner
+    -- before showing the global registry. BFI-owned movers already use
+    -- F.LoadPosition at setup time.
+    local popupParent = _G.AFPopupParent
+    local mover = popupParent and popupParent.mover
+    local position = mover and mover.save
+    if mover and position == nil then
+        local config = _G.AFConfig
+        position = config and config.popups and config.popups.position
+        if type(position) == "table" then
+            AF.UpdateMoverSave(popupParent, position)
+        end
+    end
+    if type(position) == "table"
+        and type(position[2]) == "number"
+        and type(position[3]) == "number"
+    then
+        F.LoadPosition(popupParent, position, AF.UIParent)
+    end
 end
 
 ---------------------------------------------------------------------

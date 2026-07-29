@@ -137,7 +137,6 @@ end
 ---------------------------------------------------------------------
 -- update
 ---------------------------------------------------------------------
-local init
 local function UpdateHonorBar(_, module, which)
     if module and module ~= "dataBars" then return end
     if which and which ~= "honorBar" then return end
@@ -161,7 +160,7 @@ local function UpdateHonorBar(_, module, which)
     -- honorBar:RegisterUnitEvent("PLAYER_FLAGS_CHANGED", "player", UpdateHonor)
 
     AF.UpdateMoverSave(honorBar, config.position)
-    AF.LoadPosition(honorBar, config.position)
+    BFI.funcs.LoadPosition(honorBar, config.position)
     AF.SetSize(honorBar, config.width, config.height)
 
     if config.color.type == "gradient" then

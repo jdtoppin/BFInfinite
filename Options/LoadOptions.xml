@@ -16,6 +16,7 @@
     <Script file="ActionBars_Options.lua"/>
     <Script file="ActionBars.lua"/>
     <Script file="Bags.lua"/>
+    <Script file="CooldownManager.lua"/>
     <Script file="BuffsDebuffs.lua"/>
     <Script file="UIWidgets_Options.lua"/>
     <Script file="UIWidgets.lua"/>

@@ -401,13 +401,13 @@ local function SetupScenarioObjectiveTracker()
                 widget._BFIHooked = true
 
                 hooksecurefunc(widget.CurrencyContainer, "Layout", function()
-                    local font = W.config.objectiveTracker.font
+                    local currencyFont = W.config.objectiveTracker.font
                     for currencyFrame in widget.currencyPool:EnumerateActive() do
-                        AF.SetFont(currencyFrame.Text, font, font[2] + 1, "none", true)
+                        AF.SetFont(currencyFrame.Text, currencyFont, currencyFont[2] + 1, "none", true)
                     end
                 end)
 
-                hooksecurefunc(widget, "UpdateSpellFrameEffects", function(_, widgetInfo, spellInfo, spellFrame)
+                hooksecurefunc(widget, "UpdateSpellFrameEffects", function(_, updatedWidgetInfo, spellInfo, spellFrame)
                     -- UIWidgetBaseSpellTemplate
                     -- print(spellInfo.spellID)
                     S.StyleIconFrame(spellFrame)
@@ -502,10 +502,10 @@ local function SetupQuestBlock()
         _G.CampaignQuestObjectiveTracker,
     }
 
-    for _, tracker in next, trackers do
-        hooksecurefunc(tracker, "GetProgressBar", UpdateProgressBar)
-        hooksecurefunc(tracker, "GetTimerBar", UpdateTimerBar)
-        hooksecurefunc(tracker, "AddBlock", UpdateBlock)
+    for _, objectiveTracker in next, trackers do
+        hooksecurefunc(objectiveTracker, "GetProgressBar", UpdateProgressBar)
+        hooksecurefunc(objectiveTracker, "GetTimerBar", UpdateTimerBar)
+        hooksecurefunc(objectiveTracker, "AddBlock", UpdateBlock)
     end
 end
 
@@ -581,6 +581,6 @@ local function UpdateObjectiveTracker(_, module, which)
     AF.UpdateMoverSave(trackerContainer, config.position)
 
     -- position
-    AF.LoadPosition(trackerContainer, config.position)
+    BFI.funcs.LoadPosition(trackerContainer, config.position)
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateObjectiveTracker)

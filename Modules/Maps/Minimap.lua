@@ -957,7 +957,7 @@ local function UpdateMinimap(_, module, which)
 
     -- minimap
     AF.ClearPoints(minimapContainer)
-    AF.LoadPosition(minimapContainer, config.general.position)
+    BFI.funcs.LoadPosition(minimapContainer, config.general.position)
     AF.SetSize(minimapContainer, config.general.size, config.general.size)
     Minimap:SetSize(Minimap:GetSize()) --! for ping
     Minimap:SetZoom(0)
