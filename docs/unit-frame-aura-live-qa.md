@@ -33,7 +33,12 @@ Use this clean isolated-install sequence:
    #112 at `a3069bc70e22e449231dbb7cd0be20e38a96412c`.
 6. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
    #103 at `19df3783962e9fff37c8c02f30087c5c26e22f10`.
-7. Validation-only AF #25 at
+7. Current AF `main` at `a4eade2b8da69c095d7f9224f5537f09c0cc357f`
+   with BFInfinite #118 at
+   `24c26df850ee0730982a1263e0770d5a5e7296c4`. Test the native tooltip
+   shell on Blizzard's TargetFrame with BFI Unit Frames disabled, then on any
+   upper-right native AuraButtons available to the fixture.
+8. Validation-only AF #25 at
    `d82bc3e07d4eab953d5e9a7dc82c9cc1a307e8f9` with the exact
    checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
    validation SHA. Record that full branch-head SHA immediately before
@@ -69,6 +74,8 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Party | `codex/unitframe-aura-party` | `2cfcbca80d0b2b45b9a9abb657907511152ae6b9` |
 | Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
 | Upper-right Debuff appearance (#103; includes #99) | `codex/buffs-debuffs-native-debuffs` | `19df3783962e9fff37c8c02f30087c5c26e22f10` |
+| Tooltip/status safety (#85) | `codex/combat-secret-tooltip-fixes` | `b13a19842e7db7c19a447a97c009a4c968757d18` |
+| Native AuraButton tooltip skin (#118) | `codex/native-aura-tooltip-skin` | `24c26df850ee0730982a1263e0770d5a5e7296c4` |
 | Secret identity (#100) | `codex/unitframe-secret-identity` | `b8e1671ed8a1c11657416357875f9c8277051654` |
 | Unit Frame options preview safety (#114) | `codex/unitframe-options-preview-aura-safety` | `296667d9681c07ab1a7293ea8922561c44e9cb08` |
 | Objective Tracker taint boundary (#115) | `codex/objective-tracker-taint-boundary` | `b829efaffd45939e268cfa6c0c1e167ce17312fe` |
@@ -86,10 +93,13 @@ Test in this order:
 5. Test the upper-right foundation, controller, Buffs, options, and
    forbidden-button branches in their PR order.
 6. Test #103's ordinary Debuff appearance controls with AF r33.
-7. Test #114, #115, #116, and #117 independently against their documented
+7. Test #85 and then #118 independently. For #118 alone, disable BFI Unit
+   Frames and exercise Blizzard's native TargetFrame AuraButtons; the final
+   aggregate carries both PRs for their combined restricted-context gate.
+8. Test #114, #115, #116, and #117 independently against their documented
    reproducers below.
-8. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
-9. Run the 12.1 gates below in order.
+9. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
+10. Run the 12.1 gates below in order.
 
 Record the full local SHA for every installed folder. A short SHA in this
 document is a review aid, not permission to test a different head.
@@ -214,7 +224,7 @@ while it may be secret.
 
 ### Restricted-context regression preflight
 
-Run these four checks on the clean aggregate before the longer aura gates.
+Run these five checks on the clean aggregate before the longer aura gates.
 Clear and inspect the taint log after each check so one failure cannot
 contaminate later evidence.
 
@@ -267,6 +277,25 @@ contaminate later evidence.
    automatically.
 6. Open and close the Spellbook again in and out of combat and confirm no
    further blocked action or duplicate deferred update.
+
+#### Native AuraButton tooltip shell and hover
+
+1. After a clean login, target fixtures with visible helpful and harmful
+   auras. Hover both BFI Target rows and compare their tooltip shell with an
+   ordinary BFI-skinned `GameTooltip`.
+2. Require the same flat background, black one-pixel border, and one-pixel
+   inset. Blizzard must still own the native tooltip text, aura content,
+   anchor, visibility, and lifetime.
+3. Repeat on upper-right native Buffs and on any private or boss AuraButton
+   that Blizzard exposes. The shared shell may match BFI, but the private or
+   boss button, anchor, contents, and update path must remain unchanged.
+4. Park the pointer, then enter and leave combat, swap and clear targets, and
+   reload in an active Challenge Mode both outside and during combat. Require
+   no forbidden access, Lua error, taint, tooltip-driven visibility recovery,
+   or delayed aura transition that depends on moving the pointer.
+5. Confirm nameplate aura tooltips remain disabled where their row contract
+   disables them. Disable BFI and reload once during the isolated #118 run to
+   confirm Blizzard's default native tooltip shell returns.
 
 ### 0. Current-master compatibility preflight
 
@@ -394,8 +423,10 @@ immediately using only BFInfinite's write ledgers.
 At no point may the stale row, both relation variants, or a partial new row be
 visible. Repeat the same stationary-pointer sequence on a non-partitioned row
 and on Party/Raid secure-header seeded containers, including roster retarget,
-disable, destroy, and reload quiesce. `GameTooltip` may remain visible;
-BFInfinite must neither inspect nor dismiss it.
+disable, destroy, and reload quiesce. `GameTooltip` or Blizzard's native
+AuraButton tooltip may remain visible; BFInfinite must neither inspect nor
+dismiss either one. Its only native-tooltip operation is the one-time global
+static shell configuration through Blizzard's inbound styling API.
 
 The implementation must not call `IsShown`, `IsVisible`, `IsMouseOver`, or
 `GetAlpha` on holders or native aura objects; probe protected writes with
@@ -518,7 +549,11 @@ or expose private identity, spell, duration, count, or source.
   buttons.
 - Private-aura anchors are independent siblings of that ordinary pool.
   BFInfinite must not style, hide, inspect, move, or otherwise operate on
-  them. `DeadlyDebuffFrame` is separate and must also remain unchanged.
+  them. `DeadlyDebuffFrame` is separate and must also remain unchanged. If
+  Blizzard routes one of their tooltips through the shared native AuraButton
+  tooltip, only its global outer shell may use BFI's static background and
+  border; the anchor, button, contents, visibility, and lifetime remain
+  Blizzard-owned.
 - Toggle Buffs, Separate Own, supported appearance options, profiles, Edit
   Mode, combat, hover, reload, and temporary enchants.
 - For ordinary Debuffs, verify the main enable toggle, icon width and height
@@ -532,7 +567,8 @@ or expose private identity, spell, duration, count, or source.
   Their plain-language explanations must wrap without clipping.
 - Generate ordinary, private, and deadly debuffs together. Confirm ordinary
   Debuffs receive the selected appearance with no duplicates, while private
-  auras and deadly debuffs retain their original Blizzard presentation.
+  auras and deadly debuffs retain their original Blizzard presentation apart
+  from the permitted shared native-tooltip outer shell.
 - Disable ordinary Debuff styling and confirm the icon, native border, stack
   count, and duration visibility return exactly to their original Blizzard
   values. Re-enable it and confirm the same fixed 16 buttons are reused.
@@ -596,6 +632,9 @@ Stop and file a failure with evidence for any of the following:
   combat outside #112's complete first-build final enabled submission;
 - restricted intrinsic AuraButton or aura-state inspection, or
   tooltip-driving logic;
+- direct lookup, hook, inspection, or mutation of the hidden native AuraButton
+  tooltip; failure of its outer shell to match BFI while #118 is enabled; or
+  the global shell setter enabling a tooltip that the row disabled;
 - any transition delayed, completed, or retried because the pointer moved;
 - stale wrong-relation content visible during hover or visibility deferral;
 - refresh while presentation is disallowed or still curtained;
