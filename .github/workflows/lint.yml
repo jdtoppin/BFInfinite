@@ -38,3 +38,6 @@ jobs:
 
       - name: Test 12.1 unit-frame aura policy
         run: luajit tests/unit_frame_aura_policy_test.lua
+
+      - name: Test 12.1 unit-frame aura spec
+        run: luajit tests/unit_frame_aura_spec_test.lua
