@@ -421,7 +421,7 @@ local function QuiesceForReload(runtime)
     if not runtime._built then return end
 
     -- The plain holder can be hidden immediately through the controller's
-    -- hover-safe visibility path. Disabling the native container remains
+    -- write-only visibility path. Disabling the native container remains
     -- runtime-owned OOC work so a topology change cannot smuggle a protected
     -- mutation through an enable/disable or config-mode lifecycle call.
     runtime._controller:SetShown(false)
@@ -475,8 +475,8 @@ local function SyncLifecycle(runtime)
     runtime._controller:SetShown(true)
     SyncWatcher(runtime)
     -- This answer comes only from BFI-owned tracked presentation state. A
-    -- desired show may still be hover-deferred behind an alpha curtain, in
-    -- which case stable-unit refresh must not drive the stale native row.
+    -- presentation still being committed behind its alpha curtain must not
+    -- receive a stable-unit refresh.
     return runtime._controller:IsPresentationApplied()
 end
 
@@ -746,7 +746,8 @@ Commit = function(runtime)
     -- Never submit configuration/replacement work to the controller until it
     -- can finish synchronously. This lets a later empty/error/disabled config
     -- supersede the pending descriptor without allocating stale restricted
-    -- button batches after combat or hover ends.
+    -- button batches after combat. Holder visibility is owned by the
+    -- controller's ordinary write ledger and must not be observed here.
     if runtime._configDirty and InCombatLockdown() then
         -- A group child's clean token can still change while an unrelated
         -- structural config edit waits for regen. Retarget the already-built
@@ -760,25 +761,6 @@ Commit = function(runtime)
             runtime._unitDirty = nil
         end
         QueueCombatCommit(runtime)
-        return
-    end
-    if runtime._configDirty and runtime._built and runtime:IsShown() then
-        runtime._commitScheduled = true
-        if not runtime._holderRetryScheduled then
-            runtime._holderRetryScheduled = true
-            local generation = runtime._commitGeneration
-            C_Timer.After(0.25, function()
-                runtime._holderRetryScheduled = nil
-                if not runtime._destroyed
-                    and (
-                        generation == runtime._commitGeneration
-                        or runtime._configDirty
-                    )
-                then
-                    Commit(runtime)
-                end
-            end)
-        end
         return
     end
     RemoveCombatCommit(runtime)
@@ -856,9 +838,9 @@ end
 local function SyncProviderVisibility(runtime)
     if runtime._destroyed or not runtime._built then return end
 
-    -- SetShown is the controller's plain-holder, hover-safe path. Do not
-    -- rebuild, tune, retarget, refresh, or drive Blizzard update methods in
-    -- response to a provider switch.
+    -- SetShown updates the controller's write-only presentation ledger. Do
+    -- not rebuild, tune, retarget, refresh, or drive Blizzard update methods
+    -- in response to a provider switch.
     runtime._controller:SetShown(ShouldShowNative(runtime) == true)
 end
 
@@ -1254,7 +1236,6 @@ local function NativeAuras_Destroy(self)
     self._reloadRequired = nil
     self._reloadQuiescePending = nil
     self._providerBuildDeferred = nil
-    self._holderRetryScheduled = nil
     self._sourceConfig = nil
     providerRuntimes[self] = nil
     runtimeStats.runtimesDestroyed = runtimeStats.runtimesDestroyed + 1

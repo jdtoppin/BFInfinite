@@ -126,21 +126,23 @@ local function newHolder(harness, name, parent, frameTemplate)
     end
 
     function holder:IsShown()
-        return self.shown == true
+        error("holder visibility must remain opaque")
     end
 
     function holder:IsMouseOver()
-        return self.mouseOver == true
+        error("holder hover state must remain opaque")
     end
 
     function holder:SetShown(shown)
         record(harness, "holder.shown", self, shown)
-        if self.blockSetShown then return end
         self.shown = shown
     end
 
     function holder:SetAlpha(alpha)
         self.alpha = alpha
+        if harness.recordAlpha then
+            record(harness, "holder.alpha", self, alpha)
+        end
     end
 
     function holder:SetSize(width, height)
@@ -192,6 +194,9 @@ local function newContainer(harness, parent)
 
     function container:SetAlpha(alpha)
         self.alpha = alpha
+        if harness.recordAlpha then
+            record(harness, "native.alpha", self, alpha)
+        end
     end
 
     function container:ClearAllPoints()
@@ -1775,166 +1780,96 @@ local function testPartialAddFailureDiagnostics()
     }, "retired partial AddSlot construction")
 end
 
-local function testHoveredTransitionDefers()
+local function testVisibilityUsesWriteLedger()
     local harness = makeHarness()
     local controller = harness.UF.CreateNativeAuraContainerController(
         {},
-        "BFIHoveredAuraHolder",
+        "BFIOpaqueVisibilityAuraHolder",
         completeSpec("target", true)
     )
     local holder = controller:GetFrame()
     local container = harness.containers[1]
 
+    harness.recordAlpha = true
     clearEvents(harness)
-    holder.mouseOver = true
     controller:ApplyTuning(tuningSpec())
 
-    assertEqual(#harness.events, 0, "hovered transition mutations")
-    assertEqual(holder.alpha, 0, "hovered transition alpha curtain")
-    assertEqual(controller:IsPresentationApplied(), false,
-        "hovered transition presentation state")
-    assertEqual(#harness.timerCallbacks, 1, "hover retry count")
-    assertEqual(#harness.containers, 1, "hovered container count")
-    assertEqual(container.enabled, true, "hovered container enabled")
-    assertEqual(container.shown, true, "hovered container shown")
-
-    holder.mouseOver = false
-    harness:RunNextTimer()
-
-    assertEqual(#harness.timerCallbacks, 0, "completed hover retry count")
-    assertEqual(#harness.containers, 1, "completed tuning container count")
+    assertEqual(#harness.timerCallbacks, 0, "visibility retry count")
+    assertEqual(#harness.containers, 1, "tuning container count")
     assertEqual(container.groups.helpful.filterString, "HELPFUL|PLAYER",
-        "completed hovered tuning")
-    assertEqual(holder.shown, true, "completed holder visibility")
-    assertEqual(holder.alpha, 1, "completed holder alpha")
+        "write-only tuning")
+    assertEqual(holder.shown, true, "holder visibility")
+    assertEqual(holder.alpha, 1, "holder curtain restoration")
     assertEqual(controller:IsPresentationApplied(), true,
-        "completed hovered presentation state")
-    assertEqual(harness.events[1].name, "holder.shown", "hover-safe hide order")
-    assertEqual(harness.events[1].args[2], false, "hover-safe hide state")
-    assertEqual(harness.events[#harness.events].name, "holder.shown",
-        "hover-safe restore order")
-    assertEqual(harness.events[#harness.events].args[2], true,
-        "hover-safe restore state")
+        "applied presentation state")
+    assertEqual(harness.events[1].name, "holder.alpha",
+        "holder curtain precedes hide")
+    assertEqual(harness.events[1].args[2], 0, "holder curtain alpha")
+    assertEqual(harness.events[2].name, "holder.shown", "holder hide order")
+    assertEqual(harness.events[2].args[2], false, "holder hide state")
+    assertEqual(harness.events[#harness.events].name, "holder.alpha",
+        "holder uncurtains after restore")
+    assertEqual(harness.events[#harness.events].args[2], 1,
+        "holder restored alpha")
 end
 
-local function testHoveredHideCurtainsImmediately()
+local function testHideReversalUsesWriteLedger()
     local harness = makeHarness()
     local controller = harness.UF.CreateNativeAuraContainerController(
         {},
-        "BFIHoveredHideAuraHolder",
+        "BFIWriteLedgerReversalAuraHolder",
         completeSpec("target", true)
     )
     local holder = controller:GetFrame()
 
     clearEvents(harness)
-    holder.mouseOver = true
     controller:SetShown(false)
 
-    assertEqual(holder.alpha, 0, "hovered hide alpha curtain")
-    assertEqual(holder.shown, true, "hovered hide physical deferral")
-    assertEqual(#harness.timerCallbacks, 1, "hovered hide retry count")
-
-    holder.mouseOver = false
-    harness:RunNextTimer()
-
-    assertEqual(holder.shown, false, "recovered hide visibility")
-    assertEqual(holder.alpha, 1, "recovered hidden holder alpha")
-end
-
-local function testHoveredHideReversalUsesLatestRequest()
-    local harness = makeHarness()
-    local controller = harness.UF.CreateNativeAuraContainerController(
-        {},
-        "BFIHoveredReversalAuraHolder",
-        completeSpec("target", true)
-    )
-    local holder = controller:GetFrame()
-
-    clearEvents(harness)
-    holder.mouseOver = true
-    controller:SetShown(false)
-
-    assertEqual(holder.alpha, 0, "hovered hide alpha curtain")
-    assertEqual(holder.shown, true, "hovered hide physical deferral")
+    assertEqual(holder.alpha, 0, "hidden holder remains curtained")
+    assertEqual(holder.shown, false, "hidden holder state")
     assertEqual(controller:IsPresentationApplied(), false,
-        "hovered hide presentation state")
-    assertEqual(#harness.timerCallbacks, 1, "hovered hide retry count")
+        "hidden presentation state")
+    assertEqual(#harness.timerCallbacks, 0, "hidden holder retry count")
 
     controller:SetShown(true)
-    assertEqual(holder.alpha, 1, "reversed hover alpha restoration")
-    assertEqual(holder.shown, true, "reversed hover visibility")
+    assertEqual(holder.alpha, 1, "restored holder alpha")
+    assertEqual(holder.shown, true, "restored holder visibility")
     assertEqual(controller:IsPresentationApplied(), true,
-        "reversed hover presentation state")
-
-    holder.mouseOver = false
-    harness:RunNextTimer()
-    assertEqual(holder.shown, true, "stale retry keeps latest visibility")
-    assertEqual(holder.alpha, 1, "stale retry keeps latest alpha")
-    assertEqual(#harness.timerCallbacks, 0, "stale retry drained")
+        "restored presentation state")
+    assertEqual(#harness.timerCallbacks, 0, "restored holder retry count")
 end
 
-local function testAbortedHolderWriteDefers()
+local function testDestroyCompletesWithoutVisibilityRead()
     local harness = makeHarness()
     local controller = harness.UF.CreateNativeAuraContainerController(
         {},
-        "BFIAbortedHolderAuraHolder",
+        "BFIWriteLedgerDestroyAuraHolder",
         completeSpec("target", true)
     )
     local holder = controller:GetFrame()
 
     clearEvents(harness)
-    holder.blockSetShown = true
-    controller:ApplyTuning(tuningSpec())
-
-    assertEventNames(harness, {
-        "holder.shown",
-    })
-    assertEqual(#harness.timerCallbacks, 1, "aborted-write retry count")
-    assertEqual(#harness.containers, 1, "aborted-write container count")
-    assertEqual(holder.shown, true, "aborted-write holder state")
-    assertEqual(holder.alpha, 0, "aborted-write alpha curtain")
-    assertEqual(controller:IsPresentationApplied(), false,
-        "aborted-write presentation state")
-
-    holder.blockSetShown = nil
-    harness:RunNextTimer()
-    assertEqual(#harness.containers, 1, "retried tuning container count")
-    assertEqual(
-        harness.containers[1].groups.helpful.filterString,
-        "HELPFUL|PLAYER",
-        "retried tuning group"
-    )
-    assertEqual(holder.alpha, 1, "retried-write alpha restoration")
-    assertEqual(controller:IsPresentationApplied(), true,
-        "retried-write presentation state")
-end
-
-local function testHoveredDestroyCurtainsUntilCompletion()
-    local harness = makeHarness()
-    local controller = harness.UF.CreateNativeAuraContainerController(
-        {},
-        "BFIHoveredDestroyAuraHolder",
-        completeSpec("target", true)
-    )
-    local holder = controller:GetFrame()
-
-    clearEvents(harness)
-    holder.mouseOver = true
     controller:Destroy()
 
-    assertEqual(holder.alpha, 0, "hovered destroy alpha curtain")
-    assertEqual(holder.shown, true, "hovered destroy physical deferral")
+    assertEqual(holder.alpha, 0, "destroyed holder remains curtained")
+    assertEqual(holder.shown, false, "destroyed holder visibility")
     assertEqual(controller:IsPresentationApplied(), false,
-        "hovered destroy presentation state")
-    assertEqual(#harness.timerCallbacks, 1,
-        "hovered destroy retry count")
+        "destroyed presentation state")
+    assertEqual(#harness.timerCallbacks, 0, "destroy retry count")
+end
 
-    holder.mouseOver = false
-    harness:RunNextTimer()
-    assertEqual(holder.shown, false,
-        "hovered destroy completion visibility")
-    assertEqual(holder.alpha, 1,
-        "hovered destroy completion alpha")
+local function testProductionAvoidsVisibilityInspection()
+    local file = assert(io.open("Modules/UnitFrames/AuraController.lua", "r"))
+    local source = file:read("*a")
+    file:close()
+
+    for _, method in ipairs({"IsShown", "IsVisible", "IsMouseOver", "GetAlpha"}) do
+        assertEqual(
+            source:find(":" .. method .. "%(", 1),
+            nil,
+            "forbidden visibility inspection " .. method
+        )
+    end
 end
 
 local function testMaxFrameCountContract()
@@ -2168,6 +2103,7 @@ local function testGroupSeedAdoptionAndOneShotClaim()
     assertEqual(seed.unit, "party1", "seeded build unit")
     assertEqual(seed.enabled, true, "seeded build enabled")
     assertEqual(seed.shown, true, "seeded build visibility")
+    assertEqual(seed.alpha, 1, "seeded build curtain restoration")
     assertEqual(controller:GetFrame().shown, true,
         "seeded holder visibility")
     assertEqual(countEvents(harness, "af.frame-level"), 1,
@@ -2231,6 +2167,7 @@ local function testGroupSeedBuildQueuesInCombat()
         "BFICombatBootstrapAuraHolder",
         seed
     )
+    assertEqual(seed.alpha, 0, "claimed seed is immediately curtained")
 
     clearEvents(harness)
     harness:SetCombat(true)
@@ -2244,6 +2181,7 @@ local function testGroupSeedBuildQueuesInCombat()
     assertEqual(controller._container, nil, "combat bootstrap container")
     assertEqual(next(seed.groups), nil, "combat bootstrap group declaration")
     assertEqual(next(seed.slots), nil, "combat bootstrap slot declaration")
+    assertEqual(seed.alpha, 0, "combat bootstrap seed stays curtained")
     assertEqual(controller:GetFrame().bootstrapConfigured, nil,
         "combat bootstrap holder configuration")
     assertEqual(countEvents(harness, "af.frame-level"), 0,
@@ -2269,6 +2207,7 @@ local function testGroupSeedBuildQueuesInCombat()
     assertEqual(seed.unit, "party3", "bootstrap unit")
     assertEqual(seed.enabled, true, "bootstrap enabled")
     assertEqual(seed.shown, true, "bootstrap visibility")
+    assertEqual(seed.alpha, 1, "bootstrap curtain restoration")
     assertEqual(controller:GetFrame().shown, true,
         "bootstrap holder visibility")
     assertEqual(controller:GetFrame().bootstrapConfigured, true,
@@ -2303,6 +2242,7 @@ local function testUnusedSeedDestroyAccounting()
         "BFIUnusedSeedAuraHolder",
         seed
     )
+    assertEqual(seed.alpha, 0, "unused claimed seed is curtained")
 
     assertConstructionStats(harness, {
         controllersCreated = 1,
@@ -2323,6 +2263,7 @@ local function testUnusedSeedDestroyAccounting()
     controller:Destroy()
     assertEqual(seed.enabled, false, "unused seed retired enabled state")
     assertEqual(seed.shown, false, "unused seed retired visibility")
+    assertEqual(seed.alpha, 0, "unused seed remains curtained")
     assertConstructionStats(harness, {
         controllersCreated = 1,
         destroyRequests = 1,
@@ -2384,6 +2325,7 @@ local function testGroupRetargetPrecedesStructuralTuning()
         completeSpec("party1", true)
     )
 
+    harness.recordAlpha = true
     clearEvents(harness)
     harness:SetCombat(true)
     controller:ApplyTuning(tuningSpec())
@@ -2393,6 +2335,19 @@ local function testGroupRetargetPrecedesStructuralTuning()
     assertEqual(seed.shown, false, "pending tuning seed visibility")
     assertEqual(controller:GetFrame().shown, false,
         "pending tuning holder visibility")
+    assertEqual(seed.alpha, 0, "pending tuning seed curtain")
+    assertEqual(controller:GetFrame().alpha, 0,
+        "pending tuning holder curtain")
+    local _, holderCurtainIndex = findEvent(harness, "holder.alpha")
+    local _, seedCurtainIndex = findEvent(harness, "native.alpha")
+    local _, seedHideIndex = findEvent(harness, "native.hide")
+    local _, retargetIndex = findEvent(harness, "af.unit")
+    assertTrue(holderCurtainIndex < seedHideIndex,
+        "holder curtain precedes protected seed hide")
+    assertTrue(seedCurtainIndex < seedHideIndex,
+        "seed curtain precedes protected seed hide")
+    assertTrue(seedHideIndex < retargetIndex,
+        "seed hide precedes combat-live retarget")
     assertTrue(harness.regenCallback, "pending tuning regen registration")
     assertEqual(countEvents(harness, "af.create-container"), 0,
         "combat structural allocation")
@@ -2405,13 +2360,16 @@ local function testGroupRetargetPrecedesStructuralTuning()
     assertEqual(seed.unit, "party2", "regen tuned unit")
     assertEqual(seed.enabled, true, "regen tuned enabled")
     assertEqual(seed.shown, true, "regen tuned visibility")
+    assertEqual(seed.alpha, 1, "regen tuned seed curtain restoration")
+    assertEqual(controller:GetFrame().alpha, 1,
+        "regen tuned holder curtain restoration")
     assertEqual(seed.groups.helpful.filterString, "HELPFUL|PLAYER",
         "regen group tuning")
     assertEqual(controller:GetFrame().shown, true,
         "regen tuned holder visibility")
 end
 
-local function testGroupVisibilityWaitsForHover()
+local function testGroupVisibilityDoesNotProbeFrameState()
     local harness = makeHarness()
     local root = {}
     local seed = harness.AF.CreateCustomAuraContainer(root)
@@ -2423,32 +2381,27 @@ local function testGroupVisibilityWaitsForHover()
     )
 
     clearEvents(harness)
-    controller:GetFrame().mouseOver = true
+    controller:GetFrame().IsShown = function()
+        error("forbidden IsShown visibility read")
+    end
+    controller:GetFrame().IsMouseOver = function()
+        error("forbidden IsMouseOver visibility read")
+    end
     controller:SetShown(false)
 
-    assertEqual(seed.shown, true, "hovered group seed visibility")
-    assertEqual(controller:GetFrame().shown, true,
-        "hovered group holder visibility")
-    assertEqual(controller:GetFrame().alpha, 0,
-        "hovered external group alpha curtain")
-    assertEqual(seed.alpha, 0,
-        "hovered external container alpha curtain")
-    assertEqual(controller:IsPresentationApplied(), false,
-        "hovered external presentation state")
-    assertEqual(countEvents(harness, "native.hide"), 0,
-        "hovered native visibility mutation")
-
-    controller:GetFrame().mouseOver = nil
-    harness:RunTimers(0.25)
-    assertEqual(seed.shown, false, "post-hover group seed visibility")
+    assertEqual(seed.shown, false, "group seed visibility")
     assertEqual(controller:GetFrame().shown, false,
-        "post-hover group holder visibility")
-    assertEqual(controller:GetFrame().alpha, 1,
-        "post-hover external group alpha")
-    assertEqual(seed.alpha, 1,
-        "post-hover external container alpha")
+        "group holder visibility")
+    assertEqual(controller:GetFrame().alpha, 0,
+        "hidden group holder remains curtained")
+    assertEqual(seed.alpha, 0,
+        "hidden external container remains curtained")
     assertEqual(controller:IsPresentationApplied(), false,
-        "post-hover hidden external presentation state")
+        "hidden external presentation state")
+    assertEqual(countEvents(harness, "native.hide"), 1,
+        "native visibility mutation")
+    assertEqual(#harness.timerCallbacks, 0,
+        "group visibility retry")
 end
 
 local function testPartitionBuildAndRelationSwap()
@@ -2592,11 +2545,11 @@ local function testPartitionRebuildRejectsAfterInitialBuild()
     assertEqual(ok, false, "partition rebuild after initial build")
 end
 
-local function testPartitionHoveredVariantUsesLatestRequest()
+local function testPartitionVisibilityUsesWriteLedger()
     local harness = makeHarness()
     local controller = harness.UF.CreateNativeAuraPartitionController(
         {},
-        "BFIHoveredPartitionAuraHolder"
+        "BFIOpaquePartitionAuraHolder"
     )
     controller:Rebuild(partitionCompleteSpec("target", "friendly"))
 
@@ -2604,74 +2557,59 @@ local function testPartitionHoveredVariantUsesLatestRequest()
     local friendlyHolder = controller.friendly:GetFrame()
     local mainHolder = controller.main:GetFrame()
     local complementHolder = controller.complement:GetFrame()
+    outer.IsShown = function()
+        error("forbidden partition IsShown read")
+    end
+    outer.IsMouseOver = function()
+        error("forbidden partition IsMouseOver read")
+    end
     clearEvents(harness)
-    outer.mouseOver = true
 
     controller:SetVariant("hostile")
-    assertEqual(outer.alpha, 0,
-        "initial hovered partition alpha curtain")
-    assertEqual(controller:IsPresentationApplied(), false,
-        "initial hovered partition presentation state")
-    controller:SetVariant("friendly")
-    assertEqual(outer.alpha, 1,
-        "reversed partition alpha restoration")
-    assertEqual(controller:IsPresentationApplied(), true,
-        "reversed partition presentation state")
-    controller:SetVariant("hostile")
-
-    assertEqual(#harness.timerCallbacks, 1,
-        "coalesced partition hover retry")
-    assertEqual(outer.alpha, 0,
-        "hovered partition alpha curtain")
-    assertEqual(friendlyHolder.shown, true,
-        "hovered friendly presentation retained")
-    assertEqual(mainHolder.shown, false,
-        "hovered main presentation suppressed")
-    assertEqual(complementHolder.shown, false,
-        "hovered complement presentation suppressed")
-    assertNoNativeMutation(harness, "hovered relationship request")
-
-    outer.mouseOver = false
-    assertEqual(harness:RunNextTimer(), 0.25,
-        "partition hover retry delay")
-    assertEqual(#harness.timerCallbacks, 0,
-        "partition hover retry drained")
     assertEqual(friendlyHolder.shown, false,
-        "latest friendly presentation visibility")
+        "hostile friendly presentation visibility")
     assertEqual(mainHolder.shown, true,
-        "latest main presentation visibility")
+        "hostile main presentation visibility")
     assertEqual(complementHolder.shown, true,
-        "latest complement presentation visibility")
+        "hostile complement presentation visibility")
     assertEqual(outer.alpha, 1,
-        "recovered partition alpha")
+        "hostile partition alpha")
+    assertEqual(outer.shown, true, "hostile partition visibility")
     assertEqual(controller:IsPresentationApplied(), true,
-        "recovered partition presentation state")
+        "hostile partition presentation state")
+    assertEqual(#harness.timerCallbacks, 0,
+        "hostile partition visibility retry")
+    assertNoNativeMutation(harness, "hostile relationship request")
 
     clearEvents(harness)
-    outer.mouseOver = true
     controller:SetShown(false)
     assertEqual(outer.alpha, 0,
-        "hovered partition hide alpha curtain")
-    assertEqual(outer.shown, true,
-        "hovered partition hide physical deferral")
-    assertEqual(friendlyHolder.shown, false,
-        "hovered partition stale friendly suppressed")
-    assertEqual(mainHolder.shown, true,
-        "hovered partition stale main retained behind curtain")
-    assertEqual(complementHolder.shown, true,
-        "hovered partition stale complement retained behind curtain")
-
-    outer.mouseOver = false
-    harness:RunNextTimer()
+        "hidden partition alpha curtain")
     assertEqual(outer.shown, false,
-        "recovered partition hide visibility")
-    assertEqual(outer.alpha, 1,
-        "recovered hidden partition alpha")
+        "hidden partition visibility")
+    assertEqual(friendlyHolder.shown, false,
+        "hidden partition friendly visibility")
     assertEqual(mainHolder.shown, false,
-        "recovered partition main visibility")
+        "hidden partition main visibility")
     assertEqual(complementHolder.shown, false,
-        "recovered partition complement visibility")
-    assertNoNativeMutation(harness, "retried relationship request")
+        "hidden partition complement visibility")
+    assertEqual(controller:IsPresentationApplied(), false,
+        "hidden partition presentation state")
+    assertEqual(#harness.timerCallbacks, 0,
+        "hidden partition visibility retry")
+    assertNoNativeMutation(harness, "hidden relationship request")
+
+    controller:SetShown(true)
+    assertEqual(outer.alpha, 1, "restored partition alpha")
+    assertEqual(outer.shown, true, "restored partition visibility")
+    assertEqual(friendlyHolder.shown, false,
+        "restored hostile friendly visibility")
+    assertEqual(mainHolder.shown, true,
+        "restored hostile main visibility")
+    assertEqual(complementHolder.shown, true,
+        "restored hostile complement visibility")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "restored partition presentation state")
 end
 
 local function testPartitionTuningReanchorsEveryLayer()
@@ -2801,11 +2739,10 @@ testRegenDispatchIsolation()
 testRebuildRejectsAfterInitialBuild()
 testMidBuildFailureIsOneShot()
 testPartialAddFailureDiagnostics()
-testHoveredTransitionDefers()
-testHoveredHideCurtainsImmediately()
-testHoveredHideReversalUsesLatestRequest()
-testAbortedHolderWriteDefers()
-testHoveredDestroyCurtainsUntilCompletion()
+testVisibilityUsesWriteLedger()
+testHideReversalUsesWriteLedger()
+testDestroyCompletesWithoutVisibilityRead()
+testProductionAvoidsVisibilityInspection()
 testMaxFrameCountContract()
 testDestroyPrecedence()
 testOutOfBandOOCFlushUnregisters()
@@ -2816,10 +2753,10 @@ testGroupSeedBuildQueuesInCombat()
 testUnusedSeedDestroyAccounting()
 testGroupCombatLiveRetarget()
 testGroupRetargetPrecedesStructuralTuning()
-testGroupVisibilityWaitsForHover()
+testGroupVisibilityDoesNotProbeFrameState()
 testPartitionBuildAndRelationSwap()
 testPartitionRebuildRejectsAfterInitialBuild()
-testPartitionHoveredVariantUsesLatestRequest()
+testPartitionVisibilityUsesWriteLedger()
 testPartitionTuningReanchorsEveryLayer()
 testPartitionCombatDefersNativeTuning()
 
