@@ -25,13 +25,13 @@ aggregate only after the isolated leaves pass.
 Use this clean isolated-install sequence:
 
 1. AF #19 at `d6858f3997a1014a7ab9ce05ddaaf53efe4df9c6` with BFInfinite
-   #90 at `adad69628fff7419aef513276322d377bed2b3b0`.
+   #90 at `d9c5a23246a01572e1fb75d470a250032f802b33`.
 2. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
-   #101 at `3a0d80a38247f6487dbbff2371f681672a61adc8`.
+   #101 at `b114db40fb586d37b048c58ff0f8166f00b63883`.
 3. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
-   #102 at `5bbd4948ec55353ab31418f30a39b4c592ae7457`.
+   #102 at `b88bb4fbd5430fdb7d26090d4a9c9650c1f39bb9`.
 4. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
-   #103 at `2bd05c32e7c7f8834412d01783db62c2ee785614`.
+   #103 at `19df3783962e9fff37c8c02f30087c5c26e22f10`.
 5. Validation-only AF #25 at
    `d82bc3e07d4eab953d5e9a7dc82c9cc1a307e8f9` with the exact
    checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
@@ -53,20 +53,20 @@ The aggregate must contain these exact BFInfinite terminal heads:
 
 | Coverage | Branch | Exact head |
 |---|---|---|
-| Current BFInfinite master compatibility (#104) | `master` | `977f2b3908c7b9dcda2011b15bf3cc67a36948f0` |
-| Global exact spell colors (#101) | `codex/unitframe-aura-spell-colors` | `3a0d80a38247f6487dbbff2371f681672a61adc8` |
-| Presentation hardening (#102) | `codex/unitframe-aura-presentation-hardening` | `5bbd4948ec55353ab31418f30a39b4c592ae7457` |
-| Player | `codex/unitframe-aura-player` | `3f0fd66` |
-| Boss | `codex/unitframe-aura-boss` | `241640a` |
-| Focus | `codex/unitframe-aura-focus` | `2217919` |
-| TargetTarget | `codex/unitframe-aura-targettarget` | `7f58d6c` |
-| FocusTarget | `codex/unitframe-aura-focustarget` | `ed903c8` |
-| PetTarget | `codex/unitframe-aura-pettarget` | `387cab3` |
-| Pet | `codex/unitframe-aura-pet` | `86b0bd4` |
-| Target partition | `codex/unitframe-aura-target` | `edcb992` |
-| Party | `codex/unitframe-aura-party` | `a354756` |
-| Raid | `codex/unitframe-aura-raid` | `4f370f7` |
-| Upper-right Debuff appearance (#103; includes #99) | `codex/buffs-debuffs-native-debuffs` | `2bd05c32e7c7f8834412d01783db62c2ee785614` |
+| Current BFInfinite master compatibility (#104) | `master` | `5f9426b86b49700dea00358ea426b8925b6ddf64` |
+| Global exact spell colors (#101) | `codex/unitframe-aura-spell-colors` | `b114db40fb586d37b048c58ff0f8166f00b63883` |
+| Presentation hardening (#102) | `codex/unitframe-aura-presentation-hardening` | `b88bb4fbd5430fdb7d26090d4a9c9650c1f39bb9` |
+| Player | `codex/unitframe-aura-player` | `61bbdae09c808f58dc69812c848fa2496f3cf806` |
+| Boss | `codex/unitframe-aura-boss` | `9f01f432289b6b2457c5bb9cc6f023582ad85b5c` |
+| Focus | `codex/unitframe-aura-focus` | `03b75af042fd84b93a3e3eaeb09ac68b1ff46440` |
+| TargetTarget | `codex/unitframe-aura-targettarget` | `b463ff16fe91d17a081e248727190c8744fbe3c2` |
+| FocusTarget | `codex/unitframe-aura-focustarget` | `58a60e011cb2dbd2d3b54d62cdb6ffc6b8df2df9` |
+| PetTarget | `codex/unitframe-aura-pettarget` | `02a75fd22f8f04e21e7f139df214697e6350e567` |
+| Pet | `codex/unitframe-aura-pet` | `8e91a8c7616b3000d5e607a2063bf528dd8c4f59` |
+| Target partition | `codex/unitframe-aura-target` | `45e166b3dab0ad96a29c775d7bb4dd761a4767e7` |
+| Party | `codex/unitframe-aura-party` | `2cfcbca80d0b2b45b9a9abb657907511152ae6b9` |
+| Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
+| Upper-right Debuff appearance (#103; includes #99) | `codex/buffs-debuffs-native-debuffs` | `19df3783962e9fff37c8c02f30087c5c26e22f10` |
 | Secret identity (#100) | `codex/unitframe-secret-identity` | `b8e1671ed8a1c11657416357875f9c8277051654` |
 
 Test in this order:
@@ -290,31 +290,41 @@ hours, and days correctly, with permanent auras blank.
 - Do not choose a healing spell because it is assumed public. The pass
   condition depends only on Blizzard accepting the explicit ID map.
 
-### 4. Reaction, hover, visibility, and identity
+### 4. Reaction, stationary pointer, visibility, and identity
 
-With a Target partition and an active spell-list/color gate:
+First reproduce the exact Target partition boundary:
 
-1. Show a hostile presentation and hover a native aura.
-2. Change to friendly, cross-faction, duel, phased, offline, or a secret or
-   indeterminate reaction.
-3. The addon-owned holder and any external seeded container must curtain to
-   alpha zero immediately. The stale relation must not remain visible, no new
-   variant may be driven while display is disallowed, and explicit refresh
-   must be skipped.
-4. Reverse the desired state while still hovered. If the already-applied
-   presentation is again correct, alpha must return to one without exposing
-   both variants.
-5. End hover or restore a public permitted reaction. The correct variant must
-   apply first, then alpha returns to one.
+1. Enable Target Debuffs and **Separate Auras Not from Player, Pet, or
+   Vehicle**, then reload. This creates the hostile-complement holder named
+   `BFI_Target_Debuffs_HostileComplement`.
+2. In combat or another aura-secret context, target a hostile unit with a
+   harmful aura from another player. Park the pointer over a visible
+   complement aura and do not move it for the rest of this sequence.
+3. Clear the target or select a friendly, cross-faction, duel, phased,
+   offline, secret, or indeterminate unit, then retarget the hostile unit.
+4. Repeat hostile-to-friendly, friendly-to-hostile, and no-target transitions.
+   Also disable and re-enable the row, then repeat without relation
+   partitioning.
 
-Repeat the hide/recovery sequence on a non-partitioned row and on Party/Raid
-seeded containers. Include a failed/deferred holder write, reload quiesce, and
-destroy while hovered. The implementation may read only BFInfinite's plain
-holder state and its own tracked configuration. It must not read native
-visibility, children, buttons, aura data, or tooltip ownership, and must not
-drive a tooltip to force hover to end. `GameTooltip` may remain visible while
-the alpha curtain applies; BFInfinite must neither inspect nor dismiss it, and
-the transition must produce no error or taint.
+The pointer is never a transition signal. Outside combat, the newest permitted
+presentation must apply immediately even while the pointer remains stationary.
+In combat, any physical visibility, initialization, retirement, or structural
+swap that is not already applied remains at alpha zero until
+`PLAYER_REGEN_ENABLED`; moving the pointer must not release it. A request that
+reverses to the already-applied relation or shown state may remove the curtain
+immediately using only BFInfinite's write ledgers.
+
+At no point may the stale row, both relation variants, or a partial new row be
+visible. Repeat the same stationary-pointer sequence on a non-partitioned row
+and on Party/Raid secure-header seeded containers, including roster retarget,
+disable, destroy, and reload quiesce. `GameTooltip` may remain visible;
+BFInfinite must neither inspect nor dismiss it.
+
+The implementation must not call `IsShown`, `IsVisible`, `IsMouseOver`, or
+`GetAlpha` on holders or native aura objects; probe protected writes with
+`pcall`; call `Show`, `Hide`, `SetShown`, or enable/disable methods in combat;
+schedule a hover retry; inspect children, buttons, aura data, or tooltip
+ownership; or make pointer movement necessary for recovery.
 
 ### 5. Unit and roster churn
 
@@ -394,6 +404,10 @@ or expose private identity, spell, duration, count, or source.
 - Change every supported ordinary Debuff setting in combat. Confirm the old
   presentation remains stable until combat ends, the options report a pending
   update, and the new presentation applies afterward without a reload.
+- Keep the pointer stationary over an ordinary Debuff while changing each
+  supported setting outside combat. The appearance must update immediately;
+  no pointer-leave retry or tooltip manipulation is permitted. Repeat in
+  combat and confirm that combat alone, not hover, controls the pending state.
 - Repeat the ordinary/private/deadly checks across Edit Mode, reload, hover,
   Mythic+, raid, and PvP restrictions.
 - Confirm no restricted AuraButton inspection, reparenting, duplicate aura,
@@ -459,8 +473,11 @@ Stop and file a failure with evidence for any of the following:
 
 - Lua error, blocked action, forbidden-access error, or new taint;
 - secret value comparison, logging, caching, or branching;
+- any holder/native visibility, hover, or alpha read-back; a protected-call
+  write probe; or a protected visibility/enabled write attempted in combat;
 - restricted intrinsic AuraButton or aura-state inspection, or
   tooltip-driving logic;
+- any transition delayed, completed, or retried because the pointer moved;
 - stale wrong-relation content visible during hover or visibility deferral;
 - refresh while presentation is disallowed or still curtained;
 - both Target relation variants visible together;

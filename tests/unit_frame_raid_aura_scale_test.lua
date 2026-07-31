@@ -915,8 +915,10 @@ local function testRaidAuraScaleLockdown()
                 "combat construction reload state")
             assertEqual(state.pending, true,
                 "combat construction quiesce pending state")
-            assertEqual(runtime:IsShown(), false,
-                "combat construction holder visibility")
+            assertEqual(runtime:IsShown(), true,
+                "combat construction protected visibility remains unchanged")
+            assertEqual(runtime.alpha, 0,
+                "combat construction holder curtain")
             assertEqual(runtime._controller._container.enabled, true,
                 "combat deferred native enabled state")
         end
