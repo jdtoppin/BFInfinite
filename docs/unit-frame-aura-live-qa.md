@@ -38,7 +38,12 @@ Use this clean isolated-install sequence:
    `24c26df850ee0730982a1263e0770d5a5e7296c4`. Test the native tooltip
    shell on Blizzard's TargetFrame with BFI Unit Frames disabled, then on any
    upper-right native AuraButtons available to the fixture.
-8. Validation-only AF #25 at
+8. Current AF `main` at `a4eade2b8da69c095d7f9224f5537f09c0cc357f`
+   with BFInfinite #119 at
+   `d555ad11c49cb8e598340e7d273778d33f285b39`. Reload before testing,
+   then open the Character panel inside an active Challenge Mode both outside
+   and during combat.
+9. Validation-only AF #25 at
    `d82bc3e07d4eab953d5e9a7dc82c9cc1a307e8f9` with the exact
    checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
    validation SHA. Record that full branch-head SHA immediately before
@@ -81,6 +86,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Objective Tracker taint boundary (#115) | `codex/objective-tracker-taint-boundary` | `b829efaffd45939e268cfa6c0c1e167ce17312fe` |
 | Secret pixel geometry (#116) | `codex/style-secret-pixel-geometry` | `3eb6642f82e81c1fb08a725727e80d0d2a1c566e` |
 | Player Spells combat deferral (#117) | `codex/player-spells-combat-style-deferral` | `50b3c30a17a05c8d82279676d248f3bc48da5d2c` |
+| Character unit-stat safety (#119) | `codex/character-frame-unit-stats-safety` | `d555ad11c49cb8e598340e7d273778d33f285b39` |
 
 Test in this order:
 
@@ -98,8 +104,11 @@ Test in this order:
    aggregate carries both PRs for their combined restricted-context gate.
 8. Test #114, #115, #116, and #117 independently against their documented
    reproducers below.
-9. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
-10. Run the 12.1 gates below in order.
+9. Test #119 independently after a reload. In restricted content, require the
+   custom Movement Speed row to be absent while Blizzard's supported tertiary
+   Speed row and BFI's presentation styling remain.
+10. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
+11. Run the 12.1 gates below in order.
 
 Record the full local SHA for every installed folder. A short SHA in this
 document is a review aid, not permission to test a different head.
@@ -224,7 +233,7 @@ while it may be secret.
 
 ### Restricted-context regression preflight
 
-Run these five checks on the clean aggregate before the longer aura gates.
+Run these six checks on the clean aggregate before the longer aura gates.
 Clear and inspect the taint log after each check so one failure cannot
 contaminate later evidence.
 
@@ -296,6 +305,25 @@ contaminate later evidence.
 5. Confirm nameplate aura tooltips remain disabled where their row contract
    disables them. Disable BFI and reload once during the isolated #118 run to
    confirm Blizzard's default native tooltip shell returns.
+
+#### Character panel with restricted unit stats
+
+1. Reload inside an active Challenge Mode while out of combat. This reload is
+   mandatory because an older BFI build may already have mutated Blizzard's
+   stat-category table for the current session.
+2. Open, close, and reopen the Character panel. Change gear, specialization,
+   and target, then begin moving to force stat and speed updates.
+3. Confirm BFI's former extra **Movement Speed** row is absent. Blizzard's
+   separate tertiary **Speed** stat, the supported stat list, row backgrounds,
+   and BFI fonts must remain intact.
+4. Repeat while in combat, then leave combat and repeat once more without
+   reloading.
+5. Require no `MovementSpeed_OnUpdate` secret arithmetic, Versatility
+   arithmetic, `Background:IsShown()` secret-boolean test, Lua error, blocked
+   action, or new taint.
+6. Leave the Challenge Mode restriction and reopen the panel. The retired
+   Movement Speed row must not return; ordinary Blizzard stats must continue
+   to update and retain BFI's presentation styling.
 
 ### 0. Current-master compatibility preflight
 
@@ -656,5 +684,8 @@ Stop and file a failure with evidence for any of the following:
 - failure to restore the original ordinary Debuff appearance when its BFI
   styling is disabled;
 - any unsupported ordinary Debuff control being enabled;
+- BFI reading or mutating `PAPERDOLL_STATCATEGORIES`, adding the dormant
+  `MOVESPEED` row, formatting or deriving a restricted unit-stat value, or
+  branching on a stat row's visibility;
 - clipped or unwrapped settings explanations;
 - any 12.1 native frame silently using the legacy backend.
