@@ -135,11 +135,14 @@ local function createHarness()
         combatQueries = 0,
         controls = {},
         dataAvailable = false,
+        deferredCallbacks = {},
         fires = {},
         fontStrings = {},
         namedFrames = {},
         nativeReset = true,
         panes = {},
+        repointed = {},
+        scrollFrames = {},
     }
     local root = newWidget(state, "root")
     local AF = {}
@@ -155,6 +158,7 @@ local function createHarness()
     function AF.CreateScrollFrame(parent)
         local frame = newWidget(state, "scroll", parent)
         frame.scrollContent = newWidget(state, "scrollContent", frame)
+        state.scrollFrames[#state.scrollFrames + 1] = frame
         return frame
     end
 
@@ -209,6 +213,10 @@ local function createHarness()
 
     function AF.SetPoint(widget, ...)
         widget.points[#widget.points + 1] = {...}
+    end
+
+    function AF.RePoint(widget)
+        state.repointed[#state.repointed + 1] = widget
     end
 
     function AF.LSM_GetBarTextureDropdownItems()
@@ -319,6 +327,14 @@ local function createHarness()
     local environment = {
         AbstractFramework = AF,
         BFIOptionsFrame_ContentPane = root,
+        C_Timer = {
+            After = function(delay, callback)
+                state.deferredCallbacks[#state.deferredCallbacks + 1] = {
+                    callback = callback,
+                    delay = delay,
+                }
+            end,
+        },
         InCombatLockdown = function()
             state.combatQueries = state.combatQueries + 1
             return true
@@ -348,6 +364,42 @@ local general = state.panes["BFI Damage Meter"]
 local meters = state.panes.Meters
 local status = state.fontStrings[1]
 assertTrue(panel and panel:IsShown(), "Damage Meter panel must build and show")
+assertEqual(
+    #state.deferredCallbacks,
+    1,
+    "first open schedules a next-frame scroll layout refresh"
+)
+assertEqual(state.deferredCallbacks[1].delay, 0, "layout refresh delay")
+assertEqual(#state.repointed, 0, "layout refresh remains deferred")
+state.deferredCallbacks[1].callback()
+assertEqual(#state.repointed, 1, "first open refreshes scroll layout")
+assertEqual(
+    state.repointed[1],
+    state.scrollFrames[1],
+    "first open refreshes the Damage Meter scroll frame"
+)
+
+showPanel(nil, "general")
+showPanel(nil, "damageMeter")
+assertEqual(
+    #state.deferredCallbacks,
+    2,
+    "reopening schedules another scroll layout refresh"
+)
+state.deferredCallbacks[2].callback()
+assertEqual(#state.repointed, 2, "reopening refreshes scroll layout")
+
+showPanel(nil, "damageMeter")
+showPanel(nil, "general")
+state.deferredCallbacks[3].callback()
+assertEqual(
+    #state.repointed,
+    2,
+    "a stale refresh does not reanchor a hidden panel"
+)
+showPanel(nil, "damageMeter")
+state.deferredCallbacks[4].callback()
+assertEqual(#state.repointed, 3, "a later visible reopen still refreshes")
 assertTrue(
     general and meters and state.panes["Sessions and Automation"]
         and state.panes.Appearance

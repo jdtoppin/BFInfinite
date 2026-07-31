@@ -744,6 +744,16 @@ local function Load()
     appearancePane.Load()
 end
 
+local function RefreshScrollLayout()
+    local currentPanel = damageMeterPanel
+    local currentScroll = scroll
+    C_Timer.After(0, function()
+        if currentPanel:IsShown() then
+            AF.RePoint(currentScroll)
+        end
+    end)
+end
+
 AF.RegisterCallback("BFI_RefreshOptions", function(_, which)
     if which ~= "damageMeter" or not damageMeterPanel then return end
     Load()
@@ -761,6 +771,7 @@ AF.RegisterCallback("BFI_ShowOptionsPanel", function(_, id)
         end
         Load()
         damageMeterPanel:Show()
+        RefreshScrollLayout()
     elseif damageMeterPanel then
         damageMeterPanel:Hide()
     end
