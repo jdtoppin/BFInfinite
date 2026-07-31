@@ -459,6 +459,9 @@ local function SetHolderShownSafe(controller, shown)
     if controller._holderShown == shown then
         return true
     end
+    if InCombatLockdown() then
+        return false
+    end
 
     -- Retail 12.1.0.68914 can make visibility and hover accessors secret when
     -- a holder is anchored to a native aura container. Keep an ordinary
@@ -474,6 +477,9 @@ local function SetExternalContainerShownSafe(controller, shown)
         or controller._containerShown == shown
     then
         return true
+    end
+    if InCombatLockdown() then
+        return false
     end
 
     if shown then
