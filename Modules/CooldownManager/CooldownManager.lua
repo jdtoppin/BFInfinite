@@ -24,7 +24,8 @@ local unpack = unpack
 
 -- Retail 12.0.7.68887, Gethe/wow-ui-source commit 4383ced30106:
 -- https://github.com/Gethe/wow-ui-source/tree/4383ced30106d51b27e3e86d1987f1552f0d259d/Interface/AddOns/Blizzard_CooldownViewer
--- Compatibility checked against Retail 12.1.0.68914, commit d3915c78aba7:
+-- Compatibility checked against the current Retail PTR on 2026-07-31,
+-- 12.1.0.68914, commit d3915c78aba7:
 -- https://github.com/Gethe/wow-ui-source/tree/d3915c78aba77a7a9be76acbfa35c674bbb6abe9/Interface/AddOns/Blizzard_CooldownViewer
 --
 -- Both builds process secret aura and totem values in the viewer/item Lua
@@ -404,8 +405,7 @@ local function EnsureAssistedHighlight(item, definition)
 
     local highlight = HighlightState.assisted[item]
     if highlight then
-        UpdateSquareHighlightPixels(highlight)
-        return highlight
+        return UpdateSquareHighlightPixels(highlight) and highlight or nil
     end
 
     highlight = CreateFrame("Frame", nil, item)
@@ -453,11 +453,10 @@ local function EnsureAssistedHighlight(item, definition)
     FrameClearAllPoints(highlight)
     FrameSetPoint(highlight, "TOPLEFT", item, "TOPLEFT", -2, 2)
     FrameSetPoint(highlight, "BOTTOMRIGHT", item, "BOTTOMRIGHT", 2, -2)
-    UpdateSquareHighlightPixels(highlight)
     FrameSetAlpha(highlight, 0)
     FrameShow(highlight)
     HighlightState.assisted[item] = highlight
-    return highlight
+    return UpdateSquareHighlightPixels(highlight) and highlight or nil
 end
 
 function HighlightState.proc.Ensure(item, definition)
@@ -465,8 +464,7 @@ function HighlightState.proc.Ensure(item, definition)
 
     local highlight = HighlightState.proc.highlights[item]
     if highlight then
-        UpdateSquareHighlightPixels(highlight)
-        return highlight
+        return UpdateSquareHighlightPixels(highlight) and highlight or nil
     end
 
     highlight = CreateFrame("Frame", nil, item)
@@ -514,11 +512,10 @@ function HighlightState.proc.Ensure(item, definition)
     FrameClearAllPoints(highlight)
     FrameSetPoint(highlight, "TOPLEFT", item, "TOPLEFT", 0, 0)
     FrameSetPoint(highlight, "BOTTOMRIGHT", item, "BOTTOMRIGHT", 0, 0)
-    UpdateSquareHighlightPixels(highlight)
     FrameSetAlpha(highlight, 0)
     FrameShow(highlight)
     HighlightState.proc.highlights[item] = highlight
-    return highlight
+    return UpdateSquareHighlightPixels(highlight) and highlight or nil
 end
 
 local function GetItemBaseSpellID(item)
@@ -1734,40 +1731,81 @@ end
 local GetCountText
 
 local function CapturePresentationDefaults(item, definition, itemState)
-    if itemState.presentationCaptured then return end
-    itemState.presentationCaptured = true
+    if itemState.presentationCaptured then return true end
+    local complete = true
 
-    itemState.nativeAlpha = CaptureAlpha(item, FrameGetAlpha)
-    local mouseMotion = FrameIsMouseMotionEnabled(item)
-    if IsSafeBoolean(mouseMotion) then
-        itemState.nativeMouseMotion = mouseMotion
+    if itemState.nativeAlpha == nil then
+        itemState.nativeAlpha = CaptureAlpha(item, FrameGetAlpha)
     end
+    complete = itemState.nativeAlpha ~= nil and complete
+
+    if itemState.nativeMouseMotion == nil then
+        local mouseMotion = FrameIsMouseMotionEnabled(item)
+        if IsSafeBoolean(mouseMotion) then
+            itemState.nativeMouseMotion = mouseMotion
+        end
+    end
+    complete = itemState.nativeMouseMotion ~= nil and complete
 
     local cooldown = GetSafeField(item, "Cooldown")
     if cooldown then
-        local hideNumbers = CooldownGetHideCountdownNumbers(cooldown)
-        if IsSafeBoolean(hideNumbers) then
-            itemState.nativeHideCountdownNumbers = hideNumbers
+        if itemState.nativeHideCountdownNumbers == nil then
+            local hideNumbers = CooldownGetHideCountdownNumbers(cooldown)
+            if IsSafeBoolean(hideNumbers) then
+                itemState.nativeHideCountdownNumbers = hideNumbers
+            end
         end
+        complete = itemState.nativeHideCountdownNumbers ~= nil and complete
     end
 
     if definition.isBar then
         local icon = GetSafeField(item, "Icon")
         local bar = GetSafeField(item, "Bar")
         if icon then
-            itemState.nativeIconShown = CaptureShown(icon, FrameIsShown)
-            itemState.nativeIconAlpha = CaptureAlpha(icon, FrameGetAlpha)
+            if itemState.nativeIconShown == nil then
+                itemState.nativeIconShown = CaptureShown(icon, FrameIsShown)
+            end
+            if itemState.nativeIconAlpha == nil then
+                itemState.nativeIconAlpha = CaptureAlpha(icon, FrameGetAlpha)
+            end
+            complete = itemState.nativeIconShown ~= nil
+                and itemState.nativeIconAlpha ~= nil
+                and complete
+        else
+            complete = false
         end
         if bar then
-            itemState.nativeBarPoints = CapturePoints(bar)
+            if not itemState.nativeBarPoints then
+                itemState.nativeBarPoints = CapturePoints(bar)
+            end
             local name = GetSafeField(bar, "Name")
             local duration = GetSafeField(bar, "Duration")
-            itemState.nativeNameShown = CaptureShown(name, FontStringIsShown)
-            itemState.nativeNameAlpha = CaptureAlpha(name, FontStringGetAlpha)
-            itemState.nativeDurationShown = CaptureShown(duration, FontStringIsShown)
-            itemState.nativeDurationAlpha = CaptureAlpha(duration, FontStringGetAlpha)
+            if itemState.nativeNameShown == nil then
+                itemState.nativeNameShown = CaptureShown(name, FontStringIsShown)
+            end
+            if itemState.nativeNameAlpha == nil then
+                itemState.nativeNameAlpha = CaptureAlpha(name, FontStringGetAlpha)
+            end
+            if itemState.nativeDurationShown == nil then
+                itemState.nativeDurationShown =
+                    CaptureShown(duration, FontStringIsShown)
+            end
+            if itemState.nativeDurationAlpha == nil then
+                itemState.nativeDurationAlpha =
+                    CaptureAlpha(duration, FontStringGetAlpha)
+            end
+            complete = itemState.nativeBarPoints
+                and itemState.nativeNameShown ~= nil
+                and itemState.nativeNameAlpha ~= nil
+                and itemState.nativeDurationShown ~= nil
+                and itemState.nativeDurationAlpha ~= nil
+                and complete
+        else
+            complete = false
         end
     end
+    itemState.presentationCaptured = complete or nil
+    return complete
 end
 
 local function RecapturePresentationDefaults(item, definition, itemState)
@@ -2139,49 +2177,61 @@ local function GetIconMaskAndOverlay(iconParent)
 end
 
 local function SkinIcon(iconParent, icon)
-    if not IsValueNonSecret(iconParent) or not IsValueNonSecret(icon) then return end
+    if not IsValueNonSecret(iconParent) or not IsValueNonSecret(icon) then
+        return false
+    end
+
+    local mask, overlay = GetIconMaskAndOverlay(iconParent)
+    if not mask or not overlay then return false end
 
     local skin = iconSkins[icon]
     if not skin then
-        local mask, overlay = GetIconMaskAndOverlay(iconParent)
         skin = CreateNativeChildSkin(iconParent, icon, false)
-        if not skin then return end
-        skin.mask = mask
-        skin.overlay = overlay
+        if not skin then return false end
         iconSkins[icon] = skin
     end
+    skin.mask = mask
+    skin.overlay = overlay
 
     TextureSetTexCoord(icon, AF.GetDefaultTexCoord())
-    if skin.mask then MaskTextureHide(skin.mask) end
-    if skin.overlay then TextureHide(skin.overlay) end
-    PresentationMethods.UpdateNativeChildSkinPixels(skin)
+    MaskTextureHide(skin.mask)
+    TextureHide(skin.overlay)
+    if not PresentationMethods.UpdateNativeChildSkinPixels(skin) then
+        return false
+    end
     FrameShow(skin.border)
+    return true
 end
 
 local function SkinBar(bar)
-    if not IsValueNonSecret(bar) then return end
+    if not IsValueNonSecret(bar) then return false end
+
+    local background = GetSafeField(bar, "BarBG")
+    local fill = StatusBarGetStatusBarTexture(bar)
+    if not background or not IsValueNonSecret(fill) or not fill then
+        return false
+    end
 
     local skin = barSkins[bar]
     if not skin then
         skin = CreateNativeChildSkin(bar, bar, true)
-        if not skin then return end
+        if not skin then return false end
         barSkins[bar] = skin
     end
 
-    local background = GetSafeField(bar, "BarBG")
-    if background then
-        TextureHide(background)
-    end
+    TextureHide(background)
     StatusBarSetStatusBarTexture(bar, BFI.media.bar)
-    local fill = StatusBarGetStatusBarTexture(bar)
-    if IsValueNonSecret(fill) and fill then
-        TextureSetDrawLayer(fill, "BORDER", -1)
+    fill = StatusBarGetStatusBarTexture(bar)
+    if not IsValueNonSecret(fill) or not fill or not skin.background then
+        return false
     end
-    if skin.background then
-        FrameShow(skin.background)
+    TextureSetDrawLayer(fill, "BORDER", -1)
+    FrameShow(skin.background)
+    if not PresentationMethods.UpdateNativeChildSkinPixels(skin) then
+        return false
     end
-    PresentationMethods.UpdateNativeChildSkinPixels(skin)
     FrameShow(skin.border)
+    return true
 end
 
 ApplyFont = function(fontString, config, scale)
@@ -2262,6 +2312,7 @@ function PresentationMethods.CaptureStaticPresentationDefaults(
     itemState
 )
     local countText = GetCountText(item, definition)
+    if not countText then return false end
     if countText and not itemState.nativeCountText then
         itemState.nativeCountText =
             PresentationMethods.CaptureFontStringPresentation(countText)
@@ -2271,6 +2322,7 @@ function PresentationMethods.CaptureStaticPresentationDefaults(
     end
 
     local cooldown = GetSafeField(item, "Cooldown")
+    if not definition.isBar and not cooldown then return false end
     if cooldown then
         if not itemState.nativeCooldownPoints then
             itemState.nativeCooldownPoints = CapturePoints(cooldown)
@@ -2293,6 +2345,8 @@ function PresentationMethods.CaptureStaticPresentationDefaults(
     if definition.isBar then
         local bar = GetSafeField(item, "Bar")
         local name = bar and GetSafeField(bar, "Name")
+        local duration = bar and GetSafeField(bar, "Duration")
+        if not bar or not name or not duration then return false end
         if name and not itemState.nativeNameText then
             itemState.nativeNameText =
                 PresentationMethods.CaptureFontStringPresentation(name)
@@ -2300,7 +2354,6 @@ function PresentationMethods.CaptureStaticPresentationDefaults(
         if name and not itemState.nativeNameText then
             return false
         end
-        local duration = bar and GetSafeField(bar, "Duration")
         if duration and not itemState.nativeDurationText then
             itemState.nativeDurationText =
                 PresentationMethods.CaptureFontStringPresentation(duration)
@@ -2397,11 +2450,11 @@ local function ApplyBarContent(item, config, itemState)
         or itemState.nativeNameShown == nil
         or itemState.nativeDurationShown == nil
     then
-        return
+        return false
     end
     local name = GetSafeField(bar, "Name")
     local duration = GetSafeField(bar, "Duration")
-    if not name or not duration then return end
+    if not name or not duration then return false end
 
     local content = config.barContent
     if content == "icon_only" then
@@ -2433,16 +2486,31 @@ local function ApplyBarContent(item, config, itemState)
     )
     FrameSetPoint(bar, "RIGHT", item, "RIGHT", 0, 0)
     itemState.barExpectedNameOnly = nameOnly
+    return true
 end
 
 local function ApplyStaticPresentation(item, state, config, itemState)
-    CapturePresentationDefaults(item, state.definition, itemState)
-
-    if state.definition.assistedHighlight and CM.config.assistedHighlight then
-        EnsureAssistedHighlight(item, state.definition)
+    if not CapturePresentationDefaults(
+        item,
+        state.definition,
+        itemState
+    ) then
+        itemState.presentationGeneration = nil
+        return false
     end
-    if state.definition.assistedHighlight and CM.config.skin then
-        HighlightState.proc.Ensure(item, state.definition)
+    local complete = true
+
+    if state.definition.assistedHighlight
+        and CM.config.assistedHighlight
+        and not EnsureAssistedHighlight(item, state.definition)
+    then
+        complete = false
+    end
+    if state.definition.assistedHighlight
+        and CM.config.skin
+        and not HighlightState.proc.Ensure(item, state.definition)
+    then
+        complete = false
     end
 
     local cooldown = GetSafeField(item, "Cooldown")
@@ -2453,18 +2521,23 @@ local function ApplyStaticPresentation(item, state, config, itemState)
             and itemIcon
             and GetSafeField(itemIcon, "Icon")
             or itemIcon
-        if iconParent and icon then
-            SkinIcon(iconParent, icon)
+        if not iconParent or not icon or not SkinIcon(iconParent, icon) then
+            complete = false
         end
         local bar = state.definition.isBar and GetSafeField(item, "Bar")
-        if bar then
-            SkinBar(bar)
+        if state.definition.isBar and (not bar or not SkinBar(bar)) then
+            complete = false
         end
 
         if cooldown and iconParent then
-            PresentationMethods.PositionCooldownInside(cooldown, iconParent)
-            CooldownSetSwipeTexture(cooldown, squareCooldownSwipeTexture)
-            itemState.cooldownSwipeStyled = true
+            if PresentationMethods.PositionCooldownInside(cooldown, iconParent) then
+                CooldownSetSwipeTexture(cooldown, squareCooldownSwipeTexture)
+                itemState.cooldownSwipeStyled = true
+            else
+                complete = false
+            end
+        elseif not state.definition.isBar then
+            complete = false
         end
     else
         if cooldown and itemState.cooldownSwipeStyled then
@@ -2515,12 +2588,15 @@ local function ApplyStaticPresentation(item, state, config, itemState)
                 0
             )
         end
-        ApplyBarContent(item, config, itemState)
+        if not ApplyBarContent(item, config, itemState) then
+            complete = false
+        end
     end
 
-    itemState.presentationGeneration = presentationGeneration
+    itemState.presentationGeneration = complete and presentationGeneration or nil
     itemState.presentationRestored = nil
     UpdateItemAssistedHighlight(item)
+    return complete
 end
 
 local function GetPresentationAlpha(config)
@@ -2589,7 +2665,7 @@ local function GetOrderedItems(state)
     end
 
     local allItems = {}
-    local visibleItems = {}
+    local layoutItems = {}
     for _, item in ipairs(activeItems) do
         if IsValueNonSecret(item) and item then
             local layoutIndex = item.layoutIndex
@@ -2604,8 +2680,21 @@ local function GetOrderedItems(state)
                 allItems[#allItems + 1] = entry
 
                 local shown = FrameIsShown(item)
-                if not IsSafeBoolean(shown) or shown then
-                    visibleItems[#visibleItems + 1] = entry
+                local cooldownID = item.cooldownID
+                local assigned = not IsValueNonSecret(cooldownID)
+                    or cooldownID ~= nil
+                local includeHidden =
+                    GetSafeField(item, "includeAsLayoutChildWhenHidden")
+                -- Keep assigned hidden entries in BFI's grid, matching the
+                -- stable-slot intent of Blizzard's hidden-child layout rule,
+                -- so 12.1's target-change inactive cycle cannot briefly
+                -- compact and recenter the layout. BFI still omits unassigned
+                -- minimum-count placeholders from its centered presentation.
+                if not IsSafeBoolean(shown)
+                    or shown
+                    or (includeHidden == true and assigned)
+                then
+                    layoutItems[#layoutItems + 1] = entry
                 end
             end
         end
@@ -2618,8 +2707,8 @@ local function GetOrderedItems(state)
         return a.layoutIndex < b.layoutIndex
     end
     sort(allItems, SortItems)
-    sort(visibleItems, SortItems)
-    return allItems, visibleItems
+    sort(layoutItems, SortItems)
+    return allItems, layoutItems
 end
 
 local function CurrentGeometryMatches(item, holder, desired)
@@ -2736,7 +2825,7 @@ local function ReconcileViewer(state, config)
     if not BindHolderPosition(state, config) then
         return false
     end
-    local allItems, visibleItems = GetOrderedItems(state)
+    local allItems, layoutItems = GetOrderedItems(state)
     local activeSet = {}
     for _, entry in ipairs(allItems) do
         activeSet[entry.item] = true
@@ -2756,7 +2845,7 @@ local function ReconcileViewer(state, config)
 
     RestoreMissingItems(state, activeSet)
 
-    local layoutCount = #visibleItems
+    local layoutCount = #layoutItems
     local displayCount = layoutCount > 0 and layoutCount or state.definition.previewCount
     local layout = BuildLayout(state.definition, config, displayCount)
 
@@ -2779,13 +2868,13 @@ local function ReconcileViewer(state, config)
     -- default 0.75 scale.
     if CM.config.skin then
         layout.scale = PresentationMethods.GetPixelSnappedScale(
-            visibleItems[1].item,
+            layoutItems[1].item,
             layout.height,
             layout.scale
         )
     end
     local needsGeometry = false
-    for index, entry in ipairs(visibleItems) do
+    for index, entry in ipairs(layoutItems) do
         local x, y = GetLayoutPosition(layout, index)
         local desired = {
             x = x,
@@ -2795,7 +2884,7 @@ local function ReconcileViewer(state, config)
             scale = layout.scale,
         }
         if not PrepareItemGeometry(entry, state, desired) then
-            UpdateHolderPreview(state, layout, visibleItems[1].item, config)
+            UpdateHolderPreview(state, layout, layoutItems[1].item, config)
             return false
         end
         needsGeometry = needsGeometry or entry.needsGeometry
@@ -2813,22 +2902,22 @@ local function ReconcileViewer(state, config)
     end
 
     if needsGeometry then
-        for _, entry in ipairs(visibleItems) do
+        for _, entry in ipairs(layoutItems) do
             local bar = state.definition.isBar and GetSafeField(entry.item, "Bar")
             if entry.needsGeometry and (not CanChangeGeometry(entry.item)
                 or (bar and not CanChangeGeometry(bar)))
             then
-                UpdateHolderPreview(state, layout, visibleItems[1].item, config)
+                UpdateHolderPreview(state, layout, layoutItems[1].item, config)
                 return false
             end
         end
-        for _, entry in ipairs(visibleItems) do
+        for _, entry in ipairs(layoutItems) do
             ApplyItemGeometry(entry, state)
         end
     end
 
     local needsStaticPresentation = false
-    for _, entry in ipairs(visibleItems) do
+    for _, entry in ipairs(layoutItems) do
         if entry.needsGeometry
             or entry.itemState.presentationGeneration ~= presentationGeneration
         then
@@ -2845,16 +2934,26 @@ local function ReconcileViewer(state, config)
     end
 
     if needsStaticPresentation then
-        for _, entry in ipairs(visibleItems) do
+        local staticComplete = true
+        for _, entry in ipairs(layoutItems) do
             if entry.needsGeometry
                 or entry.itemState.presentationGeneration ~= presentationGeneration
             then
-                ApplyStaticPresentation(entry.item, state, config, entry.itemState)
+                staticComplete = ApplyStaticPresentation(
+                    entry.item,
+                    state,
+                    config,
+                    entry.itemState
+                ) and staticComplete
             end
+        end
+        if not staticComplete then
+            UpdateHolderPreview(state, layout, layoutItems[1].item, config)
+            return false
         end
     end
 
-    UpdateHolderPreview(state, layout, visibleItems[1].item, config)
+    UpdateHolderPreview(state, layout, layoutItems[1].item, config)
     return true
 end
 
@@ -2958,6 +3057,28 @@ local hotkeyRefreshEvents = {
 }
 
 local function OnPresentationEvent(_, event)
+    if event == "UNIT_AURA" then
+        -- The opaque payload is intentionally ignored. One target aura wake is
+        -- enough to catch the full refresh that can follow a target change;
+        -- disarm immediately so ordinary aura churn keeps the 0.15s throttle.
+        presentationController:UnregisterEvent("UNIT_AURA")
+        StartPresentationPolling()
+        return
+    end
+    if event == "PLAYER_TARGET_CHANGED" or event == "UNIT_TARGET" then
+        presentationController:RegisterUnitEvent("UNIT_AURA", "target")
+    end
+    if event == "COOLDOWN_VIEWER_DATA_LOADED"
+        or event == "COOLDOWN_VIEWER_TABLE_HOTFIXED"
+        or event == "EDIT_MODE_LAYOUTS_UPDATED"
+        or event == "PLAYER_ENTERING_WORLD"
+        or event == "PLAYER_TARGET_CHANGED"
+        or event == "UNIT_TARGET"
+    then
+        MarkPresentationDirty()
+        StartPresentationPolling()
+        return
+    end
     if hotkeyRefreshEvents[event] then
         hotkeyGeneration = hotkeyGeneration + 1
     end
@@ -2967,7 +3088,26 @@ end
 for event in next, hotkeyRefreshEvents do
     presentationController:RegisterEvent(event)
 end
+presentationController:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
+presentationController:RegisterEvent("PLAYER_ENTERING_WORLD")
+presentationController:RegisterEvent("PLAYER_TARGET_CHANGED")
+-- 12.0.7 refreshes the viewer from UNIT_TARGET rather than 12.1's
+-- PLAYER_TARGET_CHANGED. The unit filter avoids handling unrelated units.
+presentationController:RegisterUnitEvent("UNIT_TARGET", "player")
 presentationController:SetScript("OnEvent", OnPresentationEvent)
+
+-- 12.1 updates same-sized cooldown assignments in place after its saved-data
+-- barrier. Pool identity and geometry can remain unchanged even though native
+-- RefreshData has rewritten icon/border/glow presentation, so invalidate BFI's
+-- static generation after Blizzard finishes broadcasting the data change.
+EventRegistry:RegisterCallback(
+    "CooldownViewerSettings.OnDataChanged",
+    function()
+        MarkPresentationDirty()
+        StartPresentationPolling()
+    end,
+    presentationController
+)
 
 EventUtil.ContinueOnAddOnLoaded("Blizzard_CooldownViewer", function()
     UpdateCooldownManager(nil, "cooldownManager")
