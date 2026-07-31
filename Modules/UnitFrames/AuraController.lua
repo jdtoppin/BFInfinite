@@ -829,19 +829,6 @@ local function SyncPartitionVisibility(controller)
     local shown = spec ~= nil and spec.enabled and spec.shown
     local variant = controller._variant or PARTITION_FRIENDLY
 
-    -- A relation swap while any restricted descendant is hovered must keep
-    -- the old presentation intact until hover ends. Never expose both.
-    if controller.frame:IsShown()
-        and controller.frame:IsMouseOver()
-        and (
-            not shown
-            or controller._shownVariant ~= variant
-        )
-    then
-        controller:_QueueHoverRetry()
-        return false
-    end
-
     if not shown then
         if not SetHolderShownSafe(controller, false) then
             return false
@@ -853,7 +840,7 @@ local function SyncPartitionVisibility(controller)
         return true
     end
 
-    local swapping = controller.frame:IsShown()
+    local swapping = controller._holderShown == true
         and controller._shownVariant ~= variant
     if swapping and not SetHolderShownSafe(controller, false) then
         return false
@@ -1037,6 +1024,7 @@ function PartitionControllerMixin:_ApplyPending()
         for _, key in ipairs(PARTITION_VARIANTS) do
             self[key]:Destroy()
         end
+        self._holderShown = nil
         self._spec = nil
         self._destroyed = true
         pendingControllers[self] = nil
@@ -1234,6 +1222,7 @@ function UF.CreateNativeAuraPartitionController(parent, name)
     local controller = setmetatable({}, PartitionControllerMixin)
     controller.frame = CreateFrame("Frame", name, parent)
     controller.frame:Hide()
+    controller._holderShown = false
     controller.friendly = UF.CreateNativeAuraContainerController(
         controller.frame,
         name .. "_Friendly"

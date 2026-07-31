@@ -1488,11 +1488,11 @@ local function testPartitionBuildAndRelationSwap()
         "hostile swap atomic restore state")
 end
 
-local function testPartitionHoveredVariantUsesLatestRequest()
+local function testTargetPartitionDoesNotReadVisibilityState()
     local harness = makeHarness()
     local controller = harness.UF.CreateNativeAuraPartitionController(
         {},
-        "BFIHoveredPartitionAuraHolder"
+        "BFI_Target_Debuffs"
     )
     controller:Rebuild(partitionCompleteSpec("target", "friendly"))
 
@@ -1500,35 +1500,42 @@ local function testPartitionHoveredVariantUsesLatestRequest()
     local friendlyHolder = controller.friendly:GetFrame()
     local mainHolder = controller.main:GetFrame()
     local complementHolder = controller.complement:GetFrame()
+    assertEqual(
+        complementHolder.name,
+        "BFI_Target_Debuffs_HostileComplement",
+        "target hostile-complement holder name"
+    )
+
+    local function forbidVisibilityRead(frame, method)
+        frame[method] = function()
+            error("forbidden " .. method .. " visibility read")
+        end
+    end
+    for _, frame in ipairs({
+        outer,
+        friendlyHolder,
+        mainHolder,
+        complementHolder,
+    }) do
+        forbidVisibilityRead(frame, "IsShown")
+        forbidVisibilityRead(frame, "IsMouseOver")
+    end
+
     clearEvents(harness)
-    outer.mouseOver = true
 
     controller:SetVariant("hostile")
     controller:SetVariant("friendly")
     controller:SetVariant("hostile")
 
-    assertEqual(#harness.timerCallbacks, 1,
-        "coalesced partition hover retry")
-    assertEqual(friendlyHolder.shown, true,
-        "hovered friendly presentation retained")
-    assertEqual(mainHolder.shown, false,
-        "hovered main presentation suppressed")
-    assertEqual(complementHolder.shown, false,
-        "hovered complement presentation suppressed")
-    assertNoNativeMutation(harness, "hovered relationship request")
-
-    outer.mouseOver = false
-    assertEqual(harness:RunNextTimer(), 0.25,
-        "partition hover retry delay")
     assertEqual(#harness.timerCallbacks, 0,
-        "partition hover retry drained")
+        "partition visibility retry")
     assertEqual(friendlyHolder.shown, false,
         "latest friendly presentation visibility")
     assertEqual(mainHolder.shown, true,
         "latest main presentation visibility")
     assertEqual(complementHolder.shown, true,
         "latest complement presentation visibility")
-    assertNoNativeMutation(harness, "retried relationship request")
+    assertNoNativeMutation(harness, "secret-safe relationship request")
 end
 
 local function testPartitionTuningReanchorsEveryLayer()
@@ -1820,7 +1827,7 @@ testDestroyPrecedence()
 testOutOfBandOOCFlushUnregisters()
 testRefreshIsDirectDirtyMark()
 testPartitionBuildAndRelationSwap()
-testPartitionHoveredVariantUsesLatestRequest()
+testTargetPartitionDoesNotReadVisibilityState()
 testPartitionTuningReanchorsEveryLayer()
 testPartitionCombatDefersNativeTuning()
 testPartitionTopologyShrinkKeepsAbsentChildDormant()
