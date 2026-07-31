@@ -2775,7 +2775,7 @@ local function testPartitionCombatReversalUsesAppliedLedger()
     local harness = makeHarness()
     local controller = harness.UF.CreateNativeAuraPartitionController(
         {},
-        "BFICombatPartitionReversalHolder"
+        "BFI_Target_Debuffs"
     )
     controller:Rebuild(partitionCompleteSpec("target", "friendly"))
 
@@ -2783,6 +2783,27 @@ local function testPartitionCombatReversalUsesAppliedLedger()
     local friendlyHolder = controller.friendly:GetFrame()
     local mainHolder = controller.main:GetFrame()
     local complementHolder = controller.complement:GetFrame()
+    assertEqual(
+        complementHolder.name,
+        "BFI_Target_Debuffs_HostileComplement",
+        "target hostile-complement holder name"
+    )
+
+    local function forbidVisibilityRead(frame, method)
+        frame[method] = function()
+            error("forbidden " .. method .. " visibility read")
+        end
+    end
+    for _, frame in ipairs({
+        outer,
+        friendlyHolder,
+        mainHolder,
+        complementHolder,
+    }) do
+        forbidVisibilityRead(frame, "IsShown")
+        forbidVisibilityRead(frame, "IsMouseOver")
+    end
+
     clearEvents(harness)
     harness:SetCombat(true)
 

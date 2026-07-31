@@ -1288,7 +1288,6 @@ local function SyncPartitionVisibility(controller)
         end
         return applied
     end
-
     if not shown then
         if not SetHolderShownSafe(controller, false) then
             return false
@@ -1491,6 +1490,7 @@ function PartitionControllerMixin:_ApplyPending()
         for _, key in ipairs(PARTITION_VARIANTS) do
             self[key]:Destroy()
         end
+        self._holderShown = nil
         self._spec = nil
         self._destroyed = true
         pendingControllers[self] = nil
