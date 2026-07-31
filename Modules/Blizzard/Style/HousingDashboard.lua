@@ -424,18 +424,24 @@ local function UpdateCatalogCategory(frame, isPressed)
     end
     frame.Icon:SetAlpha(0)
     frame.Icon:Hide()
-    frame.HoverIcon:SetAlpha(0)
-    frame.HoverIcon:Hide()
+    if frame.HoverIcon then
+        frame.HoverIcon:SetAlpha(0)
+        frame.HoverIcon:Hide()
+    end
     frame.BFIHousingGlyph:SetVertexColor(AF.GetColorRGB(frame:IsEnabled() and "white" or "disabled"))
 
     if frame.SelectedBackground then
         frame.SelectedBackground:SetAlpha(0)
         frame.SelectedBackground:Hide()
-        frame.SelectedBackground.FlipbookSparkleAnim:Stop()
+        if frame.SelectedBackground.FlipbookSparkleAnim then
+            frame.SelectedBackground.FlipbookSparkleAnim:Stop()
+        end
     end
 end
 
 local function StyleCatalogCategory(frame)
+    if not frame or not frame.Icon then return end
+
     -- Let VerticalLayoutFrame expand every category surface across the full
     -- rail while the clipped identity glyph remains centered within it.
     frame.expand = true
@@ -446,7 +452,12 @@ local function StyleCatalogCategory(frame)
 
         CreateFadeSurface(frame)
         frame.Icon:SetAlpha(0)
-        frame.HoverIcon:SetAlpha(0)
+        -- The 12.1 blueprint collection placeholder is intentionally a bare
+        -- Button with Icon only; pooled catalog categories add HoverIcon and
+        -- the BaseHousingActionButtonMixin visual-update method.
+        if frame.HoverIcon then
+            frame.HoverIcon:SetAlpha(0)
+        end
 
         local glyphClip = CreateFrame("Frame", nil, frame)
         glyphClip:SetClipsChildren(true)
@@ -474,7 +485,9 @@ local function StyleCatalogCategory(frame)
         end)
         frame:HookScript("OnEnable", UpdateCatalogCategory)
         frame:HookScript("OnDisable", UpdateCatalogCategory)
-        hooksecurefunc(frame, "UpdateVisuals", UpdateCatalogCategory)
+        if type(frame.UpdateVisuals) == "function" then
+            hooksecurefunc(frame, "UpdateVisuals", UpdateCatalogCategory)
+        end
     end
 
     UpdateCatalogCategory(frame)
