@@ -29,6 +29,9 @@ jobs:
       - name: Check Buffs & Debuffs custom Buffs compiler
         run: lua5.1 tests/buffs_debuffs_custom_buffs_spec_test.lua
 
+      - name: Check Buffs & Debuffs native suppression
+        run: lua5.1 tests/buffs_debuffs_native_aura_frames_test.lua
+
       - name: Check Lua and policy
         shell: bash
         env:
