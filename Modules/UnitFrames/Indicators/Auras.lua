@@ -64,11 +64,11 @@ AF.RegisterCallback("BFI_UpdateConfig", function(_, module)
         if frame:IsVisible() then
             local buffs = UF.GetIndicator(frame, "buffs")
             if buffs and buffs.enabled then
-                Auras_Update(buffs)
+                buffs:Update(true)
             end
             local debuffs = UF.GetIndicator(frame, "debuffs")
             if debuffs and debuffs.enabled then
-                Auras_Update(debuffs)
+                debuffs:Update(true)
             end
         end
     end

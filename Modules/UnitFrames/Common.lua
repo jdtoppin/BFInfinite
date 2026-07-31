@@ -82,6 +82,7 @@ local builders = {
     threatGlow = UF.CreateThreatGlow,
     incDmgHealText = UF.CreateIncDmgHealText,
     auras = UF.CreateAuras,
+    nativeAuras = UF.CreateNativeAuras,
 }
 
 function UF.CreateIndicators(frame, indicators)

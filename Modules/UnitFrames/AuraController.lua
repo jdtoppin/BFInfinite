@@ -283,6 +283,7 @@ ControllerMixin.__index = ControllerMixin
 
 local function HasNativeMutation(controller)
     return controller._destroyRequested
+        or controller._holderConfig
         or controller._needsRebuild
         or controller._needsTuning
         or controller._needsRetarget
@@ -343,7 +344,7 @@ local function ApplyNativeTuning(controller)
     local container = controller._container
     local spec = controller._spec
 
-    controller.frame:SetSize(spec.holder.width, spec.holder.height)
+    AF.SetSize(controller.frame, spec.holder.width, spec.holder.height)
     PositionContainer(container, controller.frame, spec.containerPoint)
     AF.SetCustomAuraContainerFlowLayout(container, spec.flowLayout)
     AF.SetCustomAuraContainerProcessingPolicy(
@@ -382,7 +383,7 @@ function ControllerMixin:_Build()
     local spec = self._spec
     local holder = self.frame
 
-    holder:SetSize(spec.holder.width, spec.holder.height)
+    AF.SetSize(holder, spec.holder.width, spec.holder.height)
 
     -- Build a complete hidden replacement before touching the old container.
     -- The public holder is already hidden by the hover-safe lifecycle gate.
@@ -479,6 +480,28 @@ function ControllerMixin:_ApplyPending()
         return
     end
 
+    if self._holderConfig then
+        local configure = self._holderConfig
+        self._holderConfig = nil
+        configure(self.frame)
+    end
+
+    -- Holder-only placement/configuration is allowed before the first
+    -- complete native spec. When it is the only pending work, restore the
+    -- configured visibility of an existing spec and stop here.
+    if not HasNativeMutation(self) then
+        if self._spec then
+            self._needsVisibility = true
+            if RestoreHolderVisibility(self) then
+                self._needsVisibility = nil
+                pendingControllers[self] = nil
+            end
+        else
+            pendingControllers[self] = nil
+        end
+        return
+    end
+
     if self._needsRebuild then
         self:_Build()
         self._needsRebuild = nil
@@ -548,6 +571,19 @@ end
 
 function ControllerMixin:GetFrame()
     return self.frame
+end
+
+-- Queue the latest configuration-only holder mutation behind the same
+-- combat and hover gate as native work. This is intentionally a callback:
+-- indicator placement can resolve anchors only through UnitFrames/Common.
+function ControllerMixin:ApplyHolderConfig(configure)
+    assert(not self._destroyed and not self._destroyRequested,
+        "aura container controller is destroyed")
+    assert(type(configure) == "function",
+        "aura container holder configuration must be a function")
+
+    self._holderConfig = configure
+    RequestMutation(self)
 end
 
 function ControllerMixin:Rebuild(completeSpec)
@@ -633,6 +669,7 @@ function ControllerMixin:Destroy()
     if self._destroyed or self._destroyRequested then return end
 
     self._destroyRequested = true
+    self._holderConfig = nil
     self._needsRebuild = nil
     self._needsTuning = nil
     self._needsRetarget = nil
