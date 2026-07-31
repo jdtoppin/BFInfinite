@@ -125,16 +125,15 @@ local function newHolder(harness, name, parent)
     end
 
     function holder:IsShown()
-        return self.shown == true
+        error("holder visibility must remain opaque")
     end
 
     function holder:IsMouseOver()
-        return self.mouseOver == true
+        error("holder hover state must remain opaque")
     end
 
     function holder:SetShown(shown)
         record(harness, "holder.shown", self, shown)
-        if self.blockSetShown then return end
         self.shown = shown
     end
 
@@ -1446,70 +1445,44 @@ local function testPartialAddFailureDiagnostics()
     }, "retired partial AddSlot construction")
 end
 
-local function testHoveredTransitionDefers()
+local function testVisibilityUsesWriteLedger()
     local harness = makeHarness()
     local controller = harness.UF.CreateNativeAuraContainerController(
         {},
-        "BFIHoveredAuraHolder",
+        "BFIOpaqueVisibilityAuraHolder",
         completeSpec("target", true)
     )
     local holder = controller:GetFrame()
     local container = harness.containers[1]
 
     clearEvents(harness)
-    holder.mouseOver = true
     controller:ApplyTuning(tuningSpec())
 
-    assertEqual(#harness.events, 0, "hovered transition mutations")
-    assertEqual(#harness.timerCallbacks, 1, "hover retry count")
-    assertEqual(#harness.containers, 1, "hovered container count")
-    assertEqual(container.enabled, true, "hovered container enabled")
-    assertEqual(container.shown, true, "hovered container shown")
-
-    holder.mouseOver = false
-    harness:RunNextTimer()
-
-    assertEqual(#harness.timerCallbacks, 0, "completed hover retry count")
-    assertEqual(#harness.containers, 1, "completed tuning container count")
+    assertEqual(#harness.timerCallbacks, 0, "visibility retry count")
+    assertEqual(#harness.containers, 1, "tuning container count")
     assertEqual(container.groups.helpful.filterString, "HELPFUL|PLAYER",
-        "completed hovered tuning")
-    assertEqual(holder.shown, true, "completed holder visibility")
-    assertEqual(harness.events[1].name, "holder.shown", "hover-safe hide order")
-    assertEqual(harness.events[1].args[2], false, "hover-safe hide state")
+        "write-only tuning")
+    assertEqual(holder.shown, true, "holder visibility")
+    assertEqual(harness.events[1].name, "holder.shown", "holder hide order")
+    assertEqual(harness.events[1].args[2], false, "holder hide state")
     assertEqual(harness.events[#harness.events].name, "holder.shown",
-        "hover-safe restore order")
+        "holder restore order")
     assertEqual(harness.events[#harness.events].args[2], true,
-        "hover-safe restore state")
+        "holder restore state")
 end
 
-local function testAbortedHolderWriteDefers()
-    local harness = makeHarness()
-    local controller = harness.UF.CreateNativeAuraContainerController(
-        {},
-        "BFIAbortedHolderAuraHolder",
-        completeSpec("target", true)
-    )
-    local holder = controller:GetFrame()
+local function testProductionAvoidsVisibilityInspection()
+    local file = assert(io.open("Modules/UnitFrames/AuraController.lua", "r"))
+    local source = file:read("*a")
+    file:close()
 
-    clearEvents(harness)
-    holder.blockSetShown = true
-    controller:ApplyTuning(tuningSpec())
-
-    assertEventNames(harness, {
-        "holder.shown",
-    })
-    assertEqual(#harness.timerCallbacks, 1, "aborted-write retry count")
-    assertEqual(#harness.containers, 1, "aborted-write container count")
-    assertEqual(holder.shown, true, "aborted-write holder state")
-
-    holder.blockSetShown = nil
-    harness:RunNextTimer()
-    assertEqual(#harness.containers, 1, "retried tuning container count")
-    assertEqual(
-        harness.containers[1].groups.helpful.filterString,
-        "HELPFUL|PLAYER",
-        "retried tuning group"
-    )
+    for _, method in ipairs({"IsShown", "IsVisible", "IsMouseOver", "GetAlpha"}) do
+        assertEqual(
+            source:find(":" .. method .. "%(", 1),
+            nil,
+            "forbidden visibility inspection " .. method
+        )
+    end
 end
 
 local function testMaxFrameCountContract()
@@ -1986,7 +1959,7 @@ local function testGroupRetargetPrecedesStructuralTuning()
         "regen tuned holder visibility")
 end
 
-local function testGroupVisibilityWaitsForHover()
+local function testGroupVisibilityDoesNotProbeFrameState()
     local harness = makeHarness()
     local root = {}
     local seed = harness.AF.CreateCustomAuraContainer(root)
@@ -1998,20 +1971,21 @@ local function testGroupVisibilityWaitsForHover()
     )
 
     clearEvents(harness)
-    controller:GetFrame().mouseOver = true
+    controller:GetFrame().IsShown = function()
+        error("forbidden IsShown visibility read")
+    end
+    controller:GetFrame().IsMouseOver = function()
+        error("forbidden IsMouseOver visibility read")
+    end
     controller:SetShown(false)
 
-    assertEqual(seed.shown, true, "hovered group seed visibility")
-    assertEqual(controller:GetFrame().shown, true,
-        "hovered group holder visibility")
-    assertEqual(countEvents(harness, "native.hide"), 0,
-        "hovered native visibility mutation")
-
-    controller:GetFrame().mouseOver = nil
-    harness:RunTimers(0.25)
-    assertEqual(seed.shown, false, "post-hover group seed visibility")
+    assertEqual(seed.shown, false, "group seed visibility")
     assertEqual(controller:GetFrame().shown, false,
-        "post-hover group holder visibility")
+        "group holder visibility")
+    assertEqual(countEvents(harness, "native.hide"), 1,
+        "native visibility mutation")
+    assertEqual(#harness.timerCallbacks, 0,
+        "group visibility retry")
 end
 
 testConstructionStatsContract()
@@ -2025,8 +1999,8 @@ testRegenDispatchIsolation()
 testRebuildRejectsAfterInitialBuild()
 testMidBuildFailureIsOneShot()
 testPartialAddFailureDiagnostics()
-testHoveredTransitionDefers()
-testAbortedHolderWriteDefers()
+testVisibilityUsesWriteLedger()
+testProductionAvoidsVisibilityInspection()
 testMaxFrameCountContract()
 testDestroyPrecedence()
 testOutOfBandOOCFlushUnregisters()
@@ -2037,6 +2011,6 @@ testGroupSeedBuildQueuesInCombat()
 testUnusedSeedDestroyAccounting()
 testGroupCombatLiveRetarget()
 testGroupRetargetPrecedesStructuralTuning()
-testGroupVisibilityWaitsForHover()
+testGroupVisibilityDoesNotProbeFrameState()
 
 print("unit_frame_aura_controller_test.lua: ok")
