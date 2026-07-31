@@ -28,6 +28,7 @@
     <Script file="Style\LootFrame.lua"/>
     <Script file="Style\ChallengesUI.lua"/>
     <Script file="Style\StaticPopups.lua"/>
+    <Script file="Style\TalkingHeadFrame.lua"/>
     <Script file="Style\Tooltip.lua"/>
     <Script file="Style\WeeklyRewardsFrame.lua"/>
     <Script file="Style\WorldMapFrame.lua"/>
