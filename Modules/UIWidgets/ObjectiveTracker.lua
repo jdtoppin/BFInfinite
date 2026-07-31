@@ -35,6 +35,19 @@ local function CreateTrackerContainer()
     AF.CreateMover(trackerContainer, "BFI: " .. L["UI Widgets"], _G.HUD_EDIT_MODE_OBJECTIVE_TRACKER_LABEL)
 end
 
+local function RemoveTrackerFromRightManagedFrameContainer()
+    -- Retail 12.0.7 exposes this container directly; Retail 12.1 exposes it
+    -- through GetRightManagedFrameContainer() instead.
+    local container = _G.UIParentRightManagedFrameContainer
+    if not container and type(_G.GetRightManagedFrameContainer) == "function" then
+        container = _G.GetRightManagedFrameContainer()
+    end
+
+    if container and type(container.RemoveManagedFrame) == "function" then
+        container:RemoveManagedFrame(tracker)
+    end
+end
+
 ---------------------------------------------------------------------
 -- setup
 ---------------------------------------------------------------------
@@ -115,7 +128,7 @@ local function SetupTracker()
     tracker.ignoreFramePositionManager = true
     tracker.isManagedFrame = false
     tracker.isRightManagedFrame = false
-    _G.UIParentRightManagedFrameContainer:RemoveManagedFrame(tracker)
+    RemoveTrackerFromRightManagedFrameContainer()
     -- tracker:SetParent(trackerContainer) --! will cause weird issues ... so I give up on making it scrollable
     tracker:ClearAllPoints()
     tracker:SetPoint("TOPRIGHT", trackerContainer)

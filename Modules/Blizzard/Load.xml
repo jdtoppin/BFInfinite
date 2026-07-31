@@ -15,6 +15,7 @@
     <Script file="Style\CharacterFrame.lua"/>
     <Script file="Style\CollectionsJournal.lua"/>
     <Script file="Style\CommunitiesFrame.lua"/>
+    <Script file="Style\EncounterJournal.lua"/>
     <Script file="Style\FriendsFrame.lua"/>
     <Script file="Style\GameMenu.lua"/>
     <Script file="Style\Menu.lua"/>
@@ -27,6 +28,7 @@
     <Script file="Style\LootFrame.lua"/>
     <Script file="Style\ChallengesUI.lua"/>
     <Script file="Style\StaticPopups.lua"/>
+    <Script file="Style\TalkingHeadFrame.lua"/>
     <Script file="Style\Tooltip.lua"/>
     <Script file="Style\WeeklyRewardsFrame.lua"/>
     <Script file="Style\WorldMapFrame.lua"/>
