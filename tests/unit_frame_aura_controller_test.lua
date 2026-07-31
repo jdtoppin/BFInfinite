@@ -227,12 +227,29 @@ local function makeHarness(options)
         slotButtons = {},
         timerCallbacks = {},
         inCombat = false,
+        afConstructionStatsReads = 0,
+        afConstructionTotalsReads = 0,
     }
     local AF = {
         isRetail = options.isRetail ~= false,
-        versionNum = options.versionNum or 30,
+        versionNum = options.versionNum or 31,
     }
     local UF = {}
+    local afConstructionTotals = {
+        containerCreateAttempts = 0,
+        containerAllocations = 0,
+        containerCreateCompletions = 0,
+        trackedContainers = 0,
+        externalContainersObserved = 0,
+        groupAddAttempts = 0,
+        groupsAdded = 0,
+        slotAddAttempts = 0,
+        slotsAdded = 0,
+        itemEnchantmentAddAttempts = 0,
+        itemEnchantmentsAdded = 0,
+        initialFrameReservationsAttempted = 0,
+        initialFrameReservationsCompleted = 0,
+    }
 
     function AF.Copy(value)
         return copy(value)
@@ -257,12 +274,37 @@ local function makeHarness(options)
     end
 
     function AF.CreateCustomAuraContainer(parent)
+        afConstructionTotals.containerCreateAttempts =
+            afConstructionTotals.containerCreateAttempts + 1
         local container = newContainer(harness, parent)
+        container.afConstructionStats = {
+            groupsAdded = 0,
+            slotsAdded = 0,
+            initialFrameReservationsCompleted = 0,
+        }
+        afConstructionTotals.containerAllocations =
+            afConstructionTotals.containerAllocations + 1
+        afConstructionTotals.containerCreateCompletions =
+            afConstructionTotals.containerCreateCompletions + 1
+        afConstructionTotals.trackedContainers =
+            afConstructionTotals.trackedContainers + 1
         if options.failCreatedContainerSetUnit then
             container.failSetUnit = true
         end
         record(harness, "af.create-container", container, parent)
         return container
+    end
+
+    function AF.GetCustomAuraContainerConstructionTotals()
+        harness.afConstructionTotalsReads =
+            harness.afConstructionTotalsReads + 1
+        return copy(afConstructionTotals)
+    end
+
+    function AF.GetCustomAuraContainerConstructionStats(container)
+        harness.afConstructionStatsReads =
+            harness.afConstructionStatsReads + 1
+        return copy(container.afConstructionStats)
     end
 
     function AF.SetCustomAuraContainerEnabled(container, enabled)
@@ -298,6 +340,10 @@ local function makeHarness(options)
     end
 
     function AF.AddCustomAuraGroup(container, key, filterString, groupOptions, buttonStyle)
+        afConstructionTotals.groupAddAttempts =
+            afConstructionTotals.groupAddAttempts + 1
+        afConstructionTotals.initialFrameReservationsAttempted =
+            afConstructionTotals.initialFrameReservationsAttempted + 10
         assertTrue(
             groupOptions.maxFrameCount == math.huge
                 or (
@@ -313,6 +359,14 @@ local function makeHarness(options)
             options = groupOptions,
             buttonStyle = buttonStyle,
         }
+        container.afConstructionStats.groupsAdded =
+            container.afConstructionStats.groupsAdded + 1
+        container.afConstructionStats.initialFrameReservationsCompleted =
+            container.afConstructionStats.initialFrameReservationsCompleted + 10
+        afConstructionTotals.groupsAdded =
+            afConstructionTotals.groupsAdded + 1
+        afConstructionTotals.initialFrameReservationsCompleted =
+            afConstructionTotals.initialFrameReservationsCompleted + 10
         record(
             harness,
             "af.add-group",
@@ -369,7 +423,15 @@ local function makeHarness(options)
     end
 
     function AF.AddCustomAuraSlot(container, key, filterString, slotOptions, buttonStyle)
+        afConstructionTotals.slotAddAttempts =
+            afConstructionTotals.slotAddAttempts + 1
+        afConstructionTotals.initialFrameReservationsAttempted =
+            afConstructionTotals.initialFrameReservationsAttempted + 1
         validateSort(slotOptions.sortMethod, slotOptions.sortDirection)
+        assertTrue(type(slotOptions.anchor) == "table", "missing mock slot anchor")
+        if options.failSlotAdd then
+            error("injected non-secret AddSlot failure")
+        end
         local button = newSlotButton(harness, container, key)
         container.slots[key] = {
             filterString = filterString,
@@ -377,6 +439,14 @@ local function makeHarness(options)
             buttonStyle = buttonStyle,
             button = button,
         }
+        container.afConstructionStats.slotsAdded =
+            container.afConstructionStats.slotsAdded + 1
+        container.afConstructionStats.initialFrameReservationsCompleted =
+            container.afConstructionStats.initialFrameReservationsCompleted + 1
+        afConstructionTotals.slotsAdded =
+            afConstructionTotals.slotsAdded + 1
+        afConstructionTotals.initialFrameReservationsCompleted =
+            afConstructionTotals.initialFrameReservationsCompleted + 1
         record(
             harness,
             "af.add-slot",
@@ -386,7 +456,14 @@ local function makeHarness(options)
             slotOptions,
             buttonStyle
         )
-        return button
+        button:ClearAllPoints()
+        button:SetPoint(
+            slotOptions.anchor.point,
+            slotOptions.anchor.relativeTo,
+            slotOptions.anchor.relativePoint,
+            slotOptions.anchor.x,
+            slotOptions.anchor.y
+        )
     end
 
     function AF.SetCustomAuraSlotFilterString(container, key, filterString)
@@ -629,15 +706,92 @@ local function tuningSpec()
     }
 end
 
+local function assertConstructionStats(harness, expected, label)
+    local stats = harness.UF.GetNativeAuraConstructionStats()
+    for field, expectedValue in pairs(expected) do
+        assertEqual(stats[field], expectedValue, label .. " " .. field)
+    end
+    for field, value in pairs(stats) do
+        assertEqual(type(value), "number", label .. " scalar " .. field)
+    end
+    return stats
+end
+
+local function testConstructionStatsContract()
+    local harness = makeHarness()
+    harness.UF.CreateNativeAuraContainerController(
+        {},
+        "BFIConstructionStatsAuraHolder",
+        completeSpec("target", true)
+    )
+
+    assertEqual(harness.afConstructionTotalsReads, 0,
+        "AF totals read during construction")
+    assertEqual(harness.afConstructionStatsReads, 0,
+        "AF per-container stats read during construction")
+    local stats = assertConstructionStats(harness, {
+        controllersCreated = 1,
+        destroyRequests = 0,
+        destroyCompletions = 0,
+        liveControllers = 1,
+        seedsAllocated = 0,
+        seedsClaimed = 0,
+        buildAttempts = 1,
+        buildCompletions = 1,
+        incompleteBuilds = 0,
+        frameworkBuilds = 1,
+        adoptedBuilds = 0,
+        expectedGroups = 1,
+        expectedSlots = 1,
+        expectedInitialReservations = 11,
+        retiredNativeShells = 0,
+        retiredInitialReservations = 0,
+        strandedNativeShells = 0,
+        strandedInitialReservations = 0,
+        afContainerCreateAttempts = 1,
+        afContainerAllocations = 1,
+        afContainerCreateCompletions = 1,
+        afTrackedContainers = 1,
+        afExternalContainersObserved = 0,
+        afGroupAddAttempts = 1,
+        afGroupsAdded = 1,
+        afSlotAddAttempts = 1,
+        afSlotsAdded = 1,
+        afItemEnchantmentAddAttempts = 0,
+        afItemEnchantmentsAdded = 0,
+        afInitialFrameReservationsAttempted = 11,
+        afInitialFrameReservationsCompleted = 11,
+    }, "construction snapshot")
+    assertEqual(harness.afConstructionTotalsReads, 1,
+        "explicit AF totals read")
+    assertEqual(harness.afConstructionStatsReads, 0,
+        "unexpected AF per-container stats read")
+
+    stats.controllersCreated = 99
+    stats.afContainerAllocations = 99
+    assertConstructionStats(harness, {
+        controllersCreated = 1,
+        buildAttempts = 1,
+        buildCompletions = 1,
+        afContainerAllocations = 1,
+    }, "fresh non-resetting snapshot")
+    assertEqual(harness.afConstructionTotalsReads, 2,
+        "second explicit AF totals read")
+end
+
 local function testCapabilityGate()
-    local oldAF = makeHarness({versionNum = 29})
-    assertEqual(oldAF.UF.HasNativeAuraContainerBackend(), false, "old AF gate")
+    local oldAF = makeHarness({versionNum = 30})
+    assertEqual(
+        oldAF.UF.HasNativeAuraContainerBackend(),
+        false,
+        "AF r30 observability gate"
+    )
     assertEqual(
         oldAF.UF.CreateNativeAuraContainerController({}, "OldAF"),
         nil,
-        "old AF controller"
+        "AF r30 controller"
     )
-    assertEqual(#oldAF.holders, 0, "old AF holder count")
+    assertEqual(#oldAF.holders, 0, "AF r30 holder count")
 
     local missingMethod = makeHarness({
         missingMethod = "SetCustomAuraSlotSortMethod",
@@ -648,6 +802,17 @@ local function testCapabilityGate()
         "missing adapter method gate"
     )
     assertEqual(#missingMethod.holders, 0, "missing-method holder count")
+
+    local missingConstructionMethod = makeHarness({
+        missingMethod = "GetCustomAuraContainerConstructionStats",
+    })
+    assertEqual(
+        missingConstructionMethod.UF.HasNativeAuraContainerBackend(),
+        false,
+        "missing construction method gate"
+    )
+    assertEqual(#missingConstructionMethod.holders, 0,
+        "missing-construction-method holder count")
 end
 
 local function testBuildContract()
@@ -703,6 +868,13 @@ local function testBuildContract()
     assertEqual(slot.filterString, "HARMFUL", "slot filter")
     assertEqual(slot.options.candidateFilters.isBossAura, true, "slot candidate filter")
     assertEqual(slot.buttonStyle.size, 18, "slot button style")
+    assertEqual(slot.options.anchor.point, "CENTER", "slot initializer anchor point")
+    assertEqual(slot.options.anchor.relativeTo, holder,
+        "slot initializer anchor owner")
+    assertEqual(slot.options.anchor.relativePoint, "CENTER",
+        "slot initializer relative point")
+    assertEqual(slot.options.anchor.x, 5, "slot initializer anchor x")
+    assertEqual(slot.options.anchor.y, 6, "slot initializer anchor y")
     assertEqual(slot.button.point[2], holder, "slot point owner")
 
     assertTrue(group.options ~= spec.groups[1], "group options were not normalized")
@@ -725,6 +897,7 @@ local function testTuningContract()
     )
     local container = harness.containers[1]
     local holder = controller:GetFrame()
+    local constructionBefore = harness.UF.GetNativeAuraConstructionStats()
 
     clearEvents(harness)
     controller:ApplyTuning(tuningSpec())
@@ -757,6 +930,26 @@ local function testTuningContract()
     assertEqual(container.groups.helpful.options.maxFrameCount, 6, "tuned group max")
     assertEqual(container.slots.priority.filterString, "HARMFUL|RAID",
         "tuned slot filter")
+    controller:Refresh()
+    local constructionAfter = assertConstructionStats(harness, {
+        controllersCreated = 1,
+        buildAttempts = 1,
+        buildCompletions = 1,
+        incompleteBuilds = 0,
+        expectedGroups = 1,
+        expectedSlots = 1,
+        expectedInitialReservations = 11,
+        strandedNativeShells = 0,
+        strandedInitialReservations = 0,
+        afContainerAllocations = 1,
+        afGroupsAdded = 1,
+        afSlotsAdded = 1,
+        afInitialFrameReservationsCompleted = 11,
+    }, "tuning construction stability")
+    for field, beforeValue in pairs(constructionBefore) do
+        assertEqual(constructionAfter[field], beforeValue,
+            "tuning/refresh construction delta " .. field)
+    end
 end
 
 local function testHolderConfigQueue()
@@ -850,6 +1043,18 @@ local function testSharedCombatQueue()
     assertEqual(second:GetFrame().shown, false,
         "combat initial-build display suppression")
     assertEqual(#harness.containers, 1, "combat initial-build mutation")
+    assertConstructionStats(harness, {
+        controllersCreated = 2,
+        liveControllers = 2,
+        buildAttempts = 1,
+        buildCompletions = 1,
+        incompleteBuilds = 0,
+        frameworkBuilds = 1,
+        expectedGroups = 1,
+        expectedSlots = 1,
+        expectedInitialReservations = 11,
+        afContainerAllocations = 1,
+    }, "combat deferred construction")
 
     harness:SetCombat(false)
     harness:FireRegen()
@@ -869,6 +1074,23 @@ local function testSharedCombatQueue()
     assertEqual(initialContainer.unit, "party3", "latest initial-build unit")
     assertEqual(initialContainer.enabled, false, "latest initial-build enabled")
     assertEqual(harness.regenCallback, nil, "regen handler after flush")
+    assertConstructionStats(harness, {
+        controllersCreated = 2,
+        liveControllers = 2,
+        buildAttempts = 2,
+        buildCompletions = 2,
+        incompleteBuilds = 0,
+        frameworkBuilds = 2,
+        expectedGroups = 2,
+        expectedSlots = 2,
+        expectedInitialReservations = 22,
+        strandedNativeShells = 0,
+        strandedInitialReservations = 0,
+        afContainerAllocations = 2,
+        afGroupsAdded = 2,
+        afSlotsAdded = 2,
+        afInitialFrameReservationsCompleted = 22,
+    }, "regen completed construction")
 end
 
 local function testRegenDispatchIsolation()
@@ -997,6 +1219,30 @@ local function assertMidBuildFailureIsOneShot(
         label .. " initial group allocations")
     assertEqual(countEvents(harness, "af.add-slot"), 1,
         label .. " initial slot allocations")
+    assertConstructionStats(harness, {
+        controllersCreated = 1,
+        destroyRequests = 0,
+        destroyCompletions = 0,
+        liveControllers = 1,
+        seedsAllocated = 0,
+        seedsClaimed = expectedCreateCount == 0 and 1 or 0,
+        buildAttempts = 1,
+        buildCompletions = 0,
+        incompleteBuilds = 1,
+        frameworkBuilds = 0,
+        adoptedBuilds = 0,
+        expectedGroups = 1,
+        expectedSlots = 1,
+        expectedInitialReservations = 11,
+        retiredNativeShells = 0,
+        retiredInitialReservations = 0,
+        strandedNativeShells = 1,
+        strandedInitialReservations = 11,
+        afContainerAllocations = 1,
+        afGroupsAdded = 1,
+        afSlotsAdded = 1,
+        afInitialFrameReservationsCompleted = 11,
+    }, label .. " incomplete construction")
 
     local group = expectedContainer.groups.helpful
     local slot = expectedContainer.slots.priority
@@ -1033,6 +1279,23 @@ local function assertMidBuildFailureIsOneShot(
     assertEqual(expectedContainer.slots.priority, slot, label .. " retry slot")
     assertEqual(expectedContainer.slots.priority.button, button,
         label .. " retry button")
+
+    controller:Destroy()
+    assertConstructionStats(harness, {
+        controllersCreated = 1,
+        destroyRequests = 1,
+        destroyCompletions = 1,
+        liveControllers = 0,
+        buildAttempts = 1,
+        buildCompletions = 0,
+        incompleteBuilds = 1,
+        frameworkBuilds = 0,
+        adoptedBuilds = 0,
+        retiredNativeShells = 1,
+        retiredInitialReservations = 11,
+        strandedNativeShells = 0,
+        strandedInitialReservations = 0,
+    }, label .. " retired incomplete construction")
 end
 
 local function testMidBuildFailureIsOneShot()
@@ -1068,6 +1331,69 @@ local function testMidBuildFailureIsOneShot()
         0,
         "seeded"
     )
+end
+
+local function testPartialAddFailureDiagnostics()
+    local harness = makeHarness({
+        failSlotAdd = true,
+    })
+    local controller = harness.UF.CreateNativeAuraContainerController(
+        {},
+        "BFIPartialAddFailureAuraHolder"
+    )
+
+    -- Test-only pcall observes an injected non-secret adapter failure.
+    -- Production construction remains unwrapped and fail-closed.
+    local succeeded, message = pcall(
+        controller.Rebuild,
+        controller,
+        completeSpec("target", true)
+    )
+    assertEqual(succeeded, false, "partial AddSlot failure acceptance")
+    assertTrue(
+        tostring(message):find("injected non-secret AddSlot failure", 1, true)
+            ~= nil,
+        "partial AddSlot failure"
+    )
+    assertEqual(#harness.slotButtons, 0, "partial AddSlot button allocation")
+    assertConstructionStats(harness, {
+        controllersCreated = 1,
+        liveControllers = 1,
+        buildAttempts = 1,
+        buildCompletions = 0,
+        incompleteBuilds = 1,
+        frameworkBuilds = 0,
+        adoptedBuilds = 0,
+        expectedGroups = 1,
+        expectedSlots = 1,
+        expectedInitialReservations = 11,
+        retiredNativeShells = 0,
+        retiredInitialReservations = 0,
+        strandedNativeShells = 1,
+        strandedInitialReservations = 10,
+        afGroupAddAttempts = 1,
+        afGroupsAdded = 1,
+        afSlotAddAttempts = 1,
+        afSlotsAdded = 0,
+        afInitialFrameReservationsAttempted = 11,
+        afInitialFrameReservationsCompleted = 10,
+    }, "partial AddSlot construction gap")
+    assertEqual(harness.afConstructionStatsReads, 0,
+        "partial failure per-container stats read")
+
+    controller:Destroy()
+    assertConstructionStats(harness, {
+        destroyRequests = 1,
+        destroyCompletions = 1,
+        liveControllers = 0,
+        incompleteBuilds = 1,
+        retiredNativeShells = 1,
+        retiredInitialReservations = 10,
+        strandedNativeShells = 0,
+        strandedInitialReservations = 0,
+        afInitialFrameReservationsAttempted = 11,
+        afInitialFrameReservationsCompleted = 10,
+    }, "retired partial AddSlot construction")
 end
 
 local function testVisibilityUsesWriteLedger()
@@ -1151,6 +1477,19 @@ local function testDestroyPrecedence()
     assertEqual(container.enabled, true, "combat destroy enabled mutation")
     assertEqual(container.shown, true, "combat destroy visibility mutation")
     assertEqual(controller:GetFrame().shown, false, "combat destroy display suppression")
+    assertConstructionStats(harness, {
+        controllersCreated = 1,
+        destroyRequests = 1,
+        destroyCompletions = 0,
+        liveControllers = 1,
+        buildAttempts = 1,
+        buildCompletions = 1,
+        incompleteBuilds = 0,
+        retiredNativeShells = 0,
+        retiredInitialReservations = 0,
+        strandedNativeShells = 0,
+        strandedInitialReservations = 0,
+    }, "combat destroy request")
 
     harness:SetCombat(false)
     harness:FireRegen()
@@ -1165,6 +1504,19 @@ local function testDestroyPrecedence()
     assertEqual(container.enabled, false, "destroy container enabled")
     assertEqual(container.shown, false, "destroy container visibility")
     assertEqual(controller:GetFrame().shown, false, "destroy holder visibility")
+    assertConstructionStats(harness, {
+        controllersCreated = 1,
+        destroyRequests = 1,
+        destroyCompletions = 1,
+        liveControllers = 0,
+        buildAttempts = 1,
+        buildCompletions = 1,
+        incompleteBuilds = 0,
+        retiredNativeShells = 1,
+        retiredInitialReservations = 11,
+        strandedNativeShells = 0,
+        strandedInitialReservations = 0,
+    }, "completed destroy")
 end
 
 local function testOutOfBandOOCFlushUnregisters()
@@ -1241,6 +1593,16 @@ local function testGroupHeaderCapabilityAndSeed()
         "12.0.7 extra group seed"
     )
     assertEqual(#unavailable.containers, 0, "12.0.7 native allocation")
+    assertConstructionStats(unavailable, {
+        controllersCreated = 0,
+        seedsAllocated = 0,
+        seedsClaimed = 0,
+        buildAttempts = 0,
+        buildCompletions = 0,
+        retiredNativeShells = 0,
+        strandedNativeShells = 0,
+        afContainerAllocations = 0,
+    }, "unavailable seed construction")
 
     local harness = makeHarness()
     local header = {
@@ -1268,6 +1630,19 @@ local function testGroupHeaderCapabilityAndSeed()
     assertEqual(seed.parent, parent, "group seed parent")
     assertEqual(seed.shown, false, "group seed initial visibility")
     assertEqual(seed.enabled, false, "group seed initial enabled state")
+    assertConstructionStats(harness, {
+        controllersCreated = 0,
+        liveControllers = 0,
+        seedsAllocated = 1,
+        seedsClaimed = 0,
+        buildAttempts = 0,
+        buildCompletions = 0,
+        retiredNativeShells = 0,
+        strandedNativeShells = 0,
+        afContainerAllocations = 1,
+        afGroupsAdded = 0,
+        afSlotsAdded = 0,
+    }, "allocated seed construction")
 end
 
 local function testGroupSeedAdoptionAndOneShotClaim()
@@ -1296,6 +1671,24 @@ local function testGroupSeedAdoptionAndOneShotClaim()
         "seeded holder visibility")
     assertEqual(countEvents(harness, "af.frame-level"), 1,
         "seeded build layer synchronization")
+    assertConstructionStats(harness, {
+        controllersCreated = 1,
+        liveControllers = 1,
+        seedsAllocated = 0,
+        seedsClaimed = 1,
+        buildAttempts = 1,
+        buildCompletions = 1,
+        incompleteBuilds = 0,
+        frameworkBuilds = 0,
+        adoptedBuilds = 1,
+        expectedGroups = 1,
+        expectedSlots = 1,
+        expectedInitialReservations = 11,
+        retiredNativeShells = 0,
+        strandedNativeShells = 0,
+        afContainerAllocations = 1,
+        afInitialFrameReservationsCompleted = 11,
+    }, "adopted seed construction")
 
     clearEvents(harness)
     controller:ApplyHolderConfig(function(holder)
@@ -1319,6 +1712,13 @@ local function testGroupSeedAdoptionAndOneShotClaim()
         "duplicate seed claim assertion"
     )
     assertEqual(#harness.holders, 1, "duplicate claim holder allocation")
+    assertConstructionStats(harness, {
+        controllersCreated = 1,
+        seedsClaimed = 1,
+        buildAttempts = 1,
+        buildCompletions = 1,
+        adoptedBuilds = 1,
+    }, "duplicate seed claim stability")
 end
 
 local function testGroupSeedBuildQueuesInCombat()
@@ -1348,6 +1748,17 @@ local function testGroupSeedBuildQueuesInCombat()
     assertEqual(countEvents(harness, "af.frame-level"), 0,
         "combat bootstrap external frame level")
     assertTrue(harness.regenCallback, "combat bootstrap regen registration")
+    assertConstructionStats(harness, {
+        controllersCreated = 1,
+        seedsClaimed = 1,
+        buildAttempts = 0,
+        buildCompletions = 0,
+        expectedGroups = 0,
+        expectedSlots = 0,
+        expectedInitialReservations = 0,
+        strandedNativeShells = 0,
+        strandedInitialReservations = 0,
+    }, "combat queued seed construction")
 
     harness:SetCombat(false)
     harness:FireRegen()
@@ -1366,6 +1777,68 @@ local function testGroupSeedBuildQueuesInCombat()
     assertEqual(seed.frameLevel, 12, "bootstrap external frame level")
     assertEqual(harness.regenCallback, nil,
         "bootstrap stale regen registration")
+    assertConstructionStats(harness, {
+        controllersCreated = 1,
+        seedsClaimed = 1,
+        buildAttempts = 1,
+        buildCompletions = 1,
+        incompleteBuilds = 0,
+        frameworkBuilds = 0,
+        adoptedBuilds = 1,
+        expectedGroups = 1,
+        expectedSlots = 1,
+        expectedInitialReservations = 11,
+        strandedNativeShells = 0,
+        strandedInitialReservations = 0,
+    }, "regen adopted seed construction")
+end
+
+local function testUnusedSeedDestroyAccounting()
+    local harness = makeHarness()
+    local root = {}
+    local seed = harness.UF.CreateNativeGroupAuraContainerSeed(root)
+    local controller = harness.UF.CreateNativeGroupAuraContainerController(
+        root,
+        "BFIUnusedSeedAuraHolder",
+        seed
+    )
+
+    assertConstructionStats(harness, {
+        controllersCreated = 1,
+        destroyRequests = 0,
+        destroyCompletions = 0,
+        liveControllers = 1,
+        seedsAllocated = 1,
+        seedsClaimed = 1,
+        buildAttempts = 0,
+        buildCompletions = 0,
+        incompleteBuilds = 0,
+        retiredNativeShells = 0,
+        retiredInitialReservations = 0,
+        strandedNativeShells = 0,
+        strandedInitialReservations = 0,
+    }, "claimed unused seed")
+
+    controller:Destroy()
+    assertEqual(seed.enabled, false, "unused seed retired enabled state")
+    assertEqual(seed.shown, false, "unused seed retired visibility")
+    assertConstructionStats(harness, {
+        controllersCreated = 1,
+        destroyRequests = 1,
+        destroyCompletions = 1,
+        liveControllers = 0,
+        seedsAllocated = 1,
+        seedsClaimed = 1,
+        buildAttempts = 0,
+        buildCompletions = 0,
+        incompleteBuilds = 0,
+        retiredNativeShells = 1,
+        retiredInitialReservations = 0,
+        strandedNativeShells = 0,
+        strandedInitialReservations = 0,
+        afContainerAllocations = 1,
+        afInitialFrameReservationsCompleted = 0,
+    }, "retired unused seed")
 end
 
 local function testGroupCombatLiveRetarget()
@@ -1466,6 +1939,7 @@ local function testGroupVisibilityDoesNotProbeFrameState()
         "group visibility retry")
 end
 
+testConstructionStatsContract()
 testCapabilityGate()
 testBuildContract()
 testTuningContract()
@@ -1474,6 +1948,7 @@ testSharedCombatQueue()
 testRegenDispatchIsolation()
 testRebuildRejectsAfterInitialBuild()
 testMidBuildFailureIsOneShot()
+testPartialAddFailureDiagnostics()
 testVisibilityUsesWriteLedger()
 testProductionAvoidsVisibilityInspection()
 testMaxFrameCountContract()
@@ -1483,6 +1958,7 @@ testRefreshIsDirectDirtyMark()
 testGroupHeaderCapabilityAndSeed()
 testGroupSeedAdoptionAndOneShotClaim()
 testGroupSeedBuildQueuesInCombat()
+testUnusedSeedDestroyAccounting()
 testGroupCombatLiveRetarget()
 testGroupRetargetPrecedesStructuralTuning()
 testGroupVisibilityDoesNotProbeFrameState()

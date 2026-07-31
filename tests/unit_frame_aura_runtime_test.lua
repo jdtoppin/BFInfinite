@@ -64,6 +64,54 @@ local function lastEvent(harness, name)
     end
 end
 
+local function countRegisteredCallbacks(harness)
+    local count = 0
+    for _, callbacks in pairs(harness.registered) do
+        for _ in pairs(callbacks) do
+            count = count + 1
+        end
+    end
+    return count
+end
+
+local function assertProviderObserverOnly(harness, message)
+    assertTrue(
+        harness.registered.AURA_DATA_PROVIDER_SWITCH ~= nil,
+        (message or "provider observer") .. " is not registered"
+    )
+    assertEqual(
+        countRegisteredCallbacks(harness),
+        1,
+        (message or "provider observer") .. " callback count"
+    )
+end
+
+local function assertNoProviderDrivenControllerWork(
+    harness,
+    message,
+    allowCompile
+)
+    local prefix = message or "provider switch"
+    local eventNames = {
+        "controller.rebuild",
+        "controller.tuning",
+        "controller.unit",
+        "controller.enabled",
+        "controller.refresh",
+        "controller.holder-config",
+    }
+    if not allowCompile then
+        eventNames[#eventNames + 1] = "uf.compile"
+    end
+    for _, eventName in ipairs(eventNames) do
+        assertEqual(
+            countEvents(harness, eventName),
+            0,
+            prefix .. " " .. eventName
+        )
+    end
+end
+
 local function record(harness, name, ...)
     harness.events[#harness.events + 1] = {
         name = name,
@@ -444,6 +492,7 @@ local function makeHarness(options)
         next = next,
         pairs = pairs,
         select = select,
+        setmetatable = setmetatable,
         tostring = tostring,
         type = type,
     }
@@ -534,10 +583,17 @@ local function testDormancyAndFallback()
     assertEqual(#harness.controllers, 0, "dormant controller count")
     assertEqual(#harness.legacyFrames, 0, "dormant legacy count")
     assertEqual(#harness.compiles, 0, "dormant compile count")
-    assertEqual(next(harness.registered), nil, "dormant event registrations")
+    assertProviderObserverOnly(harness, "dormant provider observer")
     assertEqual(countEvents(harness, "af.pixel-add"), 0, "dormant pixel updater")
 
     local unavailable = makeHarness({backend = false})
+    assertEqual(next(unavailable.registered), nil,
+        "12.0.7 provider observer")
+    local unavailableStats = unavailable.UF.GetNativeAuraRuntimeStats()
+    assertEqual(unavailableStats.nativeBackendAvailable, false,
+        "12.0.7 provider backend state")
+    assertEqual(unavailableStats.providerSwitchEvents, 0,
+        "12.0.7 provider switch count")
     local root = newRoot("Fallback", "target")
     local direct, directError = unavailable.UF.CreateNativeAuraIndicator(
         root,
@@ -612,7 +668,10 @@ local function testLifecycleAndUnitRefresh()
     assertEqual(state.state, "READY", "initial runtime state")
     assertEqual(state.built, true, "initial built state")
     assertEqual(state.active, false, "initial active state")
-    assertEqual(next(harness.registered), nil, "hidden watcher registration")
+    assertEqual(state.providerMode, "live", "initial provider mode")
+    assertEqual(state.providerBuildDeferred, false,
+        "initial provider deferral")
+    assertProviderObserverOnly(harness, "hidden provider observer")
 
     harness:ClearEvents()
     runtime:Enable()
@@ -657,7 +716,7 @@ local function testLifecycleAndUnitRefresh()
     assertEqual(controller.enabled, true, "hidden root native prewarm")
     assertEqual(countEvents(harness, "uf.unregister"), 0,
         "ungated watcher unregistrations")
-    assertEqual(next(harness.registered), nil, "watcher cleanup")
+    assertProviderObserverOnly(harness, "ungated watcher cleanup")
 
     root.enabled = false
     runtime:Disable()
@@ -1102,6 +1161,7 @@ end
 
 local function testUngatedFocusWatcher()
     local harness = makeHarness()
+    harness:ClearEvents()
     local root = newRoot("DynamicFocus", "focus")
     local runtime = createRuntime(harness, root)
 
@@ -1293,8 +1353,10 @@ local function testSecretSafeWholeHolderGates()
     runtime:LoadConfig(validConfig({
         testState = "empty",
     }))
-    assertEqual(next(harness.registered), nil,
-        "invalid state watcher cleanup before commit")
+    assertProviderObserverOnly(
+        harness,
+        "invalid state watcher cleanup before commit"
+    )
     harness:RunTimers(0.15)
 
     runtime:Disable()
@@ -1471,7 +1533,7 @@ local function testWaitingUnitAndTerminalDestroy()
     assertEqual(runtime:GetNativeAuraState().state, "DESTROYED",
         "destroyed state")
     assertEqual(controller.destroyed, true, "controller destroy state")
-    assertEqual(next(harness.registered), nil, "destroy watcher cleanup")
+    assertProviderObserverOnly(harness, "destroy watcher cleanup")
     assertEqual(controller.frame.pixelRemoved, true, "pixel updater cleanup")
 
     local rebuilds = countEvents(harness, "controller.rebuild")
@@ -1622,8 +1684,10 @@ local function testGroupSeedsPrebuildBeforeCombat()
         "group assignment combat rebuild count")
     assertEqual(countEvents(harness, "controller.unit"), 1,
         "group assignment combat retarget count")
-    assertEqual(next(harness.registered), nil,
-        "group bootstrap regen registration")
+    assertProviderObserverOnly(
+        harness,
+        "group bootstrap regen registration"
+    )
 end
 
 local function testGroupUnitRetargetsBeforePendingCombatConfig()
@@ -1803,6 +1867,487 @@ local function testSecretUnitDefersExactTopologyRecovery()
         "clean config recovery timer count")
 end
 
+local function testNativeProviderVisibilityAndRuntimeCounters()
+    local harness = makeHarness()
+    local root = newRoot("ProviderVisibility", "player")
+    local runtime, controller = createRuntime(harness, root)
+
+    harness.assistResult = false
+    runtime:LoadConfig(validConfig({
+        requiresVisible = true,
+        requiresAssist = true,
+    }))
+    runtime:Enable()
+    assertEqual(controller.shown, false,
+        "live provider assist-gated holder")
+
+    local initialStats = harness.UF.GetNativeAuraRuntimeStats()
+    assertEqual(initialStats.nativeBackendAvailable, true,
+        "provider backend availability")
+    assertEqual(initialStats.runtimesCreated, 1,
+        "provider runtime creation count")
+    assertEqual(initialStats.runtimesDestroyed, 0,
+        "provider runtime destruction count")
+    assertEqual(initialStats.liveRuntimes, 1,
+        "provider live runtime count")
+    assertEqual(initialStats.providerSwitchEvents, 0,
+        "initial provider switch count")
+    assertEqual(initialStats.testProviderActive, false,
+        "initial provider state")
+
+    harness:SetCombat(true)
+    harness:ClearEvents()
+    harness:Fire("AURA_DATA_PROVIDER_SWITCH", false)
+
+    local state = runtime:GetNativeAuraState()
+    assertEqual(state.providerMode, "test", "test provider mode")
+    assertEqual(state.providerBuildDeferred, false,
+        "built test-provider deferral")
+    assertEqual(state.pending, false, "built test-provider pending state")
+    assertEqual(controller.shown, true,
+        "test provider visibility-gate bypass")
+    assertEqual(countEvents(harness, "controller.shown"), 1,
+        "test provider holder resync count")
+    assertEqual(countEvents(harness, "wow.visible"), 0,
+        "test provider visible-gate call count")
+    assertEqual(countEvents(harness, "wow.assist"), 0,
+        "test provider assist-gate call count")
+    assertEqual(countEvents(harness, "uf.unregister"), 9,
+        "test provider gate-watcher cleanup")
+    assertProviderObserverOnly(
+        harness,
+        "test provider gate-watcher state"
+    )
+    assertNoProviderDrivenControllerWork(
+        harness,
+        "test provider entry"
+    )
+    assertEqual(harness.registered.PLAYER_REGEN_ENABLED, nil,
+        "test provider combat queue")
+    assertEqual(#harness.controllers, 1,
+        "test provider controller growth")
+
+    harness:ClearEvents()
+    runtime:Update()
+    assertEqual(countEvents(harness, "controller.refresh"), 0,
+        "test provider stable-unit refresh count")
+    assertEqual(countEvents(harness, "wow.visible"), 0,
+        "test provider stable-unit visible-gate count")
+    assertEqual(countEvents(harness, "wow.assist"), 0,
+        "test provider stable-unit assist-gate count")
+
+    harness:ClearEvents()
+    harness:Fire("AURA_DATA_PROVIDER_SWITCH", true)
+
+    state = runtime:GetNativeAuraState()
+    assertEqual(state.providerMode, "live", "restored provider mode")
+    assertEqual(state.pending, false, "restored provider pending state")
+    assertEqual(controller.shown, false,
+        "restored live assist gate")
+    assertEqual(countEvents(harness, "controller.shown"), 1,
+        "restored provider holder resync count")
+    assertEqual(countEvents(harness, "wow.visible"), 1,
+        "restored visible-gate call count")
+    assertEqual(countEvents(harness, "wow.assist"), 1,
+        "restored assist-gate call count")
+    assertEqual(countEvents(harness, "uf.register"), 9,
+        "restored provider gate-watcher registration")
+    assertNoProviderDrivenControllerWork(
+        harness,
+        "live provider restoration"
+    )
+    assertEqual(harness.registered.PLAYER_REGEN_ENABLED, nil,
+        "live provider combat queue")
+    assertEqual(#harness.controllers, 1,
+        "live provider controller growth")
+    assertEqual(#harness.timers, 0,
+        "live provider visibility retry")
+
+    local stats = harness.UF.GetNativeAuraRuntimeStats()
+    assertEqual(stats.providerSwitchEvents, 2,
+        "provider switch event count")
+    assertEqual(stats.testProviderActivations, 1,
+        "test provider activation count")
+    assertEqual(stats.liveProviderRestorations, 1,
+        "live provider restoration count")
+    assertEqual(stats.lateBuildDeferrals, 0,
+        "built provider late-build count")
+    assertEqual(stats.lateBuildResumptions, 0,
+        "built provider resume count")
+    assertEqual(stats.testProviderActive, false,
+        "restored provider stats state")
+
+    stats.runtimesCreated = 99
+    assertEqual(
+        harness.UF.GetNativeAuraRuntimeStats().runtimesCreated,
+        1,
+        "provider stats snapshot isolation"
+    )
+
+    harness:SetCombat(false)
+    runtime:Destroy()
+    stats = harness.UF.GetNativeAuraRuntimeStats()
+    assertEqual(stats.runtimesDestroyed, 1,
+        "provider runtime destroyed count")
+    assertEqual(stats.liveRuntimes, 0,
+        "provider runtime release count")
+    assertProviderObserverOnly(harness, "post-destroy provider observer")
+end
+
+local function testNativeProviderTerminalConfigCancelsLateBuild()
+    local cases = {
+        {
+            testState = "empty",
+            expectedState = "EMPTY",
+        },
+        {
+            testState = "partition",
+            expectedState = "PARTITION_DEFERRED",
+        },
+        {
+            testState = "error",
+            expectedState = "ERROR",
+        },
+    }
+
+    for _, case in ipairs(cases) do
+        local harness = makeHarness()
+        harness:Fire("AURA_DATA_PROVIDER_SWITCH", false)
+
+        local root = newRoot(
+            "ProviderTerminal_" .. case.testState,
+            "target"
+        )
+        local runtime, controller = createRuntime(harness, root)
+        runtime:LoadConfig(validConfig())
+        assertEqual(
+            runtime:GetNativeAuraState().providerBuildDeferred,
+            true,
+            case.testState .. " initial provider deferral"
+        )
+
+        runtime:LoadConfig(validConfig({
+            testState = case.testState,
+            tag = case.testState,
+        }))
+        local state = runtime:GetNativeAuraState()
+        assertEqual(
+            state.state,
+            case.expectedState,
+            case.testState .. " terminal state"
+        )
+        assertEqual(
+            state.providerBuildDeferred,
+            false,
+            case.testState .. " terminal provider deferral"
+        )
+        assertEqual(
+            controller.built,
+            nil,
+            case.testState .. " terminal controller build"
+        )
+
+        local timerCount = #harness.timers
+        harness:ClearEvents()
+        harness:Fire("AURA_DATA_PROVIDER_SWITCH", true)
+
+        state = runtime:GetNativeAuraState()
+        assertEqual(
+            state.providerMode,
+            "live",
+            case.testState .. " restored provider mode"
+        )
+        assertEqual(
+            state.providerBuildDeferred,
+            false,
+            case.testState .. " restored provider deferral"
+        )
+        assertEqual(
+            state.built,
+            false,
+            case.testState .. " restored build state"
+        )
+        assertEqual(
+            #harness.timers,
+            timerCount,
+            case.testState .. " restored timer count"
+        )
+        assertNoProviderDrivenControllerWork(
+            harness,
+            case.testState .. " provider restoration"
+        )
+
+        local stats = harness.UF.GetNativeAuraRuntimeStats()
+        assertEqual(
+            stats.lateBuildDeferrals,
+            1,
+            case.testState .. " late-build count"
+        )
+        assertEqual(
+            stats.lateBuildResumptions,
+            0,
+            case.testState .. " resume count"
+        )
+
+        harness:RunTimers(0.15)
+        assertEqual(
+            runtime:GetNativeAuraState().pending,
+            false,
+            case.testState .. " settled pending state"
+        )
+        assertEqual(
+            controller.built,
+            nil,
+            case.testState .. " settled controller build"
+        )
+    end
+end
+
+local function testNativeProviderSecretUnitCancelsLateBuild()
+    local harness = makeHarness()
+    harness:Fire("AURA_DATA_PROVIDER_SWITCH", false)
+
+    local root = newRoot("ProviderSecretUnit", "target")
+    local runtime, controller = createRuntime(harness, root)
+    runtime:LoadConfig(validConfig())
+    assertEqual(
+        runtime:GetNativeAuraState().providerBuildDeferred,
+        true,
+        "secret-unit setup provider deferral"
+    )
+
+    root.effectiveUnit = {
+        secret = true,
+    }
+    runtime:LoadConfig(validConfig({
+        tag = "secret-unit",
+    }))
+
+    local state = runtime:GetNativeAuraState()
+    assertEqual(state.state, "WAITING_FOR_UNIT",
+        "secret-unit provider waiting state")
+    assertEqual(state.providerBuildDeferred, false,
+        "secret-unit provider deferral cancellation")
+    assertEqual(state.built, false,
+        "secret-unit provider build state")
+    assertEqual(controller.built, nil,
+        "secret-unit controller build")
+
+    harness:RunTimers(0.15)
+    harness:ClearEvents()
+    harness:Fire("AURA_DATA_PROVIDER_SWITCH", true)
+
+    state = runtime:GetNativeAuraState()
+    assertEqual(state.providerMode, "live",
+        "secret-unit restored provider mode")
+    assertEqual(state.state, "WAITING_FOR_UNIT",
+        "secret-unit restored waiting state")
+    assertEqual(state.providerBuildDeferred, false,
+        "secret-unit restored provider deferral")
+    assertEqual(state.built, false,
+        "secret-unit restored build state")
+    assertEqual(controller.built, nil,
+        "secret-unit restored controller build")
+    assertNoProviderDrivenControllerWork(
+        harness,
+        "secret-unit provider restoration"
+    )
+
+    local stats = harness.UF.GetNativeAuraRuntimeStats()
+    assertEqual(stats.lateBuildDeferrals, 1,
+        "secret-unit late-build deferral count")
+    assertEqual(stats.lateBuildResumptions, 0,
+        "secret-unit false-resumption count")
+end
+
+local function testNativeProviderLateBuildDefersThroughCombat()
+    local harness = makeHarness()
+
+    -- The observer is registered before any BFI runtime or native container,
+    -- so entering Edit Mode first still protects the initial build.
+    harness:Fire("AURA_DATA_PROVIDER_SWITCH", false)
+
+    local root = newRoot("ProviderLateBuild", "target")
+    local runtime, controller = createRuntime(harness, root)
+    harness:ClearEvents()
+    runtime:LoadConfig(validConfig())
+    runtime:Enable()
+    runtime:Update()
+
+    local state = runtime:GetNativeAuraState()
+    assertEqual(state.state, "READY", "deferred provider ready state")
+    assertEqual(state.providerMode, "test",
+        "deferred provider test state")
+    assertEqual(state.providerBuildDeferred, true,
+        "deferred provider build state")
+    assertEqual(state.built, false, "deferred provider built state")
+    assertEqual(state.pending, true, "deferred provider pending state")
+    assertEqual(controller.built, nil,
+        "deferred provider controller build")
+    assertNoProviderDrivenControllerWork(
+        harness,
+        "test provider deferred build",
+        true
+    )
+    assertEqual(countEvents(harness, "uf.compile"), 1,
+        "test provider deferred compile count")
+
+    local stats = harness.UF.GetNativeAuraRuntimeStats()
+    assertEqual(stats.runtimesCreated, 1,
+        "deferred provider runtime count")
+    assertEqual(stats.providerSwitchEvents, 1,
+        "deferred provider switch count")
+    assertEqual(stats.testProviderActivations, 1,
+        "deferred provider activation count")
+    assertEqual(stats.lateBuildDeferrals, 1,
+        "deferred provider build count")
+    assertEqual(stats.lateBuildResumptions, 0,
+        "pre-restoration build resume count")
+
+    harness:SetCombat(true)
+    harness:ClearEvents()
+    harness:Fire("AURA_DATA_PROVIDER_SWITCH", true)
+
+    state = runtime:GetNativeAuraState()
+    assertEqual(state.providerMode, "live",
+        "combat restoration provider mode")
+    assertEqual(state.providerBuildDeferred, false,
+        "combat restoration provider deferral")
+    assertEqual(state.built, false,
+        "combat restoration built state")
+    assertEqual(state.pending, true,
+        "combat restoration pending state")
+    assertEqual(controller.built, nil,
+        "combat restoration controller build")
+    assertNoProviderDrivenControllerWork(
+        harness,
+        "combat provider restoration"
+    )
+    assertTrue(harness.registered.PLAYER_REGEN_ENABLED,
+        "combat provider restoration queue")
+
+    stats = harness.UF.GetNativeAuraRuntimeStats()
+    assertEqual(stats.providerSwitchEvents, 2,
+        "combat restoration switch count")
+    assertEqual(stats.liveProviderRestorations, 1,
+        "combat restoration event count")
+    assertEqual(stats.lateBuildResumptions, 1,
+        "combat restoration resume count")
+    assertEqual(stats.testProviderActive, false,
+        "combat restoration provider stats state")
+
+    harness:SetCombat(false)
+    harness:Fire("PLAYER_REGEN_ENABLED")
+    harness:RunTimers(0)
+
+    state = runtime:GetNativeAuraState()
+    assertEqual(state.built, true, "regen provider built state")
+    assertEqual(state.pending, false, "regen provider pending state")
+    assertEqual(controller.built, true,
+        "regen provider controller build")
+    assertEqual(countEvents(harness, "controller.rebuild"), 1,
+        "regen provider rebuild count")
+    assertEqual(countEvents(harness, "controller.holder-config"), 1,
+        "regen provider placement count")
+    assertEqual(countEvents(harness, "controller.tuning"), 0,
+        "regen provider tuning count")
+end
+
+local function testNativeProviderRespectsConfigModePreview()
+    local harness = makeHarness()
+    harness:Fire("AURA_DATA_PROVIDER_SWITCH", false)
+
+    local root = newRoot("ProviderConfigMode", "focus")
+    local runtime, controller = createRuntime(harness, root)
+    runtime:LoadConfig(validConfig())
+
+    root.inConfigMode = true
+    runtime:EnableConfigMode()
+    assertEqual(controller.built, nil,
+        "config-mode provider native build")
+    assertEqual(#harness.legacyFrames, 1,
+        "config-mode provider preview count")
+    assertEqual(harness.legacyFrames[1].configMode, true,
+        "config-mode provider preview state")
+
+    harness:ClearEvents()
+    harness:Fire("AURA_DATA_PROVIDER_SWITCH", true)
+
+    local state = runtime:GetNativeAuraState()
+    assertEqual(state.providerMode, "live",
+        "config-mode restored provider mode")
+    assertEqual(state.providerBuildDeferred, false,
+        "config-mode restored provider deferral")
+    assertEqual(state.configMode, true,
+        "provider switch config-mode state")
+    assertEqual(state.built, false,
+        "provider switch config-mode build")
+    assertEqual(state.pending, true,
+        "provider switch config-mode pending state")
+    assertEqual(controller.built, nil,
+        "provider switch config-mode controller build")
+    assertEqual(harness.legacyFrames[1].configMode, true,
+        "provider switch preview continuity")
+    assertEqual(countEvents(harness, "legacy.load"), 0,
+        "provider switch preview reload count")
+    assertEqual(countEvents(harness, "legacy.config-enable"), 0,
+        "provider switch preview enable count")
+    assertEqual(countEvents(harness, "legacy.config-disable"), 0,
+        "provider switch preview disable count")
+    assertEqual(countEvents(harness, "legacy.disable"), 0,
+        "provider switch preview hide count")
+    assertNoProviderDrivenControllerWork(
+        harness,
+        "config-mode provider restoration"
+    )
+
+    root.inConfigMode = nil
+    runtime:DisableConfigMode()
+    runtime:Enable()
+    state = runtime:GetNativeAuraState()
+    assertEqual(state.built, true,
+        "post-config provider built state")
+    assertEqual(state.pending, false,
+        "post-config provider pending state")
+    assertEqual(controller.built, true,
+        "post-config provider controller build")
+    assertEqual(harness.legacyFrames[1].configMode, false,
+        "post-config provider preview state")
+
+    runtime:Disable()
+    harness:ClearEvents()
+    harness:Fire("AURA_DATA_PROVIDER_SWITCH", false)
+    state = runtime:GetNativeAuraState()
+    assertEqual(state.active, false,
+        "disabled test-provider active state")
+    assertEqual(controller.shown, false,
+        "disabled test-provider holder state")
+    assertNoProviderDrivenControllerWork(
+        harness,
+        "disabled test-provider entry"
+    )
+
+    harness:Fire("AURA_DATA_PROVIDER_SWITCH", true)
+    runtime:Enable()
+    runtime:LoadConfig(validConfig({
+        style = "reload-style",
+    }))
+    assertEqual(runtime:GetNativeAuraState().reloadRequired, true,
+        "provider reload-required setup")
+
+    harness:ClearEvents()
+    harness:Fire("AURA_DATA_PROVIDER_SWITCH", false)
+    state = runtime:GetNativeAuraState()
+    assertEqual(state.reloadRequired, true,
+        "test-provider reload-required state")
+    assertEqual(controller.shown, false,
+        "test-provider reload-required holder state")
+    assertNoProviderDrivenControllerWork(
+        harness,
+        "reload-required test-provider entry"
+    )
+end
+
 testDormancyAndFallback()
 testLifecycleAndUnitRefresh()
 testDebounceAndConstructionReuse()
@@ -1825,5 +2370,10 @@ testGroupSeedsPrebuildBeforeCombat()
 testGroupUnitRetargetsBeforePendingCombatConfig()
 testSecretUnitTokenFailsClosed()
 testSecretUnitDefersExactTopologyRecovery()
+testNativeProviderVisibilityAndRuntimeCounters()
+testNativeProviderTerminalConfigCancelsLateBuild()
+testNativeProviderSecretUnitCancelsLateBuild()
+testNativeProviderLateBuildDefersThroughCombat()
+testNativeProviderRespectsConfigModePreview()
 
 print("unit_frame_aura_runtime_test.lua: ok")
