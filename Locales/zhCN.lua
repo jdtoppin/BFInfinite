@@ -129,8 +129,8 @@ L["Global Priorities"] = "全局优先级"
 L["Global Colors"] = "全局颜色"
 L["Input Spell ID"] = "输入法术ID"
 L["Unknown Spell"] = "未知法术"
-L["Set a color for each aura spell ID. Spell IDs with exactly the same color share one family. BFI gives this saved map to WoW before the row is created and never reads which auras are active. Colors work for Block-style Buffs on units you can help and Block-style Debuffs on units you cannot help. The whole colored row is hidden when that friendly or hostile match is wrong or cannot be checked safely. Unlisted spells stay gray. Each color group has its own order and display limit. If a row would need more than eight groups, BFI safely leaves the entire row gray. Changing color groups may require a UI reload"] = "为每个光环法术 ID 设置颜色。颜色完全相同的法术 ID 会共用一个组。BFI 会在创建光环列前将这份已保存的映射交给 WoW，绝不会读取当前生效的是哪些光环。颜色适用于可协助单位上的色块增益，以及不可协助单位上的色块减益。若友方或敌方关系不符合要求，或无法安全确认，BFI 会隐藏整列有颜色的光环。未列出的法术保持灰色。每个颜色组都有独立的排序和显示上限。若某一列需要超过八个组，BFI 会安全地让整列保持灰色。更改颜色组可能需要重载界面。"
-L["These spell colors are saved for WoW 12.1 but are not applied by this older aura system. You can prepare or edit the list now; 12.0.7 Block rows remain gray and BFI does not inspect their aura spell IDs"] = "这些法术颜色会为 WoW 12.1 保存，但不会应用于当前较旧的光环系统。你现在仍可准备或编辑列表；12.0.7 的色块光环列保持灰色，BFI 不会读取其光环法术 ID。"
+L["Assign colors to aura spell IDs. Block-style unit-frame auras use them where WoW supports safe matching; unlisted spells stay gray. Rows may hide when matching is unavailable. Changes may require a UI reload"] = "为光环法术 ID 分配颜色。单位框架的色块样式光环会在 WoW 可安全匹配时使用这些颜色；未列出的法术保持灰色。无法匹配时，整列光环可能会隐藏。更改后可能需要重载界面。"
+L["Assign colors by spell ID for WoW 12.1. Older aura rows stay gray"] = "按法术 ID 为 WoW 12.1 分配颜色。较旧版本的光环列会保持灰色。"
 
 ---------------------------------------------------------------------
 -- unit frames
