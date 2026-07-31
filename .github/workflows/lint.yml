@@ -38,3 +38,7 @@ jobs:
           for test_file in tests/abstract_framework_version_guard_test.lua tests/mythic_plus_*_test.lua tests/objective_tracker_managed_container_test.lua; do
             luajit "$test_file"
           done
+
+      - name: Test Retail 12.1 fixes
+        run: |
+          lua5.1 tests/experience_bar_disabled_texture_test.lua
