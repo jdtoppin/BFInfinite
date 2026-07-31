@@ -27,11 +27,11 @@ Use this clean isolated-install sequence:
 1. AF #19 at `d6858f3997a1014a7ab9ce05ddaaf53efe4df9c6` with BFInfinite
    #90 at `d9c5a23246a01572e1fb75d470a250032f802b33`.
 2. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
-   #101 at `b114db40fb586d37b048c58ff0f8166f00b63883`.
+   #101 at `5f221bdd1679ebcafb2a4cab381188f080d81572`.
 3. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
-   #102 at `b88bb4fbd5430fdb7d26090d4a9c9650c1f39bb9`.
+   #102 at `62fdc2c289dcf518adff5f3a109eba3f05ed9dc8`.
 4. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
-   #110 at `69319793765c62009e39bab4ee30a67b7c226f1a`.
+   #110 at `4b350b7ff7903c2e275c305980624937f4dca357`.
 5. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
    #103 at `19df3783962e9fff37c8c02f30087c5c26e22f10`.
 6. Validation-only AF #25 at
@@ -56,8 +56,8 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Coverage | Branch | Exact head |
 |---|---|---|
 | Current BFInfinite master compatibility (#104) | `master` | `5f9426b86b49700dea00358ea426b8925b6ddf64` |
-| Global exact spell colors (#101) | `codex/unitframe-aura-spell-colors` | `b114db40fb586d37b048c58ff0f8166f00b63883` |
-| Presentation hardening (#102) | `codex/unitframe-aura-presentation-hardening` | `b88bb4fbd5430fdb7d26090d4a9c9650c1f39bb9` |
+| Global exact spell colors (#101) | `codex/unitframe-aura-spell-colors` | `5f221bdd1679ebcafb2a4cab381188f080d81572` |
+| Presentation hardening (#102) | `codex/unitframe-aura-presentation-hardening` | `62fdc2c289dcf518adff5f3a109eba3f05ed9dc8` |
 | Player | `codex/unitframe-aura-player` | `61bbdae09c808f58dc69812c848fa2496f3cf806` |
 | Boss | `codex/unitframe-aura-boss` | `9f01f432289b6b2457c5bb9cc6f023582ad85b5c` |
 | Focus | `codex/unitframe-aura-focus` | `03b75af042fd84b93a3e3eaeb09ac68b1ff46440` |
@@ -65,7 +65,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | FocusTarget | `codex/unitframe-aura-focustarget` | `58a60e011cb2dbd2d3b54d62cdb6ffc6b8df2df9` |
 | PetTarget | `codex/unitframe-aura-pettarget` | `02a75fd22f8f04e21e7f139df214697e6350e567` |
 | Pet | `codex/unitframe-aura-pet` | `8e91a8c7616b3000d5e607a2063bf528dd8c4f59` |
-| Target partition (#110) | `codex/unitframe-aura-target-final` | `69319793765c62009e39bab4ee30a67b7c226f1a` |
+| Target partition (#110) | `codex/unitframe-aura-target-final` | `4b350b7ff7903c2e275c305980624937f4dca357` |
 | Party | `codex/unitframe-aura-party` | `2cfcbca80d0b2b45b9a9abb657907511152ae6b9` |
 | Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
 | Upper-right Debuff appearance (#103; includes #99) | `codex/buffs-debuffs-native-debuffs` | `19df3783962e9fff37c8c02f30087c5c26e22f10` |
@@ -113,6 +113,15 @@ native row.
 Changing membership inside an existing exact-RGBA family is live tuning.
 Adding, removing, or changing an RGBA family changes native construction and
 requires reload after the row has been built.
+
+Before runtime color checks, open **Auras → Global Colors** and verify:
+
+- the introduction is the short four-sentence explanation;
+- Search, `+`, and Reset share one toolbar above the bordered list;
+- the list uses three columns and never consumes a cell for `+`;
+- long spell names end in an ellipsis, while hovering the row shows the full
+  spell tooltip; and
+- clicking `+` opens a usable spell-ID field across the Search area.
 
 ### Color expansion budget and counters
 
