@@ -462,7 +462,8 @@ assertTrue(historyAt < modelAt and modelAt < meterAt
     "Mythic+ dependency load order")
 
 local toc = readFile("BFInfinite.toc")
-assertTrue(toc:find("120100", 1, true), "12.1 interface declaration")
+local interfaceVersion = toc:match("## Interface: ([^\r\n]+)")
+assertEqual(interfaceVersion, "120100", "12.1-only interface declaration")
 assertTrue(toc:find("BFIMythicPlusHistory", 1, true),
     "Mythic+ saved variable declaration")
 

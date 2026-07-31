@@ -8,12 +8,6 @@ local function assertEqual(actual, expected, message)
     end
 end
 
-local function assertTrue(value, message)
-    if not value then
-        error(message or "expected a truthy value", 2)
-    end
-end
-
 local function findUpvalue(func, targetName)
     local index = 1
     while true do
@@ -78,51 +72,23 @@ local removeTracker = findUpvalue(
     setupTracker,
     "RemoveTrackerFromRightManagedFrameContainer"
 )
-assertEqual(type(removeTracker), "function", "compatibility helper upvalue")
+assertEqual(type(removeTracker), "function", "managed-container helper")
 
-local legacyCalls = 0
 local accessorCalls = 0
-local legacyContainer = {}
-function legacyContainer:RemoveManagedFrame(frame)
-    legacyCalls = legacyCalls + 1
-    assertEqual(self, legacyContainer, "legacy container self")
-    assertEqual(frame, tracker, "legacy tracker")
+local removalCalls = 0
+local managedContainer = {}
+function managedContainer:RemoveManagedFrame(frame)
+    removalCalls = removalCalls + 1
+    assertEqual(self, managedContainer, "managed container self")
+    assertEqual(frame, tracker, "managed ObjectiveTrackerFrame")
 end
-
-environment.UIParentRightManagedFrameContainer = legacyContainer
 environment.GetRightManagedFrameContainer = function()
     accessorCalls = accessorCalls + 1
-    return {}
-end
-removeTracker()
-assertEqual(legacyCalls, 1, "12.0.7 legacy removal")
-assertEqual(accessorCalls, 0, "legacy contract takes precedence")
-
-local modernCalls = 0
-local modernContainer = {}
-function modernContainer:RemoveManagedFrame(frame)
-    modernCalls = modernCalls + 1
-    assertEqual(self, modernContainer, "modern container self")
-    assertEqual(frame, tracker, "modern tracker")
+    return managedContainer
 end
 
-environment.UIParentRightManagedFrameContainer = nil
-environment.GetRightManagedFrameContainer = function()
-    accessorCalls = accessorCalls + 1
-    return modernContainer
-end
 removeTracker()
-assertEqual(accessorCalls, 1, "12.1 accessor call")
-assertEqual(modernCalls, 1, "12.1 managed-frame removal")
+assertEqual(accessorCalls, 1, "12.1 managed-container accessor")
+assertEqual(removalCalls, 1, "12.1 managed-frame removal")
 
-environment.GetRightManagedFrameContainer = nil
-removeTracker()
-assertEqual(modernCalls, 1, "missing manager is a no-op")
-
-environment.GetRightManagedFrameContainer = function()
-    return {}
-end
-removeTracker()
-assertTrue(true, "manager without removal capability is a no-op")
-
-print("objective_tracker_12_1_compat_test.lua: ok")
+print("objective_tracker_managed_container_test.lua: ok")

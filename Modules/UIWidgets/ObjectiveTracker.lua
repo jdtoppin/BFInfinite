@@ -17,17 +17,12 @@ local trackerContainer
 
 local GenerateClosure = GenerateClosure
 
--- Retail 12.0.7.68887 exposes UIParentRightManagedFrameContainer directly.
--- Retail 12.1.0.68914 replaces it with GetRightManagedFrameContainer().
+-- Retail 12.1.0.68914, Gethe/wow-ui-source commit
+-- d3915c78aba77a7a9be76acbfa35c674bbb6abe9:
+-- Blizzard_ManagedFrameSystem/Shared/ManagedFrameSystem.lua exposes this
+-- accessor before Blizzard_ObjectiveTracker loads.
 local function RemoveTrackerFromRightManagedFrameContainer()
-    local container = _G.UIParentRightManagedFrameContainer
-    if not container and type(_G.GetRightManagedFrameContainer) == "function" then
-        container = _G.GetRightManagedFrameContainer()
-    end
-
-    if container and type(container.RemoveManagedFrame) == "function" then
-        container:RemoveManagedFrame(tracker)
-    end
+    _G.GetRightManagedFrameContainer():RemoveManagedFrame(tracker)
 end
 
 ---------------------------------------------------------------------

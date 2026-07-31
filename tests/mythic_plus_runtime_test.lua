@@ -878,7 +878,7 @@ local unavailableRun = MP.GetCurrentRun()
 state.elapsed = 1200
 state.meterFailures = 10
 eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_COMPLETED")
-unavailableRun.finalizeCandidate = "malformed legacy value"
+unavailableRun.finalizeCandidate = "malformed persisted value"
 for _ = 1, 39 do
     state.timerClock = state.timerClock + 0.1
     eventFrame.scripts.OnEvent(

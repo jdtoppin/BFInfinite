@@ -451,10 +451,10 @@ local function SanitizeSource(adapter, api, sessionType, categoryType,
 end
 
 -- Verified against generated DamageMeterDocumentation.lua from Retail
--- 12.0.7.68887 (Gethe commit 4383ced30106d51b27e3e86d1987f1552f0d259d)
--- and 12.1.0.68914 (commit d3915c78aba77a7a9be76acbfa35c674bbb6abe9).
+-- 12.1.0.68914 (Gethe/wow-ui-source commit
+-- d3915c78aba77a7a9be76acbfa35c674bbb6abe9).
 -- Session and source reads are SecretWhenInCombat. Spell drilldown is supplied
--- by GetCombatSessionSourceFromType(...).combatSpells in both artifacts.
+-- by GetCombatSessionSourceFromType(...).combatSpells in that artifact.
 function Adapter:FetchCategory(sessionType, category, rosterByGUID)
     local safe, unsafeReason = self:IsSafeToRead()
     if not safe then

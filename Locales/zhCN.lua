@@ -630,7 +630,6 @@ L["mature"] = "成熟"
 
 L["abandoned run"] = "已放弃的挑战"
 L["extended learning run"] = "超长练习记录"
-L["baselines begin with 12.1"] = "基准数据从 12.1 开始"
 L["meter data incomplete"] = "伤害统计数据不完整"
 L["run incomplete"] = "挑战未完成"
 L["manually excluded"] = "已手动排除"

@@ -39,7 +39,6 @@ local max = math.max
 local min = math.min
 local sort = table.sort
 
-local HISTORY_START_INTERFACE = 120100
 local MAX_PULL_SNAPSHOTS = 50
 local TIMER_REFRESH_INTERVAL = 0.10
 local FINALIZE_QUIET_DELAY = 0.20
@@ -89,7 +88,6 @@ local assessmentLabels = {
 local baselineReasonLabels = {
     abandoned_run = L["abandoned run"],
     extended_learning_run = L["extended learning run"],
-    history_starts_12_1 = L["baselines begin with 12.1"],
     incomplete_meter = L["meter data incomplete"],
     incomplete_run = L["run incomplete"],
     manual_exclude = L["manually excluded"],
@@ -129,10 +127,6 @@ local function getInterfaceVersion()
         return 0
     end
     return tonumber(interfaceVersion) or 0
-end
-
-local function isHistoryEra()
-    return getInterfaceVersion() >= HISTORY_START_INTERFACE
 end
 
 local function getTimestamp()
@@ -355,11 +349,6 @@ local function drainPendingRuns(season)
 end
 
 local function discoverSeason()
-    if not isHistoryEra() then
-        currentSeason = nil
-        currentSeasonKey = nil
-        return nil
-    end
     if type(C_MythicPlus) ~= "table"
         or type(C_MythicPlus.IsMythicPlusActive) ~= "function"
         or not C_MythicPlus.IsMythicPlusActive()
@@ -460,12 +449,6 @@ local function discoverSeason()
 end
 
 local function storeCompletedRun(run)
-    if not isHistoryEra() then
-        run.baselineEligible = false
-        run.baselineReason = "history_starts_12_1"
-        return
-    end
-
     discoverSeason()
     local targetSeason, targetKey = findSeasonForRun(
         run,
@@ -1511,9 +1494,7 @@ archiveInterruptedRun = function(reason, preserveElapsed)
     run.baselineReason = reason == "reset" and "reset_run"
         or "abandoned_run"
     cleanupRawMeterData(run)
-    if isHistoryEra() then
-        storeCompletedRun(run)
-    end
+    storeCompletedRun(run)
 
     ensureHistory()
     characterHistory.activeRun = nil
