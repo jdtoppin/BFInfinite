@@ -71,6 +71,7 @@ local activeColorPicker
 local activePickerCancelCount = 0
 local lastDialog
 local capturedScrollGrid
+local LONG_SPELL_NAME = "An Exceptionally Long Restoration Spell Name"
 
 local function newWidget(kind, parent)
     local widget = {
@@ -255,6 +256,10 @@ local function newWidget(kind, parent)
         self.width = value
     end
 
+    function widget:GetWidth()
+        return self.width or 57
+    end
+
     function widget:SetJustifyH(value)
         self.justifyH = value
     end
@@ -331,9 +336,11 @@ function AF.CreateFontString(parent, text)
     return fontString
 end
 
-function AF.CreateButton(parent, text)
+function AF.CreateButton(parent, text, _, width, height)
     local button = newWidget("button", parent)
     button.text = text
+    button.creationWidth = width
+    button.creationHeight = height
     button.texture = newWidget("texture", button)
     createdButtons[#createdButtons + 1] = button
     return button
@@ -519,12 +526,33 @@ function AF.Sort(items, firstKey, firstOrder, secondKey, secondOrder)
     end)
 end
 
+function AF.TruncateFontStringByWidth(
+    fontString,
+    width,
+    alignment,
+    showEllipsis,
+    text
+)
+    fontString.truncation = {
+        width = width,
+        alignment = alignment,
+        showEllipsis = showEllipsis,
+        text = text,
+    }
+    if showEllipsis and #text > 12 then
+        fontString:SetText(text:sub(1, 9) .. "...")
+    else
+        fontString:SetText(text)
+    end
+end
+
 function AF.SpellExists(spellID)
     return spellID == 101
         or spellID == 202
         or spellID == 303
         or spellID == 404
         or spellID == 505
+        or spellID == 606
         or spellID == 999
 end
 
@@ -536,6 +564,9 @@ function AF.GetSpellInfo(spellID)
         "spell lookup received malformed ID"
     )
     if AF.SpellExists(spellID) then
+        if spellID == 606 then
+            return LONG_SPELL_NAME, "spell-icon:" .. spellID
+        end
         return "Spell " .. spellID, "spell-icon:" .. spellID
     end
 end
@@ -561,6 +592,7 @@ local A = {
             [101] = {0.1, 0.2, 0.3, 0.4},
             [202] = {0.2, 0.3, 0.4, 0.5},
             [303] = {0 / 0, 0.2, 0.3, 1},
+            [606] = {0.3, 0.4, 0.5, 0.6},
             legacy = "red",
             [false] = {0.8, 0.7, 0.6, 0.5},
         },
@@ -641,34 +673,70 @@ end
 
 local function assertOnlyRow(spellID, message)
     local widgets = capturedScrollGrid.widget.widgets
-    assertEqual(#widgets, 2, message .. " count")
-    assertEqual(widgets[2].spell, spellID, message .. " spell")
+    assertEqual(#widgets, 1, message .. " count")
+    assertEqual(widgets[1].spell, spellID, message .. " spell")
 end
 
 AF.Fire("BFI_ShowOptionsPanel", "auras")
 
 local panel = capturedScrollGrid.widget.parent.parent
 assertTrue(panel, "Auras panel")
-assertEqual(capturedScrollGrid.slotColumn, 2, "grid columns")
-assertEqual(capturedScrollGrid.slotRow, 13, "wrapped-description grid rows")
+assertEqual(capturedScrollGrid.slotColumn, 3, "grid columns")
+assertEqual(capturedScrollGrid.slotRow, 13, "grid rows")
 assertEqual(capturedScrollGrid.slotHeight, 20, "grid row height")
 assertEqual(capturedScrollGrid.slotSpacing, 5, "grid spacing")
 assertEqual(panel.description.wordWrap, true, "description wrapping")
-assertTrue(
-    panel.description.text:find(
-        "exactly the same color share one family",
-        1,
-        true
-    ) ~= nil,
-    "exact-color-family explanation"
+assertEqual(
+    panel.description.text,
+    "Assign colors to aura spell IDs. Block-style unit-frame auras use "
+        .. "them where WoW supports safe matching; unlisted spells stay "
+        .. "gray. Rows may hide when matching is unavailable. Changes may "
+        .. "require a UI reload",
+    "concise Global Colors introduction"
 )
-assertTrue(
-    panel.description.text:find(
-        "whole colored row is hidden",
-        1,
-        true
-    ) ~= nil,
-    "reaction fail-closed explanation"
+local content = capturedScrollGrid.widget.parent
+local addButton = content.addButton
+local search = content.search
+local reset = content.reset
+assertEqual(addButton.parent, content, "Add button parent")
+assertEqual(addButton.creationWidth, 35, "Add button width")
+assertEqual(addButton.creationHeight, 20, "Add button height")
+assertEqual(addButton.points[1][2], reset, "Add button right neighbor")
+assertEqual(addButton.points[1][3], "TOPLEFT", "Add button anchor")
+assertEqual(search.points[2][2], addButton, "Search right neighbor")
+assertEqual(search.points[2][3], "TOPLEFT", "Search right anchor")
+for _, row in ipairs(capturedScrollGrid.widget.widgets) do
+    assertTrue(row ~= addButton, "Add button leaked into aura grid")
+end
+
+local longNameRow = assert(findRow(606))
+assertEqual(longNameRow.fullName, LONG_SPELL_NAME, "full spell name")
+assertEqual(longNameRow.nameText.wordWrap, false, "spell name wrapping")
+assertEqual(
+    longNameRow.nameText.truncation.text,
+    LONG_SPELL_NAME,
+    "ellipsis source text"
+)
+assertEqual(
+    longNameRow.nameText.truncation.showEllipsis,
+    true,
+    "spell name ellipsis"
+)
+assertEqual(
+    longNameRow.nameText.points[1][2],
+    longNameRow.idText,
+    "spell name left constraint"
+)
+assertEqual(
+    longNameRow.nameText.points[2][2],
+    longNameRow.colorPicker,
+    "spell name right constraint"
+)
+longNameRow:EnterMouse()
+assertEqual(
+    tooltip.spellCalls[#tooltip.spellCalls],
+    606,
+    "long spell full tooltip"
 )
 assertEqual(findRow(777), nil, "blacklist leaked into Colors panel")
 assertEqual(findRow(888), nil, "priorities leaked into Colors panel")
@@ -713,6 +781,11 @@ assertEqual(
 
 row101:Click("LeftButton")
 local escapedInput = editBoxes[#editBoxes]
+assertEqual(
+    escapedInput.allPoints[1],
+    row101,
+    "existing-spell editor overlays its row"
+)
 escapedInput:Escape()
 -- Simulate AF immediately lending the released transient editor elsewhere.
 -- The Auras panel must no longer treat that visible pooled widget as its own.
@@ -766,10 +839,14 @@ assertColor(
     "color cancellation mutation"
 )
 
-local addButton = capturedScrollGrid.widget.widgets[1]
 updatesBefore = countUpdates()
 addButton:Click("LeftButton")
 local addInput = editBoxes[#editBoxes]
+assertEqual(
+    addInput.allPoints[1],
+    search,
+    "new-spell editor overlays Search"
+)
 addInput:Enter(404)
 assertColor(
     A.config.colors[404],
@@ -778,7 +855,7 @@ assertColor(
 )
 assertEqual(countUpdates(), updatesBefore + 1, "add update")
 updatesBefore = countUpdates()
-capturedScrollGrid.widget.widgets[1]:Click("LeftButton")
+addButton:Click("LeftButton")
 local noOpInput = editBoxes[#editBoxes]
 noOpInput:Enter(202)
 assertEqual(countUpdates(), updatesBefore, "add-existing no-op update")
@@ -825,7 +902,6 @@ assertColor(
     "collision source color"
 )
 
-local search = capturedScrollGrid.widget.parent.search
 search:UserText("spell 505")
 assertOnlyRow(505, "name search")
 search:UserText("202")
@@ -837,7 +913,6 @@ assert(findRow(202)):Click("RightButton")
 assertEqual(A.config.colors[202], nil, "valid delete")
 assertEqual(countUpdates(), updatesBefore + 1, "valid delete update")
 
-local reset = capturedScrollGrid.widget.parent.reset
 local beforeResetCancel = copy(A.config.colors)
 updatesBefore = countUpdates()
 reset:Click("LeftButton")
@@ -857,7 +932,7 @@ assertEqual(priorities[888], 9, "reset mutated priorities")
 
 local defaultRow = assert(findRow(999))
 defaultRow.colorPicker:Open()
-capturedScrollGrid.widget.widgets[1]:Click("LeftButton")
+addButton:Click("LeftButton")
 local openInput = editBoxes[#editBoxes]
 openInput:UserText(999)
 cancelBefore = activePickerCancelCount

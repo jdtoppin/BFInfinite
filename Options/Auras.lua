@@ -94,11 +94,11 @@ local function CreateAurasPanel()
 
     if HasNativeAuraContainerBackend() then
         description:SetText(
-            L["Set a color for each aura spell ID. Spell IDs with exactly the same color share one family. BFI gives this saved map to WoW before the row is created and never reads which auras are active. Colors work for Block-style Buffs on units you can help and Block-style Debuffs on units you cannot help. The whole colored row is hidden when that friendly or hostile match is wrong or cannot be checked safely. Unlisted spells stay gray. Each color group has its own order and display limit. If a row would need more than eight groups, BFI safely leaves the entire row gray. Changing color groups may require a UI reload"]
+            L["Assign colors to aura spell IDs. Block-style unit-frame auras use them where WoW supports safe matching; unlisted spells stay gray. Rows may hide when matching is unavailable. Changes may require a UI reload"]
         )
     else
         description:SetText(
-            L["These spell colors are saved for WoW 12.1 but are not applied by this older aura system. You can prepare or edit the list now; 12.0.7 Block rows remain gray and BFI does not inspect their aura spell IDs"]
+            L["Assign colors by spell ID for WoW 12.1. Older aura rows stay gray"]
         )
     end
 
@@ -119,7 +119,11 @@ local function ShowInputBox(owner)
         nil,
         "number"
     )
-    inputBox:SetAllPoints(owner)
+    inputBox:SetAllPoints(
+        owner.spell ~= nil
+            and owner
+            or contentPane.search
+    )
     inputBox:SetBorderColor("BFI")
 
     inputBox:SetOnTextChanged(function(spell)
@@ -220,15 +224,42 @@ local function CreateContentPane()
     contentPane.reset = reset
     reset:SetPoint("TOPRIGHT")
 
+    local addButton = AF.CreateButton(
+        contentPane,
+        nil,
+        "BFI_hover",
+        35,
+        20
+    )
+    contentPane.addButton = addButton
+    addButton:SetTexture(AF.GetIcon("Plus"))
+    addButton:EnablePushEffect(false)
+    addButton:SetOnClick(ShowInputBox)
+
+    AF.SetPoint(
+        addButton,
+        "TOPRIGHT",
+        reset,
+        "TOPLEFT",
+        -7,
+        0
+    )
     AF.SetPoint(search, "TOPLEFT")
-    AF.SetPoint(search, "TOPRIGHT", reset, "TOPLEFT", -7, 0)
+    AF.SetPoint(
+        search,
+        "TOPRIGHT",
+        addButton,
+        "TOPLEFT",
+        -7,
+        0
+    )
 
     local scroll = AF.CreateScrollGrid(
         contentPane,
         nil,
         5,
         5,
-        2,
+        3,
         13,
         nil,
         20,
@@ -274,18 +305,6 @@ local function CreateContentPane()
             FireColorsChanged()
         end)
     end)
-
-    local addButton = AF.CreateButton(
-        contentPane,
-        nil,
-        "BFI_hover",
-        150,
-        20
-    )
-    contentPane.addButton = addButton
-    addButton:SetTexture(AF.GetIcon("Plus"))
-    addButton:EnablePushEffect(false)
-    addButton:SetOnClick(ShowInputBox)
 
     local tip = AF.CreateFontString(
         contentPane,
@@ -374,6 +393,16 @@ local function CreateContentPane()
         button.nameText:SetJustifyH("LEFT")
         button.nameText:SetWordWrap(false)
 
+        function button:Update()
+            AF.TruncateFontStringByWidth(
+                self.nameText,
+                self.nameText:GetWidth(),
+                "left",
+                true,
+                self.fullName
+            )
+        end
+
         button:SetOnClick(function(_, mouseButton)
             if mouseButton == "LeftButton" then
                 ShowInputBox(button)
@@ -413,6 +442,7 @@ local function CreateContentPane()
         button.spell = nil
         button.sortKey = nil
         button.spellText = nil
+        button.fullName = nil
     end)
 end
 
@@ -451,7 +481,8 @@ LoadList = function()
             button.spellText = spellText
             button.colorPicker:SetColor(GetDisplayColor(color))
             button.idText:SetText(spellText)
-            button.nameText:SetText(name or L["Unknown Spell"])
+            button.fullName = name or L["Unknown Spell"]
+            button.nameText:SetText(button.fullName)
             button:SetTexture(
                 icon or AF.GetIcon("QuestionMark"),
                 nil,
@@ -469,8 +500,12 @@ LoadList = function()
         "spellText",
         "ascending"
     )
-    table.insert(items, 1, contentPane.addButton)
     contentPane.scroll:SetWidgets(items)
+    for _, button in ipairs(items) do
+        if button:IsShown() then
+            button:Update()
+        end
+    end
 end
 
 AF.RegisterCallback("BFI_RefreshOptions", function(_, which)
