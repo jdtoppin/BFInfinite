@@ -605,7 +605,7 @@ UpdateStatus = function()
                     "Debuffs styling is waiting for combat to end."
                 ]
                 or L[
-                    "Buffs update is waiting for combat or hover to end."
+                    "Buffs update is waiting for combat to end."
                 ]
         )
         statusButton:Hide()

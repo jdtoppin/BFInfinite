@@ -66,7 +66,6 @@ local function NewHarness()
         capability = true,
         canSuppress = true,
         combat = false,
-        nativeHovered = false,
         suppressEnableSucceeds = true,
         suppressRestoreSucceeds = true,
         timers = {},
@@ -88,7 +87,6 @@ local function NewHarness()
         local frame = {
             label = label,
             shown = true,
-            hovered = false,
         }
         state.frames[#state.frames + 1] = frame
 
@@ -103,7 +101,7 @@ local function NewHarness()
         end
 
         function frame:IsMouseOver()
-            return self.hovered
+            error("forbidden hover accessor was called", 2)
         end
 
         function frame:ClearAllPoints()
@@ -271,7 +269,7 @@ local function NewHarness()
         return state.canSuppress
     end
     function BD.IsNativePublicAuraFrameHovered()
-        return state.nativeHovered
+        error("obsolete native hover helper was called", 2)
     end
     function BD.SetNativePublicAurasSuppressed(which, suppressed)
         record("BD.SetNativePublicAurasSuppressed", which, suppressed)
@@ -765,10 +763,9 @@ do
     assertEqual(lastFlowCall.args[1].marker, 7,
         "combat queue keeps latest tuning")
 
-    local holder = state.frames[1]
-    holder.hovered = true
-    local hoverFlowCount =
+    local pointerFlowCount =
         countCalls(state.calls, "AF.SetCustomAuraContainerFlowLayout")
+    local pointerTimerCount = countCalls(state.calls, "Timer.After")
     BD.UpdateCustomAuraContainer("buffs", {
         enabled = true,
         tuning = 8,
@@ -777,46 +774,22 @@ do
         enabled = true,
         tuning = 9,
     })
-    assertEqual(countCalls(state.calls, "Timer.After"), 2,
-        "one prior zero timer plus one hover retry")
     assertEqual(
         countCalls(state.calls, "AF.SetCustomAuraContainerFlowLayout"),
-        hoverFlowCount,
-        "holder hover blocks tuning"
+        pointerFlowCount + 2,
+        "pointer-stationary tuning applies immediately"
     )
-    holder.hovered = false
-    state.runTimers(0.25)
     assertFalse(BD.GetCustomAuraContainerState("buffs").pending,
-        "holder hover queue drained")
+        "pointer-stationary tuning does not queue")
+    assertEqual(countCalls(state.calls, "Timer.After"), pointerTimerCount,
+        "pointer-stationary tuning schedules no retry")
     for _, call in ipairs(state.calls) do
         if call.name == "AF.SetCustomAuraContainerFlowLayout" then
             lastFlowCall = call
         end
     end
     assertEqual(lastFlowCall.args[1].marker, 9,
-        "holder hover keeps latest tuning")
-
-    state.nativeHovered = true
-    hoverFlowCount =
-        countCalls(state.calls, "AF.SetCustomAuraContainerFlowLayout")
-    BD.UpdateCustomAuraContainer("buffs", {
-        enabled = true,
-        tuning = 10,
-    })
-    assertEqual(
-        countCalls(state.calls, "AF.SetCustomAuraContainerFlowLayout"),
-        hoverFlowCount,
-        "native hover blocks tuning"
-    )
-    state.nativeHovered = false
-    state.runTimers(0.25)
-    for _, call in ipairs(state.calls) do
-        if call.name == "AF.SetCustomAuraContainerFlowLayout" then
-            lastFlowCall = call
-        end
-    end
-    assertEqual(lastFlowCall.args[1].marker, 10,
-        "native hover queue applies tuning")
+        "pointer-stationary tuning keeps latest settings")
 
     state.combat = true
     state.playerUnit = "vehicle"
@@ -898,6 +871,35 @@ do
         1,
         "partial build performs one allocation"
     )
+end
+
+do
+    local controllerFile = assert(io.open(
+        "Modules/BuffsDebuffs/CustomAuraContainer.lua",
+        "r"
+    ))
+    local controllerSource = controllerFile:read("*a")
+    controllerFile:close()
+    local nativeFile = assert(io.open(
+        "Modules/BuffsDebuffs/NativeAuraFrames.lua",
+        "r"
+    ))
+    local nativeSource = nativeFile:read("*a")
+    nativeFile:close()
+
+    for _, symbol in ipairs({
+        ":IsMouseOver(",
+        "IsControllerHovered",
+        "QueueHoverRetry",
+        "HOVER_RETRY_SECONDS",
+        "hoverRetryScheduled",
+        "IsNativePublicAuraFrameHovered",
+    }) do
+        assertEqual(controllerSource:find(symbol, 1, true), nil,
+            "custom controller forbidden hover source " .. symbol)
+        assertEqual(nativeSource:find(symbol, 1, true), nil,
+            "native suppression forbidden hover source " .. symbol)
+    end
 end
 
 print("buffs/debuffs custom aura controller tests passed")
