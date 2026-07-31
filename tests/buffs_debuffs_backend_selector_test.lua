@@ -95,7 +95,10 @@ local function NewHarness(options)
         end,
     }
     _G.GetBuildInfo = function()
-        return "test", "test", "test", interfaceVersion
+        -- Retail returns localizedVersion and buildInfo after the interface
+        -- number. Keep those trailing values so the harness catches accidental
+        -- multi-return forwarding into APIs such as tonumber.
+        return "test", "test", "test", interfaceVersion, "test-localized", "test-build-info"
     end
     _G.GetWeaponEnchantInfo = function()
         return false
