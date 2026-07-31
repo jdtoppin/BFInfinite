@@ -517,7 +517,7 @@ UpdateStatus = function()
     elseif status.code == "PENDING_SAFE_UPDATE" then
         AF.SetWidth(statusText, 530)
         statusText:SetText(L[
-            "Buffs update is waiting for combat or hover to end."
+            "Buffs update is waiting for combat to end."
         ])
         statusButton:Hide()
     else
