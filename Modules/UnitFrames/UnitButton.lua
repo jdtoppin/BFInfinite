@@ -78,8 +78,24 @@ end
 ---------------------------------------------------------------------
 local function UnitButton_RegisterEvents(self)
     self:RegisterUnitEvent("UNIT_CONNECTION", self.unit)
-    self:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", self.unit)
-    self:RegisterUnitEvent("UNIT_EXITED_VEHICLE", self.unit)
+    -- Pet identity and vehicle transitions are emitted for its owner token.
+    local unitPetOwner = self._updateOnUnitPetChanged
+    if unitPetOwner and unitPetOwner ~= self.unit then
+        self:RegisterUnitEvent(
+            "UNIT_ENTERED_VEHICLE",
+            self.unit,
+            unitPetOwner
+        )
+        self:RegisterUnitEvent(
+            "UNIT_EXITED_VEHICLE",
+            self.unit,
+            unitPetOwner
+        )
+        self:RegisterUnitEvent("UNIT_PET", unitPetOwner)
+    else
+        self:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", self.unit)
+        self:RegisterUnitEvent("UNIT_EXITED_VEHICLE", self.unit)
+    end
     self:RegisterEvent("UNIT_FLAGS")
     self:RegisterEvent("UNIT_NAME_UPDATE")
 
@@ -105,7 +121,17 @@ local function UnitButton_UnregisterEvents(self)
 end
 
 local function UnitButton_OnEvent(self, event, unit, arg)
-    if unit and (self.effectiveUnit == unit or self.unit == unit) then
+    local isPetOwnerIdentityEvent =
+        unit == self._updateOnUnitPetChanged
+        and (
+            event == "UNIT_PET"
+            or event == "UNIT_ENTERED_VEHICLE"
+            or event == "UNIT_EXITED_VEHICLE"
+        )
+
+    if isPetOwnerIdentityEvent then
+        self._updateRequired = true
+    elseif unit and (self.effectiveUnit == unit or self.unit == unit) then
         if event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE" or event == "UNIT_CONNECTION"
             or event == "UNIT_FLAGS" or event == "UNIT_NAME_UPDATE"
         then
