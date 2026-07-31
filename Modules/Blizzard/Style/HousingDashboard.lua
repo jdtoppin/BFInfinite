@@ -282,8 +282,13 @@ local function GetCatalogCategoryIcon(frame)
         return
     end
 
+    if frame._BFIHousingIconName then
+        return frame._BFIHousingIconName
+    end
+
+    local atlasKey = frame._BFIHousingAtlasKey or frame.atlasKey
     local iconName
-    if frame.atlasKey == "category-icons_all" then
+    if atlasKey == "category-icons_all" then
         iconName = "Housing_All"
     elseif frame.isSubcategory then
         iconName = catalogSubcategoryIcons[frame.ID]
@@ -291,7 +296,7 @@ local function GetCatalogCategoryIcon(frame)
         iconName = catalogCategoryIcons[frame.ID]
     end
 
-    return iconName or catalogAtlasIcons[frame.atlasKey]
+    return iconName or catalogAtlasIcons[atlasKey]
 end
 
 local function IsCatalogEntryPreviewed(frame)
@@ -386,7 +391,9 @@ local function StyleVisibleCatalogEntries(scrollBox)
 end
 
 local function UpdateCatalogCategory(frame, isPressed)
-    local isActive = frame.IsActive and frame:IsActive() or frame.isActive
+    local isActive = frame._BFIHousingForceSelected
+        or (frame.IsActive and frame:IsActive())
+        or frame.isActive
     local state = "normal"
     if not frame:IsEnabled() then
         state = "disabled"
@@ -733,32 +740,126 @@ end
 ---------------------------------------------------------------------
 -- 12.1 house dropdown and blueprint collection
 ---------------------------------------------------------------------
-local function UpdateBlueprintEntry(frame)
-    local selected = frame:IsSelected()
-    local hovered = frame:IsHovered()
-    local color = selected and "BFI" or (hovered and "widget_highlight" or "widget")
-    local alpha = selected and 0.45 or (hovered and 0.8 or 0.55)
+local function HideBlueprintTexture(texture)
+    if not texture then return end
+    texture:SetAlpha(0)
+    texture:Hide()
+end
 
-    frame.BFIHousingBackground:SetVertexColor(AF.GetColorRGB(color, alpha))
-    frame.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB(selected and "BFI" or "border"))
+local function HideBlueprintEntryChrome(frame)
+    HideBlueprintTexture(frame.HighlightBackground)
+end
+
+local function UpdateBlueprintEntry(frame, isPressed)
+    HideBlueprintEntryChrome(frame)
+
+    local state = "normal"
+    if not frame:IsEnabled() then
+        state = "disabled"
+    elseif isPressed then
+        state = "pressed"
+    elseif frame:IsSelected() then
+        state = "selected"
+    elseif frame:IsHovered() or frame:IsMouseMotionFocus() then
+        state = "hovered"
+    end
+
+    SetFadeSurfaceState(frame, state)
+    frame.Text:SetTextColor(AF.GetColorRGB(state == "disabled" and "disabled" or "white"))
 end
 
 local function StyleBlueprintEntry(frame)
-    if frame._BFIHousingBlueprintStyled then return end
-    frame._BFIHousingBlueprintStyled = true
+    if not frame or not frame.HighlightBackground or not frame.UpdateStateVisuals then return end
 
-    CreateSquareElement(frame)
-    frame.HighlightBackground:SetAlpha(0)
-    hooksecurefunc(frame, "UpdateStateVisuals", UpdateBlueprintEntry)
+    if not frame._BFIHousingBlueprintStyled then
+        frame._BFIHousingBlueprintStyled = true
+
+        CreateFadeSurface(frame)
+        HideBlueprintEntryChrome(frame)
+
+        hooksecurefunc(frame, "UpdateStateVisuals", UpdateBlueprintEntry)
+        frame:HookScript("OnMouseDown", function(self)
+            UpdateBlueprintEntry(self, true)
+        end)
+        frame:HookScript("OnMouseUp", function(self)
+            UpdateBlueprintEntry(self)
+        end)
+        frame:HookScript("OnHide", function(self)
+            HideBlueprintEntryChrome(self)
+            SetFadeSurfaceState(self, "normal")
+        end)
+        frame:HookScript("OnEnable", UpdateBlueprintEntry)
+        frame:HookScript("OnDisable", UpdateBlueprintEntry)
+    end
+
     UpdateBlueprintEntry(frame)
 end
 
-local function StyleBlueprintGroup(frame)
-    if frame._BFIHousingBlueprintGroupStyled then return end
-    frame._BFIHousingBlueprintGroupStyled = true
+local function HideBlueprintGroupChrome(header)
+    S.RemoveRegions(header)
+end
 
-    S.RemoveRegions(frame.Header)
-    StyleActionButton(frame.Header)
+local function UpdateBlueprintGroup(frame, isPressed)
+    local header = frame.Header
+    HideBlueprintGroupChrome(header)
+
+    local state = "normal"
+    if not header:IsEnabled() then
+        state = "disabled"
+    elseif isPressed then
+        state = "pressed"
+    elseif header:IsMouseMotionFocus() then
+        state = "hovered"
+    end
+
+    SetFadeSurfaceState(header, state)
+    header.Name:SetTextColor(AF.GetColorRGB(state == "disabled" and "disabled" or "white"))
+    header.BFIHousingCollapseIcon:SetTexture(AF.GetIcon(frame:IsCollapsed() and "ArrowRight2" or "ArrowDown2"))
+end
+
+local function StyleBlueprintGroup(frame)
+    if not frame or not frame.Header then return end
+
+    if not frame._BFIHousingBlueprintGroupStyled then
+        frame._BFIHousingBlueprintGroupStyled = true
+
+        local header = frame.Header
+        CreateFadeSurface(header)
+        HideBlueprintGroupChrome(header)
+
+        local collapseIcon = AF.CreateTexture(header, nil, "white", "ARTWORK", 1)
+        AF.SetSize(collapseIcon, 14, 14)
+        AF.SetPoint(collapseIcon, "RIGHT", -6, 0)
+        header.BFIHousingCollapseIcon = collapseIcon
+
+        header:HookScript("OnEnter", function()
+            UpdateBlueprintGroup(frame)
+        end)
+        header:HookScript("OnLeave", function()
+            UpdateBlueprintGroup(frame)
+        end)
+        header:HookScript("OnMouseDown", function()
+            UpdateBlueprintGroup(frame, true)
+        end)
+        header:HookScript("OnMouseUp", function()
+            UpdateBlueprintGroup(frame)
+        end)
+        header:HookScript("OnHide", function()
+            HideBlueprintGroupChrome(header)
+            SetFadeSurfaceState(header, "normal")
+        end)
+        header:HookScript("OnEnable", function()
+            UpdateBlueprintGroup(frame)
+        end)
+        header:HookScript("OnDisable", function()
+            UpdateBlueprintGroup(frame)
+        end)
+        hooksecurefunc(header, "UpdateCollapsedState", function()
+            UpdateBlueprintGroup(frame)
+        end)
+    end
+
+    UpdateBlueprintGroup(frame)
 end
 
 local function StyleVisibleBlueprintRows(scrollBox)
@@ -771,38 +872,86 @@ local function StyleVisibleBlueprintRows(scrollBox)
     end)
 end
 
-local function StyleCollection(collection)
+local function HideBlueprintCollectionChrome(collection)
+    HideBlueprintTexture(collection.Background)
     HideCatalogDivider(collection)
-    collection:HookScript("OnShow", HideCatalogDivider)
 
     local categories = collection.Categories
-    if categories and categories.CategoryPlaceholder then
-        StyleCatalogCategory(categories.CategoryPlaceholder)
+    if categories then
+        HideCatalogCategoriesChrome(categories)
     end
 
     local blueprints = collection.BlueprintCollection
-    S.StyleScrollBar(blueprints.ScrollBar)
-    StyleActionButton(blueprints.ResetButton)
-    hooksecurefunc(blueprints.ScrollBox, "Update", StyleVisibleBlueprintRows)
-    StyleVisibleBlueprintRows(blueprints.ScrollBox)
+    if blueprints then
+        HideBlueprintTexture(blueprints.Divider)
+    end
 
     local details = collection.BlueprintDetails
-    S.StyleIconButton(details.GearDropdown, AF.GetIcon("Menu3"), 14)
-    AF.SetSize(details.GearDropdown, 22, 22)
+    if not details then return end
+
+    HideBlueprintTexture(details.PreviewBackground)
 
     local contentSummary = details.ContentSummary
-    if contentSummary.ContentsListButton then
+    local budgets = contentSummary and contentSummary.BudgetsContainer
+    if not budgets then return end
+
+    HideBlueprintTexture(budgets.Background)
+    if budgets.InteriorBudgets then
+        HideBlueprintTexture(budgets.InteriorBudgets.Divider)
+    end
+    if budgets.ExteriorBudgets then
+        HideBlueprintTexture(budgets.ExteriorBudgets.Divider)
+    end
+end
+
+local function StyleBlueprintCategories(categories)
+    if not categories or not categories.CategoryPlaceholder then return end
+
+    categories.topPadding = 0
+    categories.spacing = 0
+    HideCatalogCategoriesChrome(categories)
+
+    local category = categories.CategoryPlaceholder
+    category._BFIHousingIconName = "Housing_All"
+    category._BFIHousingForceSelected = true
+    StyleCatalogCategory(category)
+
+    categories:Layout()
+end
+
+local function StyleCollection(collection)
+    HideBlueprintCollectionChrome(collection)
+    collection:HookScript("OnShow", HideBlueprintCollectionChrome)
+
+    local categories = collection.Categories
+    StyleBlueprintCategories(categories)
+
+    local blueprints = collection.BlueprintCollection
+    if blueprints then
+        if blueprints.ScrollBar then
+            S.StyleScrollBar(blueprints.ScrollBar)
+        end
+        if blueprints.ScrollBox then
+            blueprints.ScrollBox:ClearEdgeFade()
+            hooksecurefunc(blueprints.ScrollBox, "Update", StyleVisibleBlueprintRows)
+            StyleVisibleBlueprintRows(blueprints.ScrollBox)
+        end
+        if blueprints.ResetButton then
+            StyleActionButton(blueprints.ResetButton)
+        end
+    end
+
+    local details = collection.BlueprintDetails
+    if not details then return end
+
+    if details.GearDropdown then
+        S.StyleIconButton(details.GearDropdown, AF.GetIcon("Menu3"), 14)
+        AF.SetSize(details.GearDropdown, 22, 22)
+    end
+
+    local contentSummary = details.ContentSummary
+    if contentSummary and contentSummary.ContentsListButton then
         S.StyleButton(contentSummary.ContentsListButton)
-    end
-
-    local entryMixin = _G.HousingBlueprintCollectionEntryMixin
-    if entryMixin then
-        hooksecurefunc(entryMixin, "Init", StyleBlueprintEntry)
-    end
-
-    local groupMixin = _G.HousingBlueprintCollectionGroupMixin
-    if groupMixin then
-        hooksecurefunc(groupMixin, "Init", StyleBlueprintGroup)
     end
 end
 
