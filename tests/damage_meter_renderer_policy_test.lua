@@ -760,27 +760,32 @@ local lockIcon = extractSection(
     rendererCode,
     "local function GetLockButtonIcon(locked)",
     "local function ApplyFlatDropdownStyle(dropdown)",
-    "unable to isolate versioned Damage Meter lock icons"
+    "unable to isolate adaptive Damage Meter lock icons"
 )
 assertContains(
+    lockIcon,
+    "AF.hasLockIcons and AF.GetAdaptiveIcon",
+    "lock icons must require the shared AF icon capability"
+)
+assertContains(
+    lockIcon,
+    'AF.GetAdaptiveIcon(locked and "Lock" or "Unlock")',
+    "lock icons must use AF's adaptive raster-safe path"
+)
+assertNotContains(
+    lockIcon,
+    ".svg",
+    "ordinary Texture lock controls must not receive SVG paths"
+)
+assertNotContains(
+    lockIcon,
+    "GetBuildInfo",
+    "lock icon safety must not depend on a client-version guess"
+)
+assertNotContains(
     rendererCode,
-    "local SVG_INTERFACE_VERSION = 120100",
-    "Damage Meter SVG support must be gated at Retail 12.1"
-)
-assertContains(
-    lockIcon,
-    "select(4, _G.GetBuildInfo()) or 0",
-    "lock icons must select by the running client interface version"
-)
-assertContains(
-    lockIcon,
-    'locked and "Lock.svg" or "Unlock.svg"',
-    "Retail 12.1 must use the BFI SVG lock pair"
-)
-assertContains(
-    lockIcon,
-    "BFI.name",
-    "BFI SVG lock paths must resolve through the addon namespace"
+    "SVG_INTERFACE_VERSION",
+    "the removed Texture SVG version gate must not return"
 )
 assertContains(
     lockIcon,
@@ -798,11 +803,6 @@ assertNotContains(
     'AF.GetIcon("SmallLock")',
     "Damage Meter lock control must not use an unavailable AF icon"
 )
-
-local lockSVG = readFile("Media/Icons/Lock.svg")
-local unlockSVG = readFile("Media/Icons/Unlock.svg")
-assertContains(lockSVG, "<svg", "BFI lock SVG asset is missing")
-assertContains(unlockSVG, "<svg", "BFI unlock SVG asset is missing")
 
 local options = readFile("Options/DamageMeter.lua")
 assertNotContains(

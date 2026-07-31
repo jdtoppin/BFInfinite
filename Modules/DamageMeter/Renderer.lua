@@ -41,7 +41,6 @@ local SESSION_MODE_HISTORY = "history"
 local SESSION_DROPDOWN_WIDTH = 120
 local MIN_SESSION_DROPDOWN_WIDTH = 60
 local MIN_TYPE_DROPDOWN_WIDTH = 60
-local SVG_INTERFACE_VERSION = 120100
 local MAX_DETAIL_TARGETS = 3
 
 local TYPE_DEFINITIONS = {
@@ -546,18 +545,8 @@ local function SetButtonIcon(button, icon, color, size)
 end
 
 local function GetLockButtonIcon(locked)
-    local interfaceVersion = 0
-    if type(_G.GetBuildInfo) == "function" then
-        interfaceVersion = select(4, _G.GetBuildInfo()) or 0
-    end
-
-    -- Retail 12.1 adds ordinary Texture support for SVG paths. Keep the
-    -- narrow 12.0.7 compatibility fallback on AF's existing raster icons.
-    if interfaceVersion >= SVG_INTERFACE_VERSION then
-        return AF.GetIcon(
-            locked and "Lock.svg" or "Unlock.svg",
-            BFI.name
-        )
+    if AF.hasLockIcons and AF.GetAdaptiveIcon then
+        return AF.GetAdaptiveIcon(locked and "Lock" or "Unlock")
     end
 
     return AF.GetIcon(locked and "Unavailable" or "Anchor_CENTER")

@@ -519,6 +519,12 @@ local function loadRenderer(
         return "icon:" .. name
     end
 
+    AF.hasLockIcons = true
+
+    function AF.GetAdaptiveIcon(name)
+        return "adaptive-icon:" .. name .. ".tga"
+    end
+
     function AF.GetPlainTexture()
         return "plain-texture"
     end
@@ -964,9 +970,10 @@ assertEqual(
 )
 assertEqual(
     first.lock.texture,
-    "icon:Unlock.svg",
+    "adaptive-icon:Unlock.tga",
     "unlocked meters use the dedicated unlock icon"
 )
+assertEqual(first.lock.textureColor, "gray", "unlocked icon is subdued")
 assertEqual(first.shown, true, "first window shown")
 assertEqual(second.shown, true, "second window shown")
 assertEqual(third.shown, true, "third window shown")
@@ -1680,7 +1687,12 @@ Renderer.Refresh()
 
 first.lock:Click()
 assertEqual(DM.config.locked, true, "lock button locks all meters")
-assertEqual(first.lock.texture, "icon:Lock.svg", "lock icon reflects locked state")
+assertEqual(
+    first.lock.texture,
+    "adaptive-icon:Lock.tga",
+    "lock icon reflects locked state"
+)
+assertEqual(first.lock.textureColor, "white", "locked icon is highlighted")
 assertEqual(first.resizable, false, "lock disables first resize")
 assertEqual(second.resizable, false, "lock disables second resize")
 assertEqual(first.resize.shown, false, "lock hides first resize grip")
@@ -1690,9 +1702,10 @@ second.lock:Click()
 assertEqual(DM.config.locked, false, "any lock button unlocks all")
 assertEqual(
     first.lock.texture,
-    "icon:Unlock.svg",
+    "adaptive-icon:Unlock.tga",
     "unlock icon reflects movable state"
 )
+assertEqual(first.lock.textureColor, "gray", "unlocked icon returns to gray")
 assertEqual(first.resizable, true, "unlock restores first resize")
 assertEqual(third.resize.shown, true, "unlock restores resize grips")
 
