@@ -77,10 +77,10 @@ function NP.LoadIndicatorConfig(
     if not indicator then return end
 
     if indicatorConfig then
+        indicator.enabled = indicatorConfig.enabled == true
         -- Cross-indicator layout derives from the same applied snapshot,
         -- never from a newer live profile while plates are being rebuilt.
         indicator:LoadConfig(indicatorConfig, plateConfig)
-        indicator.enabled = indicatorConfig.enabled == true
     else
         indicator.enabled = false
     end
