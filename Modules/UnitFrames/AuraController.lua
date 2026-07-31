@@ -8,7 +8,7 @@ local C_Timer = C_Timer
 local CreateFrame = CreateFrame
 local InCombatLockdown = InCombatLockdown
 local floor, huge = math.floor, math.huge
-local ipairs, next, pairs, pcall, type = ipairs, next, pairs, pcall, type
+local ipairs, next, pairs, type = ipairs, next, pairs, type
 
 -- Retail 12.1.0.68914 (wow-ui-source d3915c78) makes native aura
 -- groups/slots add-only and restricts their buttons after initialization.
@@ -323,19 +323,6 @@ local function HasPendingMutation(controller)
     return HasNativeMutation(controller) or controller._needsVisibility
 end
 
-function ControllerMixin:_QueueHoverRetry()
-    if self._hoverRetryScheduled or self._destroyed then return end
-
-    self._hoverRetryScheduled = true
-    C_Timer.After(0.25, function()
-        self._hoverRetryScheduled = nil
-        if self._destroyed or not HasPendingMutation(self) then return end
-
-        self:_ApplyPending()
-        UnregisterRegenIfIdle()
-    end)
-end
-
 function ControllerMixin:_QueueRegenDispatch()
     if self._regenDispatchScheduled then return end
 
@@ -356,29 +343,15 @@ function ControllerMixin:_QueueRegenDispatch()
 end
 
 local function SetHolderShownSafe(controller, shown)
-    local holder = controller.frame
-    if holder:IsShown() == shown then
+    if controller._holderShown == shown then
         return true
     end
 
-    -- IsShown/IsMouseOver are read only from BFI's plain, config-sized
-    -- holder. Native containers, restricted buttons, and aura state remain
-    -- opaque. A visibility flip while a native aura tooltip is hovered can
-    -- synchronously enter protected tooltip code, so retry after hover ends.
-    if holder:IsMouseOver() then
-        controller:_QueueHoverRetry()
-        return false
-    end
-
-    -- pcall only contains a non-secret write to BFI's own holder. It is not
-    -- an API/secret probe or a security boundary; hover avoidance above is
-    -- the defense. Verification keeps a raced or aborted write from letting
-    -- native mutations proceed while the holder is still visible.
-    local wrote = pcall(holder.SetShown, holder, shown)
-    if not wrote or holder:IsShown() ~= shown then
-        controller:_QueueHoverRetry()
-        return false
-    end
+    -- Retail 12.1.0.68914 can make visibility and hover accessors secret when
+    -- a holder is anchored to a native aura container. Keep an ordinary
+    -- write-only ledger instead of inspecting frame state.
+    controller.frame:SetShown(shown)
+    controller._holderShown = shown
     return true
 end
 
@@ -388,11 +361,6 @@ local function SetExternalContainerShownSafe(controller, shown)
         or controller._containerShown == shown
     then
         return true
-    end
-
-    if controller.frame:IsMouseOver() then
-        controller:_QueueHoverRetry()
-        return false
     end
 
     if shown then
@@ -594,9 +562,8 @@ function ControllerMixin:_ApplyPending()
         return
     end
 
-    -- A pure public-holder visibility change is render-side only. It may run
-    -- in combat, but still waits for hover to end before firing tooltip
-    -- intrinsics through a native child.
+    -- A pure public-holder visibility change is render-side only and may run
+    -- in combat. Holder state is tracked only through BFI-owned writes.
     if not HasNativeMutation(self) then
         if RestoreControllerVisibility(self) then
             self._needsVisibility = nil
@@ -606,7 +573,7 @@ function ControllerMixin:_ApplyPending()
     end
 
     -- Native configuration and initial-build work is OOC-only. Hide the
-    -- plain holder first so no hovered restricted child participates.
+    -- complete BFI-owned presentation before applying native mutations.
     local holderHidden = SetControllerShownSafe(self, false)
     if InCombatLockdown() then
         if holderHidden then
@@ -641,6 +608,7 @@ function ControllerMixin:_ApplyPending()
         self._containerIsExternal = nil
         self._containerShown = nil
         self._spec = nil
+        self._holderShown = nil
         self._destroyed = true
         pendingControllers[self] = nil
         return
@@ -734,8 +702,7 @@ end
 
 local function RequestMutation(controller)
     controller:_ApplyPending()
-    -- An ordinary out-of-combat update or hover retry may beat the queued
-    -- regen event.
+    -- An ordinary out-of-combat update may beat the queued regen event.
     UnregisterRegenIfIdle()
 end
 
@@ -873,6 +840,7 @@ local function CreateController(parent, name, completeSpec, options)
     local controller = setmetatable({}, ControllerMixin)
     controller.frame = CreateFrame("Frame", name, parent)
     controller.frame:Hide()
+    controller._holderShown = false
     controller._seedContainer = options.seedContainer
     controller._liveUnitChanges = options.liveUnitChanges == true
 
