@@ -241,7 +241,6 @@ local HighlightState = {
     assisted = setmetatable({}, {__mode = "k"}),
     baseSpellIDs = {},
     controller = CreateFrame("Frame"),
-    updateTimeLeft = 0,
     proc = {
         color = {1, 0.82, 0, 1},
         frameIsObjectType = methodFrame.IsObjectType,
@@ -250,11 +249,12 @@ local HighlightState = {
     },
 }
 local presentationController = CreateFrame("Frame")
-local presentationUpdateTimeLeft = 0
+presentationController.buffVisibility = {}
 local presentationGeneration = 1
 local hotkeyGeneration = 1
 local fallbackOrder = 0
 local ApplyFont
+local QueuePresentationUpdate
 
 local function IsSafeBoolean(value)
     return IsValueNonSecret(value) and type(value) == "boolean"
@@ -305,7 +305,7 @@ end
 -- method is the sole supported way to discover items. Unlike Cooldown Viewer
 -- mixins, this method only returns the SecureMap iterator and performs no
 -- assignment, acquisition, release, reset, or item callback.
-local function GetActiveItems(viewer)
+local function GetActiveItems(viewer, reusableItems)
     local pool = viewer.itemFramePool
     if not IsValueNonSecret(pool) or type(pool) ~= "table" then
         return nil
@@ -325,7 +325,10 @@ local function GetActiveItems(viewer)
         return nil
     end
 
-    local items = {}
+    local items = reusableItems or {}
+    if reusableItems then
+        wipe(items)
+    end
     while true do
         local item = iterator(invariant, control)
         if not IsValueNonSecret(item) then
@@ -346,8 +349,9 @@ end
 -- Retail 12.0.7 and 12.1 expose the same documented
 -- C_AssistedCombat.GetNextCastSpell(false) contract. Their native Assisted
 -- Highlight template uses a rounded flipbook atlas, so CDM renders the
--- recommendation with four BFI-owned square edges instead. The recommendation
--- poll is BFI-owned and never calls a Cooldown Viewer item mixin.
+-- recommendation with four BFI-owned square edges instead. Public Assisted
+-- Combat callbacks drive immediate runtime refreshes; a scoped fallback
+-- preserves false-mode-only recommendations without calling a viewer mixin.
 local function GetNonSecretSpellID(spellID)
     if not IsSafeNumber(spellID) then
         return nil
@@ -633,7 +637,8 @@ end
 
 function HighlightState.proc.Restore(item)
     -- Keep the square replacement visible until Blizzard's alpha has actually
-    -- been restored. A denied/secret write is retried by presentation polling.
+    -- been restored. A denied/secret write is retried by the finite
+    -- presentation reconciliation window and later lifecycle edges.
     if not HighlightState.proc.SetNativeSuppressed(item, false) then
         return false
     end
@@ -712,29 +717,19 @@ local function SetAssistedHighlightSpell(spellID)
     if spellID == HighlightState.spellID
         and baseSpellID == HighlightState.baseSpellID
     then
-        return
+        return false
     end
 
     HighlightState.spellID = spellID
     HighlightState.baseSpellID = baseSpellID
     hotkeyGeneration = hotkeyGeneration + 1
-    presentationUpdateTimeLeft = 0
+    return true
 end
 
-local function PollAssistedHighlight(_, elapsed)
-    HighlightState.updateTimeLeft = HighlightState.updateTimeLeft - elapsed
-    if HighlightState.updateTimeLeft > 0 then return end
-
-    local updateRate = tonumber(GetCVar("assistedCombatIconUpdateRate")) or 0
-    HighlightState.updateTimeLeft = max(0, min(updateRate, 1))
-    SetAssistedHighlightSpell(C_AssistedCombat.GetNextCastSpell(false))
-    RefreshAssistedHighlights()
-end
-
-local function UpdateAssistedHighlightPolling()
+function HighlightState.IsAssistedHighlightEnabled()
     local config = CM.config
     local cvarEnabled = GetCVarBool("assistedCombatHighlight")
-    local enabled = config
+    return config
         and config.enabled
         and config.assistedHighlight
         and IsSafeBoolean(cvarEnabled)
@@ -743,29 +738,115 @@ local function UpdateAssistedHighlightPolling()
         and type(C_AssistedCombat.GetNextCastSpell) == "function"
         and C_CooldownViewer
         and type(C_CooldownViewer.GetCooldownViewerCooldownInfo) == "function"
+end
 
-    if enabled then
-        HighlightState.updateTimeLeft = 0
-        HighlightState.controller:SetScript("OnUpdate", PollAssistedHighlight)
-    else
-        HighlightState.controller:SetScript("OnUpdate", nil)
-        SetAssistedHighlightSpell(nil)
+local function RefreshAssistedHighlightState(force)
+    local spellID
+    if HighlightState.IsAssistedHighlightEnabled() then
+        spellID = C_AssistedCombat.GetNextCastSpell(false)
+    end
+    local changed = SetAssistedHighlightSpell(spellID)
+    if force or changed then
         RefreshAssistedHighlights()
+    end
+    return changed
+end
+
+local function QueueAssistedHighlightRefresh()
+    local config = CM.config
+    if presentationController.disabledRestored
+        and (not config or not config.enabled)
+    then
+        return
+    end
+    -- Runtime highlight state remains safe to update while protected layout
+    -- work is latched in combat. Only the resulting hotkey-generation edge
+    -- needs the broader presentation controller.
+    if RefreshAssistedHighlightState(true) then
+        QueuePresentationUpdate()
     end
 end
 
+function HighlightState.RefreshAssistedHighlightRecommendation()
+    local config = CM.config
+    if presentationController.disabledRestored
+        and (not config or not config.enabled)
+    then
+        return
+    end
+    if RefreshAssistedHighlightState(false) then
+        QueuePresentationUpdate()
+    end
+end
+
+function HighlightState.PollAssistedHighlightFallback()
+    -- Native callbacks query GetNextCastSpell(true), which can stay nil while
+    -- a CDM item is still eligible for BFI's false-mode recommendation. This
+    -- low-frequency fallback does no presentation work until that value
+    -- actually changes.
+    if not HighlightState.IsAssistedHighlightEnabled() then
+        HighlightState.UpdateAssistedHighlightFallback()
+        return
+    end
+    HighlightState.RefreshAssistedHighlightRecommendation()
+end
+
+local function GetAssistedHighlightFallbackInterval()
+    local value = GetCVar("assistedCombatIconUpdateRate")
+    if not IsValueNonSecret(value)
+        or (type(value) ~= "number" and type(value) ~= "string")
+    then
+        return 0.2
+    end
+    -- Honor slower user-selected rates while keeping a 5 Hz ceiling on BFI's
+    -- extra false-mode query instead of recreating Blizzard's frame-rate poll.
+    return ClampNumber(tonumber(value), 0.2, 0.2, 1)
+end
+
+function HighlightState.UpdateAssistedHighlightFallback()
+    local enabled = HighlightState.IsAssistedHighlightEnabled()
+    local canTick = C_Timer and type(C_Timer.NewTicker) == "function"
+    local interval = enabled and canTick
+        and GetAssistedHighlightFallbackInterval()
+    if HighlightState.fallbackTicker
+        and HighlightState.fallbackInterval ~= interval
+    then
+        HighlightState.fallbackTicker:Cancel()
+        HighlightState.fallbackTicker = nil
+    end
+    if enabled and canTick then
+        if not HighlightState.fallbackTicker then
+            HighlightState.fallbackInterval = interval
+            HighlightState.fallbackTicker = C_Timer.NewTicker(
+                interval,
+                HighlightState.PollAssistedHighlightFallback
+            )
+        end
+    elseif HighlightState.fallbackTicker then
+        HighlightState.fallbackTicker:Cancel()
+        HighlightState.fallbackTicker = nil
+    end
+    if not HighlightState.fallbackTicker then
+        HighlightState.fallbackInterval = nil
+    end
+    QueueAssistedHighlightRefresh()
+end
+
 local function OnAssistedHighlightEvent(_, event)
-    if event == "COOLDOWN_VIEWER_DATA_LOADED" or event == "COOLDOWN_VIEWER_TABLE_HOTFIXED" then
+    if event == "COOLDOWN_VIEWER_DATA_LOADED"
+        or event == "COOLDOWN_VIEWER_TABLE_HOTFIXED"
+    then
+        -- Cache invalidation must survive disabled dormancy so a later enable
+        -- cannot reuse mappings from the previous native data generation.
         wipe(HighlightState.baseSpellIDs)
     end
-    HighlightState.updateTimeLeft = 0
-    if event == "PLAYER_REGEN_DISABLED"
-        or event == "PLAYER_REGEN_ENABLED"
-        or event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW"
-        or event == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE"
+    local config = CM.config
+    if presentationController.disabledRestored
+        and (not config or not config.enabled)
     then
-        RefreshAssistedHighlights()
+        return
     end
+    QueueAssistedHighlightRefresh()
 end
 
 HighlightState.controller:RegisterEvent("COOLDOWN_VIEWER_DATA_LOADED")
@@ -777,12 +858,31 @@ HighlightState.controller:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_HIDE")
 HighlightState.controller:SetScript("OnEvent", OnAssistedHighlightEvent)
 CVarCallbackRegistry:RegisterCallback(
     "assistedCombatHighlight",
-    UpdateAssistedHighlightPolling,
+    HighlightState.UpdateAssistedHighlightFallback,
     HighlightState.controller
 )
 CVarCallbackRegistry:RegisterCallback(
     "assistedCombatIconUpdateRate",
-    UpdateAssistedHighlightPolling,
+    HighlightState.UpdateAssistedHighlightFallback,
+    HighlightState.controller
+)
+-- Both audited clients publish these callbacks only after their own Assisted
+-- Combat manager has updated the recommendation state. Refresh the BFI-owned
+-- highlight immediately; the shared controller separately coalesces the
+-- hotkey presentation invalidation caused by a recommendation change.
+EventRegistry:RegisterCallback(
+    "AssistedCombatManager.OnAssistedHighlightSpellChange",
+    HighlightState.RefreshAssistedHighlightRecommendation,
+    HighlightState.controller
+)
+EventRegistry:RegisterCallback(
+    "AssistedCombatManager.OnSetUseAssistedHighlight",
+    HighlightState.UpdateAssistedHighlightFallback,
+    HighlightState.controller
+)
+EventRegistry:RegisterCallback(
+    "AssistedCombatManager.OnSetActionSpell",
+    HighlightState.RefreshAssistedHighlightRecommendation,
     HighlightState.controller
 )
 
@@ -954,6 +1054,12 @@ local function ResolveItemHotkey(item)
 end
 
 local function OnBFIActionButtonUpdate(_event, button)
+    local config = CM.config
+    if presentationController.disabledRestored
+        and (not config or not config.enabled)
+    then
+        return
+    end
     if not IsValueNonSecret(button) or not button then return end
 
     local action = button.action
@@ -962,7 +1068,7 @@ local function OnBFIActionButtonUpdate(_event, button)
 
     bfiActionButtonActions[button] = action
     hotkeyGeneration = hotkeyGeneration + 1
-    presentationUpdateTimeLeft = 0
+    QueuePresentationUpdate()
 end
 
 -- BFI bars support arbitrary secure paging conditions that do not always
@@ -1127,9 +1233,15 @@ end
 -- BFI-owned holders and edit-mode previews
 ---------------------------------------------------------------------
 local function MarkPresentationDirty()
+    local config = CM.config
+    if presentationController.disabledRestored
+        and (not config or not config.enabled)
+    then
+        return
+    end
     presentationGeneration = presentationGeneration + 1
     hotkeyGeneration = hotkeyGeneration + 1
-    presentationUpdateTimeLeft = 0
+    QueuePresentationUpdate()
 end
 
 local function EnsureHolder(state)
@@ -2747,14 +2859,14 @@ local function ReconcileViewer(state, config)
         for _, entry in ipairs(allItems) do
             restored = RestoreItem(entry.item, entry.itemState) and restored
         end
-        RestoreMissingItems(state, activeSet)
+        restored = RestoreMissingItems(state, activeSet) and restored
 
         local previewLayout = BuildLayout(state.definition, config, state.definition.previewCount)
         UpdateHolderPreview(state, previewLayout, nil, config)
         return restored
     end
 
-    RestoreMissingItems(state, activeSet)
+    local missingItemsRestored = RestoreMissingItems(state, activeSet)
 
     local layoutCount = #visibleItems
     local displayCount = layoutCount > 0 and layoutCount or state.definition.previewCount
@@ -2769,7 +2881,7 @@ local function ReconcileViewer(state, config)
             )
         end
         UpdateHolderPreview(state, layout, nil, config)
-        return true
+        return missingItemsRestored
     end
 
     layout.count = layoutCount
@@ -2838,8 +2950,8 @@ local function ReconcileViewer(state, config)
                 state,
                 entry.itemState
             ) then
-                needsStaticPresentation = false
-                break
+                UpdateHolderPreview(state, layout, visibleItems[1].item, config)
+                return false
             end
         end
     end
@@ -2855,7 +2967,7 @@ local function ReconcileViewer(state, config)
     end
 
     UpdateHolderPreview(state, layout, visibleItems[1].item, config)
-    return true
+    return missingItemsRestored
 end
 
 local function RestoreViewer(state)
@@ -2898,46 +3010,295 @@ local function InitializeViewers()
     end
 end
 
-local function PollPresentation(_, elapsed)
-    presentationUpdateTimeLeft = presentationUpdateTimeLeft - elapsed
-    if presentationUpdateTimeLeft > 0 then return end
-    presentationUpdateTimeLeft = 0.15
+presentationController.buffVisibility.weakKeys = {__mode = "k"}
 
-    InitializeViewers()
+function presentationController.buffVisibility:Stop()
+    if self.ticker then
+        self.ticker:Cancel()
+        self.ticker = nil
+    end
+    self.invalidPassesRemaining = nil
+    for _, state in ipairs(viewerStates) do
+        if state.definition.isBuff then
+            state.buffVisibilityInitialized = nil
+            state.buffVisibilitySnapshotIndex = nil
+            state.buffVisibilityStaged = nil
+            if state.buffVisibilityItems then
+                wipe(state.buffVisibilityItems)
+            end
+            if state.buffVisibilitySnapshots then
+                wipe(state.buffVisibilitySnapshots[1])
+                wipe(state.buffVisibilitySnapshots[2])
+            end
+        end
+    end
+end
+
+function presentationController.buffVisibility:Sample()
+    local config = CM.config
+    local enabled = config
+        and config.enabled
+        and type(config.viewers) == "table"
+    local changed = false
+    local anyActive = false
+
+    for _, state in ipairs(viewerStates) do
+        if state.definition.isBuff then
+            state.buffVisibilityStaged = nil
+            local viewerConfig = enabled and config.viewers[state.key]
+            if type(viewerConfig) == "table"
+                and viewerConfig.visibility ~= "hidden"
+            then
+                local hideWhenInactive = state.viewer.hideWhenInactive
+                if not IsSafeBoolean(hideWhenInactive) then
+                    return false
+                end
+                if hideWhenInactive then
+                    if not state.buffVisibilitySnapshots then
+                        state.buffVisibilitySnapshots = {
+                            setmetatable({}, self.weakKeys),
+                            setmetatable({}, self.weakKeys),
+                        }
+                        state.buffVisibilityItems = {}
+                    end
+
+                    local previousIndex = state.buffVisibilitySnapshotIndex
+                    local currentIndex = previousIndex == 1 and 2 or 1
+                    local current = state.buffVisibilitySnapshots[currentIndex]
+                    local previous = state.buffVisibilityInitialized
+                        and state.buffVisibilitySnapshots[previousIndex]
+                    wipe(current)
+
+                    local activeItems = GetActiveItems(
+                        state.viewer,
+                        state.buffVisibilityItems
+                    )
+                    if not activeItems then
+                        wipe(state.buffVisibilityItems)
+                        return false
+                    end
+                    for _, item in ipairs(activeItems) do
+                        local shown = FrameIsShown(item)
+                        if not IsSafeBoolean(shown) then
+                            wipe(state.buffVisibilityItems)
+                            return false
+                        end
+                        current[item] = shown
+                        anyActive = shown or anyActive
+                        if previous and previous[item] ~= shown then
+                            changed = true
+                        end
+                    end
+                    if previous then
+                        for item in next, previous do
+                            if current[item] == nil then
+                                changed = true
+                                break
+                            end
+                        end
+                    end
+                    wipe(state.buffVisibilityItems)
+                    state.buffVisibilityStaged = currentIndex
+                else
+                    state.buffVisibilityStaged = 0
+                end
+            else
+                state.buffVisibilityStaged = 0
+            end
+        end
+    end
+
+    for _, state in ipairs(viewerStates) do
+        if state.definition.isBuff then
+            if state.buffVisibilityStaged == 0 then
+                state.buffVisibilityInitialized = nil
+                state.buffVisibilitySnapshotIndex = nil
+                if state.buffVisibilitySnapshots then
+                    wipe(state.buffVisibilitySnapshots[1])
+                    wipe(state.buffVisibilitySnapshots[2])
+                end
+            elseif state.buffVisibilityStaged then
+                state.buffVisibilityInitialized = true
+                state.buffVisibilitySnapshotIndex = state.buffVisibilityStaged
+            end
+            state.buffVisibilityStaged = nil
+        end
+    end
+    return true, anyActive, changed
+end
+
+function presentationController.buffVisibility:Start()
+    self.invalidPassesRemaining = 7
+    if not self.ticker and C_Timer and type(C_Timer.NewTicker) == "function" then
+        -- Buff items can hide themselves when a native aura/totem clock ends
+        -- without dispatching an addon event. This narrow worker exists only
+        -- while a configured hide-when-inactive buff viewer needs sampling.
+        self.ticker = C_Timer.NewTicker(0.25, function()
+            presentationController.buffVisibility:Tick()
+        end)
+    end
+end
+
+function presentationController.buffVisibility:Tick()
+    local valid, anyActive, changed = self:Sample()
+    if not valid then
+        self.invalidPassesRemaining =
+            (self.invalidPassesRemaining or 7) - 1
+        if self.invalidPassesRemaining <= 0 then
+            self:Stop()
+        end
+        return
+    end
+    self.invalidPassesRemaining = nil
+
+    if changed then
+        QueuePresentationUpdate()
+    end
+    if not anyActive then
+        self:Stop()
+    end
+end
+
+function presentationController.buffVisibility:Update()
+    local config = CM.config
+    if not config or not config.enabled or type(config.viewers) ~= "table" then
+        self:Stop()
+        return
+    end
+
+    local valid, anyActive = self:Sample()
+    if not valid then
+        self:Start()
+        return
+    end
+    if not anyActive then
+        self:Stop()
+        return
+    end
+    self:Start()
+end
+
+function presentationController:ReleaseCombatBlock()
+    if not self.combatBlocked then return false end
+
+    local locked = InCombatLockdown()
+    if not IsValueNonSecret(locked) or locked then
+        return false
+    end
+
+    self.combatBlocked = nil
+    QueuePresentationUpdate()
+    return true
+end
+
+local function ProcessPresentationUpdate(_, elapsed)
+    presentationController.updateTimeLeft =
+        presentationController.updateTimeLeft - elapsed
+    if presentationController.updateTimeLeft > 0 then return end
+    presentationController.updateTimeLeft = 0.15
+    presentationController.dirty = nil
+
     local config = CM.config
     local enabled = config and config.enabled and type(config.viewers) == "table"
-    local allRestored = true
+    local complete = true
+
+    InitializeViewers()
+    if not enabled then
+        if HighlightState.fallbackTicker then
+            HighlightState.fallbackTicker:Cancel()
+            HighlightState.fallbackTicker = nil
+        end
+        HighlightState.fallbackInterval = nil
+        RefreshAssistedHighlightState(true)
+    end
 
     for _, state in ipairs(viewerStates) do
         local viewerConfig = enabled and config.viewers[state.key]
         if type(viewerConfig) == "table" then
-            ReconcileViewer(state, viewerConfig)
+            complete = ReconcileViewer(state, viewerConfig) and complete
         else
-            allRestored = RestoreViewer(state) and allRestored
+            complete = RestoreViewer(state) and complete
         end
     end
 
-    if not enabled and allRestored then
+    presentationController.buffVisibility:Update()
+
+    if presentationController.dirty then
+        return
+    end
+
+    if complete then
+        presentationController.combatBlocked = nil
+        presentationController.disabledRestored = not enabled or nil
         presentationController:SetScript("OnUpdate", nil)
+        presentationController.retryPassesRemaining = nil
+        return
+    end
+
+    local locked = InCombatLockdown()
+    if not IsValueNonSecret(locked) or locked then
+        -- Protected geometry cannot make progress in combat. Sleep after the
+        -- useful runtime pass. Ordinary dirt remains pending without waking
+        -- again until a safe restriction-release event clears this latch.
+        presentationController.combatBlocked = true
+        presentationController.dirty = true
+        presentationController:SetScript("OnUpdate", nil)
+        presentationController.retryPassesRemaining = nil
+        return
+    end
+
+    presentationController.retryPassesRemaining =
+        presentationController.retryPassesRemaining - 1
+    if presentationController.retryPassesRemaining <= 0 then
+        -- Incomplete native construction normally settles within this finite
+        -- out-of-combat window. Stop instead of sweeping indefinitely and let
+        -- another real lifecycle edge re-arm reconciliation.
+        presentationController:SetScript("OnUpdate", nil)
+        presentationController.retryPassesRemaining = nil
     end
 end
 
-local function StartPresentationPolling()
-    presentationUpdateTimeLeft = 0
-    presentationController:SetScript("OnUpdate", PollPresentation)
+QueuePresentationUpdate = function()
+    local config = CM.config
+    local enabled = config
+        and config.enabled
+        and type(config.viewers) == "table"
+    if presentationController.disabledRestored and not enabled then
+        return
+    end
+    if enabled then
+        presentationController.disabledRestored = nil
+    end
+
+    presentationController.dirty = true
+    if presentationController.combatBlocked then
+        return
+    end
+    presentationController.updateTimeLeft = 0
+    presentationController.retryPassesRemaining = 7
+    presentationController:SetScript("OnUpdate", ProcessPresentationUpdate)
 end
 
 local function UpdateCooldownManager(_, module)
     if module == "actionBars" then
+        local config = CM.config
+        if presentationController.disabledRestored
+            and (not config or not config.enabled)
+        then
+            return
+        end
         hotkeyGeneration = hotkeyGeneration + 1
-        StartPresentationPolling()
+        QueuePresentationUpdate()
         return
     end
     if module and module ~= "cooldownManager" then return end
 
+    -- A user-driven module/profile update is authoritative and may represent
+    -- either a re-enable or another cleanup attempt.
+    presentationController.disabledRestored = nil
+    presentationController.combatBlocked = nil
     MarkPresentationDirty()
-    StartPresentationPolling()
-    UpdateAssistedHighlightPolling()
+    HighlightState.UpdateAssistedHighlightFallback()
 end
 
 local hotkeyRefreshEvents = {
@@ -2958,18 +3319,100 @@ local hotkeyRefreshEvents = {
 }
 
 local function OnPresentationEvent(_, event)
+    local config = CM.config
+    if presentationController.disabledRestored
+        and (not config or not config.enabled)
+    then
+        return
+    end
+    if event == "PLAYER_REGEN_ENABLED"
+        or event == "ADDON_RESTRICTION_STATE_CHANGED"
+    then
+        presentationController:ReleaseCombatBlock()
+    end
     if hotkeyRefreshEvents[event] then
         hotkeyGeneration = hotkeyGeneration + 1
     end
-    StartPresentationPolling()
+    if event == "COOLDOWN_VIEWER_DATA_LOADED"
+        or event == "COOLDOWN_VIEWER_TABLE_HOTFIXED"
+        or event == "EDIT_MODE_LAYOUTS_UPDATED"
+        or event == "PLAYER_ENTERING_WORLD"
+        or event == "VARIABLES_LOADED"
+        or event == "TRAIT_CONFIG_UPDATED"
+        or event == "ACTIVE_PLAYER_SPECIALIZATION_CHANGED"
+        or event == "ACTIVE_COMBAT_CONFIG_CHANGED"
+        or event == "ACTIVE_TALENT_GROUP_CHANGED"
+        or event == "PLAYER_PVP_TALENT_UPDATE"
+        or event == "PLAYER_EQUIPMENT_CHANGED"
+    then
+        MarkPresentationDirty()
+        return
+    end
+    QueuePresentationUpdate()
 end
 
 for event in next, hotkeyRefreshEvents do
     presentationController:RegisterEvent(event)
 end
+-- Retail 12.0.7.68887 (4383ced30106) and 12.1.0.68914
+-- (d3915c78aba7) drive Cooldown Viewer pool membership and item visibility
+-- from these events. Their payloads, including secret UNIT_AURA data, are
+-- intentionally ignored; BFI only coalesces a later read of the supported
+-- pool proxy and captured widget presentation.
+presentationController:RegisterEvent("PLAYER_REGEN_DISABLED")
+presentationController:RegisterEvent("PLAYER_IN_COMBAT_CHANGED")
+presentationController:RegisterEvent("PLAYER_LEVEL_CHANGED")
+presentationController:RegisterEvent("VARIABLES_LOADED")
+presentationController:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
+presentationController:RegisterEvent("PLAYER_ENTERING_WORLD")
+presentationController:RegisterEvent("TRAIT_CONFIG_UPDATED")
+presentationController:RegisterEvent("ACTIVE_PLAYER_SPECIALIZATION_CHANGED")
+presentationController:RegisterEvent("ACTIVE_COMBAT_CONFIG_CHANGED")
+presentationController:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
+presentationController:RegisterEvent("PLAYER_PVP_TALENT_UPDATE")
+presentationController:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+presentationController:RegisterEvent("PLAYER_TARGET_CHANGED")
+presentationController:RegisterUnitEvent("UNIT_TARGET", "player")
+presentationController:RegisterUnitEvent("UNIT_AURA", "player", "target")
+presentationController:RegisterEvent("PLAYER_TOTEM_UPDATE")
+presentationController:RegisterEvent("BAG_UPDATE_COOLDOWN")
+presentationController:RegisterEvent("COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED")
+presentationController:RegisterEvent("SPELL_UPDATE_ICON")
+presentationController:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 presentationController:SetScript("OnEvent", OnPresentationEvent)
 
+EventRegistry:RegisterCallback(
+    "CooldownViewerSettings.OnDataChanged",
+    MarkPresentationDirty,
+    presentationController
+)
+EventRegistry:RegisterCallback(
+    "CooldownViewerSettings.OnShow",
+    MarkPresentationDirty,
+    presentationController
+)
+EventRegistry:RegisterCallback(
+    "CooldownViewerSettings.OnHide",
+    MarkPresentationDirty,
+    presentationController
+)
+EventRegistry:RegisterCallback(
+    "EditMode.Enter",
+    MarkPresentationDirty,
+    presentationController
+)
+EventRegistry:RegisterCallback(
+    "EditMode.Exit",
+    MarkPresentationDirty,
+    presentationController
+)
+
 EventUtil.ContinueOnAddOnLoaded("Blizzard_CooldownViewer", function()
+    CVarCallbackRegistry:RegisterCallback(
+        "cooldownViewerEnabled",
+        MarkPresentationDirty,
+        presentationController
+    )
     UpdateCooldownManager(nil, "cooldownManager")
 end)
 AF.RegisterCallback("BFI_UpdateModule", UpdateCooldownManager)

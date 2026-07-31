@@ -34,7 +34,7 @@ Some extra features are forked from ElvUI/Blizzard
 ]]
 
 local MAJOR_VERSION = "LibActionButton-1.0-BFI"
-local MINOR_VERSION = 132 -- BFI fork revision; Retail compatibility reviewed against upstream revision 153
+local MINOR_VERSION = 133 -- BFI fork revision; Retail compatibility reviewed against upstream revision 153
 
 if not LibStub then error(MAJOR_VERSION .. " requires LibStub.") end
 local lib, oldversion = LibStub:NewLibrary(MAJOR_VERSION, MINOR_VERSION)
@@ -92,6 +92,12 @@ lib.buttonRegistry = lib.buttonRegistry or {}
 lib.activeButtons = lib.activeButtons or {}
 lib.actionButtons = lib.actionButtons or {}
 lib.nonActionButtons = lib.nonActionButtons or {}
+lib.flashingButtons = lib.flashingButtons or {}
+
+if not lib.flashController then
+    lib.flashController = CreateFrame("Frame")
+    lib.flashController:Hide()
+end
 
 -- usable state for retail using slot
 lib.buttonToSlot = lib.buttonToSlot or {}
@@ -148,7 +154,7 @@ local UpdateRange
 local ShowButtonGlow, HideButtonGlow
 local GetFlyoutHandler
 
-local InitializeEventHandler, OnEvent, ForAllButtons, OnUpdate
+local InitializeEventHandler, OnEvent, ForAllButtons, OnUpdate, UpdateFlashRegistration
 
 local function GameTooltip_GetOwnerForbidden()
     if GameTooltip:IsForbidden() then
@@ -247,6 +253,11 @@ function lib:CreateButton(id, name, header, config)
     button:SetScript("PostClick", Generic.PostClick)
     button:SetScript("OnEvent", Generic.OnButtonEvent)
     button:SetScript("OnAttributeChanged", nil)
+    -- BFI owns these updates; discard any template handler once at creation.
+    button:SetScript("OnUpdate", nil)
+    button:HookScript("OnShow", Generic.OnShow)
+    button:HookScript("OnHide", Generic.OnHide)
+    button.__LAB_SharedFlashHooks = true
 
     -- ActionButtonTemplate supplies a HasAction method which would shadow the
     -- BFI action-type implementation provided through this button's metatable.
@@ -1382,17 +1393,48 @@ function Generic:PostClick(button, down)
     end
 end
 
-function Generic:OnUpdate(elapsed)
-    if self.flashing then
-        self.flashTime = (self.flashTime or 0) - elapsed
-
-        if self.flashTime <= 0 then
-            self.Flash:SetShown(not self.Flash:IsShown())
-
-            self.flashTime = self.flashTime + ATTACK_BUTTON_FLASH_TIME
+-- Match Blizzard's shared, visibility-gated action-button updater. Verified
+-- against Retail 12.1.0.68914 UI source at d3915c78aba77a7a9be76acbfa35c674bbb6abe9.
+function UpdateFlashRegistration(self)
+    if self.flashing and self:IsVisible() then
+        lib.flashingButtons[self] = true
+        lib.flashController:Show()
+    else
+        lib.flashingButtons[self] = nil
+        if not next(lib.flashingButtons) then
+            lib.flashController:Hide()
         end
     end
 end
+
+function OnUpdate(_, elapsed)
+    for button in next, lib.flashingButtons do
+        if button.flashing and button:IsVisible() then
+            button.flashTime = (button.flashTime or 0) - elapsed
+
+            if button.flashTime <= 0 then
+                button.Flash:SetShown(not button.Flash:IsShown())
+                button.flashTime = button.flashTime + ATTACK_BUTTON_FLASH_TIME
+            end
+        else
+            lib.flashingButtons[button] = nil
+        end
+    end
+
+    if not next(lib.flashingButtons) then
+        lib.flashController:Hide()
+    end
+end
+
+function Generic:OnShow()
+    UpdateFlashRegistration(self)
+end
+
+function Generic:OnHide()
+    UpdateFlashRegistration(self)
+end
+
+lib.flashController:SetScript("OnUpdate", OnUpdate)
 
 -----------------------------------------------------------
 --- configuration
@@ -1570,7 +1612,6 @@ function InitializeEventHandler()
     end
 
     lib.eventFrame:Show()
-    -- lib.eventFrame:SetScript("OnUpdate", OnUpdate)
 
     if UseCustomFlyout and IsLoggedIn() then
         DiscoverFlyoutSpells()
@@ -1965,6 +2006,7 @@ function Update(self, which)
         ActiveButtons[self] = nil
         ActionButtons[self] = nil
         NonActionButtons[self] = nil
+        StopFlash(self)
         if gridCounter == 0 and not self.config.showGrid then
             self:SetAlpha(0.0)
         end
@@ -2008,7 +2050,6 @@ function Update(self, which)
     -- self.icon:SetDesaturated(false)
 
     if texture then
-        self:SetScript("OnUpdate", Generic.OnUpdate)
         self.icon:SetTexture(texture)
         self.icon:Show()
 
@@ -2043,7 +2084,7 @@ function Update(self, which)
             end
         end
     else
-        self:SetScript("OnUpdate", nil)
+        StopFlash(self)
         self.icon:Hide()
         self.cooldown:Hide()
 
@@ -2219,6 +2260,7 @@ function StartFlash(self)
     local prevFlash = self.flashing
 
     self.flashing = true
+    UpdateFlashRegistration(self)
 
     if prevFlash ~= self.flashing then
         UpdateButtonState(self)
@@ -2230,6 +2272,7 @@ function StopFlash(self)
 
     self.flashing = false
     self.flashTime = nil
+    UpdateFlashRegistration(self)
 
     self.Flash:Hide()
     if prevFlash ~= self.flashing then
@@ -2914,6 +2957,14 @@ end
 if oldversion and next(lib.buttonRegistry) then
     InitializeEventHandler()
     for button in next, lib.buttonRegistry do
+        if oldversion < 133 then
+            button:SetScript("OnUpdate", nil)
+            if not button.__LAB_SharedFlashHooks then
+                button:HookScript("OnShow", Generic.OnShow)
+                button:HookScript("OnHide", Generic.OnHide)
+                button.__LAB_SharedFlashHooks = true
+            end
+        end
         -- this refreshes the metatable on the button
         Generic.UpdateAction(button, true)
         SetupSecureSnippets(button)
