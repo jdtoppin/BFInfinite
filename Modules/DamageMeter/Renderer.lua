@@ -1439,15 +1439,24 @@ local function CreateWindow(index)
         OnWindowSizeChanged(window, width, height)
     end)
 
-    local header = AF.CreateFrame(
+    local header = AF.CreateBorderedFrame(
         window,
         nil,
         nil,
         nil,
-        "BackdropTemplate"
+        "header",
+        "border"
     )
     window.header = header
-    AF.ApplyDefaultBackdrop_NoBorder(header)
+    header.tex = AF.CreateGradientTexture(
+        header,
+        "HORIZONTAL",
+        AF.GetColorTable("BFI", 0.4),
+        AF.GetColorTable("BFI", 0),
+        nil,
+        "ARTWORK"
+    )
+    AF.SetOnePixelInside(header.tex, header)
     header:EnableMouse(true)
     header:RegisterForDrag("LeftButton")
     header:SetScript("OnDragStart", function()
@@ -1685,11 +1694,9 @@ local function ApplyWindowLayout(window, config)
     window.header:SetPoint("TOPLEFT")
     window.header:SetPoint("TOPRIGHT")
     window.header:SetHeight(config.headerHeight)
-    if config.accentHeader then
-        window.header:SetBackdropColor(AF.GetColorRGB("BFI", 0.94))
-    else
-        window.header:SetBackdropColor(AF.GetColorRGB("header", 0.94))
-    end
+    window.header:SetBackdropColor(AF.GetColorRGB("header"))
+    window.header:SetBackdropBorderColor(AF.GetColorRGB("border"))
+    window.header.tex:SetShown(config.accentHeader)
 
     window.minimize:SetSize(controlSize, controlSize)
     window.minimize:ClearAllPoints()

@@ -393,12 +393,45 @@ local function loadRenderer(
         return newFrame("AFFrame", parent, name, width, height)
     end
 
+    function AF.CreateBorderedFrame(
+        parent,
+        name,
+        width,
+        height,
+        color,
+        borderColor
+    )
+        local frame = newFrame(
+            "BorderedFrame",
+            parent,
+            name,
+            width,
+            height
+        )
+        frame.backgroundColorName = color
+        frame.borderColorName = borderColor
+        return frame
+    end
+
     function AF.CreateFontString(parent)
         return newFrame("FontString", parent)
     end
 
     function AF.CreateTexture(parent)
         return newFrame("Texture", parent)
+    end
+
+    function AF.CreateGradientTexture(
+        parent,
+        orientation,
+        color1,
+        color2
+    )
+        local texture = newFrame("GradientTexture", parent)
+        texture.gradientOrientation = orientation
+        texture.gradientColor1 = color1
+        texture.gradientColor2 = color2
+        return texture
     end
 
     function AF.CreateButton(parent, name, _, width, height)
@@ -495,6 +528,10 @@ local function loadRenderer(
             return 0.18, 0.18, 0.18, alpha
         end
         return 0.04, 0.04, 0.04, alpha
+    end
+
+    function AF.GetColorTable(name, alpha)
+        return {AF.GetColorRGB(name, alpha)}
     end
 
     function AF.GetClassColor(classFilename)
@@ -770,6 +807,32 @@ local third = state.namedFrames.BFIDamageMeterWindow3
 assertEqual(type(first), "table", "first addon-owned window")
 assertEqual(type(second), "table", "second addon-owned window")
 assertEqual(type(third), "table", "third addon-owned window")
+assertEqual(
+    first.header.backgroundColorName,
+    "header",
+    "title bar uses the standard BFI header surface"
+)
+assertEqual(
+    first.header.borderColorName,
+    "border",
+    "title bar uses the standard BFI border"
+)
+assertEqual(
+    first.header.tex.gradientOrientation,
+    "HORIZONTAL",
+    "title bar accent uses the standard horizontal gradient"
+)
+assertEqual(first.header.tex.gradientColor1[1], 0.82, "gradient red")
+assertEqual(first.header.tex.gradientColor1[2], 0.37, "gradient green")
+assertEqual(first.header.tex.gradientColor1[3], 0.12, "gradient blue")
+assertEqual(first.header.tex.gradientColor1[4], 0.4, "gradient start alpha")
+assertEqual(first.header.tex.gradientColor2[4], 0, "gradient end alpha")
+assertSame(
+    first.header.tex.onePixelInside,
+    first.header,
+    "title bar accent is inset within its border"
+)
+assertEqual(first.header.tex.shown, true, "accent header defaults on")
 assertEqual(first.shown, true, "first window shown")
 assertEqual(second.shown, true, "second window shown")
 assertEqual(third.shown, true, "third window shown")
@@ -1749,6 +1812,21 @@ assertEqual(first.width, 360, "live width")
 assertEqual(first.height, 260, "live height")
 assertEqual(second.height, 240, "second window keeps its own height")
 assertEqual(first.header.height, 26, "live header height")
+assertEqual(
+    first.header.backdropColor.r,
+    0.18,
+    "title bar keeps its dark header surface"
+)
+assertEqual(
+    first.header.borderColor.r,
+    0.1,
+    "title bar keeps its border color"
+)
+assertEqual(
+    first.header.tex.shown,
+    false,
+    "disabling Accent Header hides only the gradient"
+)
 assertEqual(firstRow.height, 24, "live bar height")
 assertEqual(firstRow.points[1].x, 6, "live horizontal padding")
 assertEqual(firstRow.points[1].y, -6, "live vertical padding")
