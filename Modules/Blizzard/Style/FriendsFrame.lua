@@ -140,20 +140,39 @@ local function StyleTitledDialog(frame, sourceTitle)
     end
 
     -- AddFriendFrame is a ResizeLayoutFrame on PTR 12.1.0.68914. Give the
-    -- shared titled-frame skin a root-owned title, while leaving Blizzard's
-    -- nested title in the layout so repeated Info/Entry resizing is stable.
+    -- shared titled-frame skin a root-owned compatibility title, then remove
+    -- Blizzard's nested title from the content layout so its row collapses.
+    local titleText = sourceTitle:GetText()
+    if not titleText or titleText == "" then
+        titleText = _G.ADD_NEW_FRIEND
+    end
+
     frame.Title = frame:CreateFontString(nil, "OVERLAY")
     local fontObject = sourceTitle:GetFontObject()
     if fontObject then
         frame.Title:SetFontObject(fontObject)
     end
-    frame.Title:SetText(sourceTitle:GetText())
+    frame.Title:SetText(titleText)
     frame.Title.ignoreInLayout = true
     sourceTitle:SetAlpha(0)
+    sourceTitle.ignoreInLayout = true
 
     S.StyleTitledFrame(frame, false)
     frame.BFIBg.ignoreInLayout = true
     frame.BFIHeader.ignoreInLayout = true
+
+    -- BFIHeader is a child frame above AddFriendFrame's draw level, so a
+    -- root-owned FontString can sit behind it. Keep that root title only as
+    -- the shared skin's compatibility target and draw the visible copy on
+    -- the header itself.
+    frame.Title:SetAlpha(0)
+    frame.BFITitleText = frame.BFIHeader:CreateFontString(nil, "OVERLAY")
+    if fontObject then
+        frame.BFITitleText:SetFontObject(fontObject)
+    end
+    frame.BFITitleText:SetText(titleText)
+    frame.BFITitleText.ignoreInLayout = true
+    AF.SetPoint(frame.BFITitleText, "CENTER")
 end
 
 local function StyleRoleIcon(icon, role)
@@ -431,6 +450,21 @@ local function StyleAddFriendFrame()
             StyleTitledDialog(frame, titleContainer.Title)
         else
             StylePlainDialog(frame)
+        end
+
+        local infoButton = (entryFrame and entryFrame.InfoButton)
+            or _G.AddFriendEntryFrameInfoButton
+        if frame.BFIHeader and infoButton then
+            infoButton.ignoreInLayout = true
+            S.StyleTitleBarInfoButton(frame, infoButton)
+            if infoButton.OnTextScaleUpdated
+                and not infoButton._BFITitleBarScaleHooked
+            then
+                infoButton._BFITitleBarScaleHooked = true
+                hooksecurefunc(infoButton, "OnTextScaleUpdated", function(self)
+                    AF.SetSize(self, 20, 20)
+                end)
+            end
         end
 
         local infoFrame = frame.InfoFrame

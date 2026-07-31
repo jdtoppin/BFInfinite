@@ -59,6 +59,24 @@ local function makeFlatTexture()
     return texture
 end
 
+local function makeFontString(owner, name, layer)
+    local fontString = {
+        layer = layer,
+        name = name,
+        owner = owner,
+    }
+    function fontString:SetAlpha(alpha)
+        self.alpha = alpha
+    end
+    function fontString:SetFontObject(fontObject)
+        self.fontObject = fontObject
+    end
+    function fontString:SetText(text)
+        self.text = text
+    end
+    return fontString
+end
+
 local function makeTab(name)
     local tab = {
         Icon = {},
@@ -99,6 +117,7 @@ local startupCallback
 local addonCallbacks = {}
 local textScaleRegistration
 local titledFrameCalls = {}
+local titleBarInfoButtonCalls = {}
 
 local AF = {}
 
@@ -133,7 +152,25 @@ local S = {}
 function S.StyleTitledFrame(frame, movableTarget)
     titledFrameCalls[frame] = movableTarget
     frame.BFIBg = frame.BFIBg or {}
-    frame.BFIHeader = frame.BFIHeader or {}
+    if not frame.BFIHeader then
+        local header = {
+            createdFontStrings = {},
+        }
+        function header:CreateFontString(name, layer)
+            local fontString = makeFontString(self, name, layer)
+            self.createdFontStrings[#self.createdFontStrings + 1] = fontString
+            return fontString
+        end
+        frame.BFIHeader = header
+    end
+end
+
+function S.StyleTitleBarInfoButton(frame, button)
+    titleBarInfoButtonCalls[#titleBarInfoButtonCalls + 1] = {
+        button = button,
+        frame = frame,
+    }
+    AF.SetSize(button, 20, 20)
 end
 
 function S.StyleDropdownButton()
@@ -180,6 +217,7 @@ local environment = {
     unpack = unpack,
 }
 environment._G = environment
+environment.ADD_NEW_FRIEND = "Localized Add New Friend"
 
 local chunk, loadError = loadfile("Modules/Blizzard/Style/FriendsFrame.lua")
 assertEqual(type(chunk), "function", loadError or "module load")
@@ -320,7 +358,7 @@ assertSocialTabLayout("post-RefreshTabs")
 local sourceFont = {}
 local sourceTitle = {
     fontObject = sourceFont,
-    text = "Add New Friend",
+    text = "",
 }
 function sourceTitle:GetFontObject()
     return self.fontObject
@@ -332,8 +370,16 @@ function sourceTitle:SetAlpha(alpha)
     self.alpha = alpha
 end
 
+local infoButton = {}
+function infoButton:OnTextScaleUpdated()
+    self.nativeTextScaleCalls = (self.nativeTextScaleCalls or 0) + 1
+    self.width = 32
+    self.height = 32
+end
+
 local addFriendFrame = {
     Border = makeAlphaRegion(),
+    createdFontStrings = {},
     EntryFrame = {
         TitleContainer = {
             Title = sourceTitle,
@@ -341,39 +387,74 @@ local addFriendFrame = {
     },
 }
 function addFriendFrame:CreateFontString(name, layer)
-    local title = {
-        layer = layer,
-        name = name,
-    }
-    function title.SetFontObject(titleObject, fontObject)
-        titleObject.fontObject = fontObject
-    end
-    function title.SetText(titleObject, text)
-        titleObject.text = text
-    end
-    return title
+    local fontString = makeFontString(self, name, layer)
+    self.createdFontStrings[#self.createdFontStrings + 1] = fontString
+    return fontString
 end
 
 environment.AddFriendFrame = addFriendFrame
+environment.AddFriendEntryFrameInfoButton = infoButton
 addonCallbacks.Blizzard_AddFriend()
 
 assertTrue(addFriendFrame.BFIHeader, "Add Friend BFI header")
-assertTrue(addFriendFrame.Title, "Add Friend root title")
+assertTrue(addFriendFrame.Title, "Add Friend root title placeholder")
 assertEqual(addFriendFrame.Title.layer, "OVERLAY",
-    "Add Friend root title layer")
+    "Add Friend root title placeholder layer")
 assertEqual(addFriendFrame.Title.fontObject, sourceFont,
-    "Add Friend root title font")
-assertEqual(addFriendFrame.Title.text, sourceTitle.text,
-    "Add Friend root title text")
+    "Add Friend root title placeholder font")
+assertEqual(addFriendFrame.Title.text, environment.ADD_NEW_FRIEND,
+    "Add Friend root title placeholder localized fallback")
 assertEqual(addFriendFrame.Title.ignoreInLayout, true,
-    "Add Friend root title excluded from layout")
+    "Add Friend root title placeholder excluded from layout")
+assertEqual(addFriendFrame.Title.alpha, 0,
+    "Add Friend root title placeholder hidden")
+assertEqual(addFriendFrame.Title.owner, addFriendFrame,
+    "Add Friend root title placeholder owner")
+
+local visibleTitle = addFriendFrame.BFITitleText
+assertTrue(visibleTitle, "Add Friend visible header title")
+assertEqual(visibleTitle.owner, addFriendFrame.BFIHeader,
+    "Add Friend visible title owner")
+assertEqual(visibleTitle.layer, "OVERLAY",
+    "Add Friend visible title layer")
+assertEqual(visibleTitle.fontObject, sourceFont,
+    "Add Friend visible title font")
+assertEqual(visibleTitle.text, environment.ADD_NEW_FRIEND,
+    "Add Friend visible title localized fallback")
+assertEqual(visibleTitle.ignoreInLayout, true,
+    "Add Friend visible title excluded from layout")
+assertTrue(visibleTitle.alpha ~= 0, "Add Friend visible title shown")
+assertPoint(visibleTitle, "Add Friend visible title point", "CENTER")
 assertEqual(addFriendFrame.BFIBg.ignoreInLayout, true,
     "Add Friend background excluded from layout")
 assertEqual(addFriendFrame.BFIHeader.ignoreInLayout, true,
     "Add Friend header excluded from layout")
 assertEqual(sourceTitle.alpha, 0, "nested Add Friend title hidden")
+assertEqual(sourceTitle.ignoreInLayout, true,
+    "nested Add Friend title excluded from content layout")
 assertEqual(addFriendFrame.Border.alpha, 0, "native Add Friend border hidden")
 assertEqual(titledFrameCalls[addFriendFrame], false,
     "Add Friend retains native positioning")
+assertEqual(#titleBarInfoButtonCalls, 1,
+    "Add Friend title-bar info-button call count")
+assertEqual(titleBarInfoButtonCalls[1].frame, addFriendFrame,
+    "Add Friend title-bar info-button frame")
+assertEqual(titleBarInfoButtonCalls[1].button,
+    environment.AddFriendEntryFrameInfoButton,
+    "Add Friend global info-button target")
+assertEqual(infoButton.ignoreInLayout, true,
+    "Add Friend info button excluded from layout")
+assertEqual(infoButton.width, 20, "Add Friend info button initial width")
+assertEqual(infoButton.height, 20, "Add Friend info button initial height")
+assertEqual(infoButton._BFITitleBarScaleHooked, true,
+    "Add Friend info-button text-scale hook marker")
+
+infoButton:OnTextScaleUpdated()
+assertEqual(infoButton.nativeTextScaleCalls, 1,
+    "Add Friend native info-button text-scale update preserved")
+assertEqual(infoButton.width, 20,
+    "Add Friend info-button width restored after text scaling")
+assertEqual(infoButton.height, 20,
+    "Add Friend info-button height restored after text scaling")
 
 print("social_window_skin_test.lua: ok")
