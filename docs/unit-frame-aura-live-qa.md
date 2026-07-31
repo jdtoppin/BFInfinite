@@ -31,7 +31,7 @@ Use this clean isolated-install sequence:
 3. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
    #102 at `5bbd4948ec55353ab31418f30a39b4c592ae7457`.
 4. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
-   #103 at `3a15584af39f69cde28d5d00e80a1d29d8934e29`.
+   #103 at `2bd05c32e7c7f8834412d01783db62c2ee785614`.
 5. Validation-only AF #25 at
    `d82bc3e07d4eab953d5e9a7dc82c9cc1a307e8f9` with the exact
    checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
@@ -66,7 +66,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Target partition | `codex/unitframe-aura-target` | `edcb992` |
 | Party | `codex/unitframe-aura-party` | `a354756` |
 | Raid | `codex/unitframe-aura-raid` | `4f370f7` |
-| Upper-right Debuff appearance (#103; includes #99) | `codex/buffs-debuffs-native-debuffs` | `3a15584af39f69cde28d5d00e80a1d29d8934e29` |
+| Upper-right Debuff appearance (#103; includes #99) | `codex/buffs-debuffs-native-debuffs` | `2bd05c32e7c7f8834412d01783db62c2ee785614` |
 | Secret identity (#100) | `codex/unitframe-secret-identity` | `b8e1671ed8a1c11657416357875f9c8277051654` |
 
 Test in this order:
@@ -213,6 +213,8 @@ while it may be secret.
 ### 1. Backend, load, and ownership
 
 - Login and reload with every unit-frame Buffs and Debuffs indicator enabled.
+- Confirm the `BFI_UpdateModule` callback produces no interface-version
+  `tonumber` error when upper-right Buffs & Debuffs initializes.
 - Confirm Player, Pet, Party, Raid, Target, Boss, Focus, TargetTarget,
   FocusTarget, and PetTarget use native containers.
 - Confirm no unit-frame row silently falls back to the legacy backend.
