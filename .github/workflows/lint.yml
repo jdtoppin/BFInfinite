@@ -35,10 +35,12 @@ jobs:
 
       - name: Test Mythic+ timer, seasonal analysis, and tracker integration
         run: |
-          for test_file in tests/abstract_framework_version_guard_test.lua tests/mythic_plus_*_test.lua tests/objective_tracker_managed_container_test.lua; do
+          for test_file in tests/abstract_framework_version_guard_test.lua tests/mythic_plus_*_test.lua tests/objective_tracker_taint_boundary_test.lua; do
             luajit "$test_file"
           done
 
       - name: Test Retail 12.1 fixes
         run: |
-          lua5.1 tests/experience_bar_disabled_texture_test.lua
+          for test_file in tests/experience_bar_disabled_texture_test.lua tests/queue_status_frame_native_ownership_test.lua tests/style_pixel_updater_secret_geometry_test.lua tests/unit_frame_status_timer_secret_test.lua; do
+            lua5.1 "$test_file"
+          done

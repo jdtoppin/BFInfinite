@@ -44,6 +44,7 @@ local TIMER_REFRESH_INTERVAL = 0.10
 local FINALIZE_QUIET_DELAY = 0.20
 local FINALIZE_DEADLINE_SECONDS = 4
 local FINALIZE_RETRY_DELAYS = {0.25, 0.50, 0.75, 0.75}
+local RUN_HYDRATION_RETRY_DELAYS = {0, 0.25, 1, 2}
 local RUN_START_MATCH_TOLERANCE = 10
 local MAX_RESTORE_IDENTITY_RETRIES = 2
 
@@ -58,6 +59,8 @@ local timerFrame
 local previewRun
 local updateAccumulator = 0
 local deadlineScheduled = {}
+local hydrationScheduleToken = 0
+local runStartScheduleToken = 0
 
 local RefreshDisplay
 local TryFinalizeRun
@@ -468,25 +471,31 @@ local function storeCompletedRun(run)
     requestMapInfo()
 end
 
-local function getChallengeTimer()
-    if type(GetWorldElapsedTimers) ~= "function"
-        or type(GetWorldElapsedTime) ~= "function"
+local function getChallengeTimerElapsed(timerID)
+    if type(GetWorldElapsedTime) ~= "function"
+        or not isNonSecret(timerID) or type(timerID) ~= "number"
     then
         return nil
     end
 
-    local timerIDs = {GetWorldElapsedTimers()}
+    local _, elapsed, timerType = GetWorldElapsedTime(timerID)
     local challengeType = Enum and Enum.WorldElapsedTimerTypes
         and Enum.WorldElapsedTimerTypes.ChallengeMode
+    if isNonSecret(elapsed) and isNonSecret(timerType)
+        and type(elapsed) == "number" and timerType == challengeType
+    then
+        return elapsed
+    end
+end
+
+local function getChallengeTimer()
+    if type(GetWorldElapsedTimers) ~= "function" then return nil end
+
+    local timerIDs = {GetWorldElapsedTimers()}
     for _, timerID in ipairs(timerIDs) do
-        if isNonSecret(timerID) and type(timerID) == "number" then
-            local _, elapsed, timerType = GetWorldElapsedTime(timerID)
-            if isNonSecret(elapsed) and isNonSecret(timerType)
-                and type(elapsed) == "number"
-                and timerType == challengeType
-            then
-                return timerID, elapsed
-            end
+        local elapsed = getChallengeTimerElapsed(timerID)
+        if elapsed ~= nil then
+            return timerID, elapsed
         end
     end
 end
@@ -495,14 +504,9 @@ MP.GetChallengeTimer = getChallengeTimer
 local function getRunElapsed(run)
     if type(run) ~= "table" then return 0 end
 
-    if run.timerID and type(GetWorldElapsedTime) == "function" then
-        local _, elapsed, timerType = GetWorldElapsedTime(run.timerID)
-        local challengeType = Enum and Enum.WorldElapsedTimerTypes
-            and Enum.WorldElapsedTimerTypes.ChallengeMode
-        if isNonSecret(elapsed) and isNonSecret(timerType)
-            and type(elapsed) == "number"
-            and timerType == challengeType
-        then
+    if run.timerID then
+        local elapsed = getChallengeTimerElapsed(run.timerID)
+        if elapsed ~= nil then
             return max(0, elapsed)
         end
     end
@@ -510,7 +514,18 @@ local function getRunElapsed(run)
     local timerID, elapsed = getChallengeTimer()
     if timerID then
         run.timerID = timerID
+        run.awaitingWorldTimer = nil
+        if type(GetTimePreciseSec) == "function" then
+            local now = GetTimePreciseSec()
+            if isNonSecret(now) and type(now) == "number" then
+                run.localClockStart = now - elapsed
+            end
+        end
         return max(0, elapsed)
+    end
+
+    if run.awaitingWorldTimer then
+        return max(0, tonumber(run.elapsed) or 0)
     end
 
     if type(GetTimePreciseSec) == "function" and run.localClockStart then
@@ -727,9 +742,7 @@ end
 
 local trackerSuppressed
 local trackerHooked
-local trackerWasShown
 local trackerRestoreAlpha
-local trackerRestorePending
 
 local function shouldSuppressTracker()
     return trackerSuppressed == true
@@ -740,16 +753,15 @@ local function applyTrackerSuppression()
     local tracker = _G.ObjectiveTrackerFrame
     if not tracker or not shouldSuppressTracker() then return end
 
-    if trackerWasShown == nil then
-        trackerWasShown = tracker:IsShown()
-        trackerRestoreAlpha = tracker:GetAlpha()
+    if trackerRestoreAlpha == nil then
+        local alpha = tracker:GetAlpha()
+        if isNonSecret(alpha) and type(alpha) == "number" then
+            trackerRestoreAlpha = alpha
+        else
+            trackerRestoreAlpha = 1
+        end
     end
-    if type(InCombatLockdown) == "function" and InCombatLockdown() then
-        tracker:SetAlpha(0)
-    else
-        tracker:SetAlpha(0)
-        tracker:Hide()
-    end
+    tracker:SetAlpha(0)
 end
 
 local function installTrackerHook()
@@ -773,31 +785,15 @@ end
 
 local function restoreTrackerNow()
     local tracker = _G.ObjectiveTrackerFrame
-    trackerRestorePending = nil
-    if tracker and (
-        trackerWasShown ~= nil or trackerRestoreAlpha ~= nil
-    ) then
-        tracker:SetAlpha(trackerRestoreAlpha or 1)
-        if trackerWasShown == true then
-            tracker:Show()
-        elseif trackerWasShown == false then
-            tracker:Hide()
-        end
+    if tracker and trackerRestoreAlpha ~= nil then
+        tracker:SetAlpha(trackerRestoreAlpha)
     end
-    trackerWasShown = nil
     trackerRestoreAlpha = nil
 end
 
 local function restoreTracker()
     trackerSuppressed = nil
-    if type(InCombatLockdown) == "function" and InCombatLockdown() then
-        trackerRestorePending = true
-        if eventFrame then
-            eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-        end
-    else
-        restoreTrackerNow()
-    end
+    restoreTrackerNow()
 end
 
 local function persistActiveRun()
@@ -847,27 +843,139 @@ local function capturePowerModifiers(level)
     return damage, health
 end
 
-local function startRun(mapID, forcePartial)
+local function readMapMetadata(mapID, season)
+    local mapName, timeLimit, texture
+    if type(C_ChallengeMode) == "table"
+        and type(C_ChallengeMode.GetMapUIInfo) == "function"
+    then
+        local name, _, limit, mapTexture =
+            C_ChallengeMode.GetMapUIInfo(mapID)
+        if isNonSecret(name) and type(name) == "string"
+            and name ~= ""
+        then
+            mapName = name
+        end
+        if isNonSecret(limit) and isFiniteNumber(limit)
+            and limit > 0
+        then
+            timeLimit = limit
+        end
+        if isNonSecret(mapTexture) and type(mapTexture) == "number" then
+            texture = mapTexture
+        end
+    end
+
+    local cached = getMapHistory(season, mapID)
+    if type(cached) == "table" then
+        if not mapName and type(cached.name) == "string"
+            and cached.name ~= ""
+        then
+            mapName = cached.name
+        end
+        if not timeLimit and isFiniteNumber(cached.timeLimit)
+            and cached.timeLimit > 0
+        then
+            timeLimit = cached.timeLimit
+        end
+        if not texture and type(cached.texture) == "number" then
+            texture = cached.texture
+        end
+    end
+    return mapName, timeLimit, texture
+end
+
+local function refreshRunPresentation(run)
+    if currentRun ~= run or type(run) ~= "table" or not run.active then
+        return true
+    end
+
+    local mapName, timeLimit, texture =
+        readMapMetadata(run.mapID, currentSeason)
+    if mapName then run.mapName = mapName end
+    if timeLimit then run.timeLimit = timeLimit end
+    if texture then run.mapTexture = texture end
+
+    local timerID, elapsed = getChallengeTimer()
+    if timerID and isFiniteNumber(elapsed) then
+        run.timerID = timerID
+        run.awaitingWorldTimer = nil
+        run.elapsed = max(0, elapsed)
+        if type(GetTimePreciseSec) == "function" then
+            local now = GetTimePreciseSec()
+            if isNonSecret(now) and type(now) == "number" then
+                run.localClockStart = now - elapsed
+            end
+        end
+    end
+
+    updateObjectives(run)
+    persistActiveRun()
+    RefreshDisplay()
+
+    return mapName ~= nil and timeLimit ~= nil
+        and type(run.objectives) == "table"
+        and #run.objectives > 0
+end
+
+local function scheduleRunHydration(run)
+    hydrationScheduleToken = hydrationScheduleToken + 1
+    local token = hydrationScheduleToken
+    for _, delay in ipairs(RUN_HYDRATION_RETRY_DELAYS) do
+        runAfter(delay, function()
+            if token ~= hydrationScheduleToken then return end
+            if refreshRunPresentation(run) then
+                hydrationScheduleToken = hydrationScheduleToken + 1
+            end
+        end)
+    end
+end
+
+local function startRun(mapID, forcePartial, retryCount, startToken)
+    if not config or not config.enabled then return end
+    if not startToken then
+        runStartScheduleToken = runStartScheduleToken + 1
+        startToken = runStartScheduleToken
+    end
     mapID = mapID or getActiveMapID()
-    if not mapID or not config or not config.enabled then return end
+    if not mapID then
+        retryCount = (retryCount or 0) + 1
+        if retryCount <= #RUN_HYDRATION_RETRY_DELAYS then
+            local delay = RUN_HYDRATION_RETRY_DELAYS[retryCount]
+            runAfter(delay, function()
+                if startToken == runStartScheduleToken
+                    and config and config.enabled
+                    and not (currentRun and currentRun.active)
+                then
+                    startRun(nil, forcePartial, retryCount, startToken)
+                end
+            end)
+        end
+        return
+    end
     if currentRun and currentRun.active and currentRun.mapID == mapID then
+        if not refreshRunPresentation(currentRun) then
+            scheduleRunHydration(currentRun)
+        end
         return
     end
 
     local discoveredSeason = discoverSeason()
-    local mapName, _, timeLimit, texture
-    if type(C_ChallengeMode.GetMapUIInfo) == "function" then
-        mapName, _, timeLimit, texture =
-            C_ChallengeMode.GetMapUIInfo(mapID)
-    end
-    if not isNonSecret(mapName) or type(mapName) ~= "string" then
-        mapName = _G.UNKNOWN or "Unknown"
-    end
-    if not isNonSecret(timeLimit) or type(timeLimit) ~= "number" then
-        timeLimit = 0
-    end
-    if not isNonSecret(texture) or type(texture) ~= "number" then
-        texture = nil
+    local mapName, timeLimit, texture =
+        readMapMetadata(mapID, discoveredSeason)
+    if not mapName or not timeLimit then
+        retryCount = (retryCount or 0) + 1
+        if retryCount <= #RUN_HYDRATION_RETRY_DELAYS then
+            local delay = RUN_HYDRATION_RETRY_DELAYS[retryCount]
+            runAfter(delay, function()
+                if startToken == runStartScheduleToken
+                    and config and config.enabled
+                    and not (currentRun and currentRun.active)
+                then
+                    startRun(nil, forcePartial, retryCount, startToken)
+                end
+            end)
+        end
+        return
     end
 
     local level, affixes, charged =
@@ -922,6 +1030,7 @@ local function startRun(mapID, forcePartial)
         timeLimit = timeLimit,
         elapsed = elapsed,
         timerID = timerID,
+        awaitingWorldTimer = not timerID and not forcePartial or nil,
         localClockStart = now - elapsed,
         startedAt = startedAt,
         seasonID = discoveredSeason
@@ -955,6 +1064,7 @@ local function startRun(mapID, forcePartial)
     attachReference(currentRun)
     updateObjectives(currentRun)
     persistActiveRun()
+    scheduleRunHydration(currentRun)
     suppressTracker()
     if timerFrame then
         timerFrame:SetScript("OnUpdate", timerFrame._onUpdate)
@@ -965,7 +1075,7 @@ end
 local restoreIdentityRetries = 0
 local restoreIdentityRetryScheduled
 
-local function restoreRun()
+local function restoreRun(preferredTimerID)
     if not isChallengeActive() then return false end
     local mapID = getActiveMapID()
     if not mapID then return false end
@@ -986,7 +1096,12 @@ local function restoreRun()
         return currentRun ~= nil
     end
 
-    local timerID, elapsed = getChallengeTimer()
+    local timerID = preferredTimerID
+    local elapsed = timerID
+        and getChallengeTimerElapsed(timerID) or nil
+    if elapsed == nil then
+        timerID, elapsed = getChallengeTimer()
+    end
     local activeDeaths, activeDeathTimeLost = readChallengeDeathData()
     if not timerID or not isFiniteNumber(elapsed)
         or not isFiniteNumber(activeDeathTimeLost)
@@ -1001,7 +1116,7 @@ local function restoreRun()
             runAfter(1, function()
                 restoreIdentityRetryScheduled = nil
                 if config and config.enabled and isChallengeActive() then
-                    restoreRun()
+                    restoreRun(preferredTimerID)
                 end
             end)
             return false
@@ -1050,6 +1165,7 @@ local function restoreRun()
     currentRun.active = true
     currentRun.completed = false
     currentRun.timerID = timerID
+    currentRun.awaitingWorldTimer = nil
     currentRun.elapsed = max(0, elapsed)
     if canEstablishSavedIdentity then
         currentRun.startedAt = estimatedStartedAt
@@ -1068,6 +1184,8 @@ local function restoreRun()
         attachReference(currentRun)
     end
     updateObjectives(currentRun)
+    refreshRunPresentation(currentRun)
+    scheduleRunHydration(currentRun)
     suppressTracker()
     if timerFrame then
         timerFrame:SetScript("OnUpdate", timerFrame._onUpdate)
@@ -1473,6 +1591,7 @@ local function completeRun()
 end
 
 archiveInterruptedRun = function(reason, preserveElapsed)
+    runStartScheduleToken = runStartScheduleToken + 1
     local run = currentRun
     if not run or not run.active then return end
 
@@ -1532,8 +1651,12 @@ local function onEvent(_, event, ...)
     if event == "CHALLENGE_MODE_MAPS_UPDATE" then
         discoverSeason()
     elseif event == "CHALLENGE_MODE_START" then
-        startRun(...)
+        -- Retail 12.1's event payload is a generic map ID. Blizzard's own
+        -- ScenarioTimer reacquires the active challenge-mode map ID before
+        -- passing it to GetMapUIInfo, whose argument is mapChallengeModeID.
+        startRun()
     elseif event == "CHALLENGE_MODE_COMPLETED" then
+        runStartScheduleToken = runStartScheduleToken + 1
         completeRun()
     elseif event == "CHALLENGE_MODE_RESET" then
         archiveInterruptedRun("reset")
@@ -1563,9 +1686,6 @@ local function onEvent(_, event, ...)
             RefreshDisplay()
         end
     elseif event == "PLAYER_REGEN_ENABLED" then
-        if trackerRestorePending then
-            restoreTrackerNow()
-        end
         local pendingFinalization = characterHistory
             and characterHistory.pendingFinalization
         if type(pendingFinalization) == "table"
@@ -1650,24 +1770,32 @@ local function onEvent(_, event, ...)
         end)
     elseif event == "WORLD_STATE_TIMER_START" then
         local timerID = ...
-        if currentRun and currentRun.active
-            and isNonSecret(timerID) and type(timerID) == "number"
-        then
-            local _, elapsed, timerType = GetWorldElapsedTime(timerID)
-            local challengeType = Enum and Enum.WorldElapsedTimerTypes
-                and Enum.WorldElapsedTimerTypes.ChallengeMode
-            if isNonSecret(elapsed) and isNonSecret(timerType)
-                and type(elapsed) == "number"
-                and timerType == challengeType
-            then
-                currentRun.timerID = timerID
-                currentRun.elapsed = max(0, elapsed)
-                establishRunIdentity(currentRun, currentRun.elapsed)
-                persistActiveRun()
-                RefreshDisplay()
+        local elapsed = getChallengeTimerElapsed(timerID)
+        if elapsed ~= nil and not (
+            currentRun and currentRun.active
+        ) and isChallengeActive() then
+            ensureHistory()
+            if type(characterHistory.activeRun) == "table" then
+                restoreRun(timerID)
+            else
+                startRun()
             end
-        elseif isChallengeActive() then
-            restoreRun()
+        end
+        if elapsed ~= nil and currentRun and currentRun.active then
+            currentRun.timerID = timerID
+            currentRun.awaitingWorldTimer = nil
+            currentRun.elapsed = max(0, elapsed)
+            if type(GetTimePreciseSec) == "function" then
+                local now = GetTimePreciseSec()
+                if isNonSecret(now) and type(now) == "number" then
+                    currentRun.localClockStart = now - elapsed
+                end
+            end
+            establishRunIdentity(currentRun, currentRun.elapsed)
+            refreshRunPresentation(currentRun)
+            scheduleRunHydration(currentRun)
+            persistActiveRun()
+            RefreshDisplay()
         end
     elseif event == "WORLD_STATE_TIMER_STOP" then
         local timerID = ...
@@ -2735,7 +2863,8 @@ local function renderRun(run)
     updateDeathData(run)
     local elapsed = run.elapsed or 0
     local timeLimit = run.timeLimit or 0
-    local remaining = timeLimit - elapsed
+    local hasTimeLimit = timeLimit > 0
+    local remaining = hasTimeLimit and timeLimit - elapsed or 0
     local plusTwo, plusThree = Model.CalculateBonusThresholds(
         timeLimit,
         run.affixes
@@ -2756,13 +2885,14 @@ local function renderRun(run)
         "TOPLEFT", 8, -7)
     setTruncatedText(
         timerFrame.time,
-        Model.FormatClock(elapsed) .. " / "
-            .. Model.FormatClock(timeLimit),
+        Model.FormatClock(elapsed) .. " / " .. (
+            hasTimeLimit and Model.FormatClock(timeLimit) or "—"
+        ),
         contentWidth * 0.36,
         "right"
     )
     timerFrame.time:SetTextColor(AF.GetColorRGB(
-        remaining >= 0 and "white" or "firebrick"
+        hasTimeLimit and remaining < 0 and "firebrick" or "white"
     ))
     anchorText(timerFrame.time, "TOPRIGHT", timerFrame,
         "TOPRIGHT", -8, -7)
@@ -2771,7 +2901,8 @@ local function renderRun(run)
     local detailsY = y
     y = renderAffixes(run, y)
 
-    local showThresholds = config.showThresholds ~= false
+    local showThresholds = hasTimeLimit
+        and config.showThresholds ~= false
     if showThresholds then
         timerFrame.thresholds:SetText(L["+3 %s   +2 %s"]:format(
             Model.FormatClock(plusThree - elapsed, true),
@@ -2797,16 +2928,20 @@ local function renderRun(run)
         8,
         y
     )
-    timerFrame.timerBar:SetMinMaxValues(0, max(timeLimit, 1))
+    timerFrame.timerBar:SetMinMaxValues(
+        0,
+        hasTimeLimit and max(timeLimit, 1) or max(elapsed, 1)
+    )
     timerFrame.timerBar:SetBarValue(
-        min(max(elapsed, 0), max(timeLimit, 1))
+        hasTimeLimit
+            and min(max(elapsed, 0), max(timeLimit, 1)) or 0
     )
     setStatusBarColor(
         timerFrame.timerBar,
-        elapsed <= plusThree and "softlime"
+        not hasTimeLimit and "gray"
+            or elapsed <= plusThree and "softlime"
             or elapsed <= plusTwo and "skyblue"
-            or remaining >= 0 and "BFI"
-            or "firebrick"
+            or remaining >= 0 and "BFI" or "firebrick"
     )
     if showThresholds then
         AF.ClearPoints(timerFrame.plusThreeTick)
@@ -2879,14 +3014,17 @@ local function renderRun(run)
         "TOPLEFT", 8, y)
     setTruncatedText(
         timerFrame.remaining,
-        remaining >= 0
-            and L["Remaining %s"]:format(Model.FormatClock(remaining))
+        not hasTimeLimit and L["Unavailable"]
+            or remaining >= 0 and L["Remaining %s"]:format(
+                Model.FormatClock(remaining)
+            )
             or L["Over %s"]:format(Model.FormatClock(-remaining)),
         contentWidth * 0.36,
         "right"
     )
     timerFrame.remaining:SetTextColor(AF.GetColorRGB(
-        remaining >= 0 and "softlime" or "firebrick"
+        not hasTimeLimit and "gray"
+            or remaining >= 0 and "softlime" or "firebrick"
     ))
     anchorText(timerFrame.remaining, "TOPRIGHT", timerFrame,
         "TOPRIGHT", -8, y)
@@ -3096,6 +3234,7 @@ local function updateMythicPlus(_, module, which)
 
     config = W.config.mythicPlus
     if not config.enabled then
+        runStartScheduleToken = runStartScheduleToken + 1
         if timerFrame then
             timerFrame.enabled = false
         end

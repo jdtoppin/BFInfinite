@@ -24,23 +24,28 @@ local function assertNear(actual, expected, tolerance, message)
     end
 end
 
+local secretAlpha = {}
 local state = {
     challengeActive = false,
     elapsed = 0,
     inCombat = false,
     bossComplete = false,
     forcesComplete = false,
+    scenarioReady = true,
     queuedTimers = {},
     timerClock = 0,
     meterReads = 0,
     meterFailures = 0,
     deltaDurations = {},
     activeMapID = 399,
+    activeMapAvailable = true,
     keyLevel = 13,
     deaths = 1,
     deathTimeLost = 5,
     deathDataAvailable = true,
     timerAvailable = true,
+    timerListAvailable = true,
+    preciseTime = nil,
     dragPoint = "TOPLEFT",
     dragX = 42,
     dragY = -73,
@@ -358,8 +363,8 @@ local L = setmetatable({}, {
 local BFI = {
     L = L,
     funcs = {
-        isValueNonSecret = function()
-            return true
+        isValueNonSecret = function(value)
+            return value ~= secretAlpha
         end,
     },
     modules = {
@@ -482,6 +487,7 @@ function challengeMode.GetMapTable()
     return {399, 400}
 end
 function challengeMode.GetMapUIInfo(mapID)
+    if mapID ~= 399 and mapID ~= 400 then return end
     return mapID == 400 and "Second Dungeon" or "Test Dungeon",
         mapID,
         1800,
@@ -490,7 +496,8 @@ function challengeMode.GetMapUIInfo(mapID)
         2444
 end
 function challengeMode.GetActiveChallengeMapID()
-    return state.challengeActive and state.activeMapID or nil
+    return state.challengeActive and state.activeMapAvailable
+        and state.activeMapID or nil
 end
 function challengeMode.IsChallengeModeActive()
     return state.challengeActive
@@ -540,9 +547,11 @@ end
 
 local scenarioInfo = {}
 function scenarioInfo.GetScenarioStepInfo()
+    if not state.scenarioReady then return {numCriteria = 0} end
     return {numCriteria = 2}
 end
 function scenarioInfo.GetCriteriaInfo(index)
+    if not state.scenarioReady then return nil end
     if index == 1 then
         return {
             criteriaID = 1,
@@ -594,7 +603,7 @@ local environment = {
     end,
     Enum = {
         WorldElapsedTimerTypes = {
-            ChallengeMode = 2,
+            ChallengeMode = 1,
         },
         DamageMeterSessionType = {
             Overall = 0,
@@ -611,15 +620,19 @@ local environment = {
         return 100000 + math.floor(state.timerClock)
     end,
     GetTimePreciseSec = function()
-        return 1000 + state.elapsed
+        return state.preciseTime or 1000 + state.elapsed
     end,
     GetWorldElapsedTimers = function()
-        if not state.timerAvailable then return end
+        if not state.timerAvailable
+            or not state.timerListAvailable
+        then
+            return
+        end
         return 42
     end,
     GetWorldElapsedTime = function(timerID)
         if not state.timerAvailable or timerID ~= 42 then return end
-        return "Challenge", state.elapsed, 2
+        return "Challenge", state.elapsed, 1
     end,
     InCombatLockdown = function()
         return state.inCombat
@@ -720,13 +733,38 @@ assertEqual(timerFrame.mouseEnabled, false,
 assertEqual(timerFrame.dragButtons[1], nil,
     "closing the preview unregisters direct drag input")
 
+tracker.alpha = secretAlpha
 state.challengeActive = true
-eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_START", 399)
+state.scenarioReady = false
+eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_START", 2444)
 local run = MP.GetCurrentRun()
 assertTrue(run and run.active, "challenge start creates an active run")
-assertEqual(run.mapID, 399, "active map captured")
+assertEqual(run.mapID, 399,
+    "challenge start reacquires the challenge-mode map ID")
+assertEqual(run.mapName, "Test Dungeon",
+    "challenge map metadata is available from key insertion")
+assertEqual(run.timeLimit, 1800,
+    "challenge map time limit is available from key insertion")
+assertEqual(#run.objectives, 0,
+    "startup tolerates scenario criteria arriving after the map")
+assertEqual(timerFrame.remaining.text, "Remaining 30:00",
+    "valid startup metadata never renders the run as overtime")
+state.scenarioReady = true
+eventFrame.scripts.OnEvent(
+    eventFrame,
+    "WORLD_STATE_TIMER_START",
+    42
+)
+assertEqual(#run.objectives, 2,
+    "world timer start hydrates delayed scenario progress")
+runAllTimers()
 assertEqual(run.partialObservation, nil, "on-time start is complete")
-assertEqual(tracker.shown, false, "Blizzard tracker is hidden for the key")
+assertEqual(tracker.shown, true,
+    "Blizzard retains tracker visibility ownership during the key")
+assertEqual(tracker.alpha, 0,
+    "Blizzard tracker is suppressed with alpha only")
+assertEqual(tracker.hideCalls or 0, 0,
+    "tracker suppression never calls Blizzard Hide")
 assertEqual(timerFrame.shown, true, "custom timer is visible")
 assertEqual(timerFrame.mouseEnabled, false,
     "live timer does not capture drag input")
@@ -808,8 +846,10 @@ assertEqual(
     run,
     "completed run persists before deferred finalization"
 )
-assertEqual(tracker.shown, false,
-    "tracker stays hidden while the debrief occupies its position")
+assertEqual(tracker.shown, true,
+    "debrief does not change Blizzard tracker visibility")
+assertEqual(tracker.alpha, 0,
+    "tracker stays alpha-suppressed while the debrief is visible")
 
 runAllTimers()
 assertEqual(run.finalized, true, "deferred finalization completes")
@@ -826,6 +866,10 @@ assertEqual(timerFrame.closeButton.shown, true,
 timerFrame.closeButton.scripts.OnClick()
 assertEqual(tracker.shown, true,
     "dismissing the debrief restores the Blizzard tracker")
+assertEqual(tracker.alpha, 1,
+    "dismissing the debrief restores the tracker alpha")
+assertEqual(tracker.showCalls or 0, 0,
+    "tracker restoration never calls Blizzard Show")
 assertEqual(MP.GetCurrentRun(), nil,
     "dismissing the debrief releases the completed display")
 local season = MP.GetCurrentSeason()
@@ -955,7 +999,9 @@ assertEqual(season.maps[399].runs, nil,
 W.config.mythicPlus.showDebrief = false
 state.elapsed = 0
 eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_START", 399)
-assertEqual(tracker.shown, false,
+assertEqual(tracker.shown, true,
+    "active key leaves tracker visibility unchanged")
+assertEqual(tracker.alpha, 0,
     "active key still suppresses the tracker when debrief is disabled")
 state.elapsed = 1200
 eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_COMPLETED")
@@ -965,6 +1011,8 @@ assertEqual(timerFrame.shown, false,
     "disabled debrief hides the timer after completion")
 assertEqual(tracker.shown, true,
     "disabled debrief restores the tracker after completion")
+assertEqual(tracker.alpha, 1,
+    "disabled debrief restores tracker alpha after completion")
 runAllTimers()
 season = MP.GetCurrentSeason()
 assertEqual(#season.maps[399].runs, 1,
@@ -977,16 +1025,14 @@ assertTrue(MP.GetCurrentRun().active, "a second run can start")
 state.inCombat = true
 W.config.mythicPlus.enabled = false
 callbacks.BFI_UpdateModule(nil, "uiWidgets", "mythicPlus")
-assertEqual(tracker.alpha, 0, "combat-safe restoration is deferred")
-assertTrue(eventFrame.events.PLAYER_REGEN_ENABLED,
-    "disable keeps the one event needed for restoration")
+assertEqual(tracker.alpha, 1,
+    "alpha-only tracker restoration is safe during combat")
+assertEqual(next(eventFrame.events), nil,
+    "alpha-only restoration needs no deferred combat event")
 
 state.inCombat = false
-eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
-assertEqual(tracker.alpha, 1, "tracker alpha restores after combat")
-assertEqual(tracker.shown, true, "tracker visibility restores after combat")
-assertEqual(next(eventFrame.events), nil,
-    "disabled module unregisters after deferred restoration")
+assertEqual(tracker.shown, true,
+    "tracker visibility remains Blizzard-owned after combat")
 
 state.challengeActive = false
 W.config.mythicPlus.enabled = true
@@ -1024,10 +1070,16 @@ state.timerClock = state.timerClock + 120
 timerFrame.scripts.OnUpdate(timerFrame, 0.11)
 W.config.mythicPlus.enabled = false
 callbacks.BFI_UpdateModule(nil, "uiWidgets", "mythicPlus")
+resumableRun.mapName = "Unknown"
+resumableRun.timeLimit = 0
 W.config.mythicPlus.enabled = true
 callbacks.BFI_UpdateModule(nil, "uiWidgets", "mythicPlus")
 assertEqual(MP.GetCurrentRun(), resumableRun,
     "same active key restores when its start identity matches")
+assertEqual(resumableRun.mapName, "Test Dungeon",
+    "restore repairs legacy unknown map metadata")
+assertEqual(resumableRun.timeLimit, 1800,
+    "restore repairs a legacy zero time limit")
 
 state.elapsed = 620
 state.timerClock = state.timerClock + 480
@@ -1176,6 +1228,56 @@ assertEqual(unverifiedReplacement.abandoned, true,
     "elapsed rollback archives the stale unverified run")
 assertEqual(rollbackReplacement.partialObservation, true,
     "elapsed rollback starts a partial replacement observation")
+
+eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_RESET")
+state.activeMapAvailable = false
+state.elapsed = 0
+eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_START", 2444)
+assertEqual(MP.GetCurrentRun(), nil,
+    "start waits when the active challenge map is not published yet")
+state.activeMapAvailable = true
+state.timerListAvailable = false
+eventFrame.scripts.OnEvent(eventFrame, "WORLD_STATE_TIMER_START", 42)
+local worldTimerStartedRun = MP.GetCurrentRun()
+assertTrue(worldTimerStartedRun and worldTimerStartedRun.active,
+    "world timer fallback starts the delayed challenge")
+assertEqual(worldTimerStartedRun.mapID, 399,
+    "world timer fallback uses the active challenge map ID")
+assertEqual(worldTimerStartedRun.partialObservation, nil,
+    "on-time world timer fallback is not marked partial")
+assertEqual(worldTimerStartedRun.timerID, 42,
+    "world timer fallback adopts the event timer before list readiness")
+assertEqual(worldTimerStartedRun.identityUnverified, nil,
+    "authoritative event timer establishes fresh run identity")
+
+eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_RESET")
+state.timerAvailable = false
+state.preciseTime = 5000
+eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_START", 2444)
+local countdownRun = MP.GetCurrentRun()
+assertTrue(countdownRun and countdownRun.awaitingWorldTimer,
+    "fresh run records that it is awaiting the world timer")
+state.preciseTime = 5008
+timerFrame.scripts.OnUpdate(timerFrame, 0.11)
+assertEqual(countdownRun.elapsed, 0,
+    "local fallback clock stays frozen during the key countdown")
+state.timerAvailable = true
+state.timerListAvailable = true
+state.preciseTime = nil
+eventFrame.scripts.OnEvent(eventFrame, "WORLD_STATE_TIMER_START", 42)
+assertEqual(countdownRun.awaitingWorldTimer, nil,
+    "world timer activation releases the countdown hold")
+assertEqual(countdownRun.timerID, 42,
+    "countdown run adopts the authoritative timer ID")
+
+eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_RESET")
+state.activeMapAvailable = false
+eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_START", 2444)
+eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_RESET")
+state.activeMapAvailable = true
+runAllTimers()
+assertEqual(MP.GetCurrentRun(), nil,
+    "reset cancels delayed startup retries")
 
 local sourceFile = assert(io.open(
     "Modules/UIWidgets/MythicPlus.lua",
