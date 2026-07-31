@@ -139,6 +139,9 @@ local function newHolder(harness, name, parent)
 
     function holder:SetAlpha(alpha)
         self.alpha = alpha
+        if harness.recordAlpha then
+            record(harness, "holder.alpha", self, alpha)
+        end
     end
 
     function holder:SetSize(width, height)
@@ -171,6 +174,9 @@ local function newContainer(harness, parent)
 
     function container:SetAlpha(alpha)
         self.alpha = alpha
+        if harness.recordAlpha then
+            record(harness, "native.alpha", self, alpha)
+        end
     end
 
     function container:ClearAllPoints()
@@ -1463,6 +1469,7 @@ local function testVisibilityUsesWriteLedger()
     local holder = controller:GetFrame()
     local container = harness.containers[1]
 
+    harness.recordAlpha = true
     clearEvents(harness)
     controller:ApplyTuning(tuningSpec())
 
@@ -1474,12 +1481,15 @@ local function testVisibilityUsesWriteLedger()
     assertEqual(holder.alpha, 1, "holder curtain restoration")
     assertEqual(controller:IsPresentationApplied(), true,
         "applied presentation state")
-    assertEqual(harness.events[1].name, "holder.shown", "holder hide order")
-    assertEqual(harness.events[1].args[2], false, "holder hide state")
-    assertEqual(harness.events[#harness.events].name, "holder.shown",
-        "holder restore order")
-    assertEqual(harness.events[#harness.events].args[2], true,
-        "holder restore state")
+    assertEqual(harness.events[1].name, "holder.alpha",
+        "holder curtain precedes hide")
+    assertEqual(harness.events[1].args[2], 0, "holder curtain alpha")
+    assertEqual(harness.events[2].name, "holder.shown", "holder hide order")
+    assertEqual(harness.events[2].args[2], false, "holder hide state")
+    assertEqual(harness.events[#harness.events].name, "holder.alpha",
+        "holder uncurtains after restore")
+    assertEqual(harness.events[#harness.events].args[2], 1,
+        "holder restored alpha")
 end
 
 local function testHideReversalUsesWriteLedger()
@@ -1494,7 +1504,7 @@ local function testHideReversalUsesWriteLedger()
     clearEvents(harness)
     controller:SetShown(false)
 
-    assertEqual(holder.alpha, 1, "hidden holder curtain restoration")
+    assertEqual(holder.alpha, 0, "hidden holder remains curtained")
     assertEqual(holder.shown, false, "hidden holder state")
     assertEqual(controller:IsPresentationApplied(), false,
         "hidden presentation state")
@@ -1520,7 +1530,7 @@ local function testDestroyCompletesWithoutVisibilityRead()
     clearEvents(harness)
     controller:Destroy()
 
-    assertEqual(holder.alpha, 1, "destroyed holder alpha")
+    assertEqual(holder.alpha, 0, "destroyed holder remains curtained")
     assertEqual(holder.shown, false, "destroyed holder visibility")
     assertEqual(controller:IsPresentationApplied(), false,
         "destroyed presentation state")
@@ -1772,6 +1782,7 @@ local function testGroupSeedAdoptionAndOneShotClaim()
     assertEqual(seed.unit, "party1", "seeded build unit")
     assertEqual(seed.enabled, true, "seeded build enabled")
     assertEqual(seed.shown, true, "seeded build visibility")
+    assertEqual(seed.alpha, 1, "seeded build curtain restoration")
     assertEqual(controller:GetFrame().shown, true,
         "seeded holder visibility")
     assertEqual(countEvents(harness, "af.frame-level"), 1,
@@ -1835,6 +1846,7 @@ local function testGroupSeedBuildQueuesInCombat()
         "BFICombatBootstrapAuraHolder",
         seed
     )
+    assertEqual(seed.alpha, 0, "claimed seed is immediately curtained")
 
     clearEvents(harness)
     harness:SetCombat(true)
@@ -1848,6 +1860,7 @@ local function testGroupSeedBuildQueuesInCombat()
     assertEqual(controller._container, nil, "combat bootstrap container")
     assertEqual(next(seed.groups), nil, "combat bootstrap group declaration")
     assertEqual(next(seed.slots), nil, "combat bootstrap slot declaration")
+    assertEqual(seed.alpha, 0, "combat bootstrap seed stays curtained")
     assertEqual(controller:GetFrame().bootstrapConfigured, nil,
         "combat bootstrap holder configuration")
     assertEqual(countEvents(harness, "af.frame-level"), 0,
@@ -1873,6 +1886,7 @@ local function testGroupSeedBuildQueuesInCombat()
     assertEqual(seed.unit, "party3", "bootstrap unit")
     assertEqual(seed.enabled, true, "bootstrap enabled")
     assertEqual(seed.shown, true, "bootstrap visibility")
+    assertEqual(seed.alpha, 1, "bootstrap curtain restoration")
     assertEqual(controller:GetFrame().shown, true,
         "bootstrap holder visibility")
     assertEqual(controller:GetFrame().bootstrapConfigured, true,
@@ -1907,6 +1921,7 @@ local function testUnusedSeedDestroyAccounting()
         "BFIUnusedSeedAuraHolder",
         seed
     )
+    assertEqual(seed.alpha, 0, "unused claimed seed is curtained")
 
     assertConstructionStats(harness, {
         controllersCreated = 1,
@@ -1927,6 +1942,7 @@ local function testUnusedSeedDestroyAccounting()
     controller:Destroy()
     assertEqual(seed.enabled, false, "unused seed retired enabled state")
     assertEqual(seed.shown, false, "unused seed retired visibility")
+    assertEqual(seed.alpha, 0, "unused seed remains curtained")
     assertConstructionStats(harness, {
         controllersCreated = 1,
         destroyRequests = 1,
@@ -1988,6 +2004,7 @@ local function testGroupRetargetPrecedesStructuralTuning()
         completeSpec("party1", true)
     )
 
+    harness.recordAlpha = true
     clearEvents(harness)
     harness:SetCombat(true)
     controller:ApplyTuning(tuningSpec())
@@ -1997,6 +2014,19 @@ local function testGroupRetargetPrecedesStructuralTuning()
     assertEqual(seed.shown, false, "pending tuning seed visibility")
     assertEqual(controller:GetFrame().shown, false,
         "pending tuning holder visibility")
+    assertEqual(seed.alpha, 0, "pending tuning seed curtain")
+    assertEqual(controller:GetFrame().alpha, 0,
+        "pending tuning holder curtain")
+    local _, holderCurtainIndex = findEvent(harness, "holder.alpha")
+    local _, seedCurtainIndex = findEvent(harness, "native.alpha")
+    local _, seedHideIndex = findEvent(harness, "native.hide")
+    local _, retargetIndex = findEvent(harness, "af.unit")
+    assertTrue(holderCurtainIndex < seedHideIndex,
+        "holder curtain precedes protected seed hide")
+    assertTrue(seedCurtainIndex < seedHideIndex,
+        "seed curtain precedes protected seed hide")
+    assertTrue(seedHideIndex < retargetIndex,
+        "seed hide precedes combat-live retarget")
     assertTrue(harness.regenCallback, "pending tuning regen registration")
     assertEqual(countEvents(harness, "af.create-container"), 0,
         "combat structural allocation")
@@ -2009,6 +2039,9 @@ local function testGroupRetargetPrecedesStructuralTuning()
     assertEqual(seed.unit, "party2", "regen tuned unit")
     assertEqual(seed.enabled, true, "regen tuned enabled")
     assertEqual(seed.shown, true, "regen tuned visibility")
+    assertEqual(seed.alpha, 1, "regen tuned seed curtain restoration")
+    assertEqual(controller:GetFrame().alpha, 1,
+        "regen tuned holder curtain restoration")
     assertEqual(seed.groups.helpful.filterString, "HELPFUL|PLAYER",
         "regen group tuning")
     assertEqual(controller:GetFrame().shown, true,
@@ -2038,10 +2071,10 @@ local function testGroupVisibilityDoesNotProbeFrameState()
     assertEqual(seed.shown, false, "group seed visibility")
     assertEqual(controller:GetFrame().shown, false,
         "group holder visibility")
-    assertEqual(controller:GetFrame().alpha, 1,
-        "group holder curtain restoration")
-    assertEqual(seed.alpha, 1,
-        "external container curtain restoration")
+    assertEqual(controller:GetFrame().alpha, 0,
+        "hidden group holder remains curtained")
+    assertEqual(seed.alpha, 0,
+        "hidden external container remains curtained")
     assertEqual(controller:IsPresentationApplied(), false,
         "hidden external presentation state")
     assertEqual(countEvents(harness, "native.hide"), 1,

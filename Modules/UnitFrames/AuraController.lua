@@ -494,7 +494,13 @@ local function SetControllerShownSafe(controller, shown)
     if shown and not SetExternalContainerShownSafe(controller, true) then
         return false
     end
-    SetPresentationCurtained(controller, false)
+    -- Hidden, deferred, and destroyed presentations stay behind the alpha
+    -- curtain. Show/Hide/SetShown can be protected for header-born frames,
+    -- while constant SetAlpha writes remain permitted by the pinned 12.1
+    -- contract. Only expose a completely applied shown presentation.
+    if shown then
+        SetPresentationCurtained(controller, false)
+    end
     return true
 end
 
@@ -612,7 +618,9 @@ function ControllerMixin:_Build()
         self._container = container
         self._containerIsExternal = true
         self._containerShown = false
-        self._containerAlpha = nil
+        -- The seed was curtained at claim time, before any deferred build
+        -- work. Adopt that known write state without reading it back.
+        self._containerAlpha = 0
         MarkBuildShellStranded(self)
     end
 
@@ -1034,6 +1042,11 @@ local function CreateController(parent, name, completeSpec, options)
     if controller._seedContainer then
         claimedGroupAuraContainers[controller._seedContainer] = true
         constructionStats.seedsClaimed = constructionStats.seedsClaimed + 1
+        -- A header-born seed can exist before its controller receives a
+        -- complete spec. Curtain it immediately so combat-deferred build work
+        -- cannot expose Blizzard's baseline or a stale prior assignment even
+        -- if the protected Hide call is blocked.
+        controller._seedContainer:SetAlpha(0)
         controller._seedContainer:Hide()
         AF.SetCustomAuraContainerEnabled(controller._seedContainer, false)
     end
