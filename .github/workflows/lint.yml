@@ -23,6 +23,9 @@ jobs:
       - name: Check Buffs & Debuffs backend selection
         run: lua5.1 tests/buffs_debuffs_backend_selector_test.lua
 
+      - name: Check Buffs & Debuffs custom aura controller
+        run: lua5.1 tests/buffs_debuffs_custom_aura_controller_test.lua
+
       - name: Check Buffs & Debuffs native suppression
         run: lua5.1 tests/buffs_debuffs_native_aura_frames_test.lua
 
