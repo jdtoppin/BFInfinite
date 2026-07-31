@@ -863,6 +863,45 @@ local function testSharedCombatQueue()
     assertEqual(harness.regenCallback, nil, "regen handler after flush")
 end
 
+local function testPlayerVehicleCombatRetarget()
+    local harness = makeHarness()
+    local controller = harness.UF.CreateNativeAuraContainerController(
+        {},
+        "BFIPlayerVehicleAuraHolder",
+        completeSpec("player", true)
+    )
+    local container = harness.containers[1]
+
+    clearEvents(harness)
+    harness:SetCombat(true)
+    controller:SetUnit("vehicle")
+
+    assertEqual(container.unit, "player",
+        "combat Player vehicle native unit")
+    assertEqual(controller:GetFrame().shown, false,
+        "combat Player vehicle stale-display suppression")
+    assertEqual(countEvents(harness, "af.unit"), 0,
+        "combat Player vehicle retarget mutation")
+    assertEqual(countEvents(harness, "af.create-container"), 0,
+        "combat Player vehicle replacement count")
+    assertTrue(harness.regenCallback,
+        "combat Player vehicle regen registration")
+
+    harness:SetCombat(false)
+    harness:FireRegen()
+
+    assertEqual(container.unit, "vehicle",
+        "deferred Player vehicle native unit")
+    assertEqual(controller:GetFrame().shown, true,
+        "deferred Player vehicle holder visibility")
+    assertEqual(countEvents(harness, "af.unit"), 1,
+        "deferred Player vehicle retarget count")
+    assertEqual(countEvents(harness, "af.create-container"), 0,
+        "deferred Player vehicle replacement count")
+    assertEqual(harness.regenCallback, nil,
+        "Player vehicle regen handler after flush")
+end
+
 local function testRegenDispatchIsolation()
     local harness = makeHarness()
     local first = harness.UF.CreateNativeAuraContainerController(
@@ -1086,6 +1125,7 @@ testBuildContract()
 testTuningContract()
 testHolderConfigQueue()
 testSharedCombatQueue()
+testPlayerVehicleCombatRetarget()
 testRegenDispatchIsolation()
 testReplacementIsReadyBeforeSwap()
 testVisibilityUsesWriteLedger()
