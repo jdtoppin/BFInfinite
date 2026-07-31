@@ -22,13 +22,11 @@ local tonumber = tonumber
 local type = type
 local unpack = unpack
 
--- Retail 12.0.7.68887, Gethe/wow-ui-source commit 4383ced30106:
--- https://github.com/Gethe/wow-ui-source/tree/4383ced30106d51b27e3e86d1987f1552f0d259d/Interface/AddOns/Blizzard_CooldownViewer
--- Compatibility checked against the current Retail PTR on 2026-07-31,
--- 12.1.0.68914, commit d3915c78aba7:
+-- Retail 12.1 compatibility checked against the current PTR on 2026-07-31,
+-- build 12.1.0.68914, Gethe/wow-ui-source commit d3915c78aba7:
 -- https://github.com/Gethe/wow-ui-source/tree/d3915c78aba77a7a9be76acbfa35c674bbb6abe9/Interface/AddOns/Blizzard_CooldownViewer
 --
--- Both builds process secret aura and totem values in the viewer/item Lua
+-- The client processes secret aura and totem values in the viewer/item Lua
 -- mixins. Calling those mixins from addon execution (including RefreshLayout,
 -- SetIsEditing, or a secure post-hook) contaminates Blizzard's pooled item
 -- state and file-local caches. This module therefore has a strict boundary:
@@ -344,11 +342,11 @@ end
 ---------------------------------------------------------------------
 -- Assisted Combat highlight
 ---------------------------------------------------------------------
--- Retail 12.0.7 and 12.1 expose the same documented
--- C_AssistedCombat.GetNextCastSpell(false) contract. Their native Assisted
--- Highlight template uses a rounded flipbook atlas, so CDM renders the
--- recommendation with four BFI-owned square edges instead. The recommendation
--- poll is BFI-owned and never calls a Cooldown Viewer item mixin.
+-- Retail 12.1 exposes the documented C_AssistedCombat.GetNextCastSpell(false)
+-- contract. Its native Assisted Highlight template uses a rounded flipbook
+-- atlas, so CDM renders the recommendation with four BFI-owned square edges
+-- instead. The recommendation poll is BFI-owned and never calls a Cooldown
+-- Viewer item mixin.
 local function GetNonSecretSpellID(spellID)
     if not IsSafeNumber(spellID) then
         return nil
@@ -786,11 +784,11 @@ CVarCallbackRegistry:RegisterCallback(
 ---------------------------------------------------------------------
 -- Assigned action-bar hotkeys
 ---------------------------------------------------------------------
--- Retail 12.0.7 and 12.1 expose the same FindSpellActionButtons
--- contract: it accepts a base spell and returns action slots. Resolve those
--- slots against BFI-owned buttons first so secure paging and custom class
--- bars remain authoritative. Every returned value is rejected unless it is
--- non-secret; no GetActionInfo scan or Cooldown Viewer item mixin is used.
+-- Retail 12.1's FindSpellActionButtons accepts a base spell and returns action
+-- slots. Resolve those slots against BFI-owned buttons first so secure paging
+-- and custom class bars remain authoritative. Every returned value is rejected
+-- unless it is non-secret; no GetActionInfo scan or Cooldown Viewer item mixin
+-- is used.
 local function GetFormattedBinding(command)
     if not IsSafeString(command) then return nil end
 
@@ -3065,7 +3063,7 @@ local function OnPresentationEvent(_, event)
         StartPresentationPolling()
         return
     end
-    if event == "PLAYER_TARGET_CHANGED" or event == "UNIT_TARGET" then
+    if event == "PLAYER_TARGET_CHANGED" then
         presentationController:RegisterUnitEvent("UNIT_AURA", "target")
     end
     if event == "COOLDOWN_VIEWER_DATA_LOADED"
@@ -3073,7 +3071,6 @@ local function OnPresentationEvent(_, event)
         or event == "EDIT_MODE_LAYOUTS_UPDATED"
         or event == "PLAYER_ENTERING_WORLD"
         or event == "PLAYER_TARGET_CHANGED"
-        or event == "UNIT_TARGET"
     then
         MarkPresentationDirty()
         StartPresentationPolling()
@@ -3091,9 +3088,6 @@ end
 presentationController:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
 presentationController:RegisterEvent("PLAYER_ENTERING_WORLD")
 presentationController:RegisterEvent("PLAYER_TARGET_CHANGED")
--- 12.0.7 refreshes the viewer from UNIT_TARGET rather than 12.1's
--- PLAYER_TARGET_CHANGED. The unit filter avoids handling unrelated units.
-presentationController:RegisterUnitEvent("UNIT_TARGET", "player")
 presentationController:SetScript("OnEvent", OnPresentationEvent)
 
 -- 12.1 updates same-sized cooldown assignments in place after its saved-data
