@@ -263,6 +263,10 @@ assertEqual(row.highlight.blendMode, "BLEND", "highlight blend mode")
 -- inside BFI's backdrop.
 currentMenu = makeMenu(140, {row, widerRow})
 manager:OpenMenu(nil, description)
+assertPoint(currentMenu.BFIBackdrop.points[1],
+    {"TOPLEFT", currentMenu, 0, -7}, "AF vertical shell top")
+assertPoint(currentMenu.BFIBackdrop.points[2],
+    {"BOTTOMRIGHT", currentMenu, 0, 14}, "AF vertical shell bottom")
 assertEqual(row.highlight.clearCount, 1, "single-column highlight reset")
 assertPoint(row.highlight.points[1],
     {"TOPLEFT", row, "TOPLEFT", -7, 0}, "single-column top-left")
@@ -280,6 +284,12 @@ assertPoint(widerRow.highlight.points[2],
 -- hook must apply the same geometry once the final row width is available.
 local submenu = makeMenu(1, {})
 acquiredCallback(submenu)
+local submenuBackdrop = submenu.BFIBackdrop
+assertPoint(submenuBackdrop.points[1],
+    {"TOPLEFT", submenu, 0, -7}, "submenu AF vertical shell top")
+assertPoint(submenuBackdrop.points[2],
+    {"BOTTOMRIGHT", submenu, 0, 14},
+    "submenu AF vertical shell bottom")
 local submenuRow = makeFrame(80, nil, 108)
 MenuVariants.CreateHighlight(submenuRow)
 submenu.width = 140
@@ -298,6 +308,9 @@ assertPoint(submenuRow.highlight.points[2],
 submenu.width = 1
 submenu.children = {}
 acquiredCallback(submenu)
+assertEqual(submenu.BFIBackdrop, submenuBackdrop,
+    "reused submenu backdrop identity")
+assertEqual(#submenuBackdrop.points, 2, "reused submenu backdrop points")
 local reusedSubmenuRow = makeFrame(80, nil, 108)
 MenuVariants.CreateHighlight(reusedSubmenuRow)
 submenu.width = 140

@@ -102,8 +102,10 @@ local function StyleMenu(menu)
         S.CreateBackdrop(menu)
         menu.BFIBackdrop:SetBackdropColor(AF.GetColorRGB("widget", 0.9))
         AF.ClearPoints(menu.BFIBackdrop)
-        AF.SetPoint(menu.BFIBackdrop, "TOPLEFT", menu, 0, -1)
-        AF.SetPoint(menu.BFIBackdrop, "BOTTOMRIGHT", menu, 0, 8)
+        -- MenuStyle1 offsets rows by 8 at the top and 15 at the bottom.
+        -- Match AF dropdown lists by leaving one unit inside each border.
+        AF.SetPoint(menu.BFIBackdrop, "TOPLEFT", menu, 0, -7)
+        AF.SetPoint(menu.BFIBackdrop, "BOTTOMRIGHT", menu, 0, 14)
 
         -- Acquired submenu callbacks run before Blizzard lays out their rows.
         hooksecurefunc(menu, "Layout", StyleMenuHighlightRows)
