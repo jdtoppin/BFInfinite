@@ -737,6 +737,24 @@ local function StyleHouseInfo(houseInfo)
     end
 end
 
+local function SyncCachedHouseInfoState(houseInfo, houseDropdown)
+    local houseInfoList = houseDropdown and houseDropdown.playerHouseList
+    if not houseInfoList then return end
+
+    local noHouses = houseInfo.DashboardNoHousesFrame
+    local content = houseInfo.ContentFrame
+    if noHouses:IsShown() or content.tabsInitialized then return end
+
+    -- PTR 12.1 creates HouseDropdown before HouseInfoContent. If the first
+    -- asynchronous list result arrives between their OnLoad handlers, the
+    -- dropdown caches it before House Info registers its EventRegistry
+    -- listener; identical later results are deliberately not rebroadcast.
+    -- Replay Blizzard's native presentation update only for that otherwise
+    -- uninitialized state so the welcome/tutorial or owned-house view appears.
+    houseInfo:UpdateNoHousesDashboard()
+    houseInfo:OnHouseListUpdated(houseInfoList)
+end
+
 ---------------------------------------------------------------------
 -- 12.1 house dropdown and blueprint collection
 ---------------------------------------------------------------------
@@ -970,6 +988,7 @@ local function StyleBlizzard()
     end
 
     StyleHouseInfo(frame.HouseInfoContent)
+    SyncCachedHouseInfoState(frame.HouseInfoContent, frame.HouseDropdown)
     StyleCatalog(frame.CatalogContent)
 
     if frame.CollectionContent then
