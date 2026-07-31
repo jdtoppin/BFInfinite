@@ -524,7 +524,8 @@ Commit = function(runtime)
     -- Never submit configuration/replacement work to the controller until it
     -- can finish synchronously. This lets a later empty/error/disabled config
     -- supersede the pending descriptor without allocating stale restricted
-    -- button batches after combat or hover ends.
+    -- button batches after combat. Holder visibility is owned by the
+    -- controller's ordinary write ledger and must not be observed here.
     if runtime._configDirty and InCombatLockdown() then
         -- A group child's clean token can still change while an unrelated
         -- structural config edit waits for regen. Retarget the already-built
@@ -538,25 +539,6 @@ Commit = function(runtime)
             runtime._unitDirty = nil
         end
         QueueCombatCommit(runtime)
-        return
-    end
-    if runtime._configDirty and runtime._built and runtime:IsShown() then
-        runtime._commitScheduled = true
-        if not runtime._holderRetryScheduled then
-            runtime._holderRetryScheduled = true
-            local generation = runtime._commitGeneration
-            C_Timer.After(0.25, function()
-                runtime._holderRetryScheduled = nil
-                if not runtime._destroyed
-                    and (
-                        generation == runtime._commitGeneration
-                        or runtime._configDirty
-                    )
-                then
-                    Commit(runtime)
-                end
-            end)
-        end
         return
     end
     RemoveCombatCommit(runtime)
@@ -924,7 +906,6 @@ local function NativeAuras_Destroy(self)
     self._configMode = nil
     self._reloadRequired = nil
     self._reloadQuiescePending = nil
-    self._holderRetryScheduled = nil
     SetRuntimeWatched(self, false)
     RemoveCombatCommit(self)
 
