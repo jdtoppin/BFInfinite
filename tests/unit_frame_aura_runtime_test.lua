@@ -179,6 +179,7 @@ local function makeHarness(options)
         spellColors = copy(options.spellColors or {}),
         visibleResult = true,
         assistResult = true,
+        attackResult = false,
         inCombat = false,
     }
     local UF = {}
@@ -186,6 +187,8 @@ local function makeHarness(options)
     local F = {}
 
     function AF.Copy(value)
+        assertTrue(type(value) == "table",
+            "mock AF.Copy requires a table")
         return copy(value)
     end
 
@@ -310,6 +313,15 @@ local function makeHarness(options)
                 and self.enabled == true
                 and self.shown == true
         end
+        function controller:SetVariant(variant)
+            if self.variant == variant then return end
+            self.variant = variant
+            if self.deferVariantApplication then
+                self.presentationApplied = false
+            end
+            if self.spec then self.spec.variant = variant end
+            record(harness, "controller.variant", self, variant)
+        end
         function controller:Refresh()
             self.refreshCount = (self.refreshCount or 0) + 1
             record(harness, "controller.refresh", self)
@@ -341,6 +353,13 @@ local function makeHarness(options)
         seedContainer
     )
         return newController(parent, name, seedContainer)
+    end
+
+    function UF.CreateNativeAuraPartitionController(parent, name)
+        local controller = newController(parent, name)
+        controller.partitionController = true
+        record(harness, "uf.partition-controller", controller, parent, name)
+        return controller
     end
 
     function UF.CompileNativeAuraSpec(unit, auraFilter, config)
@@ -389,10 +408,8 @@ local function makeHarness(options)
                 spellIDFilterRequiresPublicNonAssist =
                     config.spellIDFilterRequiresPublicNonAssist == true,
             },
-            partition = partitioned and {
-                filter = "notCastByMe",
-            } or nil,
-            migrationReady = not empty and not partitioned,
+            partition = nil,
+            migrationReady = not empty,
             empty = empty,
             diagnostics = {config.tag},
             degradations = {
@@ -435,6 +452,67 @@ local function makeHarness(options)
                 },
                 slots = {},
             }
+
+            if partitioned then
+                local main = {
+                    completeSpec = copy(descriptor.completeSpec),
+                    tuningSpec = copy(descriptor.tuningSpec),
+                    constructionKey = copy(descriptor.constructionKey),
+                }
+                main.completeSpec.groups[1].filterString =
+                    config.tag .. "|PLAYER"
+                main.tuningSpec.groups[1].filterString =
+                    config.tag .. "|PLAYER"
+
+                local complementStyle =
+                    config.complementStyle or "complement-a"
+                local complement = {
+                    completeSpec = copy(descriptor.completeSpec),
+                    tuningSpec = copy(descriptor.tuningSpec),
+                    constructionKey = copy(descriptor.constructionKey),
+                }
+                complement.completeSpec.holder = {
+                    width = config.complementWidth or 16,
+                    height = config.complementHeight or 8,
+                }
+                complement.tuningSpec.holder =
+                    copy(complement.completeSpec.holder)
+                complement.completeSpec.groups[1].filterString =
+                    config.tag .. "|!PLAYER"
+                complement.tuningSpec.groups[1].filterString =
+                    config.tag .. "|!PLAYER"
+                complement.completeSpec.groups[1].buttonStyle.style =
+                    complementStyle
+                complement.constructionKey.groups[1]
+                    .buttonStyle.style = complementStyle
+
+                local includeComplement =
+                    config.partitionMainOnly ~= true
+                descriptor.partition = {
+                    filter = "notCastByMe",
+                    selector = {
+                        kind = "unitCanAttack",
+                        actorUnit = "player",
+                        secretFallback = "friendly",
+                    },
+                    holder = {
+                        width = config.width or 20,
+                        height = config.compositeHeight or 18,
+                    },
+                    hostile = {
+                        main = main,
+                        complement = includeComplement
+                            and complement
+                            or nil,
+                        attachment = includeComplement and {
+                            point = "BOTTOMLEFT",
+                            relativePoint = "TOPLEFT",
+                            x = 0,
+                            y = -1,
+                        } or nil,
+                    },
+                }
+            end
         end
         return descriptor
     end
@@ -537,6 +615,11 @@ local function makeHarness(options)
             assertEqual(sourceUnit, "player", "assist source unit")
             record(harness, "wow.assist", sourceUnit, unit)
             return harness.assistResult
+        end,
+        UnitCanAttack = function(sourceUnit, unit)
+            assertEqual(sourceUnit, "player", "attack source unit")
+            record(harness, "wow.attack", sourceUnit, unit)
+            return harness.attackResult
         end,
         UnitIsVisible = function(unit)
             record(harness, "wow.visible", unit)
@@ -648,6 +731,19 @@ local function createGroupRuntime(harness, root)
     return runtime, harness.controllers[#harness.controllers], seedContainer
 end
 
+local function createPartitionRuntime(harness, root)
+    local runtime = harness.UF.CreateNativePartitionedAuraIndicator(
+        root,
+        root.name .. "_Auras",
+        "HARMFUL",
+        true
+    )
+    assertTrue(runtime, "partition runtime was not created")
+    runtime.enabled = true
+    root.indicators.debuffs = runtime
+    return runtime, harness.controllers[#harness.controllers]
+end
+
 local function testDormancyAndFallback()
     local harness = makeHarness()
     assertEqual(#harness.controllers, 0, "dormant controller count")
@@ -688,6 +784,30 @@ local function testDormancyAndFallback()
     assertEqual(fallback.auraFilter, "HELPFUL", "fallback filter")
     assertEqual(fallback.hasSubFrame, false, "fallback subframe")
 
+    local nativePartitionDirect, nativePartitionError =
+        unavailable.UF.CreateNativePartitionedAuraIndicator(
+            root,
+            "Fallback_PartitionAuras",
+            "HARMFUL",
+            true
+        )
+    assertEqual(nativePartitionDirect, nil,
+        "unavailable direct partition runtime")
+    assertEqual(nativePartitionError,
+        "NATIVE_AURA_BACKEND_UNAVAILABLE",
+        "unavailable direct partition error")
+    local nativePartitionFallback =
+        unavailable.UF.CreateNativePartitionedAuras(
+            root,
+            "Fallback_PartitionAuras",
+            "HARMFUL",
+            true
+        )
+    assertEqual(nativePartitionFallback, unavailable.legacyFrames[2],
+        "12.0.7 partition legacy fallback")
+    assertEqual(nativePartitionFallback.hasSubFrame, true,
+        "partition fallback subframe")
+
     local partitionFallback = harness.UF.CreateNativeAuras(
         root,
         "Partition_Auras",
@@ -718,6 +838,230 @@ local function testDormancyAndFallback()
     disabledRuntime:LoadConfig(validConfig({enabled = false}))
     assertEqual(disabledController.built, nil,
         "direct disabled config native allocation")
+end
+
+local function testOptInRelationPartitionRuntime()
+    local harness = makeHarness()
+    local root = newRoot("RelationPartition", "party1")
+    local runtime, controller = createPartitionRuntime(harness, root)
+
+    runtime:LoadConfig(validConfig({
+        testState = "partition",
+        tag = "partition-a",
+        spellIDFilterRequiresPublicAssist = true,
+    }))
+    runtime:Enable()
+
+    local state = runtime:GetNativeAuraState()
+    assertEqual(state.state, "READY", "opt-in partition state")
+    assertEqual(state.partitionVariant, "friendly",
+        "friendly initial partition variant")
+    assertTrue(controller.partitionController,
+        "partition controller selection")
+    assertEqual(controller.variant, "friendly",
+        "friendly controller variant")
+    assertTrue(type(controller.spec.friendly) == "table",
+        "friendly prebuilt spec")
+    assertTrue(type(controller.spec.main) == "table",
+        "hostile-main prebuilt spec")
+    assertTrue(type(controller.spec.complement) == "table",
+        "hostile-complement prebuilt spec")
+    assertEqual(controller.spec.holder.height, 18,
+        "composite holder height")
+    assertTrue(harness.registered.UNIT_FACTION ~= nil,
+        "partition relationship watcher")
+
+    harness:ClearEvents()
+    harness.attackResult = true
+    controller.deferVariantApplication = true
+    harness:SetCombat(true)
+    harness:Fire("UNIT_FACTION", "party1")
+    harness:RunTimers(0.05)
+    assertEqual(controller.variant, "hostile",
+        "hostile combat relation variant")
+    assertEqual(runtime:GetNativeAuraState().partitionVariant, "hostile",
+        "hostile state variant")
+    assertEqual(countEvents(harness, "controller.variant"), 1,
+        "hostile visibility switch count")
+    assertEqual(countEvents(harness, "controller.refresh"), 0,
+        "deferred hostile refresh count")
+    assertEqual(countEvents(harness, "controller.rebuild"), 0,
+        "hostile relation rebuild count")
+    assertEqual(countEvents(harness, "controller.tuning"), 0,
+        "hostile relation tuning count")
+    assertEqual(countEvents(harness, "controller.holder-config"), 0,
+        "hostile relation placement count")
+    assertEqual(countEvents(harness, "controller.unit"), 0,
+        "hostile relation retarget count")
+
+    controller.deferVariantApplication = nil
+    controller.presentationApplied = true
+    harness:ClearEvents()
+    runtime:Update()
+    assertEqual(countEvents(harness, "controller.refresh"), 1,
+        "applied hostile refresh count")
+
+    harness:ClearEvents()
+    harness.assistResult = {secret = true}
+    harness:Fire("UNIT_FACTION", "party1")
+    harness:RunTimers(0.05)
+    assertEqual(controller.shown, false,
+        "secret spell-gated partition visibility")
+    assertEqual(controller.variant, "hostile",
+        "hidden partition does not drive a replacement variant")
+    assertEqual(runtime:GetNativeAuraState().partitionVariant, nil,
+        "hidden partition state suppresses variant")
+    assertEqual(countEvents(harness, "controller.refresh"), 0,
+        "secret spell-gated partition refresh count")
+
+    harness:ClearEvents()
+    harness.assistResult = true
+    harness:Fire("UNIT_FACTION", "party1")
+    harness:RunTimers(0.05)
+    assertEqual(controller.shown, true,
+        "public spell-gated partition recovery")
+    assertEqual(controller.variant, "hostile",
+        "recovered partition relation")
+    assertEqual(countEvents(harness, "controller.refresh"), 1,
+        "recovered partition refresh count")
+
+    harness:ClearEvents()
+    harness.attackResult = {secret = true}
+    harness:Fire("UNIT_FACTION", "player")
+    harness:RunTimers(0.05)
+    assertEqual(controller.variant, "friendly",
+        "secret relationship friendly fallback")
+    assertTrue(countEvents(harness, "secret.check") > 0,
+        "secret relationship guard")
+    assertEqual(countEvents(harness, "controller.rebuild"), 0,
+        "secret relationship rebuild count")
+    assertEqual(countEvents(harness, "controller.tuning"), 0,
+        "secret relationship tuning count")
+
+    harness:SetCombat(false)
+    harness.attackResult = false
+    harness:ClearEvents()
+    runtime:LoadConfig(validConfig({
+        testState = "partition",
+        tag = "partition-tuned",
+    }))
+    harness:RunTimers(0.15)
+    assertEqual(countEvents(harness, "controller.tuning"), 1,
+        "partition tuning reuse count")
+    assertEqual(countEvents(harness, "controller.rebuild"), 0,
+        "partition tuning rebuild count")
+    assertEqual(controller.tuning.friendly.tag, "partition-tuned",
+        "friendly partition tuning payload")
+    assertEqual(
+        controller.tuning.main.groups[1].filterString,
+        "partition-tuned|PLAYER",
+        "hostile-main tuning payload"
+    )
+    assertEqual(
+        controller.tuning.complement.groups[1].filterString,
+        "partition-tuned|!PLAYER",
+        "hostile-complement tuning payload"
+    )
+
+    harness:ClearEvents()
+    runtime:LoadConfig(validConfig({
+        testState = "partition",
+        tag = "partition-tuned",
+        complementStyle = "complement-b",
+    }))
+    harness:RunTimers(0.15)
+    assertEqual(countEvents(harness, "controller.rebuild"), 0,
+        "complement construction live rebuild count")
+    assertEqual(countEvents(harness, "controller.tuning"), 0,
+        "complement construction tuning count")
+    assertEqual(
+        runtime:GetNativeAuraState().reloadRequired,
+        true,
+        "complement construction reload boundary"
+    )
+
+    local unpartitionedHarness = makeHarness()
+    local unpartitionedRoot = newRoot("OptionalPartition", "target")
+    local unpartitionedRuntime, unpartitionedController =
+        createPartitionRuntime(unpartitionedHarness, unpartitionedRoot)
+    unpartitionedRuntime:LoadConfig(validConfig())
+    unpartitionedRuntime:Enable()
+    assertEqual(unpartitionedRuntime:GetNativeAuraState().state, "READY",
+        "partition-capable unpartitioned state")
+    assertTrue(type(unpartitionedController.spec.friendly) == "table",
+        "unpartitioned friendly spec")
+    assertEqual(unpartitionedController.spec.main, nil,
+        "unpartitioned hostile-main spec")
+    assertEqual(unpartitionedController.spec.complement, nil,
+        "unpartitioned hostile-complement spec")
+
+    unpartitionedHarness:ClearEvents()
+    unpartitionedRuntime:LoadConfig(validConfig({
+        testState = "partition",
+    }))
+    unpartitionedHarness:RunTimers(0.15)
+    assertEqual(
+        countEvents(unpartitionedHarness, "controller.rebuild"),
+        0,
+        "unpartitioned-to-partitioned live rebuild count"
+    )
+    assertEqual(
+        countEvents(unpartitionedHarness, "controller.tuning"),
+        0,
+        "unpartitioned-to-partitioned tuning count"
+    )
+    assertEqual(
+        unpartitionedRuntime:GetNativeAuraState().reloadRequired,
+        true,
+        "unpartitioned-to-partitioned reload boundary"
+    )
+
+    unpartitionedHarness:ClearEvents()
+    unpartitionedRuntime:LoadConfig(validConfig())
+    unpartitionedHarness:RunTimers(0.15)
+    assertEqual(
+        countEvents(unpartitionedHarness, "controller.rebuild"),
+        0,
+        "partitioned-to-unpartitioned live rebuild count"
+    )
+    assertEqual(
+        countEvents(unpartitionedHarness, "controller.tuning"),
+        1,
+        "restored unpartitioned tuning count"
+    )
+    assertEqual(
+        unpartitionedRuntime:GetNativeAuraState().reloadRequired,
+        false,
+        "restored unpartitioned topology clears reload"
+    )
+
+    local mainOnlyHarness = makeHarness()
+    local mainOnlyRoot = newRoot("MainOnlyPartition", "target")
+    local mainOnlyRuntime, mainOnlyController =
+        createPartitionRuntime(mainOnlyHarness, mainOnlyRoot)
+    mainOnlyRuntime:LoadConfig(validConfig({
+        testState = "partition",
+        partitionMainOnly = true,
+    }))
+    mainOnlyRuntime:Enable()
+    assertEqual(mainOnlyRuntime:GetNativeAuraState().state, "READY",
+        "main-only partition state")
+    assertTrue(type(mainOnlyController.spec.main) == "table",
+        "main-only hostile-main spec")
+    assertEqual(mainOnlyController.spec.complement, nil,
+        "main-only hostile-complement spec")
+    assertEqual(mainOnlyController.spec.attachment, nil,
+        "main-only partition attachment")
+
+    mainOnlyRuntime:SetUnit(nil)
+    assertEqual(mainOnlyRuntime:GetNativeAuraState().state,
+        "WAITING_FOR_UNIT",
+        "partition waiting-unit state")
+    assertEqual(
+        mainOnlyRuntime:GetNativeAuraState().partitionVariant,
+        nil,
+        "partition waiting-unit variant"
+    )
 end
 
 local function testLifecycleAndUnitRefresh()
@@ -1321,6 +1665,97 @@ local function testWatcherRoutesUnitSignals()
         "global focus refresh")
     assertEqual(targetController.refreshCount, targetRefreshes + 2,
         "global target refresh")
+
+    focusRuntime:Disable()
+    targetRuntime:Disable()
+end
+
+local function testWatcherRoutesRelationshipSignals()
+    local harness = makeHarness()
+    local focusRoot = newRoot("VehicleFocus", "focus")
+    local targetRoot = newRoot("VehicleTarget", "target")
+    focusRoot.effectiveUnit = "focuspet"
+    targetRoot.effectiveUnit = "targetpet"
+    local focusRuntime, focusController = createRuntime(
+        harness,
+        focusRoot
+    )
+    local targetRuntime, targetController = createRuntime(
+        harness,
+        targetRoot
+    )
+
+    focusRuntime:LoadConfig(validConfig())
+    targetRuntime:LoadConfig(validConfig())
+    focusRuntime:Enable()
+    targetRuntime:Enable()
+    local focusRefreshes = focusController.refreshCount
+    local targetRefreshes = targetController.refreshCount
+
+    harness:Fire("PLAYER_TARGET_CHANGED")
+    harness:RunTimers(0.05)
+    assertEqual(
+        focusController.refreshCount,
+        focusRefreshes,
+        "derived target-event focus suppression"
+    )
+    assertEqual(
+        targetController.refreshCount,
+        targetRefreshes + 1,
+        "derived target-event target refresh"
+    )
+
+    harness:Fire("PLAYER_FOCUS_CHANGED")
+    harness:RunTimers(0.05)
+    assertEqual(
+        focusController.refreshCount,
+        focusRefreshes + 1,
+        "derived focus-event focus refresh"
+    )
+    assertEqual(
+        targetController.refreshCount,
+        targetRefreshes + 1,
+        "derived focus-event target suppression"
+    )
+
+    harness:Fire("UNIT_FACTION", "targetpet")
+    harness:RunTimers(0.05)
+    assertEqual(
+        focusController.refreshCount,
+        focusRefreshes + 1,
+        "effective-faction focus suppression"
+    )
+    assertEqual(
+        targetController.refreshCount,
+        targetRefreshes + 2,
+        "effective-faction target refresh"
+    )
+
+    harness:Fire("UNIT_FACTION", "target")
+    harness:RunTimers(0.05)
+    assertEqual(
+        focusController.refreshCount,
+        focusRefreshes + 1,
+        "root-faction focus suppression"
+    )
+    assertEqual(
+        targetController.refreshCount,
+        targetRefreshes + 3,
+        "root-faction target refresh"
+    )
+
+    harness:Fire("UNIT_FACTION", "player")
+    harness:RunTimers(0.05)
+    assertEqual(
+        focusController.refreshCount,
+        focusRefreshes + 2,
+        "player-faction focus relationship refresh"
+    )
+    assertEqual(
+        targetController.refreshCount,
+        targetRefreshes + 4,
+        "player-faction target relationship refresh"
+    )
 
     focusRuntime:Disable()
     targetRuntime:Disable()
@@ -2684,6 +3119,7 @@ local function testNativeProviderRespectsConfigModePreview()
 end
 
 testDormancyAndFallback()
+testOptInRelationPartitionRuntime()
 testLifecycleAndUnitRefresh()
 testPendingPresentationSuppressesStableRefresh()
 testDebounceAndConstructionReuse()
@@ -2695,6 +3131,7 @@ testSharedCombatCommitQueue()
 testCombatConfigSupersession()
 testUngatedFocusWatcher()
 testWatcherRoutesUnitSignals()
+testWatcherRoutesRelationshipSignals()
 testQuiesceAndRecovery()
 testSecretSafeWholeHolderGates()
 testSpellIDReactionGatesAndProviderBypass()
