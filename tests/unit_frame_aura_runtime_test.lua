@@ -343,8 +343,18 @@ local function makeHarness(options)
         return controller
     end
 
-    function UF.CreateNativeAuraContainerController(parent, name)
-        return newController(parent, name)
+    function UF.CreateNativeAuraContainerController(
+        parent,
+        name,
+        completeSpec,
+        frameTemplate,
+        controllerOptions
+    )
+        local controller = newController(parent, name)
+        controller.creationSpec = copy(completeSpec)
+        controller.frameTemplate = frameTemplate
+        controller.options = copy(controllerOptions)
+        return controller
     end
 
     function UF.CreateNativeGroupAuraContainerController(
@@ -3118,6 +3128,115 @@ local function testNativeProviderRespectsConfigModePreview()
     )
 end
 
+local function testNameplateRuntimeOptions()
+    local harness = makeHarness({
+        spellColors = {
+            [774] = {0.2, 0.8, 0.3, 1},
+        },
+    })
+    local root = newRoot("NameplateRuntime", "nameplate7")
+    local placementCalls = 0
+    local runtime = harness.UF.CreateNativeAuraIndicator(
+        root,
+        "BFINameplate7Debuffs",
+        "HARMFUL",
+        false,
+        {
+            includeSpellColors = false,
+            allowCombatInitialBuild = true,
+            keepNativeEnabledWhenHidden = true,
+            immediateConfigCommit = true,
+            applyPlacement = function(holder, placement, placementRoot)
+                placementCalls = placementCalls + 1
+                assertEqual(placementRoot, root,
+                    "nameplate placement root")
+                holder.position = copy(placement.position)
+                holder.anchorTo = placement.anchorTo
+            end,
+            controller = {
+                liveUnitChanges = true,
+                allowCombatInitialBuild = true,
+                alphaOnlyVisibility = true,
+            },
+        }
+    )
+    local controller = harness.controllers[#harness.controllers]
+    runtime.enabled = true
+    root.indicators.debuffs = runtime
+
+    assertEqual(controller.options.liveUnitChanges, true,
+        "nameplate live-unit controller option")
+    assertEqual(controller.options.allowCombatInitialBuild, true,
+        "nameplate combat-build controller option")
+    assertEqual(controller.options.alphaOnlyVisibility, true,
+        "nameplate alpha-only controller option")
+
+    harness:SetCombat(true)
+    runtime:LoadConfig(validConfig({
+        offset = 9,
+    }))
+    runtime:Enable()
+
+    assertEqual(runtime:GetNativeAuraState().built, true,
+        "nameplate combat initial build")
+    assertEqual(runtime:GetNativeAuraState().pending, false,
+        "nameplate combat initial pending state")
+    assertEqual(countEvents(harness, "controller.rebuild"), 1,
+        "nameplate combat rebuild count")
+    assertEqual(placementCalls, 1,
+        "nameplate custom placement count")
+    assertEqual(controller.frame.position[3], 9,
+        "nameplate custom placement offset")
+    assertEqual(harness.compiles[1].config.spellColors, nil,
+        "nameplate Global Colors opt-out")
+    assertEqual(harness.registered.PLAYER_REGEN_ENABLED, nil,
+        "nameplate combat initial regen queue")
+
+    harness:ClearEvents()
+    runtime.enabled = false
+    runtime:Disable()
+    assertEqual(controller.shown, false,
+        "friendly pool assignment holder state")
+    assertEqual(controller.enabled, true,
+        "friendly pool assignment native enabled state")
+    assertEqual(countEvents(harness, "controller.enabled"), 0,
+        "friendly pool assignment enabled writes")
+
+    root.unit = "nameplate12"
+    root.effectiveUnit = "nameplate12"
+    runtime.enabled = true
+    runtime:Enable()
+    assertEqual(controller.unit, "nameplate12",
+        "friendly-to-hostile live retarget")
+    assertEqual(controller.shown, true,
+        "friendly-to-hostile holder state")
+    assertEqual(controller.enabled, true,
+        "friendly-to-hostile native enabled state")
+    assertEqual(countEvents(harness, "controller.enabled"), 0,
+        "friendly-to-hostile enabled writes")
+    assertEqual(harness.registered.PLAYER_REGEN_ENABLED, nil,
+        "friendly-to-hostile regen queue")
+
+    harness:SetCombat(false)
+    harness:ClearEvents()
+    runtime:LoadConfig(validConfig({
+        enabled = false,
+    }))
+    runtime.enabled = false
+    runtime:Disable()
+    assertEqual(controller.enabled, false,
+        "user-disabled nameplate native state")
+    assertEqual(countEvents(harness, "controller.enabled"), 1,
+        "user-disabled nameplate enabled write")
+
+    harness:ClearEvents()
+    harness.AF.Fire("BFI_UpdateConfig", "auras", "colors")
+    assertEqual(countEvents(harness, "uf.compile"), 0,
+        "nameplate Global Colors refresh compile")
+    assertEqual(countEvents(harness, "controller.tuning"), 0,
+        "nameplate Global Colors refresh tuning")
+end
+
 testDormancyAndFallback()
 testOptInRelationPartitionRuntime()
 testLifecycleAndUnitRefresh()
@@ -3151,5 +3270,6 @@ testNativeProviderTerminalConfigCancelsLateBuild()
 testNativeProviderSecretUnitCancelsLateBuild()
 testNativeProviderLateBuildDefersThroughCombat()
 testNativeProviderRespectsConfigModePreview()
+testNameplateRuntimeOptions()
 
 print("unit_frame_aura_runtime_test.lua: ok")
