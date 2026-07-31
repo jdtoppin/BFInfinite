@@ -118,9 +118,12 @@ local function newHolder(harness, name, parent, frameTemplate)
         name = name,
         parent = parent,
         frameTemplate = frameTemplate,
+        shown = true,
     }
 
     function holder:Hide()
+        assertEqual(harness.inCombat, false,
+            "protected holder Hide called in combat")
         self.shown = false
         record(harness, "holder.hide", self)
     end
@@ -134,6 +137,8 @@ local function newHolder(harness, name, parent, frameTemplate)
     end
 
     function holder:SetShown(shown)
+        assertEqual(harness.inCombat, false,
+            "protected holder SetShown called in combat")
         record(harness, "holder.shown", self, shown)
         self.shown = shown
     end
@@ -180,14 +185,19 @@ local function newContainer(harness, parent)
         parent = parent,
         groups = {},
         slots = {},
+        shown = true,
     }
 
     function container:Hide()
+        assertEqual(harness.inCombat, false,
+            "protected native Hide called in combat")
         self.shown = false
         record(harness, "native.hide", self)
     end
 
     function container:Show()
+        assertEqual(harness.inCombat, false,
+            "protected native Show called in combat")
         self.shown = true
         record(harness, "native.show", self)
     end
@@ -342,6 +352,8 @@ local function makeHarness(options)
     end
 
     function AF.SetCustomAuraContainerEnabled(container, enabled)
+        assertEqual(harness.inCombat, false,
+            "native enabled state changed in combat")
         container.enabled = enabled
         record(harness, "af.enabled", container, enabled)
     end
@@ -1327,11 +1339,14 @@ local function testHolderConfigQueue()
         record(harness, "holder.config", configuredHolder, "latest")
     end)
     assertEventNames(harness, {
-        "holder.shown",
         "uf.register",
     })
     assertEqual(countEvents(harness, "holder.config"), 0,
         "combat holder configuration")
+    assertEqual(holder.shown, true,
+        "combat holder config does not use protected visibility")
+    assertEqual(holder.alpha, 0,
+        "combat holder config is immediately curtained")
 
     harness:SetCombat(false)
     harness:FireRegen()
@@ -1379,12 +1394,14 @@ local function testSharedCombatQueue()
     second:Rebuild(completeSpec("party3", false))
 
     assertEventNames(harness, {
-        "holder.shown",
         "uf.register",
     })
     assertEqual(firstContainer.unit, "target", "combat retarget mutation")
     assertEqual(firstContainer.enabled, true, "combat enabled mutation")
-    assertEqual(first:GetFrame().shown, false, "combat stale-display suppression")
+    assertEqual(first:GetFrame().shown, true,
+        "combat stale display avoids protected visibility")
+    assertEqual(first:GetFrame().alpha, 0,
+        "combat stale display is curtained")
     assertEqual(second:GetFrame().shown, false,
         "combat initial-build display suppression")
     assertEqual(#harness.containers, 1, "combat initial-build mutation")
@@ -1453,8 +1470,10 @@ local function testPlayerVehicleCombatRetarget()
 
     assertEqual(container.unit, "player",
         "combat Player vehicle native unit")
-    assertEqual(controller:GetFrame().shown, false,
-        "combat Player vehicle stale-display suppression")
+    assertEqual(controller:GetFrame().shown, true,
+        "combat Player vehicle protected visibility remains unchanged")
+    assertEqual(controller:GetFrame().alpha, 0,
+        "combat Player vehicle stale-display curtain")
     assertEqual(countEvents(harness, "af.unit"), 0,
         "combat Player vehicle retarget mutation")
     assertEqual(countEvents(harness, "af.create-container"), 0,
@@ -1839,6 +1858,47 @@ local function testHideReversalUsesWriteLedger()
     assertEqual(#harness.timerCallbacks, 0, "restored holder retry count")
 end
 
+local function testCombatVisibilityDefersProtectedWrites()
+    local harness = makeHarness()
+    local controller = harness.UF.CreateNativeAuraContainerController(
+        {},
+        "BFICombatVisibilityAuraHolder",
+        completeSpec("target", true)
+    )
+    local holder = controller:GetFrame()
+
+    clearEvents(harness)
+    harness:SetCombat(true)
+    controller:SetShown(false)
+
+    assertEqual(holder.shown, true,
+        "combat hide preserves protected holder visibility")
+    assertEqual(holder.alpha, 0, "combat hide applies curtain")
+    assertTrue(harness.regenCallback, "combat hide queues regen")
+    assertEqual(countEvents(harness, "holder.shown"), 0,
+        "combat hide protected holder writes")
+
+    controller:SetShown(true)
+    assertEqual(holder.shown, true, "combat reversal holder visibility")
+    assertEqual(holder.alpha, 1, "combat reversal removes curtain")
+    assertEqual(harness.regenCallback, nil,
+        "combat reversal cancels stale regen work")
+    assertEqual(countEvents(harness, "holder.shown"), 0,
+        "combat reversal protected holder writes")
+
+    controller:SetShown(false)
+    assertEqual(holder.alpha, 0, "second combat hide curtain")
+    harness:SetCombat(false)
+    harness:FireRegen()
+    assertEqual(holder.shown, false, "regen applies deferred hide")
+    assertEqual(holder.alpha, 0, "regen hidden holder remains curtained")
+    assertEqual(harness.regenCallback, nil, "deferred hide queue drained")
+
+    controller:SetShown(true)
+    assertEqual(holder.shown, true, "OOC show restores visibility")
+    assertEqual(holder.alpha, 1, "OOC show removes curtain")
+end
+
 local function testDestroyCompletesWithoutVisibilityRead()
     local harness = makeHarness()
     local controller = harness.UF.CreateNativeAuraContainerController(
@@ -1907,12 +1967,14 @@ local function testDestroyPrecedence()
     controller:Destroy()
 
     assertEventNames(harness, {
-        "holder.shown",
         "uf.register",
     })
     assertEqual(container.enabled, true, "combat destroy enabled mutation")
     assertEqual(container.shown, true, "combat destroy visibility mutation")
-    assertEqual(controller:GetFrame().shown, false, "combat destroy display suppression")
+    assertEqual(controller:GetFrame().shown, true,
+        "combat destroy avoids protected visibility")
+    assertEqual(controller:GetFrame().alpha, 0,
+        "combat destroy display curtain")
     assertConstructionStats(harness, {
         controllersCreated = 1,
         destroyRequests = 1,
@@ -1930,8 +1992,8 @@ local function testDestroyPrecedence()
     harness:SetCombat(false)
     harness:FireRegen()
     assertEventNames(harness, {
-        "holder.shown",
         "uf.register",
+        "holder.shown",
         "af.enabled",
         "native.hide",
         "uf.unregister",
@@ -1970,8 +2032,8 @@ local function testOutOfBandOOCFlushUnregisters()
     controller:SetUnit("mouseover")
 
     assertEventNames(harness, {
-        "holder.shown",
         "uf.register",
+        "holder.shown",
         "af.unit",
         "af.update",
         "holder.shown",
@@ -2233,6 +2295,48 @@ local function testGroupSeedBuildQueuesInCombat()
     }, "regen adopted seed construction")
 end
 
+local function testCombatSeedClaimQueuesInitialization()
+    local harness = makeHarness()
+    local root = {}
+    harness:SetCombat(true)
+    clearEvents(harness)
+
+    local seed = harness.UF.CreateNativeGroupAuraContainerSeed(root)
+    local controller = harness.UF.CreateNativeGroupAuraContainerController(
+        root,
+        "BFICombatSeedClaimAuraHolder",
+        seed
+    )
+    local holder = controller:GetFrame()
+
+    assertEqual(seed.shown, true,
+        "combat-created seed avoids protected hide")
+    assertEqual(seed.alpha, 0, "combat-created seed curtain")
+    assertEqual(seed.enabled, nil,
+        "combat-created seed avoids enabled mutation")
+    assertEqual(holder.shown, true,
+        "combat-created holder avoids protected hide")
+    assertEqual(holder.alpha, 0, "combat-created holder curtain")
+    assertTrue(harness.regenCallback,
+        "combat seed claim owns a queued recovery reference")
+    assertEqual(countEvents(harness, "native.hide"), 0,
+        "combat seed claim native hide writes")
+    assertEqual(countEvents(harness, "holder.hide"), 0,
+        "combat seed claim holder hide writes")
+    assertEqual(countEvents(harness, "af.enabled"), 0,
+        "combat seed claim enabled writes")
+
+    harness:SetCombat(false)
+    harness:FireRegen()
+    assertEqual(seed.shown, false, "regen initializes claimed seed")
+    assertEqual(seed.enabled, false, "regen disables claimed seed")
+    assertEqual(holder.shown, false, "regen initializes claimed holder")
+    assertEqual(harness.regenCallback, nil,
+        "combat seed initialization queue drained")
+
+    controller:Destroy()
+end
+
 local function testUnusedSeedDestroyAccounting()
     local harness = makeHarness()
     local root = {}
@@ -2299,12 +2403,10 @@ local function testGroupCombatLiveRetarget()
     controller:SetUnit("party4")
 
     assertEventNames(harness, {
-        "native.hide",
-        "holder.shown",
+        "uf.register",
         "af.unit",
         "af.update",
-        "holder.shown",
-        "native.show",
+        "uf.unregister",
     })
     assertEqual(seed.unit, "party4", "combat-live group unit")
     assertEqual(seed.shown, true, "combat-live group visibility")
@@ -2312,6 +2414,46 @@ local function testGroupCombatLiveRetarget()
         "combat-live holder visibility")
     assertEqual(harness.regenCallback, nil,
         "combat-live retarget regen registration")
+end
+
+local function testCombatLiveRetargetFailureKeepsRecovery()
+    local harness = makeHarness()
+    local root = {}
+    local seed = harness.AF.CreateCustomAuraContainer(root)
+    local controller = harness.UF.CreateNativeGroupAuraContainerController(
+        root,
+        "BFIFailingLiveRetargetAuraHolder",
+        seed,
+        completeSpec("party1", true)
+    )
+
+    seed.failSetUnit = true
+    harness:SetCombat(true)
+    local succeeded = pcall(controller.SetUnit, controller, "party2")
+    assertEqual(succeeded, false, "combat live retarget failure acceptance")
+    assertTrue(harness.regenCallback,
+        "failed live retarget retains queued recovery")
+    assertEqual(seed.unit, "party1", "failed live retarget unit")
+    assertEqual(seed.shown, true,
+        "failed live retarget avoids protected seed visibility")
+    assertEqual(controller:GetFrame().shown, true,
+        "failed live retarget avoids protected holder visibility")
+    assertEqual(seed.alpha, 0, "failed live retarget seed curtain")
+    assertEqual(controller:GetFrame().alpha, 0,
+        "failed live retarget holder curtain")
+
+    seed.failSetUnit = nil
+    harness:SetCombat(false)
+    harness:FireRegen()
+    assertEqual(seed.unit, "party2", "regen live retarget unit")
+    assertEqual(seed.shown, true, "regen live retarget seed visibility")
+    assertEqual(seed.alpha, 1, "regen live retarget seed alpha")
+    assertEqual(controller:GetFrame().shown, true,
+        "regen live retarget holder visibility")
+    assertEqual(controller:GetFrame().alpha, 1,
+        "regen live retarget holder alpha")
+    assertEqual(harness.regenCallback, nil,
+        "failed live retarget recovery queue drained")
 end
 
 local function testGroupRetargetPrecedesStructuralTuning()
@@ -2332,22 +2474,27 @@ local function testGroupRetargetPrecedesStructuralTuning()
     controller:SetUnit("party2")
 
     assertEqual(seed.unit, "party2", "pending tuning live unit")
-    assertEqual(seed.shown, false, "pending tuning seed visibility")
-    assertEqual(controller:GetFrame().shown, false,
-        "pending tuning holder visibility")
+    assertEqual(seed.shown, true,
+        "pending tuning avoids protected seed visibility")
+    assertEqual(controller:GetFrame().shown, true,
+        "pending tuning avoids protected holder visibility")
     assertEqual(seed.alpha, 0, "pending tuning seed curtain")
     assertEqual(controller:GetFrame().alpha, 0,
         "pending tuning holder curtain")
     local _, holderCurtainIndex = findEvent(harness, "holder.alpha")
     local _, seedCurtainIndex = findEvent(harness, "native.alpha")
-    local _, seedHideIndex = findEvent(harness, "native.hide")
+    local _, regenIndex = findEvent(harness, "uf.register")
     local _, retargetIndex = findEvent(harness, "af.unit")
-    assertTrue(holderCurtainIndex < seedHideIndex,
-        "holder curtain precedes protected seed hide")
-    assertTrue(seedCurtainIndex < seedHideIndex,
-        "seed curtain precedes protected seed hide")
-    assertTrue(seedHideIndex < retargetIndex,
-        "seed hide precedes combat-live retarget")
+    assertTrue(holderCurtainIndex < retargetIndex,
+        "holder curtain precedes combat-live retarget")
+    assertTrue(seedCurtainIndex < retargetIndex,
+        "seed curtain precedes combat-live retarget")
+    assertTrue(regenIndex < retargetIndex,
+        "regen recovery is registered before combat-live retarget")
+    assertEqual(countEvents(harness, "native.hide"), 0,
+        "combat structural update performs no protected native hide")
+    assertEqual(countEvents(harness, "holder.shown"), 0,
+        "combat structural update performs no protected holder visibility")
     assertTrue(harness.regenCallback, "pending tuning regen registration")
     assertEqual(countEvents(harness, "af.create-container"), 0,
         "combat structural allocation")
@@ -2502,31 +2649,43 @@ local function testPartitionBuildAndRelationSwap()
     clearEvents(harness)
     harness:SetCombat(true)
     controller:SetVariant("hostile")
-    harness:SetCombat(false)
 
-    assertEqual(friendlyHolder.shown, false,
-        "friendly hostile-swap visibility")
-    assertEqual(mainHolder.shown, true, "main hostile-swap visibility")
-    assertEqual(complementHolder.shown, true,
-        "complement hostile-swap visibility")
-    assertEqual(outer.shown, true, "hostile-swap outer visibility")
+    assertEqual(friendlyHolder.shown, true,
+        "combat hostile-swap friendly physical visibility")
+    assertEqual(mainHolder.shown, false,
+        "combat hostile-swap main physical visibility")
+    assertEqual(complementHolder.shown, false,
+        "combat hostile-swap complement physical visibility")
+    assertEqual(outer.shown, true,
+        "combat hostile-swap outer physical visibility")
+    assertEqual(outer.alpha, 0, "combat hostile-swap outer curtain")
+    assertEqual(friendlyHolder.alpha, 1,
+        "combat hostile-swap friendly applied presentation")
+    assertEqual(mainHolder.alpha, 0,
+        "combat hostile-swap main remains hidden")
+    assertEqual(complementHolder.alpha, 0,
+        "combat hostile-swap complement remains hidden")
     assertEqual(#harness.containers, 3,
         "hostile swap container allocation")
-    assertEqual(countEvents(harness, "uf.register"), 0,
+    assertEqual(countEvents(harness, "uf.register"), 1,
         "hostile swap combat queue")
     assertNoNativeMutation(harness, "hostile relationship swap")
-    assertEqual(harness.events[1].name, "holder.shown",
-        "hostile swap atomic hide event")
-    assertEqual(harness.events[1].args[1], outer,
-        "hostile swap atomic hide holder")
-    assertEqual(harness.events[1].args[2], false,
-        "hostile swap atomic hide state")
-    assertEqual(harness.events[#harness.events].name, "holder.shown",
-        "hostile swap atomic restore event")
-    assertEqual(harness.events[#harness.events].args[1], outer,
-        "hostile swap atomic restore holder")
-    assertEqual(harness.events[#harness.events].args[2], true,
-        "hostile swap atomic restore state")
+
+    harness:SetCombat(false)
+    harness:FireRegen()
+
+    assertEqual(friendlyHolder.shown, false,
+        "deferred friendly hostile-swap visibility")
+    assertEqual(mainHolder.shown, true,
+        "deferred main hostile-swap visibility")
+    assertEqual(complementHolder.shown, true,
+        "deferred complement hostile-swap visibility")
+    assertEqual(outer.shown, true,
+        "deferred hostile-swap outer visibility")
+    assertEqual(outer.alpha, 1,
+        "deferred hostile-swap outer curtain removal")
+    assertEqual(countEvents(harness, "uf.unregister"), 1,
+        "hostile swap combat queue drain")
 end
 
 local function testPartitionRebuildRejectsAfterInitialBuild()
@@ -2543,6 +2702,133 @@ local function testPartitionRebuildRejectsAfterInitialBuild()
         partitionCompleteSpec("focus", "hostile", 2)
     )
     assertEqual(ok, false, "partition rebuild after initial build")
+end
+
+local function testPartitionCombatConstructionQueuesInitialization()
+    local harness = makeHarness()
+    harness:SetCombat(true)
+    clearEvents(harness)
+
+    local controller = harness.UF.CreateNativeAuraPartitionController(
+        {},
+        "BFICombatPartitionConstructionHolder"
+    )
+    local holders = {
+        controller:GetFrame(),
+        controller.friendly:GetFrame(),
+        controller.main:GetFrame(),
+        controller.complement:GetFrame(),
+    }
+
+    for index, holder in ipairs(holders) do
+        assertEqual(holder.shown, true,
+            "combat partition construction physical visibility " .. index)
+        assertEqual(holder.alpha, 0,
+            "combat partition construction curtain " .. index)
+    end
+    assertEqual(countEvents(harness, "holder.hide"), 0,
+        "combat partition construction protected hides")
+    assertEqual(countEvents(harness, "holder.shown"), 0,
+        "combat partition construction protected visibility writes")
+    assertTrue(harness.regenCallback,
+        "combat partition construction recovery registration")
+
+    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
+    assertEqual(#harness.containers, 0,
+        "combat partition construction native allocations")
+    assertNoNativeMutation(harness,
+        "combat partition construction native mutations")
+
+    harness:SetCombat(false)
+    harness:FireRegen()
+
+    assertEqual(#harness.containers, 3,
+        "regen partition construction native allocations")
+    assertEqual(holders[1].shown, true,
+        "regen partition outer visibility")
+    assertEqual(holders[1].alpha, 1,
+        "regen partition outer curtain removal")
+    assertEqual(holders[2].shown, true,
+        "regen partition friendly visibility")
+    assertEqual(holders[2].alpha, 1,
+        "regen partition friendly curtain removal")
+    assertEqual(holders[3].shown, false,
+        "regen partition hostile main visibility")
+    assertEqual(holders[3].alpha, 0,
+        "regen partition hostile main curtain")
+    assertEqual(holders[4].shown, false,
+        "regen partition hostile complement visibility")
+    assertEqual(holders[4].alpha, 0,
+        "regen partition hostile complement curtain")
+    assertEqual(holders[4].frameTemplate,
+        "DisableUntrustedLayoutScriptsTemplate",
+        "regen partition complement template")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "regen partition presentation state")
+    assertEqual(harness.regenCallback, nil,
+        "combat partition construction queue drained")
+
+    controller:Destroy()
+end
+
+local function testPartitionCombatReversalUsesAppliedLedger()
+    local harness = makeHarness()
+    local controller = harness.UF.CreateNativeAuraPartitionController(
+        {},
+        "BFICombatPartitionReversalHolder"
+    )
+    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
+
+    local outer = controller:GetFrame()
+    local friendlyHolder = controller.friendly:GetFrame()
+    local mainHolder = controller.main:GetFrame()
+    local complementHolder = controller.complement:GetFrame()
+    clearEvents(harness)
+    harness:SetCombat(true)
+
+    controller:SetVariant("hostile")
+    assertEqual(outer.alpha, 0,
+        "combat partition variant request curtain")
+    assertEqual(friendlyHolder.shown, true,
+        "combat partition variant request friendly visibility")
+    assertEqual(mainHolder.shown, false,
+        "combat partition variant request main visibility")
+    assertEqual(complementHolder.shown, false,
+        "combat partition variant request complement visibility")
+    assertEqual(countEvents(harness, "uf.register"), 1,
+        "combat partition variant request registration")
+
+    controller:SetVariant("friendly")
+    assertEqual(outer.alpha, 1,
+        "combat partition variant reversal curtain removal")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "combat partition variant reversal presentation")
+    assertEqual(harness.regenCallback, nil,
+        "combat partition variant reversal queue drain")
+    assertEqual(countEvents(harness, "uf.unregister"), 1,
+        "combat partition variant reversal unregistration")
+
+    controller:SetShown(false)
+    assertEqual(outer.alpha, 0,
+        "combat partition hide request curtain")
+    assertEqual(friendlyHolder.shown, true,
+        "combat partition hide request child visibility")
+    controller:SetShown(true)
+    assertEqual(outer.alpha, 1,
+        "combat partition show reversal curtain removal")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "combat partition show reversal presentation")
+    assertEqual(harness.regenCallback, nil,
+        "combat partition show reversal queue drain")
+    assertEqual(countEvents(harness, "uf.register"), 2,
+        "combat partition reversal registration count")
+    assertEqual(countEvents(harness, "uf.unregister"), 2,
+        "combat partition reversal unregistration count")
+    assertEqual(#harness.timerCallbacks, 0,
+        "combat partition reversal timer count")
+
+    harness:SetCombat(false)
+    controller:Destroy()
 end
 
 local function testPartitionVisibilityUsesWriteLedger()
@@ -2698,8 +2984,10 @@ local function testPartitionCombatDefersNativeTuning()
     controller:ApplyTuning(partitionTuningSpec())
     controller:SetVariant("hostile")
 
-    assertEqual(outer.shown, false,
-        "combat partition stale-display suppression")
+    assertEqual(outer.shown, true,
+        "combat partition protected visibility remains unchanged")
+    assertEqual(outer.alpha, 0,
+        "combat partition stale-display curtain")
     assertEqual(complementHolder.point[2], oldAttachmentOwner,
         "combat complement reanchor mutation")
     assertEqual(countEvents(harness, "uf.register"), 1,
@@ -2741,6 +3029,7 @@ testMidBuildFailureIsOneShot()
 testPartialAddFailureDiagnostics()
 testVisibilityUsesWriteLedger()
 testHideReversalUsesWriteLedger()
+testCombatVisibilityDefersProtectedWrites()
 testDestroyCompletesWithoutVisibilityRead()
 testProductionAvoidsVisibilityInspection()
 testMaxFrameCountContract()
@@ -2750,12 +3039,16 @@ testRefreshIsDirectDirtyMark()
 testGroupHeaderCapabilityAndSeed()
 testGroupSeedAdoptionAndOneShotClaim()
 testGroupSeedBuildQueuesInCombat()
+testCombatSeedClaimQueuesInitialization()
 testUnusedSeedDestroyAccounting()
 testGroupCombatLiveRetarget()
+testCombatLiveRetargetFailureKeepsRecovery()
 testGroupRetargetPrecedesStructuralTuning()
 testGroupVisibilityDoesNotProbeFrameState()
 testPartitionBuildAndRelationSwap()
 testPartitionRebuildRejectsAfterInitialBuild()
+testPartitionCombatConstructionQueuesInitialization()
+testPartitionCombatReversalUsesAppliedLedger()
 testPartitionVisibilityUsesWriteLedger()
 testPartitionTuningReanchorsEveryLayer()
 testPartitionCombatDefersNativeTuning()
