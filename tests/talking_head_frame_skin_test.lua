@@ -133,18 +133,65 @@ function frame:PlayCurrent()
     text:SetShadowColor(0, 0, 0, 0)
 end
 
+function frame:FadeinFrames()
+    self.nativeFadeInCalls = (self.nativeFadeInCalls or 0) + 1
+end
+
+function frame:FadeoutFrames()
+    self.nativeFadeOutCalls = (self.nativeFadeOutCalls or 0) + 1
+end
+
+function frame:UpdateShownState()
+    self.nativeShownStateCalls = (self.nativeShownStateCalls or 0) + 1
+end
+
 local callback
 local callbackEvent
 local hookCount = 0
 local removeCalls = {}
 local backdropCalls = {}
 local closeButtonCalls = 0
+local fadeAnimationCalls = {}
 local colors = {
     BFI = {1, 0.4, 0, 1},
     white = {1, 1, 1, 1},
 }
 
 local AF = {}
+
+function AF.CreateFadeInOutAnimation(region, duration, noHide)
+    fadeAnimationCalls[#fadeAnimationCalls + 1] = {
+        duration = duration,
+        noHide = noHide,
+        region = region,
+    }
+
+    function region:FadeIn()
+        self.fadeInCalls = (self.fadeInCalls or 0) + 1
+        self.fadeInStartAlpha = self.alpha
+        self.alpha = 1
+    end
+
+    function region:FadeOut()
+        self.fadeOutCalls = (self.fadeOutCalls or 0) + 1
+        self.fadeOutStartAlpha = self.alpha
+        self.alpha = 0
+    end
+
+    function region:SetAlpha(alpha)
+        self.alpha = alpha
+    end
+
+    function region:SetFadeDuration(fadeDuration)
+        self.fadeDuration = fadeDuration
+    end
+
+    function region:ShowNow()
+        self.showNowCalls = (self.showNowCalls or 0) + 1
+        self.alpha = 1
+        self.shown = true
+    end
+end
 
 function AF.GetColorRGB(color)
     return unpack(colors[color])
@@ -173,7 +220,10 @@ function S.CreateBackdrop(region, noBackground, offset, relativeFrameLevel)
         region = region,
         relativeFrameLevel = relativeFrameLevel,
     }
-    region.BFIBackdrop = {}
+    region.BFIBackdrop = {
+        alpha = 1,
+        shown = true,
+    }
 end
 
 function S.RemoveTextures(region, hide)
@@ -250,12 +300,55 @@ assertEqual(backdropCalls[2].noBackground, true,
 assertEqual(backdropCalls[2].relativeFrameLevel, 1,
     "portrait border layer")
 assertEqual(closeButtonCalls, 1, "close button styled")
-assertEqual(hookCount, 1, "per-line text hook")
+assertEqual(#fadeAnimationCalls, 1, "backdrop fade setup")
+assertEqual(fadeAnimationCalls[1].region, frame.BFIBackdrop,
+    "backdrop fade target")
+assertEqual(fadeAnimationCalls[1].duration, 1,
+    "default backdrop fade duration")
+assertEqual(fadeAnimationCalls[1].noHide, true,
+    "faded backdrop remains available")
+assertEqual(hookCount, 4, "Talking Head lifecycle hooks")
 
 assertEqual(name.textColor[1], colors.BFI[1], "name color")
 assertEqual(text.textColor[1], colors.white[1], "body color")
 assertTrue(name.shadowApplied, "name shadow")
 assertTrue(text.shadowApplied, "body shadow")
+
+frame:FadeoutFrames()
+assertEqual(frame.nativeFadeOutCalls, 1, "native fade-out preserved")
+assertEqual(frame.BFIBackdrop.fadeOutCalls, 1, "backdrop fade-out")
+assertEqual(frame.BFIBackdrop.fadeOutStartAlpha, 1,
+    "backdrop fade-out start alpha")
+assertEqual(frame.BFIBackdrop.fadeDuration, 1,
+    "backdrop fade-out duration")
+assertEqual(frame.BFIBackdrop.alpha, 0,
+    "backdrop reaches zero alpha before the root hides")
+
+frame:FadeinFrames()
+assertEqual(frame.nativeFadeInCalls, 1, "native fade-in preserved")
+assertEqual(frame.BFIBackdrop.fadeInCalls, 1, "backdrop fade-in")
+assertEqual(frame.BFIBackdrop.fadeInStartAlpha, 0,
+    "backdrop fade-in start alpha")
+assertEqual(frame.BFIBackdrop.fadeDuration, 0.75,
+    "backdrop fade-in duration")
+assertEqual(frame.BFIBackdrop.alpha, 1,
+    "backdrop reaches full alpha")
+
+frame.BFIBackdrop.alpha = 0
+frame.isInEditMode = true
+frame.isPlaying = false
+frame:UpdateShownState()
+assertEqual(frame.nativeShownStateCalls, 1,
+    "native shown-state update preserved")
+assertEqual(frame.BFIBackdrop.alpha, 1,
+    "Edit Mode restores the backdrop")
+
+frame.BFIBackdrop.alpha = 0
+frame.isInEditMode = false
+frame:UpdateShownState()
+assertEqual(frame.BFIBackdrop.alpha, 0,
+    "ordinary hidden state does not restore the backdrop")
+frame.isInEditMode = true
 
 frame:PlayCurrent()
 assertTrue(textBackground.hidden,
@@ -277,7 +370,8 @@ callback()
 assertEqual(#removeCalls, 5, "repeat initialization is ignored")
 assertEqual(#backdropCalls, 2, "no duplicate backdrops")
 assertEqual(closeButtonCalls, 1, "no duplicate close-button skin")
-assertEqual(hookCount, 1, "no duplicate hooks")
+assertEqual(#fadeAnimationCalls, 1, "no duplicate fade setup")
+assertEqual(hookCount, 4, "no duplicate hooks")
 
 assertEqual(frame.OnClick, originalClick, "native click handler preserved")
 assertEqual(frame.registeredEvents, originalEvents, "native events preserved")

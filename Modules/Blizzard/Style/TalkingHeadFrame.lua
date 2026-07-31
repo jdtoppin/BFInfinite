@@ -4,6 +4,27 @@ local S = BFI.modules.Style
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
+local function FadeInBackdrop(frame)
+    local backdrop = frame.BFIBackdrop
+    backdrop:ShowNow()
+    backdrop:SetAlpha(0)
+    backdrop:SetFadeDuration(0.75)
+    backdrop:FadeIn()
+end
+
+local function FadeOutBackdrop(frame)
+    local backdrop = frame.BFIBackdrop
+    backdrop:ShowNow()
+    backdrop:SetFadeDuration(1)
+    backdrop:FadeOut()
+end
+
+local function UpdateBackdropShownState(frame)
+    if frame.isInEditMode and not frame.isPlaying then
+        frame.BFIBackdrop:ShowNow()
+    end
+end
+
 local function UpdateTextStyle(frame)
     local name = frame.NameFrame.Name
     local text = frame.TextFrame.Text
@@ -37,8 +58,12 @@ local function StyleTalkingHeadFrame()
     S.CreateBackdrop(frame, nil, nil, -1)
     S.CreateBackdrop(mainFrame.Model, true, nil, 1)
     S.StyleCloseButton(mainFrame.CloseButton)
+    AF.CreateFadeInOutAnimation(frame.BFIBackdrop, 1, true)
 
     UpdateTextStyle(frame)
+    hooksecurefunc(frame, "FadeinFrames", FadeInBackdrop)
+    hooksecurefunc(frame, "FadeoutFrames", FadeOutBackdrop)
     hooksecurefunc(frame, "PlayCurrent", UpdateTextStyle)
+    hooksecurefunc(frame, "UpdateShownState", UpdateBackdropShownState)
 end
 AF.RegisterCallback("BFI_StyleBlizzard", StyleTalkingHeadFrame)
