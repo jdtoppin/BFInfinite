@@ -244,12 +244,23 @@ local function makeHarness(options)
         frame:SetSize(width, height)
     end
 
+    function AF.SetFrameLevel(frame, level, relativeTo)
+        assertEqual(harness.inCombat, false,
+            "external container layer mutated in combat")
+        frame.frameLevel = (relativeTo.frameLevel or 0) + level
+        frame.frameStrata = relativeTo.frameStrata
+        record(harness, "af.frame-level", frame, level, relativeTo)
+    end
+
     function AF.HasCustomAuraContainer()
         return options.hasBackend ~= false
     end
 
     function AF.CreateCustomAuraContainer(parent)
         local container = newContainer(harness, parent)
+        if options.failCreatedContainerSetUnit then
+            container.failSetUnit = true
+        end
         record(harness, "af.create-container", container, parent)
         return container
     end
@@ -816,11 +827,9 @@ local function testSharedCombatQueue()
     )
     local second = harness.UF.CreateNativeAuraContainerController(
         {},
-        "BFISecondAuraHolder",
-        completeSpec("party1", true)
+        "BFISecondAuraHolder"
     )
     local firstContainer = harness.containers[1]
-    local secondContainer = harness.containers[2]
 
     clearEvents(harness)
     harness:SetCombat(true)
@@ -834,32 +843,31 @@ local function testSharedCombatQueue()
     assertEventNames(harness, {
         "holder.shown",
         "uf.register",
-        "holder.shown",
     })
     assertEqual(firstContainer.unit, "target", "combat retarget mutation")
     assertEqual(firstContainer.enabled, true, "combat enabled mutation")
     assertEqual(first:GetFrame().shown, false, "combat stale-display suppression")
-    assertEqual(second:GetFrame().shown, false, "combat rebuild display suppression")
-    assertEqual(#harness.containers, 2, "combat rebuild mutation")
+    assertEqual(second:GetFrame().shown, false,
+        "combat initial-build display suppression")
+    assertEqual(#harness.containers, 1, "combat initial-build mutation")
 
     harness:SetCombat(false)
     harness:FireRegen()
 
     assertEqual(countEvents(harness, "uf.register"), 1, "shared regen registrations")
     assertEqual(countEvents(harness, "uf.unregister"), 1, "shared regen unregistrations")
-    assertEqual(countEvents(harness, "af.create-container"), 1, "coalesced rebuild count")
+    assertEqual(countEvents(harness, "af.create-container"), 1,
+        "coalesced initial-build count")
     assertEqual(firstContainer.unit, "focus", "deferred retarget")
     assertEqual(firstContainer.enabled, false, "deferred enabled")
     assertEqual(first:GetFrame().shown, false, "deferred holder visibility")
     assertEqual(firstContainer.groups.helpful.filterString, "HELPFUL|PLAYER",
         "deferred tuning")
 
-    local replacement = harness.containers[3]
-    assertEqual(replacement.parent, second:GetFrame(), "replacement owner")
-    assertEqual(replacement.unit, "party3", "latest rebuild unit")
-    assertEqual(replacement.enabled, false, "latest rebuild enabled")
-    assertEqual(secondContainer.enabled, false, "old container disabled")
-    assertEqual(secondContainer.shown, false, "old container hidden")
+    local initialContainer = harness.containers[2]
+    assertEqual(initialContainer.parent, second:GetFrame(), "initial-build owner")
+    assertEqual(initialContainer.unit, "party3", "latest initial-build unit")
+    assertEqual(initialContainer.enabled, false, "latest initial-build enabled")
     assertEqual(harness.regenCallback, nil, "regen handler after flush")
 end
 
@@ -905,35 +913,161 @@ local function testRegenDispatchIsolation()
     assertTrue(harness.regenCallback, "failing controller regen retention")
 end
 
-local function testReplacementIsReadyBeforeSwap()
+local function testRebuildRejectsAfterInitialBuild()
     local harness = makeHarness()
     local controller = harness.UF.CreateNativeAuraContainerController(
         {},
-        "BFIReplacementAuraHolder",
+        "BFISingleBuildAuraHolder",
         completeSpec("target", true)
     )
-    local oldContainer = harness.containers[1]
+    local container = harness.containers[1]
+    local group = container.groups.helpful
+    local slot = container.slots.priority
+    local button = slot.button
 
     clearEvents(harness)
-    controller:Rebuild(completeSpec("focus", true))
+    local accepted, message = pcall(
+        controller.Rebuild,
+        controller,
+        completeSpec("focus", false)
+    )
 
-    local replacementContainer = harness.containers[2]
-    local _, newUpdateIndex = findEvent(harness, "af.update", function(args)
-        return args[1] == replacementContainer
-    end)
-    local _, oldDisableIndex = findEvent(harness, "af.enabled", function(args)
-        return args[1] == oldContainer and args[2] == false
-    end)
-    local _, oldHideIndex = findEvent(harness, "native.hide", function(args)
-        return args[1] == oldContainer
-    end)
-    local _, newShowIndex = findEvent(harness, "native.show", function(args)
-        return args[1] == replacementContainer
-    end)
+    assertEqual(accepted, false, "second rebuild acceptance")
+    assertTrue(
+        tostring(message):find("initial build already attempted", 1, true) ~= nil,
+        "second rebuild assertion"
+    )
+    assertEqual(#harness.events, 0, "second rebuild native mutations")
+    assertEqual(#harness.containers, 1, "second rebuild container allocation")
+    assertEqual(#harness.slotButtons, 1, "second rebuild button allocation")
+    assertEqual(controller._container, container, "second rebuild controller container")
+    assertEqual(container.groups.helpful, group, "second rebuild group")
+    assertEqual(container.slots.priority, slot, "second rebuild slot")
+    assertEqual(container.slots.priority.button, button, "second rebuild button")
+    assertEqual(container.unit, "target", "second rebuild unit mutation")
+    assertEqual(container.enabled, true, "second rebuild enabled mutation")
+    assertEqual(group.filterString, "HELPFUL", "second rebuild group mutation")
+    assertEqual(slot.filterString, "HARMFUL", "second rebuild slot mutation")
 
-    assertTrue(newUpdateIndex and oldDisableIndex, "replacement lifecycle events missing")
-    assertTrue(newUpdateIndex < oldDisableIndex, "old container touched before replacement ready")
-    assertTrue(oldHideIndex < newShowIndex, "replacement shown before old container hidden")
+    controller:ApplyTuning(tuningSpec())
+
+    assertEqual(#harness.containers, 1, "post-rejection tuning container count")
+    assertEqual(#harness.slotButtons, 1, "post-rejection tuning button count")
+    assertEqual(countEvents(harness, "af.create-container"), 0,
+        "post-rejection tuning container allocation")
+    assertEqual(countEvents(harness, "af.add-group"), 0,
+        "post-rejection tuning group addition")
+    assertEqual(countEvents(harness, "af.add-slot"), 0,
+        "post-rejection tuning slot addition")
+    assertEqual(group.filterString, "HELPFUL|PLAYER",
+        "post-rejection group tuning")
+    assertEqual(slot.filterString, "HARMFUL|RAID",
+        "post-rejection slot tuning")
+end
+
+local function assertMidBuildFailureIsOneShot(
+    harness,
+    controller,
+    expectedContainer,
+    expectedCreateCount,
+    label
+)
+    clearEvents(harness)
+    local built, buildMessage = pcall(
+        controller.Rebuild,
+        controller,
+        completeSpec("party1", true)
+    )
+
+    assertEqual(built, false, label .. " injected build acceptance")
+    assertTrue(
+        tostring(buildMessage):find("injected non-secret SetUnit failure", 1, true)
+            ~= nil,
+        label .. " injected build failure"
+    )
+    expectedContainer = expectedContainer or harness.containers[1]
+    assertEqual(controller._buildAttempted, true, label .. " build-attempt latch")
+    assertEqual(controller._seedContainer, nil, label .. " consumed seed")
+    assertEqual(controller._container, expectedContainer, label .. " claimed container")
+    assertEqual(#harness.containers, 1, label .. " initial container count")
+    assertEqual(#harness.slotButtons, 1, label .. " initial button count")
+    assertEqual(countEvents(harness, "af.create-container"), expectedCreateCount,
+        label .. " initial container allocations")
+    assertEqual(countEvents(harness, "af.add-group"), 1,
+        label .. " initial group allocations")
+    assertEqual(countEvents(harness, "af.add-slot"), 1,
+        label .. " initial slot allocations")
+
+    local group = expectedContainer.groups.helpful
+    local slot = expectedContainer.slots.priority
+    local button = slot.button
+    expectedContainer.failSetUnit = nil
+    clearEvents(harness)
+
+    local rebuilt, rebuildMessage = pcall(
+        controller.Rebuild,
+        controller,
+        completeSpec("party2", false)
+    )
+    assertEqual(rebuilt, false, label .. " public retry acceptance")
+    assertTrue(
+        tostring(rebuildMessage):find("initial build already attempted", 1, true)
+            ~= nil,
+        label .. " public retry assertion"
+    )
+
+    local internalRetry, internalMessage = pcall(
+        controller._Build,
+        controller
+    )
+    assertEqual(internalRetry, false, label .. " internal retry acceptance")
+    assertTrue(
+        tostring(internalMessage):find("initial build already attempted", 1, true)
+            ~= nil,
+        label .. " internal retry assertion"
+    )
+    assertEqual(#harness.events, 0, label .. " retry native mutations")
+    assertEqual(#harness.containers, 1, label .. " retry container count")
+    assertEqual(#harness.slotButtons, 1, label .. " retry button count")
+    assertEqual(expectedContainer.groups.helpful, group, label .. " retry group")
+    assertEqual(expectedContainer.slots.priority, slot, label .. " retry slot")
+    assertEqual(expectedContainer.slots.priority.button, button,
+        label .. " retry button")
+end
+
+local function testMidBuildFailureIsOneShot()
+    local createdHarness = makeHarness({
+        failCreatedContainerSetUnit = true,
+    })
+    local createdController = createdHarness.UF.CreateNativeAuraContainerController(
+        {},
+        "BFIFailingCreatedAuraHolder"
+    )
+    assertMidBuildFailureIsOneShot(
+        createdHarness,
+        createdController,
+        createdHarness.containers[1],
+        1,
+        "created"
+    )
+
+    local seededHarness = makeHarness()
+    local root = {}
+    local seed = seededHarness.AF.CreateCustomAuraContainer(root)
+    seed.failSetUnit = true
+    local seededController =
+        seededHarness.UF.CreateNativeGroupAuraContainerController(
+            root,
+            "BFIFailingSeededAuraHolder",
+            seed
+        )
+    assertMidBuildFailureIsOneShot(
+        seededHarness,
+        seededController,
+        seed,
+        0,
+        "seeded"
+    )
 end
 
 local function testVisibilityUsesWriteLedger()
@@ -944,16 +1078,15 @@ local function testVisibilityUsesWriteLedger()
         completeSpec("target", true)
     )
     local holder = controller:GetFrame()
-    local oldContainer = harness.containers[1]
+    local container = harness.containers[1]
 
     clearEvents(harness)
-    controller:Rebuild(completeSpec("focus", true))
+    controller:ApplyTuning(tuningSpec())
 
     assertEqual(#harness.timerCallbacks, 0, "visibility retry count")
-    assertEqual(#harness.containers, 2, "replacement count")
-    assertEqual(oldContainer.enabled, false, "old container enabled")
-    assertEqual(oldContainer.shown, false, "old container shown")
-    assertEqual(harness.containers[2].unit, "focus", "replacement unit")
+    assertEqual(#harness.containers, 1, "tuning container count")
+    assertEqual(container.groups.helpful.filterString, "HELPFUL|PLAYER",
+        "write-only tuning")
     assertEqual(holder.shown, true, "holder visibility")
     assertEqual(harness.events[1].name, "holder.shown", "holder hide order")
     assertEqual(harness.events[1].args[2], false, "holder hide state")
@@ -1008,7 +1141,7 @@ local function testDestroyPrecedence()
 
     clearEvents(harness)
     harness:SetCombat(true)
-    controller:Rebuild(completeSpec("focus", true))
+    controller:ApplyTuning(tuningSpec())
     controller:Destroy()
 
     assertEventNames(harness, {
@@ -1081,18 +1214,277 @@ local function testRefreshIsDirectDirtyMark()
     assertEqual(harness.regenCallback, nil, "refresh regen handler")
 end
 
+local function testGroupHeaderCapabilityAndSeed()
+    local unavailable = makeHarness({
+        hasBackend = false,
+    })
+    local unavailableHeader = {
+        attributes = {},
+    }
+    function unavailableHeader:SetAttribute(key, value)
+        self.attributes[key] = value
+    end
+
+    assertEqual(
+        unavailable.UF.PrepareNativeGroupAuraHeader(unavailableHeader),
+        false,
+        "unavailable group header capability"
+    )
+    assertEqual(
+        unavailableHeader.attributes.auraContainerTemplate,
+        nil,
+        "12.0.7 group header attribute"
+    )
+    assertEqual(
+        unavailable.UF.CreateNativeGroupAuraContainerSeed({}),
+        nil,
+        "12.0.7 extra group seed"
+    )
+    assertEqual(#unavailable.containers, 0, "12.0.7 native allocation")
+
+    local harness = makeHarness()
+    local header = {
+        attributes = {},
+    }
+    function header:SetAttribute(key, value)
+        self.attributes[key] = value
+        record(harness, "header.attribute", self, key, value)
+    end
+
+    assertEqual(
+        harness.UF.PrepareNativeGroupAuraHeader(header),
+        true,
+        "12.1 group header capability"
+    )
+    assertEqual(
+        header.attributes.auraContainerTemplate,
+        "CustomAuraContainerTemplate",
+        "12.1 group header template"
+    )
+
+    local parent = {}
+    local seed = harness.UF.CreateNativeGroupAuraContainerSeed(parent)
+    assertEqual(seed, harness.containers[1], "created group seed")
+    assertEqual(seed.parent, parent, "group seed parent")
+    assertEqual(seed.shown, false, "group seed initial visibility")
+    assertEqual(seed.enabled, false, "group seed initial enabled state")
+end
+
+local function testGroupSeedAdoptionAndOneShotClaim()
+    local harness = makeHarness()
+    local root = {}
+    local seed = harness.AF.CreateCustomAuraContainer(root)
+    local controller = harness.UF.CreateNativeGroupAuraContainerController(
+        root,
+        "BFIGroupAuraHolder",
+        seed,
+        completeSpec("party1", true)
+    )
+
+    assertEqual(#harness.containers, 1, "seeded build allocation count")
+    assertEqual(controller._container, seed, "adopted group seed")
+    assertEqual(controller._seedContainer, nil, "consumed group seed")
+    assertEqual(controller._containerIsExternal, true,
+        "external group container")
+    assertEqual(seed.parent, root, "adopted seed parent")
+    assertEqual(seed.point[2], controller:GetFrame(),
+        "seed position relative to holder")
+    assertEqual(seed.unit, "party1", "seeded build unit")
+    assertEqual(seed.enabled, true, "seeded build enabled")
+    assertEqual(seed.shown, true, "seeded build visibility")
+    assertEqual(controller:GetFrame().shown, true,
+        "seeded holder visibility")
+    assertEqual(countEvents(harness, "af.frame-level"), 1,
+        "seeded build layer synchronization")
+
+    clearEvents(harness)
+    controller:ApplyHolderConfig(function(holder)
+        holder.frameLevel = 27
+        holder.frameStrata = "HIGH"
+    end)
+    assertEqual(seed.frameLevel, 28, "seeded updated frame level")
+    assertEqual(seed.frameStrata, "HIGH", "seeded updated frame strata")
+    assertEqual(countEvents(harness, "af.frame-level"), 1,
+        "seeded holder update layer synchronization")
+
+    local accepted, message = pcall(
+        harness.UF.CreateNativeGroupAuraContainerController,
+        {},
+        "BFIDuplicateGroupAuraHolder",
+        seed
+    )
+    assertEqual(accepted, false, "duplicate seed claim acceptance")
+    assertTrue(
+        tostring(message):find("already claimed", 1, true) ~= nil,
+        "duplicate seed claim assertion"
+    )
+    assertEqual(#harness.holders, 1, "duplicate claim holder allocation")
+end
+
+local function testGroupSeedBuildQueuesInCombat()
+    local harness = makeHarness()
+    local root = {}
+    local seed = harness.AF.CreateCustomAuraContainer(root)
+    local controller = harness.UF.CreateNativeGroupAuraContainerController(
+        root,
+        "BFICombatBootstrapAuraHolder",
+        seed
+    )
+
+    clearEvents(harness)
+    harness:SetCombat(true)
+    controller:ApplyHolderConfig(function(holder)
+        holder.bootstrapConfigured = true
+        holder.frameLevel = 11
+    end)
+    assertTrue(harness.regenCallback, "bootstrap holder regen registration")
+
+    controller:Rebuild(completeSpec("party3", true))
+    assertEqual(controller._container, nil, "combat bootstrap container")
+    assertEqual(next(seed.groups), nil, "combat bootstrap group declaration")
+    assertEqual(next(seed.slots), nil, "combat bootstrap slot declaration")
+    assertEqual(controller:GetFrame().bootstrapConfigured, nil,
+        "combat bootstrap holder configuration")
+    assertEqual(countEvents(harness, "af.frame-level"), 0,
+        "combat bootstrap external frame level")
+    assertTrue(harness.regenCallback, "combat bootstrap regen registration")
+
+    harness:SetCombat(false)
+    harness:FireRegen()
+    assertEqual(#harness.containers, 1, "bootstrap allocation count")
+    assertEqual(countEvents(harness, "af.create-container"), 0,
+        "bootstrap ordinary container allocation")
+    assertEqual(seed.unit, "party3", "bootstrap unit")
+    assertEqual(seed.enabled, true, "bootstrap enabled")
+    assertEqual(seed.shown, true, "bootstrap visibility")
+    assertEqual(controller:GetFrame().shown, true,
+        "bootstrap holder visibility")
+    assertEqual(controller:GetFrame().bootstrapConfigured, true,
+        "bootstrap holder configuration")
+    assertTrue(seed.groups.helpful, "bootstrap group declaration")
+    assertTrue(seed.slots.priority, "bootstrap slot declaration")
+    assertEqual(seed.frameLevel, 12, "bootstrap external frame level")
+    assertEqual(harness.regenCallback, nil,
+        "bootstrap stale regen registration")
+end
+
+local function testGroupCombatLiveRetarget()
+    local harness = makeHarness()
+    local root = {}
+    local seed = harness.AF.CreateCustomAuraContainer(root)
+    local controller = harness.UF.CreateNativeGroupAuraContainerController(
+        root,
+        "BFILiveGroupAuraHolder",
+        seed,
+        completeSpec("party1", true)
+    )
+
+    clearEvents(harness)
+    harness:SetCombat(true)
+    controller:SetUnit("party4")
+
+    assertEventNames(harness, {
+        "native.hide",
+        "holder.shown",
+        "af.unit",
+        "af.update",
+        "holder.shown",
+        "native.show",
+    })
+    assertEqual(seed.unit, "party4", "combat-live group unit")
+    assertEqual(seed.shown, true, "combat-live group visibility")
+    assertEqual(controller:GetFrame().shown, true,
+        "combat-live holder visibility")
+    assertEqual(harness.regenCallback, nil,
+        "combat-live retarget regen registration")
+end
+
+local function testGroupRetargetPrecedesStructuralTuning()
+    local harness = makeHarness()
+    local root = {}
+    local seed = harness.AF.CreateCustomAuraContainer(root)
+    local controller = harness.UF.CreateNativeGroupAuraContainerController(
+        root,
+        "BFIStructuralGroupAuraHolder",
+        seed,
+        completeSpec("party1", true)
+    )
+
+    clearEvents(harness)
+    harness:SetCombat(true)
+    controller:ApplyTuning(tuningSpec())
+    controller:SetUnit("party2")
+
+    assertEqual(seed.unit, "party2", "pending tuning live unit")
+    assertEqual(seed.shown, false, "pending tuning seed visibility")
+    assertEqual(controller:GetFrame().shown, false,
+        "pending tuning holder visibility")
+    assertTrue(harness.regenCallback, "pending tuning regen registration")
+    assertEqual(countEvents(harness, "af.create-container"), 0,
+        "combat structural allocation")
+    assertEqual(countEvents(harness, "af.unit"), 1,
+        "combat structural live retarget count")
+
+    harness:SetCombat(false)
+    harness:FireRegen()
+    assertEqual(#harness.containers, 1, "regen tuning container count")
+    assertEqual(seed.unit, "party2", "regen tuned unit")
+    assertEqual(seed.enabled, true, "regen tuned enabled")
+    assertEqual(seed.shown, true, "regen tuned visibility")
+    assertEqual(seed.groups.helpful.filterString, "HELPFUL|PLAYER",
+        "regen group tuning")
+    assertEqual(controller:GetFrame().shown, true,
+        "regen tuned holder visibility")
+end
+
+local function testGroupVisibilityDoesNotProbeFrameState()
+    local harness = makeHarness()
+    local root = {}
+    local seed = harness.AF.CreateCustomAuraContainer(root)
+    local controller = harness.UF.CreateNativeGroupAuraContainerController(
+        root,
+        "BFIHoveredGroupAuraHolder",
+        seed,
+        completeSpec("party1", true)
+    )
+
+    clearEvents(harness)
+    controller:GetFrame().IsShown = function()
+        error("forbidden IsShown visibility read")
+    end
+    controller:GetFrame().IsMouseOver = function()
+        error("forbidden IsMouseOver visibility read")
+    end
+    controller:SetShown(false)
+
+    assertEqual(seed.shown, false, "group seed visibility")
+    assertEqual(controller:GetFrame().shown, false,
+        "group holder visibility")
+    assertEqual(countEvents(harness, "native.hide"), 1,
+        "native visibility mutation")
+    assertEqual(#harness.timerCallbacks, 0,
+        "group visibility retry")
+end
+
 testCapabilityGate()
 testBuildContract()
 testTuningContract()
 testHolderConfigQueue()
 testSharedCombatQueue()
 testRegenDispatchIsolation()
-testReplacementIsReadyBeforeSwap()
+testRebuildRejectsAfterInitialBuild()
+testMidBuildFailureIsOneShot()
 testVisibilityUsesWriteLedger()
 testProductionAvoidsVisibilityInspection()
 testMaxFrameCountContract()
 testDestroyPrecedence()
 testOutOfBandOOCFlushUnregisters()
 testRefreshIsDirectDirtyMark()
+testGroupHeaderCapabilityAndSeed()
+testGroupSeedAdoptionAndOneShotClaim()
+testGroupSeedBuildQueuesInCombat()
+testGroupCombatLiveRetarget()
+testGroupRetargetPrecedesStructuralTuning()
+testGroupVisibilityDoesNotProbeFrameState()
 
 print("unit_frame_aura_controller_test.lua: ok")
