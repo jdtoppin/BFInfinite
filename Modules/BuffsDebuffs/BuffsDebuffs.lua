@@ -49,7 +49,11 @@ BD.CUSTOM_AURA_CONTAINER_BACKEND = CUSTOM_AURA_CONTAINER_BACKEND
 BD.BLIZZARD_DEBUFF_STYLE_BACKEND = BLIZZARD_DEBUFF_STYLE_BACKEND
 
 local function GetRetailInterfaceVersion()
-    return tonumber(select(4, GetBuildInfo()))
+    -- GetBuildInfo returns values after interfaceVersion as well. Assign the
+    -- selected value first so tonumber never receives those trailing strings
+    -- as its optional base argument.
+    local interfaceVersion = select(4, GetBuildInfo())
+    return tonumber(interfaceVersion)
 end
 
 -- Retail 12.0.7 loads the implementation and template together from
