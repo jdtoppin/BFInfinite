@@ -165,7 +165,7 @@ local function makeHarness(options)
             return self.name
         end
         function frame:IsShown()
-            return self.shown == true
+            error("runtime must not observe holder visibility")
         end
 
         local controller = {
@@ -206,9 +206,6 @@ local function makeHarness(options)
         function controller:SetShown(shown)
             if self.shown == shown then return end
             self.shown = shown
-            if not (self.deferPhysicalHide and shown == false) then
-                self.frame.shown = shown
-            end
             if self.spec then self.spec.shown = shown end
             record(harness, "controller.shown", self, shown)
         end
@@ -989,38 +986,52 @@ local function testDebounceAndConstructionReuse()
         .groups[1].filterString, "latest-rebuild", "latest rebuild payload")
 end
 
-local function testHoverCommitUsesLatestConfig()
+local function testControllerLedgerCommitUsesLatestConfig()
     local harness = makeHarness()
-    local root = newRoot("HoverCommit", "player")
+    local root = newRoot("LedgerCommit", "player")
     local runtime, controller = createRuntime(harness, root)
 
     runtime:LoadConfig(validConfig())
     runtime:Enable()
-    controller.deferPhysicalHide = true
     harness:ClearEvents()
 
     runtime:LoadConfig(validConfig({
-        tag = "stale-hover",
+        tag = "stale-ledger",
     }))
-    harness:RunTimers(0.15)
-    assertEqual(countEvents(harness, "controller.tuning"), 0,
-        "hovered tuning count")
-
     runtime:LoadConfig(validConfig({
-        tag = "latest-hover",
+        tag = "latest-ledger",
     }))
     harness:RunTimers(0.15)
-    assertEqual(countEvents(harness, "controller.tuning"), 0,
-        "second hovered tuning count")
-
-    controller.deferPhysicalHide = nil
-    controller.frame.shown = false
-    harness:RunTimers(0.25)
     assertEqual(countEvents(harness, "controller.tuning"), 1,
-        "post-hover tuning count")
-    assertEqual(controller.tuning.tag, "latest-hover",
-        "post-hover latest tuning")
-    assertEqual(controller.shown, true, "post-hover holder visibility")
+        "controller-ledger tuning count")
+    assertEqual(controller.tuning.tag, "latest-ledger",
+        "controller-ledger latest tuning")
+    assertEqual(controller.shown, true,
+        "controller-ledger holder visibility")
+    assertEqual(runtime:GetNativeAuraState().pending, false,
+        "controller-ledger settled state")
+end
+
+local function testRuntimeHasNoHolderVisibilityReads()
+    local file = assert(io.open(
+        "Modules/UnitFrames/AuraRuntime.lua",
+        "r"
+    ))
+    local source = file:read("*a")
+    file:close()
+
+    local forbiddenMethods = {
+        "IsShown",
+        "IsVisible",
+        "IsMouseOver",
+        "GetAlpha",
+    }
+    for _, method in ipairs(forbiddenMethods) do
+        assertTrue(
+            source:find(":" .. method .. "(", 1, true) == nil,
+            "runtime reads holder visibility through " .. method
+        )
+    end
 end
 
 local function testSharedCombatCommitQueue()
@@ -1570,7 +1581,8 @@ testDormancyAndFallback()
 testOptInRelationPartitionRuntime()
 testLifecycleAndUnitRefresh()
 testDebounceAndConstructionReuse()
-testHoverCommitUsesLatestConfig()
+testControllerLedgerCommitUsesLatestConfig()
+testRuntimeHasNoHolderVisibilityReads()
 testSharedCombatCommitQueue()
 testCombatConfigSupersession()
 testUngatedFocusWatcher()
