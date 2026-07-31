@@ -125,16 +125,15 @@ local function newHolder(harness, name, parent)
     end
 
     function holder:IsShown()
-        return self.shown == true
+        error("holder visibility must remain opaque")
     end
 
     function holder:IsMouseOver()
-        return self.mouseOver == true
+        error("holder hover state must remain opaque")
     end
 
     function holder:SetShown(shown)
         record(harness, "holder.shown", self, shown)
-        if self.blockSetShown then return end
         self.shown = shown
     end
 
@@ -872,65 +871,45 @@ local function testReplacementIsReadyBeforeSwap()
     assertTrue(oldHideIndex < newShowIndex, "replacement shown before old container hidden")
 end
 
-local function testHoveredTransitionDefers()
+local function testVisibilityUsesWriteLedger()
     local harness = makeHarness()
     local controller = harness.UF.CreateNativeAuraContainerController(
         {},
-        "BFIHoveredAuraHolder",
+        "BFIOpaqueVisibilityAuraHolder",
         completeSpec("target", true)
     )
     local holder = controller:GetFrame()
     local oldContainer = harness.containers[1]
 
     clearEvents(harness)
-    holder.mouseOver = true
     controller:Rebuild(completeSpec("focus", true))
 
-    assertEqual(#harness.events, 0, "hovered transition mutations")
-    assertEqual(#harness.timerCallbacks, 1, "hover retry count")
-    assertEqual(#harness.containers, 1, "hovered replacement count")
-    assertEqual(oldContainer.enabled, true, "hovered old container enabled")
-    assertEqual(oldContainer.shown, true, "hovered old container shown")
-
-    holder.mouseOver = false
-    harness:RunNextTimer()
-
-    assertEqual(#harness.timerCallbacks, 0, "completed hover retry count")
-    assertEqual(#harness.containers, 2, "completed replacement count")
-    assertEqual(harness.containers[2].unit, "focus", "completed replacement unit")
-    assertEqual(holder.shown, true, "completed holder visibility")
-    assertEqual(harness.events[1].name, "holder.shown", "hover-safe hide order")
-    assertEqual(harness.events[1].args[2], false, "hover-safe hide state")
+    assertEqual(#harness.timerCallbacks, 0, "visibility retry count")
+    assertEqual(#harness.containers, 2, "replacement count")
+    assertEqual(oldContainer.enabled, false, "old container enabled")
+    assertEqual(oldContainer.shown, false, "old container shown")
+    assertEqual(harness.containers[2].unit, "focus", "replacement unit")
+    assertEqual(holder.shown, true, "holder visibility")
+    assertEqual(harness.events[1].name, "holder.shown", "holder hide order")
+    assertEqual(harness.events[1].args[2], false, "holder hide state")
     assertEqual(harness.events[#harness.events].name, "holder.shown",
-        "hover-safe restore order")
+        "holder restore order")
     assertEqual(harness.events[#harness.events].args[2], true,
-        "hover-safe restore state")
+        "holder restore state")
 end
 
-local function testAbortedHolderWriteDefers()
-    local harness = makeHarness()
-    local controller = harness.UF.CreateNativeAuraContainerController(
-        {},
-        "BFIAbortedHolderAuraHolder",
-        completeSpec("target", true)
-    )
-    local holder = controller:GetFrame()
+local function testProductionAvoidsVisibilityInspection()
+    local file = assert(io.open("Modules/UnitFrames/AuraController.lua", "r"))
+    local source = file:read("*a")
+    file:close()
 
-    clearEvents(harness)
-    holder.blockSetShown = true
-    controller:Rebuild(completeSpec("focus", true))
-
-    assertEventNames(harness, {
-        "holder.shown",
-    })
-    assertEqual(#harness.timerCallbacks, 1, "aborted-write retry count")
-    assertEqual(#harness.containers, 1, "aborted-write replacement count")
-    assertEqual(holder.shown, true, "aborted-write holder state")
-
-    holder.blockSetShown = nil
-    harness:RunNextTimer()
-    assertEqual(#harness.containers, 2, "retried replacement count")
-    assertEqual(harness.containers[2].unit, "focus", "retried replacement unit")
+    for _, method in ipairs({"IsShown", "IsVisible", "IsMouseOver", "GetAlpha"}) do
+        assertEqual(
+            source:find(":" .. method .. "%(", 1),
+            nil,
+            "forbidden visibility inspection " .. method
+        )
+    end
 end
 
 local function testMaxFrameCountContract()
@@ -1043,8 +1022,8 @@ testTuningContract()
 testSharedCombatQueue()
 testRegenDispatchIsolation()
 testReplacementIsReadyBeforeSwap()
-testHoveredTransitionDefers()
-testAbortedHolderWriteDefers()
+testVisibilityUsesWriteLedger()
+testProductionAvoidsVisibilityInspection()
 testMaxFrameCountContract()
 testDestroyPrecedence()
 testOutOfBandOOCFlushUnregisters()
