@@ -35,3 +35,6 @@ jobs:
 
       - name: Test 12.1 unit-frame aura controller
         run: luajit tests/unit_frame_aura_controller_test.lua
+
+      - name: Test 12.1 unit-frame aura policy
+        run: luajit tests/unit_frame_aura_policy_test.lua
