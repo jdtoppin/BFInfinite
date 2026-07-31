@@ -153,16 +153,6 @@ local function ForceShowGroup(group)
     end
 end
 
-local function ForceHideGroup(group)
-    for i, frame in pairs(configModeGroups[group]["children"]) do
-        frame:Hide()
-    end
-
-    if configModeGroups[group]["container"] then
-        configModeGroups[group]["container"]:Hide()
-    end
-end
-
 ---------------------------------------------------------------------
 -- enable config mode
 ---------------------------------------------------------------------
@@ -209,21 +199,27 @@ local function DisableConfigModeForGroup(group)
     configModeGroups[group]["enabled"] = false
 
     for _, frame in pairs(configModeGroups[group]["children"]) do
-        -- restore indicators
+        -- Entry invokes EnableConfigMode for every indicator, including
+        -- disabled ones whose methods still need to be restored.
         for _, indicator in pairs(frame.indicators) do
-            if indicator.enabled and indicator.DisableConfigMode then
+            if indicator.DisableConfigMode then
                 indicator:DisableConfigMode()
             end
         end
 
-        -- restore unit
+        -- Restore the real unit and leave preview state before registering
+        -- its watch. RegisterUnitWatch may show an existing unit
+        -- synchronously, so registration must never observe preview player.
         UnregisterUnitWatch(frame)
-        RegisterUnitWatch(frame)
-        frame:SetAttribute("unit", frame.oldUnit)
+        local oldUnit = frame.oldUnit
         frame.oldUnit = nil
         frame.inConfigMode = nil
+        frame:SetAttribute("unit", oldUnit)
         frame:EnableMouse(true)
         frame:Hide()
+        if frame.enabled then
+            RegisterUnitWatch(frame)
+        end
     end
 
     if configModeGroups[group]["headers"] then
@@ -236,7 +232,15 @@ local function DisableConfigModeForGroup(group)
     if configModeGroups[group]["container"] then
         local container = configModeGroups[group]["container"]
         container.inConfigMode = nil
-        RegisterAttributeDriver(container, container.driverKey, container.driverValue)
+        if container.enabled then
+            RegisterAttributeDriver(
+                container,
+                container.driverKey,
+                container.driverValue
+            )
+        else
+            container:Hide()
+        end
     end
 end
 
