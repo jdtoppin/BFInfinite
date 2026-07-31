@@ -468,6 +468,24 @@ end
 local updatePending
 local pendingWhich
 local UpdateBuffsDebuffs
+local pendingOptionsSignature
+
+function BD.IsBuffsDebuffsUpdatePending(which)
+    if not updatePending then return false end
+    return pendingWhich == nil
+        or which == nil
+        or pendingWhich == which
+end
+
+local function NotifyPendingOptions()
+    local signature = updatePending
+        and (pendingWhich or "*")
+        or ""
+    if signature == pendingOptionsSignature then return end
+
+    pendingOptionsSignature = signature
+    AF.Fire("BFI_RefreshOptions", "buffsDebuffs")
+end
 
 local function RetryBuffsDebuffsUpdate()
     BD:UnregisterEvent("PLAYER_REGEN_ENABLED", RetryBuffsDebuffsUpdate)
@@ -476,6 +494,7 @@ local function RetryBuffsDebuffsUpdate()
     updatePending = nil
     pendingWhich = nil
     UpdateBuffsDebuffs(nil, "buffsDebuffs", which)
+    NotifyPendingOptions()
 end
 
 local function DisableHeader(which, header)
@@ -552,6 +571,7 @@ UpdateBuffsDebuffs = function(_, module, which)
         end
         updatePending = true
         BD:RegisterEvent("PLAYER_REGEN_ENABLED", RetryBuffsDebuffsUpdate)
+        NotifyPendingOptions()
         return
     end
 

@@ -79,6 +79,9 @@ local function NewHarness(options)
     local createFrameCalls = 0
     local customDisableCalls = {}
     local customUpdateCalls = {}
+    local eventCallbacks = {}
+    local refreshEvents = {}
+    local inCombat = options.inCombat == true
     local updateCallback
 
     local schema = NewSchema()
@@ -104,7 +107,7 @@ local function NewHarness(options)
         return 1
     end
     _G.InCombatLockdown = function()
-        return false
+        return inCombat
     end
     _G.CreateFrame = function()
         createFrameCalls = createFrameCalls + 1
@@ -152,6 +155,12 @@ local function NewHarness(options)
             updateCallback = callback
         end
     end
+    AF.Fire = function(event, which)
+        refreshEvents[#refreshEvents + 1] = {
+            event = event,
+            which = which,
+        }
+    end
     _G.AbstractFramework = AF
 
     local BD = {
@@ -161,9 +170,13 @@ local function NewHarness(options)
         SetNativePublicAurasSuppressed = function()
             return true
         end,
-        RegisterEvent = function()
+        RegisterEvent = function(_, event, callback)
+            eventCallbacks[event] = callback
         end,
-        UnregisterEvent = function()
+        UnregisterEvent = function(_, event, callback)
+            if eventCallbacks[event] == callback then
+                eventCallbacks[event] = nil
+            end
         end,
         config = {
             buffs = {
@@ -210,6 +223,18 @@ local function NewHarness(options)
         end,
         customDisableCalls = customDisableCalls,
         customUpdateCalls = customUpdateCalls,
+        refreshEvents = refreshEvents,
+        setCombat = function(value)
+            inCombat = value == true
+        end,
+        fireRegen = function()
+            local callback = eventCallbacks.PLAYER_REGEN_ENABLED
+            assert(callback, "PLAYER_REGEN_ENABLED callback not registered")
+            callback()
+        end,
+        hasRegenCallback = function()
+            return eventCallbacks.PLAYER_REGEN_ENABLED ~= nil
+        end,
         update = function(which)
             updateCallback(nil, "buffsDebuffs", which)
         end,
@@ -272,6 +297,71 @@ do
     assertEqual(harness.customUpdateCalls[2].which, "debuffs", "12.1 custom debuffs update")
     assertEqual(harness.customUpdateCalls[2].config, BD.config.debuffs, "12.1 custom debuffs config")
     assertEqual(#harness.customDisableCalls, 0, "12.1 custom disable count")
+end
+
+do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 33,
+        registerCustomBackend = true,
+        inCombat = true,
+    })
+    local BD = harness.BD
+
+    harness.update("buffs")
+    assertEqual(
+        BD.IsBuffsDebuffsUpdatePending("buffs"),
+        true,
+        "combat queue marks Buffs pending"
+    )
+    assertEqual(
+        BD.IsBuffsDebuffsUpdatePending("debuffs"),
+        false,
+        "single-pane combat queue excludes Debuffs"
+    )
+    assertEqual(#harness.refreshEvents, 1, "first queue refresh")
+    assertEqual(
+        harness.refreshEvents[1].event,
+        "BFI_RefreshOptions",
+        "queue refresh event"
+    )
+    assertEqual(
+        harness.refreshEvents[1].which,
+        "buffsDebuffs",
+        "queue refresh module"
+    )
+    assertEqual(harness.hasRegenCallback(), true, "regen callback registered")
+
+    harness.update("buffs")
+    assertEqual(#harness.refreshEvents, 1, "same queue state deduplicated")
+
+    harness.update("debuffs")
+    assertEqual(
+        BD.IsBuffsDebuffsUpdatePending("buffs"),
+        true,
+        "mixed queue coalesces Buffs"
+    )
+    assertEqual(
+        BD.IsBuffsDebuffsUpdatePending("debuffs"),
+        true,
+        "mixed queue coalesces Debuffs"
+    )
+    assertEqual(
+        BD.IsBuffsDebuffsUpdatePending(),
+        true,
+        "mixed queue exposes aggregate pending"
+    )
+    assertEqual(#harness.refreshEvents, 2, "wildcard queue refresh")
+
+    harness.update("debuffs")
+    assertEqual(#harness.refreshEvents, 2, "wildcard state deduplicated")
+
+    harness.setCombat(false)
+    harness.fireRegen()
+    assertEqual(BD.IsBuffsDebuffsUpdatePending(), false, "regen clears queue")
+    assertEqual(harness.hasRegenCallback(), false, "regen callback released")
+    assertEqual(#harness.refreshEvents, 3, "queue clear refresh")
+    assertEqual(#harness.customUpdateCalls, 2, "wildcard retry updates both panes")
 end
 
 do
