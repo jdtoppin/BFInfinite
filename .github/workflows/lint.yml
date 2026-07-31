@@ -50,3 +50,6 @@ jobs:
 
       - name: Test 12.1 Player aura integration
         run: luajit tests/unit_frame_player_native_aura_test.lua
+
+      - name: Test Unit Frame options preview aura safety
+        run: lua5.1 tests/unit_frame_options_preview_aura_safety_test.lua

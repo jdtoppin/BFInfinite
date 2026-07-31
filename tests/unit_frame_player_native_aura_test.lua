@@ -414,17 +414,13 @@ local function testPlayerActivationAndPreviewIsolation()
     assertEqual(liveDebuffs[3], "HARMFUL", "live debuffs filter")
 
     assertTrue(preview ~= live, "preset preview list aliases live list")
-    assertEqual(#preview, #live, "preset preview indicator count")
-    assertTrue(previewBuffs ~= liveBuffs,
-        "preset buffs descriptor aliases live descriptor")
-    assertTrue(previewDebuffs ~= liveDebuffs,
-        "preset debuffs descriptor aliases live descriptor")
-    assertEqual(previewBuffs[1], "auras", "preset buffs builder")
-    assertEqual(previewDebuffs[1], "auras", "preset debuffs builder")
+    assertEqual(#preview, #live - 2, "preset preview indicator count")
+    assertEqual(previewBuffs, nil, "preset preview buffs descriptor")
+    assertEqual(previewDebuffs, nil, "preset preview debuffs descriptor")
     assertEqual(liveBuffs[1], "nativeAuras",
-        "preset conversion mutated live buffs")
+        "preset filtering mutated live buffs")
     assertEqual(liveDebuffs[1], "nativeAuras",
-        "preset conversion mutated live debuffs")
+        "preset filtering mutated live debuffs")
 
     local common = readFile("Modules/UnitFrames/Common.lua")
     assertTrue(
