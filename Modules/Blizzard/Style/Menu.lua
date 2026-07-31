@@ -134,8 +134,10 @@ function S.StyleMenuSelection(frame, selectedSize)
     local border = frame:AttachTexture()
     border:SetDrawLayer(layer, subLevel - 1)
     border:SetColorTexture(AF.GetColorRGB("border"))
-    AF.SetSize(border, 15, 15)
-    AF.SetPoint(border, "CENTER", selectionBox)
+    -- Centering independently pixel-rounded 15px and 13px textures can
+    -- leave an odd physical-pixel difference at some UI scales, making two
+    -- border edges appear thicker. Derive every edge from the same inset.
+    AF.SetOnePixelOutside(border, selectionBox)
 
     -- Mainline radios use a -3px icon offset and only a 1px text gap,
     -- while checkboxes use the roomier alignment adopted by BFI. Normalize

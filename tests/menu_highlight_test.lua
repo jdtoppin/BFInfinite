@@ -26,29 +26,48 @@ local function installSecureHook(target, method, hook)
     end
 end
 
-local function makeHighlight()
-    local highlight = {
+local function makeTexture(layer, subLevel)
+    local texture = {
+        layer = layer or "ARTWORK",
         points = {},
+        subLevel = subLevel or 0,
     }
 
-    function highlight:ClearAllPoints()
+    function texture:ClearAllPoints()
         self.clearCount = (self.clearCount or 0) + 1
         self.points = {}
     end
 
-    function highlight:SetBlendMode(blendMode)
+    function texture:GetDrawLayer()
+        return self.layer, self.subLevel
+    end
+
+    function texture:SetAtlas(atlas)
+        self.atlas = atlas
+    end
+
+    function texture:SetBlendMode(blendMode)
         self.blendMode = blendMode
     end
 
-    function highlight:SetColorTexture(...)
+    function texture:SetColorTexture(...)
         self.color = {...}
     end
 
-    function highlight:SetPoint(...)
+    function texture:SetDrawLayer(drawLayer, drawSubLevel)
+        self.layer = drawLayer
+        self.subLevel = drawSubLevel or 0
+    end
+
+    function texture:SetPoint(...)
         self.points[#self.points + 1] = {...}
     end
 
-    return highlight
+    return texture
+end
+
+local function makeHighlight()
+    return makeTexture("BACKGROUND", 0)
 end
 
 local function makeFrame(width, children, left)
@@ -58,8 +77,15 @@ local function makeFrame(width, children, left)
         highlight = makeHighlight(),
         includeInLayout = true,
         left = left or 0,
+        attachments = {},
         width = width,
     }
+
+    function frame:AttachTexture()
+        local texture = makeTexture("ARTWORK", 0)
+        self.attachments[#self.attachments + 1] = texture
+        return texture
+    end
 
     function frame:GetChildren()
         return unpack(self.children)
@@ -157,7 +183,14 @@ function AF.SetPoint(region, ...)
     region.points[#region.points + 1] = {...}
 end
 
-function AF.SetSize()
+function AF.SetOnePixelOutside(region, relativeTo)
+    AF.ClearPoints(region)
+    AF.SetPoint(region, "TOPLEFT", relativeTo, "TOPLEFT", -1, 1)
+    AF.SetPoint(region, "BOTTOMRIGHT", relativeTo, "BOTTOMRIGHT", 1, -1)
+end
+
+function AF.SetSize(region, width, height)
+    region.size = {width, height}
 end
 
 function AF.UnpackColor(color)
@@ -257,6 +290,29 @@ MenuVariants.CreateHighlight(widerRow)
 assertPoint(row.highlight.color, {0.1, 0.2, 0.3, 0.6},
     "highlight color")
 assertEqual(row.highlight.blendMode, "BLEND", "highlight blend mode")
+
+-- An active radio keeps its border behind the square, but derives all four
+-- border edges from the same pixel-rounded offset. Independently centering
+-- 15px and 13px textures produces uneven edges at some effective scales.
+local activeRadio = makeFrame(80, nil, 108)
+activeRadio.leftTexture1 = makeTexture("ARTWORK", 7)
+activeRadio.leftTexture2 = makeTexture("ARTWORK", 8)
+activeRadio.fontString = {points = {}}
+S.StyleMenuSelection(activeRadio)
+local radioBorder = activeRadio.attachments[1]
+assertEqual(radioBorder.layer, "ARTWORK", "radio border draw layer")
+assertEqual(radioBorder.subLevel, 6, "radio border draw sublevel")
+assertEqual(radioBorder.size, nil, "radio border independent size")
+assertPoint(radioBorder.points[1],
+    {"TOPLEFT", activeRadio.leftTexture1, "TOPLEFT", -1, 1},
+    "radio border top-left")
+assertPoint(radioBorder.points[2],
+    {"BOTTOMRIGHT", activeRadio.leftTexture1, "BOTTOMRIGHT", 1, -1},
+    "radio border bottom-right")
+assertPoint(activeRadio.leftTexture1.size, {13, 13},
+    "radio square size")
+assertPoint(activeRadio.leftTexture2.size, {13, 13},
+    "active radio fill size")
 
 -- A content-sized radio row can end well before the 140px MenuStyle1 shell.
 -- Its highlight should fill both actual gaps and stop one physical pixel
