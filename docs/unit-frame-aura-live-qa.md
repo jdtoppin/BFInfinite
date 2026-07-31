@@ -57,7 +57,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Current BFInfinite master compatibility | `master` | `151353453b28639404d29dc2aa3f751487c8f2bb` |
 | Global exact spell colors (#101) | `codex/unitframe-aura-spell-colors` | `5f221bdd1679ebcafb2a4cab381188f080d81572` |
 | Presentation hardening (#102) | `codex/unitframe-aura-presentation-hardening` | `62fdc2c289dcf518adff5f3a109eba3f05ed9dc8` |
-| Player | `codex/unitframe-aura-player` | `61bbdae09c808f58dc69812c848fa2496f3cf806` |
+| Player | `codex/unitframe-aura-player` | `673838dc5dea739617155bf6806d4bb42fcaea97` |
 | Boss | `codex/unitframe-aura-boss` | `9f01f432289b6b2457c5bb9cc6f023582ad85b5c` |
 | Focus | `codex/unitframe-aura-focus` | `03b75af042fd84b93a3e3eaeb09ac68b1ff46440` |
 | TargetTarget | `codex/unitframe-aura-targettarget` | `b463ff16fe91d17a081e248727190c8744fbe3c2` |
