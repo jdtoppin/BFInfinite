@@ -249,7 +249,9 @@ local assistedSource = extract(
 local assisted = loadHarness([[
 local state = {
     cvarEnabled = true,
+    inCombat = false,
     nextSpell = 101,
+    baseCalls = 0,
     queryCalls = 0,
     queueAttempts = 0,
     queueCalls = 0,
@@ -312,7 +314,11 @@ local function GetNonSecretSpellID(spellID)
     return type(spellID) == "number" and spellID or nil
 end
 local function GetBaseSpellID(spellID)
+    state.baseCalls = state.baseCalls + 1
     return spellID and spellID + 1000 or nil
+end
+local function UnitAffectingCombat()
+    return state.inCombat
 end
 local function RefreshAssistedHighlights()
     state.refreshCalls = state.refreshCalls + 1
@@ -341,47 +347,77 @@ return {
 ]], "cooldown_manager_assisted_fallback")
 
 assisted.updateFallback()
-assertEqual(assisted.state.lastTicker.interval, 0.2, "assisted fallback cadence")
+assertEqual(assisted.highlight.fallbackTicker, nil,
+    "assisted fallback is dormant out of combat")
 assertEqual(assisted.state.queryCalls, 1, "fallback lifecycle samples immediately")
 assertEqual(assisted.state.refreshCalls, 1, "initial recommendation refreshes")
 assertEqual(assisted.state.queueCalls, 1, "initial recommendation queues hotkey work")
 
-local assistedTicker = assisted.state.lastTicker
-assistedTicker.callback()
-assertEqual(assisted.state.refreshCalls, 1,
-    "unchanged fallback does no highlight work")
-assertEqual(assisted.state.queueCalls, 1,
-    "unchanged fallback does no presentation work")
-
 assisted.state.nextSpell = 202
-assistedTicker.callback()
+assisted.event(nil, "SPELL_UPDATE_COOLDOWN")
+assertEqual(assisted.highlight.fallbackTicker, nil,
+    "out-of-combat recommendation events do not arm a ticker")
 assertEqual(assisted.state.refreshCalls, 2,
-    "changed fallback refreshes immediately")
+    "out-of-combat recommendation edge refreshes immediately")
 assertEqual(assisted.state.queueCalls, 2,
+    "out-of-combat recommendation edge queues presentation once")
+local unchangedOOCBaseCalls = assisted.state.baseCalls
+assisted.event(nil, "UNIT_POWER_UPDATE")
+assertEqual(assisted.state.baseCalls, unchangedOOCBaseCalls,
+    "unchanged out-of-combat edge does no base-spell lookup")
+assertEqual(assisted.state.refreshCalls, 2,
+    "unchanged out-of-combat edge does no highlight work")
+
+assisted.state.inCombat = true
+assisted.event(nil, "PLAYER_REGEN_DISABLED")
+assertEqual(assisted.state.lastTicker.interval, 0.2, "assisted fallback cadence")
+local assistedTicker = assisted.state.lastTicker
+local unchangedBaseCalls = assisted.state.baseCalls
+assistedTicker.callback()
+assertEqual(assisted.state.refreshCalls, 3,
+    "unchanged fallback does no highlight work")
+assertEqual(assisted.state.queueCalls, 2,
+    "unchanged fallback does no presentation work")
+assertEqual(assisted.state.baseCalls, unchangedBaseCalls,
+    "unchanged fallback does no base-spell lookup")
+
+assisted.state.nextSpell = 303
+assistedTicker.callback()
+assertEqual(assisted.state.refreshCalls, 4,
+    "changed fallback refreshes immediately")
+assertEqual(assisted.state.queueCalls, 3,
     "changed fallback queues presentation once")
 
 assisted.controller.combatBlocked = true
-assisted.state.nextSpell = 303
+assisted.state.nextSpell = 404
 assistedTicker.callback()
-assertEqual(assisted.state.refreshCalls, 3,
+assertEqual(assisted.state.refreshCalls, 5,
     "combat latch does not block runtime highlight refresh")
-assertEqual(assisted.state.queueCalls, 2,
+assertEqual(assisted.state.queueCalls, 3,
     "combat latch still defers broad presentation")
 local queueAttempts = assisted.state.queueAttempts
 assisted.event(nil, "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW")
-assertEqual(assisted.state.refreshCalls, 4,
+assertEqual(assisted.state.refreshCalls, 6,
     "glow event refreshes runtime highlight behind latch")
 assertEqual(assisted.state.queueAttempts, queueAttempts,
     "unchanged glow event does not queue broad work")
 
 assisted.controller.combatBlocked = nil
+assisted.state.inCombat = false
+assisted.event(nil, "PLAYER_REGEN_ENABLED")
+assertEqual(assistedTicker.cancelled, true,
+    "combat exit cancels assisted fallback")
+assertEqual(assisted.highlight.fallbackTicker, nil,
+    "combat exit releases assisted fallback")
+
+assisted.state.inCombat = true
+assisted.event(nil, "PLAYER_REGEN_DISABLED")
+local featureTicker = assisted.state.lastTicker
 assisted.module.config.assistedHighlight = false
 assisted.updateFallback()
-assertEqual(assistedTicker.cancelled, true, "feature disable cancels fallback")
+assertEqual(featureTicker.cancelled, true, "feature disable cancels fallback")
 assertEqual(assisted.highlight.fallbackTicker, nil, "cancelled fallback is released")
 assertEqual(assisted.highlight.spellID, nil, "feature disable clears recommendation")
-assertEqual(assisted.state.refreshCalls, 5,
-    "feature disable clears highlight immediately")
 
 assisted.module.config.assistedHighlight = true
 assisted.updateFallback()
@@ -416,7 +452,8 @@ local state = {
 }
 local presentationController = {buffVisibility = {}}
 local item = {shown = true}
-state.items = {item}
+local item2 = {shown = true}
+state.items = {item, item2}
 local viewer = {hideWhenInactive = true}
 local viewerState = {
     definition = {isBuff = true},
@@ -473,6 +510,7 @@ end
 
 return {
     item = item,
+    item2 = item2,
     module = CM,
     monitor = presentationController.buffVisibility,
     state = state,
@@ -497,7 +535,7 @@ visibilityTicker.callback()
 assertEqual(visibility.state.queueCalls, 1,
     "eventless native visibility edge queues reconciliation")
 assertEqual(visibility.monitor.ticker, nil,
-    "buff monitor sleeps when no dynamic buff remains active")
+    "buff monitor sleeps after compacting to one visible item")
 
 visibility.item.shown = true
 visibility.monitor:Update()
@@ -506,6 +544,15 @@ assertEqual(visibility.viewerState.buffVisibilitySnapshots, snapshotBuffers,
 assertEqual(visibility.viewerState.buffVisibilityItems, reusableItems,
     "buff monitor reuses item storage")
 assertTrue(visibility.monitor.ticker ~= nil, "active buff re-arms monitor")
+
+visibility.item2.shown = false
+visibility.monitor:Update()
+assertEqual(visibility.monitor.ticker, nil,
+    "a lone visible buff needs no idle visibility monitor")
+visibility.item2.shown = true
+visibility.monitor:Update()
+assertTrue(visibility.monitor.ticker ~= nil,
+    "a second visible buff re-arms compaction monitoring")
 
 visibility.viewer.hideWhenInactive = false
 visibility.monitor:Update()
@@ -532,6 +579,7 @@ assertEqual(visibility.monitor.ticker, nil,
     "persistently unsafe sampling does not become permanent idle work")
 
 visibility.item.shown = true
+visibility.item2.shown = true
 visibility.monitor:Update()
 assertTrue(visibility.monitor.ticker ~= nil,
     "later safe lifecycle update can re-arm buff monitor")
@@ -625,9 +673,28 @@ assertContains(moduleSource,
 assertContains(moduleSource,
     "PLAYER_REGEN_ENABLED = true",
     "combat-denied regeneration wake")
+assertEqual(
+    moduleSource:find(
+        'presentationController:RegisterEvent("SPELL_UPDATE_COOLDOWN")',
+        1,
+        true
+    ),
+    nil,
+    "steady cooldown events do not wake full presentation reconciliation"
+)
 assertContains(moduleSource,
-    'RegisterEvent("SPELL_UPDATE_COOLDOWN")',
-    "cooldown visibility wake")
+    'HighlightState.controller:RegisterEvent("SPELL_UPDATE_COOLDOWN")',
+    "cooldown edges cheaply observe false-mode recommendations")
+assertEqual(
+    moduleSource:find('RegisterEvent("SPELL_UPDATE_ICON")', 1, true),
+    nil,
+    "native icon refreshes do not wake full presentation reconciliation"
+)
+assertEqual(
+    moduleSource:find("FrameSetAlpha(highlight, shown and 1 or 0)", 1, true),
+    nil,
+    "inactive BFI highlight region trees are hidden instead of alpha-muted"
+)
 assertContains(moduleSource,
     '"CooldownViewerSettings.OnDataChanged"',
     "viewer assignment wake")

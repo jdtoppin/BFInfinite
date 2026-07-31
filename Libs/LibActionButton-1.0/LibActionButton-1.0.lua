@@ -34,7 +34,7 @@ Some extra features are forked from ElvUI/Blizzard
 ]]
 
 local MAJOR_VERSION = "LibActionButton-1.0-BFI"
-local MINOR_VERSION = 133 -- BFI fork revision; Retail compatibility reviewed against upstream revision 153
+local MINOR_VERSION = 134 -- BFI fork revision; Retail compatibility reviewed against upstream revision 153
 
 if not LibStub then error(MAJOR_VERSION .. " requires LibStub.") end
 local lib, oldversion = LibStub:NewLibrary(MAJOR_VERSION, MINOR_VERSION)
@@ -88,11 +88,28 @@ local RegisterActionUIButton = C_ActionBar.RegisterActionUIButton
 lib.eventFrame = lib.eventFrame or CreateFrame("Frame")
 lib.eventFrame:UnregisterAllEvents()
 
+if WoWRetail
+    and CVarCallbackRegistry
+    and type(CVarCallbackRegistry.RegisterCallback) == "function"
+    and not lib.assistedCombatRateCallbackRegistered
+then
+    CVarCallbackRegistry:RegisterCallback(
+        "assistedCombatIconUpdateRate",
+        function()
+            local refresh = lib.RefreshAssistedCombatTickerRate
+            if refresh then refresh() end
+        end,
+        lib.eventFrame
+    )
+    lib.assistedCombatRateCallbackRegistered = true
+end
+
 lib.buttonRegistry = lib.buttonRegistry or {}
 lib.activeButtons = lib.activeButtons or {}
 lib.actionButtons = lib.actionButtons or {}
 lib.nonActionButtons = lib.nonActionButtons or {}
 lib.flashingButtons = lib.flashingButtons or {}
+lib.assistedCombatButtons = lib.assistedCombatButtons or {}
 
 if not lib.flashController then
     lib.flashController = CreateFrame("Frame")
@@ -102,6 +119,8 @@ end
 -- usable state for retail using slot
 lib.buttonToSlot = lib.buttonToSlot or {}
 lib.slotButtons = lib.slotButtons or {}
+lib.buttonToActionSlot = lib.buttonToActionSlot or {}
+lib.actionSlotButtons = lib.actionSlotButtons or {}
 
 lib.FlyoutInfo = lib.FlyoutInfo or {}
 lib.FlyoutButtons = lib.FlyoutButtons or {}
@@ -155,6 +174,7 @@ local ShowButtonGlow, HideButtonGlow
 local GetFlyoutHandler
 
 local InitializeEventHandler, OnEvent, ForAllButtons, OnUpdate, UpdateFlashRegistration
+local PollAssistedCombatButtons, UpdateAssistedCombatRegistration
 
 local function GameTooltip_GetOwnerForbidden()
     if GameTooltip:IsForbidden() then
@@ -258,6 +278,7 @@ function lib:CreateButton(id, name, header, config)
     button:HookScript("OnShow", Generic.OnShow)
     button:HookScript("OnHide", Generic.OnHide)
     button.__LAB_SharedFlashHooks = true
+    button.__LAB_IdleLifecycleHooks = true
 
     -- ActionButtonTemplate supplies a HasAction method which would shadow the
     -- BFI action-type implementation provided through this button's metatable.
@@ -753,11 +774,14 @@ local function UnregisterRange(button, slot)
         return
     end
     lib.slotButtons[slot][button] = nil
-    EnableActionRangeCheck(slot, false)
+    if not next(lib.slotButtons[slot]) then
+        lib.slotButtons[slot] = nil
+        EnableActionRangeCheck(slot, false)
+    end
 end
 
 local function SetupRange(button)
-    if button._state_type == "action" then
+    if button._state_type == "action" and button:IsVisible() then
         local action = button._state_action
         if action then
             local slot = lib.buttonToSlot[button]
@@ -774,6 +798,33 @@ local function SetupRange(button)
             lib.buttonToSlot[button] = nil
             UnregisterRange(button, slot)
         end
+    end
+end
+
+local function SetupActionSlot(button)
+    local oldSlot = lib.buttonToActionSlot[button]
+    local newSlot = button._state_type == "action"
+        and tonumber(button._state_action)
+    if oldSlot == newSlot then return end
+
+    if oldSlot then
+        local oldButtons = lib.actionSlotButtons[oldSlot]
+        if oldButtons then
+            oldButtons[button] = nil
+            if not next(oldButtons) then
+                lib.actionSlotButtons[oldSlot] = nil
+            end
+        end
+    end
+
+    lib.buttonToActionSlot[button] = newSlot
+    if newSlot then
+        local buttons = lib.actionSlotButtons[newSlot]
+        if not buttons then
+            buttons = {}
+            lib.actionSlotButtons[newSlot] = buttons
+        end
+        buttons[button] = true
     end
 end
 
@@ -1426,12 +1477,111 @@ function OnUpdate(_, elapsed)
     end
 end
 
+local function StopAssistedCombatTicker()
+    if lib.assistedCombatTicker then
+        lib.assistedCombatTicker:Cancel()
+        lib.assistedCombatTicker = nil
+    end
+end
+
+local function GetAssistedCombatUpdateInterval()
+    local value = GetCVar("assistedCombatIconUpdateRate")
+    local interval = tonumber(value) or 0.2
+    return math.max(0.2, math.min(interval, 1))
+end
+
+local function StartAssistedCombatTicker()
+    if lib.assistedCombatTicker
+        or not next(lib.assistedCombatButtons)
+        or not C_Timer
+        or type(C_Timer.NewTicker) ~= "function"
+    then
+        return
+    end
+    lib.assistedCombatTicker = C_Timer.NewTicker(
+        GetAssistedCombatUpdateInterval(),
+        PollAssistedCombatButtons
+    )
+end
+
+lib.RefreshAssistedCombatTickerRate = function()
+    if not lib.assistedCombatTicker then return end
+    StopAssistedCombatTicker()
+    StartAssistedCombatTicker()
+end
+
+local function IsVisibleAssistedCombatButton(button)
+    return button
+        and button:IsVisible()
+        and button._state_type == "action"
+        and C_ActionBar
+        and C_ActionBar.IsAssistedCombatAction
+        and C_ActionBar.IsAssistedCombatAction(button._state_action)
+end
+
+PollAssistedCombatButtons = function()
+    local getNextCastSpell = C_AssistedCombat
+        and C_AssistedCombat.GetNextCastSpell
+    local nextSpell = getNextCastSpell and getNextCastSpell() or nil
+    local texture = nextSpell
+        and C_Spell.GetSpellTexture
+        and C_Spell.GetSpellTexture(nextSpell)
+
+    for button in next, lib.assistedCombatButtons do
+        if IsVisibleAssistedCombatButton(button) then
+            if button.__LAB_AssistedCombatSpell ~= nextSpell then
+                button.__LAB_AssistedCombatSpell = nextSpell
+                button.icon:SetTexture(texture or button:GetTexture())
+                button.icon:Show()
+                UpdateUsable(button)
+                UpdateCount(button)
+            end
+            -- The assisted action's cooldown follows the recommended spell
+            -- even while the recommendation itself is unchanged.
+            UpdateCooldown(button)
+        else
+            button.__LAB_AssistedCombatSpell = nil
+            lib.assistedCombatButtons[button] = nil
+        end
+    end
+
+    if not next(lib.assistedCombatButtons) then
+        StopAssistedCombatTicker()
+    end
+end
+
+UpdateAssistedCombatRegistration = function(button)
+    local rotationFrame = button.AssistedCombatRotationFrame
+    local active = rotationFrame
+        and rotationFrame:IsShown()
+        and IsVisibleAssistedCombatButton(button)
+
+    if active then
+        local wasEmpty = not next(lib.assistedCombatButtons)
+        lib.assistedCombatButtons[button] = true
+        if wasEmpty then
+            PollAssistedCombatButtons()
+        end
+        StartAssistedCombatTicker()
+    else
+        button.__LAB_AssistedCombatSpell = nil
+        lib.assistedCombatButtons[button] = nil
+        if not next(lib.assistedCombatButtons) then
+            StopAssistedCombatTicker()
+        end
+    end
+end
+
 function Generic:OnShow()
     UpdateFlashRegistration(self)
+    SetupRange(self)
+    UpdateAssistedCombatRegistration(self)
 end
 
 function Generic:OnHide()
     UpdateFlashRegistration(self)
+    SetupRange(self)
+    UpdateAssistedCombatRegistration(self)
 end
 
 lib.flashController:SetScript("OnUpdate", OnUpdate)
@@ -1649,10 +1799,21 @@ function OnEvent(frame, event, arg1, ...)
             tooltipOwner:SetTooltip()
         end
     elseif event == "ACTIONBAR_SLOT_CHANGED" then
-        for button in next, ButtonRegistry do
-            if button._state_type == "action" and (arg1 == 0 or arg1 == tonumber(button._state_action)) then
+        local buttons = arg1 ~= 0 and lib.actionSlotButtons[arg1]
+        if buttons then
+            for button in next, buttons do
                 ClearNewActionHighlight(button._state_action, true, false)
                 Update(button)
+            end
+        elseif arg1 == 0 then
+            -- A full invalidation can populate a previously empty action
+            -- slot, so this rare path must include action-typed buttons that
+            -- are not yet members of ActionButtons.
+            for button in next, ButtonRegistry do
+                if button._state_type == "action" then
+                    ClearNewActionHighlight(button._state_action, true, false)
+                    Update(button)
+                end
             end
         end
     elseif event == "PLAYER_ENTERING_WORLD" or event == "UPDATE_VEHICLE_ACTIONBAR" then
@@ -1717,28 +1878,36 @@ function OnEvent(frame, event, arg1, ...)
         end
     elseif event == "ACTIONBAR_UPDATE_COOLDOWN" then
         for button in next, ActionButtons do
-            UpdateCooldown(button)
-            if GameTooltip_GetOwnerForbidden() == button then
-                UpdateTooltip(button)
+            if button:IsVisible() then
+                UpdateCooldown(button)
+                if GameTooltip_GetOwnerForbidden() == button then
+                    UpdateTooltip(button)
+                end
             end
         end
     elseif event == "SPELL_UPDATE_COOLDOWN" then
         for button in next, NonActionButtons do
-            UpdateCooldown(button)
-            if GameTooltip_GetOwnerForbidden() == button then
-                UpdateTooltip(button)
+            if button:IsVisible() then
+                UpdateCooldown(button)
+                if GameTooltip_GetOwnerForbidden() == button then
+                    UpdateTooltip(button)
+                end
             end
         end
     elseif event == "LOSS_OF_CONTROL_ADDED" then
         for button in next, ActiveButtons do
-            UpdateCooldown(button)
-            if GameTooltip_GetOwnerForbidden() == button then
-                UpdateTooltip(button)
+            if button:IsVisible() then
+                UpdateCooldown(button)
+                if GameTooltip_GetOwnerForbidden() == button then
+                    UpdateTooltip(button)
+                end
             end
         end
     elseif event == "LOSS_OF_CONTROL_UPDATE" then
         for button in next, ActiveButtons do
-            UpdateCooldown(button)
+            if button:IsVisible() then
+                UpdateCooldown(button)
+            end
         end
     elseif event == "TRADE_SKILL_SHOW" or event == "TRADE_SKILL_CLOSE"  or event == "ARCHAEOLOGY_CLOSED" then
         ForAllButtons(UpdateButtonState, true)
@@ -2129,6 +2298,7 @@ function Update(self, which)
 
     self:UpdateLocal()
 
+    SetupActionSlot(self)
     SetupRange(self)
     UpdateRange(self, which == "config")
 
@@ -2432,6 +2602,11 @@ function UpdateAssistedCombatRotationFrame(self, isConfigUpdate)
         -- ActionBarButtonAssistedCombatRotationFrameMixin
         assistedCombatRotationFrame = AF.CreateFlipBookFrame(self, nil, "ActionBarButtonAssistedCombatRotationTemplate")
         self.AssistedCombatRotationFrame = assistedCombatRotationFrame
+        -- Retail 12.1.0.68914 (d3915c78aba7)'s inherited handler enters Lua
+        -- every rendered frame and force-refreshes this one action on its own
+        -- timer. BFI uses one lazy 5 Hz-or-slower ticker shared by all visible
+        -- assisted buttons below.
+        assistedCombatRotationFrame:SetScript("OnUpdate", nil)
         assistedCombatRotationFrame:SetFrameLevel(self:GetFrameLevel() + 15)
         assistedCombatRotationFrame:Hide()
 
@@ -2481,11 +2656,14 @@ function UpdateAssistedCombatRotationFrame(self, isConfigUpdate)
     end
 
     if assistedCombatRotationFrame then
+        -- Also repair frames retained across a live LibStub upgrade.
+        assistedCombatRotationFrame:SetScript("OnUpdate", nil)
         if isConfigUpdate then
             assistedCombatRotationFrame.UpdateConfig()
         end
         assistedCombatRotationFrame:UpdateState()
     end
+    UpdateAssistedCombatRegistration(self)
 end
 
 function UpdatedAssistedHighlightFrame(self)
@@ -2963,7 +3141,13 @@ if oldversion and next(lib.buttonRegistry) then
                 button:HookScript("OnShow", Generic.OnShow)
                 button:HookScript("OnHide", Generic.OnHide)
                 button.__LAB_SharedFlashHooks = true
+                button.__LAB_IdleLifecycleHooks = true
             end
+        end
+        if oldversion < 134 and not button.__LAB_IdleLifecycleHooks then
+            button:HookScript("OnShow", Generic.OnShow)
+            button:HookScript("OnHide", Generic.OnHide)
+            button.__LAB_IdleLifecycleHooks = true
         end
         -- this refreshes the metatable on the button
         Generic.UpdateAction(button, true)

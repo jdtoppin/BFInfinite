@@ -9,6 +9,64 @@ local AB = BFI.modules.ActionBars
 local GetBindingKey = GetBindingKey
 local LAB = BFI.libs.LAB
 
+-- Retail 12.1.0.68914 (d3915c78aba7)'s PetActionButtonTemplate installs one
+-- OnUpdate per button even though its body only animates the attack flash.
+-- Keep those scripts dormant at idle and share one visibility-gated updater
+-- while a pet attack is actually flashing.
+local petFlashingButtons = {}
+local petFlashController = CreateFrame("Frame")
+petFlashController:Hide()
+
+local function UpdatePetFlashController()
+    if next(petFlashingButtons) then
+        petFlashController:Show()
+    else
+        petFlashController:Hide()
+    end
+end
+
+local function UpdatePetFlashRegistration(button)
+    if button.flashing and button:IsVisible() then
+        petFlashingButtons[button] = true
+    else
+        petFlashingButtons[button] = nil
+    end
+    UpdatePetFlashController()
+end
+
+local function StartPetFlash(button)
+    button.flashing = true
+    button.flashtime = 0
+    UpdatePetFlashRegistration(button)
+end
+
+local function StopPetFlash(button)
+    button.flashing = false
+    petFlashingButtons[button] = nil
+    button.Flash:Hide()
+    UpdatePetFlashController()
+end
+
+petFlashController:SetScript("OnUpdate", function(_, elapsed)
+    for button in next, petFlashingButtons do
+        if button.flashing and button:IsVisible() then
+            local flashTime = (button.flashtime or 0) - elapsed
+            if flashTime <= 0 then
+                local overtime = -flashTime
+                if overtime >= ATTACK_BUTTON_FLASH_TIME then
+                    overtime = 0
+                end
+                flashTime = ATTACK_BUTTON_FLASH_TIME - overtime
+                button.Flash:SetShown(not button.Flash:IsShown())
+            end
+            button.flashtime = flashTime
+        else
+            petFlashingButtons[button] = nil
+        end
+    end
+    UpdatePetFlashController()
+end)
+
 ---------------------------------------------------------------------
 -- hotkey
 ---------------------------------------------------------------------
@@ -144,6 +202,7 @@ function AB.StylizeButton(b)
     if b.NewActionTexture then b.NewActionTexture:SetAlpha(0) end
     if b.HighlightTexture then b.HighlightTexture:SetAlpha(0) end
     if b.SlotBackground then b.SlotBackground:Hide() end
+    if b.SlotArt then b.SlotArt:Hide() end
     if b.IconMask then b.IconMask:Hide() end
 
     -- texts ----------------------------------------------------------------- --
@@ -402,6 +461,12 @@ end
 
 function AB.CreatePetButton(parent, id)
     local b = CreateFrame("CheckButton", "BFI_PetBarButton" .. id, parent, "PetActionButtonTemplate")
+
+    b:SetScript("OnUpdate", nil)
+    b.StartFlash = StartPetFlash
+    b.StopFlash = StopPetFlash
+    b:HookScript("OnShow", UpdatePetFlashRegistration)
+    b:HookScript("OnHide", UpdatePetFlashRegistration)
 
     b:SetID(id)
     b.index = id

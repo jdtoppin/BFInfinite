@@ -94,20 +94,63 @@ function LibStub:NewLibrary()
     return library
 end
 
+local timerCreations = 0
+local assistedCombatRate = "0.2"
+local assistedCombatRateCallback
+local actionBar = makeNamespace()
+function actionBar.IsAssistedCombatAction(action)
+    return action == 42
+end
+local assistedCombat = {
+    nextSpell = 101,
+}
+function assistedCombat.GetNextCastSpell()
+    return assistedCombat.nextSpell
+end
+local spellAPI = makeNamespace()
+function spellAPI.GetSpellTexture(spellID)
+    return "spell:" .. tostring(spellID)
+end
+local timerAPI = {}
+function timerAPI.NewTicker(interval, callback)
+    timerCreations = timerCreations + 1
+    local ticker = {
+        callback = callback,
+        interval = interval,
+    }
+    function ticker:Cancel()
+        self.cancelled = true
+    end
+    return ticker
+end
+local cvarAPI = makeNamespace()
+function cvarAPI.GetCVar()
+    return assistedCombatRate
+end
+local cvarCallbackRegistry = {}
+function cvarCallbackRegistry:RegisterCallback(name, callback)
+    if name == "assistedCombatIconUpdateRate" then
+        assistedCombatRateCallback = callback
+    end
+end
+
 local environment = {
     _G = false,
     AbstractFramework = {},
     ATTACK_BUTTON_FLASH_TIME = 0.4,
-    C_ActionBar = makeNamespace(),
+    C_ActionBar = actionBar,
+    C_AssistedCombat = assistedCombat,
     C_Container = makeNamespace(),
-    C_CVar = makeNamespace(),
+    C_CVar = cvarAPI,
     C_Item = makeNamespace(),
     C_LevelLink = makeNamespace(),
-    C_Spell = makeNamespace(),
+    C_Spell = spellAPI,
     C_SpellActivationOverlay = makeNamespace(),
     C_SpellBook = makeNamespace(),
     C_ToyBox = makeNamespace(),
+    C_Timer = timerAPI,
     C_UnitAuras = makeNamespace(),
+    CVarCallbackRegistry = cvarCallbackRegistry,
     CreateFrame = function()
         return makeFrame()
     end,
@@ -232,6 +275,126 @@ updateController(controller, 0.01)
 assertEqual(library.flashingButtons[stale], nil, "stale flasher cleanup")
 assertEqual(controller:IsShown(), false, "controller sleeps after stale cleanup")
 
+local function makeAssistedButton()
+    local button = {
+        _state_type = "action",
+        _state_action = 42,
+        visible = true,
+        config = {
+            outOfRangeColoring = "button",
+            colors = {
+                range = {1, 0, 0},
+                mana = {0, 0, 1},
+                notUsable = {0.4, 0.4, 0.4},
+            },
+        },
+        cooldown = {},
+        chargeCooldown = {},
+        lossOfControlCooldown = {},
+        Count = {},
+        icon = {},
+        AssistedCombatRotationFrame = {shown = true},
+    }
+    function button.AssistedCombatRotationFrame:IsShown()
+        return self.shown
+    end
+    function button:IsVisible()
+        return self.visible
+    end
+    function button:GetTexture()
+        return "fallback"
+    end
+    function button:GetCooldownInfo()
+        return {isActive = false}
+    end
+    function button:GetChargeInfo()
+        return {isActive = false}
+    end
+    function button:GetLossOfControlCooldownInfo()
+        return {isActive = false, shouldReplaceNormalCooldown = false}
+    end
+    function button:GetCooldownDuration()
+    end
+    function button:GetChargeDuration()
+    end
+    function button:GetLossOfControlCooldownDuration()
+    end
+    function button:HasAction()
+        return true
+    end
+    function button:GetDisplayCount()
+        return 1
+    end
+    function button:IsUsable()
+        return true, false
+    end
+    function button.cooldown:Clear()
+        button.cooldownUpdates = (button.cooldownUpdates or 0) + 1
+    end
+    button.chargeCooldown.Clear = button.cooldown.Clear
+    button.lossOfControlCooldown.Clear = button.cooldown.Clear
+    function button.Count:SetText(text)
+        self.text = text
+    end
+    function button.icon:SetTexture(texture)
+        self.texture = texture
+    end
+    function button.icon:Show()
+        self.shown = true
+    end
+    function button.icon:SetVertexColor()
+    end
+    function button.icon:SetDesaturated()
+    end
+    return button
+end
+
+local assistedFirst = makeAssistedButton()
+generic.OnShow(assistedFirst)
+assertEqual(timerCreations, 1, "first assisted button creates one shared ticker")
+assertEqual(library.assistedCombatTicker.interval, 0.2,
+    "assisted ticker has a 5 Hz ceiling")
+assertEqual(assistedFirst.icon.texture, "spell:101",
+    "assisted registration paints the current recommendation")
+assertEqual(library.buttonToSlot[assistedFirst], 42,
+    "visible action registers range checking")
+
+local originalAssistedTicker = library.assistedCombatTicker
+assistedCombatRate = "0.8"
+assistedCombatRateCallback()
+assertEqual(originalAssistedTicker.cancelled, true,
+    "runtime assisted rate change cancels the old ticker")
+assertEqual(library.assistedCombatTicker.interval, 0.8,
+    "runtime assisted rate change restarts at the new cadence")
+assertEqual(timerCreations, 2,
+    "runtime assisted rate change creates one replacement ticker")
+
+local assistedSecond = makeAssistedButton()
+generic.OnShow(assistedSecond)
+assertEqual(timerCreations, 2, "multiple assisted buttons share one ticker")
+local assistedTicker = library.assistedCombatTicker
+assistedCombat.nextSpell = 202
+assistedTicker.callback()
+assertEqual(assistedFirst.icon.texture, "spell:202",
+    "shared ticker updates first assisted button")
+assertEqual(assistedSecond.icon.texture, "spell:202",
+    "shared ticker updates second assisted button")
+
+assistedFirst.visible = false
+generic.OnHide(assistedFirst)
+assertEqual(library.assistedCombatButtons[assistedFirst], nil,
+    "hidden assisted button deregisters")
+assertEqual(library.buttonToSlot[assistedFirst], nil,
+    "hidden action releases range checking")
+assertEqual(assistedTicker.cancelled, nil,
+    "shared ticker remains for another visible assisted button")
+assistedSecond.visible = false
+generic.OnHide(assistedSecond)
+assertEqual(assistedTicker.cancelled, true,
+    "last hidden assisted button cancels shared ticker")
+assertEqual(library.assistedCombatTicker, nil,
+    "assisted ticker is released at idle")
+
 local sourceFile = assert(io.open(libraryPath, "r"))
 local source = sourceFile:read("*a")
 sourceFile:close()
@@ -241,5 +404,24 @@ assertContains(source, "NonActionButtons%[self%] = nil%s+StopFlash%(self%)",
     "buttons that lose their action must stop flashing")
 assertContains(source, "else%s+StopFlash%(self%)%s+self%.icon:Hide%(%)",
     "buttons that lose their texture must stop flashing")
+assertContains(source,
+    'assistedCombatRotationFrame:SetScript%("OnUpdate", nil%)',
+    "native assisted per-frame updater removed")
+assertContains(source, "lib%.actionSlotButtons%[arg1%]",
+    "slot changes use a targeted action-slot map")
+assertContains(source,
+    "elseif arg1 == 0 then.-for button in next, ButtonRegistry do",
+    "full slot invalidation still refreshes empty action buttons")
+
+local commonPath = "Modules/ActionBars/Common.lua"
+local commonFile = assert(io.open(commonPath, "r"))
+local commonSource = commonFile:read("*a")
+commonFile:close()
+assertContains(commonSource, 'b:SetScript%("OnUpdate", nil%)',
+    "native pet per-button updater removed")
+assertContains(commonSource, "petFlashController:SetScript",
+    "pet attack flashing uses one shared controller")
+assertContains(commonSource, "if b%.SlotArt then b%.SlotArt:Hide%(%) end",
+    "redundant Retail slot art is hidden")
 
 print("action_bar_idle_flash_test.lua: ok")

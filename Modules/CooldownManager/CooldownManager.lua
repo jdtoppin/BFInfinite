@@ -458,8 +458,8 @@ local function EnsureAssistedHighlight(item, definition)
     FrameSetPoint(highlight, "TOPLEFT", item, "TOPLEFT", -2, 2)
     FrameSetPoint(highlight, "BOTTOMRIGHT", item, "BOTTOMRIGHT", 2, -2)
     UpdateSquareHighlightPixels(highlight)
-    FrameSetAlpha(highlight, 0)
-    FrameShow(highlight)
+    FrameSetAlpha(highlight, 1)
+    FrameHide(highlight)
     HighlightState.assisted[item] = highlight
     return highlight
 end
@@ -519,8 +519,8 @@ function HighlightState.proc.Ensure(item, definition)
     FrameSetPoint(highlight, "TOPLEFT", item, "TOPLEFT", 0, 0)
     FrameSetPoint(highlight, "BOTTOMRIGHT", item, "BOTTOMRIGHT", 0, 0)
     UpdateSquareHighlightPixels(highlight)
-    FrameSetAlpha(highlight, 0)
-    FrameShow(highlight)
+    FrameSetAlpha(highlight, 1)
+    FrameHide(highlight)
     HighlightState.proc.highlights[item] = highlight
     return highlight
 end
@@ -621,18 +621,35 @@ function HighlightState.proc.SetNativeSuppressed(item, suppressed)
     return true
 end
 
-function HighlightState.proc.SetShown(highlight, shown)
+function HighlightState.proc.SetShown(highlight, shown, animate)
     if not highlight then return end
 
     local animation = highlight.Pulse
-    if shown then
+    if animate == nil then
+        animate = shown
+    end
+    if animate then
         if not animation:IsPlaying() then
             animation:Play()
         end
     elseif animation:IsPlaying() then
         animation:Stop()
     end
-    FrameSetAlpha(highlight, shown and 1 or 0)
+
+    local currentlyShown = FrameIsShown(highlight)
+    if IsSafeBoolean(currentlyShown) and currentlyShown ~= shown then
+        if shown then
+            FrameSetAlpha(highlight, 1)
+            FrameShow(highlight)
+        else
+            FrameHide(highlight)
+        end
+    elseif shown then
+        local alpha = FrameGetAlpha(highlight)
+        if IsSafeNumber(alpha) and not NearlyEqual(alpha, 1) then
+            FrameSetAlpha(highlight, 1)
+        end
+    end
 end
 
 function HighlightState.proc.Restore(item)
@@ -685,15 +702,11 @@ local function UpdateItemAssistedHighlight(item)
             and ItemMatchesAssistedHighlight(item)
         local inCombat = UnitAffectingCombat("player")
         inCombat = IsSafeBoolean(inCombat) and inCombat
-        local animation = highlight.Pulse
-        if shown and inCombat then
-            if not animation:IsPlaying() then
-                animation:Play()
-            end
-        elseif animation:IsPlaying() then
-            animation:Stop()
-        end
-        FrameSetAlpha(highlight, shown and 1 or 0)
+        HighlightState.proc.SetShown(
+            highlight,
+            shown and true or false,
+            shown and inCombat
+        )
     end
     HighlightState.proc.Update(item)
 end
@@ -711,8 +724,11 @@ local function RefreshAssistedHighlights()
     end
 end
 
-local function SetAssistedHighlightSpell(spellID)
+local function SetAssistedHighlightSpell(spellID, forceBaseRefresh)
     spellID = GetNonSecretSpellID(spellID)
+    if not forceBaseRefresh and spellID == HighlightState.spellID then
+        return false
+    end
     local baseSpellID = GetBaseSpellID(spellID)
     if spellID == HighlightState.spellID
         and baseSpellID == HighlightState.baseSpellID
@@ -745,7 +761,7 @@ local function RefreshAssistedHighlightState(force)
     if HighlightState.IsAssistedHighlightEnabled() then
         spellID = C_AssistedCombat.GetNextCastSpell(false)
     end
-    local changed = SetAssistedHighlightSpell(spellID)
+    local changed = SetAssistedHighlightSpell(spellID, force)
     if force or changed then
         RefreshAssistedHighlights()
     end
@@ -805,8 +821,12 @@ end
 
 function HighlightState.UpdateAssistedHighlightFallback()
     local enabled = HighlightState.IsAssistedHighlightEnabled()
+    local affectingCombat = enabled and UnitAffectingCombat("player")
+    local active = enabled
+        and IsSafeBoolean(affectingCombat)
+        and affectingCombat
     local canTick = C_Timer and type(C_Timer.NewTicker) == "function"
-    local interval = enabled and canTick
+    local interval = active and canTick
         and GetAssistedHighlightFallbackInterval()
     if HighlightState.fallbackTicker
         and HighlightState.fallbackInterval ~= interval
@@ -814,7 +834,7 @@ function HighlightState.UpdateAssistedHighlightFallback()
         HighlightState.fallbackTicker:Cancel()
         HighlightState.fallbackTicker = nil
     end
-    if enabled and canTick then
+    if active and canTick then
         if not HighlightState.fallbackTicker then
             HighlightState.fallbackInterval = interval
             HighlightState.fallbackTicker = C_Timer.NewTicker(
@@ -846,6 +866,34 @@ local function OnAssistedHighlightEvent(_, event)
     then
         return
     end
+    if event == "PLAYER_REGEN_DISABLED"
+        or event == "PLAYER_REGEN_ENABLED"
+    then
+        -- Native callbacks continue to cover ordinary out-of-combat changes.
+        -- Keep the false-mode discrepancy fallback dormant at idle and sample
+        -- once on both combat edges so its state is current before/after the
+        -- rotation begins advancing.
+        HighlightState.UpdateAssistedHighlightFallback()
+        return
+    end
+    if event == "SPELL_UPDATE_COOLDOWN"
+        or event == "SPELL_UPDATE_CHARGES"
+        or event == "PLAYER_TARGET_CHANGED"
+        or event == "UNIT_POWER_UPDATE"
+        or event == "UNIT_AURA"
+        or event == "PLAYER_TOTEM_UPDATE"
+        or event == "UPDATE_SHAPESHIFT_FORM"
+    then
+        -- These state edges can advance GetNextCastSpell(false) without the
+        -- native true-mode callback seeing a recommendation. Observe only the
+        -- scalar value while the combat ticker is dormant; unchanged events
+        -- do no base lookup, highlight walk, or presentation work.
+        local affectingCombat = UnitAffectingCombat("player")
+        if IsSafeBoolean(affectingCombat) and not affectingCombat then
+            HighlightState.RefreshAssistedHighlightRecommendation()
+        end
+        return
+    end
     QueueAssistedHighlightRefresh()
 end
 
@@ -853,6 +901,13 @@ HighlightState.controller:RegisterEvent("COOLDOWN_VIEWER_DATA_LOADED")
 HighlightState.controller:RegisterEvent("COOLDOWN_VIEWER_TABLE_HOTFIXED")
 HighlightState.controller:RegisterEvent("PLAYER_REGEN_DISABLED")
 HighlightState.controller:RegisterEvent("PLAYER_REGEN_ENABLED")
+HighlightState.controller:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+HighlightState.controller:RegisterEvent("SPELL_UPDATE_CHARGES")
+HighlightState.controller:RegisterEvent("PLAYER_TARGET_CHANGED")
+HighlightState.controller:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
+HighlightState.controller:RegisterUnitEvent("UNIT_AURA", "player", "target")
+HighlightState.controller:RegisterEvent("PLAYER_TOTEM_UPDATE")
+HighlightState.controller:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
 HighlightState.controller:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_SHOW")
 HighlightState.controller:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_HIDE")
 HighlightState.controller:SetScript("OnEvent", OnAssistedHighlightEvent)
@@ -3040,7 +3095,7 @@ function presentationController.buffVisibility:Sample()
         and config.enabled
         and type(config.viewers) == "table"
     local changed = false
-    local anyActive = false
+    local needsMonitoring = false
 
     for _, state in ipairs(viewerStates) do
         if state.definition.isBuff then
@@ -3077,6 +3132,7 @@ function presentationController.buffVisibility:Sample()
                         wipe(state.buffVisibilityItems)
                         return false
                     end
+                    local shownCount = 0
                     for _, item in ipairs(activeItems) do
                         local shown = FrameIsShown(item)
                         if not IsSafeBoolean(shown) then
@@ -3084,11 +3140,18 @@ function presentationController.buffVisibility:Sample()
                             return false
                         end
                         current[item] = shown
-                        anyActive = shown or anyActive
+                        if shown then
+                            shownCount = shownCount + 1
+                        end
                         if previous and previous[item] ~= shown then
                             changed = true
                         end
                     end
+                    -- A single visible item can disappear without leaving a
+                    -- layout gap. Native aura/totem events re-arm sampling
+                    -- when another item appears, so only multi-item viewers
+                    -- need an idle visibility watcher for compaction.
+                    needsMonitoring = shownCount > 1 or needsMonitoring
                     if previous then
                         for item in next, previous do
                             if current[item] == nil then
@@ -3124,7 +3187,7 @@ function presentationController.buffVisibility:Sample()
             state.buffVisibilityStaged = nil
         end
     end
-    return true, anyActive, changed
+    return true, needsMonitoring, changed
 end
 
 function presentationController.buffVisibility:Start()
@@ -3140,7 +3203,7 @@ function presentationController.buffVisibility:Start()
 end
 
 function presentationController.buffVisibility:Tick()
-    local valid, anyActive, changed = self:Sample()
+    local valid, needsMonitoring, changed = self:Sample()
     if not valid then
         self.invalidPassesRemaining =
             (self.invalidPassesRemaining or 7) - 1
@@ -3154,7 +3217,7 @@ function presentationController.buffVisibility:Tick()
     if changed then
         QueuePresentationUpdate()
     end
-    if not anyActive then
+    if not needsMonitoring then
         self:Stop()
     end
 end
@@ -3166,12 +3229,12 @@ function presentationController.buffVisibility:Update()
         return
     end
 
-    local valid, anyActive = self:Sample()
+    local valid, needsMonitoring = self:Sample()
     if not valid then
         self:Start()
         return
     end
-    if not anyActive then
+    if not needsMonitoring then
         self:Stop()
         return
     end
@@ -3377,8 +3440,10 @@ presentationController:RegisterUnitEvent("UNIT_AURA", "player", "target")
 presentationController:RegisterEvent("PLAYER_TOTEM_UPDATE")
 presentationController:RegisterEvent("BAG_UPDATE_COOLDOWN")
 presentationController:RegisterEvent("COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED")
-presentationController:RegisterEvent("SPELL_UPDATE_ICON")
-presentationController:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+-- Deliberately do not register SPELL_UPDATE_COOLDOWN or SPELL_UPDATE_ICON.
+-- The pinned 12.1 native viewers already consume those events and update their
+-- own item widgets; BFI has no duration- or texture-dependent presentation to
+-- do. Waking here would rescan, sort, and reconcile all four viewers each time.
 presentationController:SetScript("OnEvent", OnPresentationEvent)
 
 EventRegistry:RegisterCallback(
