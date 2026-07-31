@@ -268,6 +268,9 @@ local function InitAndBackupCVars()
         "AutoPushSpellToActionBar",
         -- bags
         "combinedBags",
+        -- damage meter
+        "damageMeterEnabled",
+        "damageMeterResetOnNewInstance",
         -- chat
         "chatStyle",
         "whisperMode",

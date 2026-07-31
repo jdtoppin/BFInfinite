@@ -54,7 +54,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 
 | Coverage | Branch | Exact head |
 |---|---|---|
-| Current BFInfinite master compatibility (#104) | `master` | `5f9426b86b49700dea00358ea426b8925b6ddf64` |
+| Current BFInfinite master compatibility | `master` | `151353453b28639404d29dc2aa3f751487c8f2bb` |
 | Global exact spell colors (#101) | `codex/unitframe-aura-spell-colors` | `5f221bdd1679ebcafb2a4cab381188f080d81572` |
 | Presentation hardening (#102) | `codex/unitframe-aura-presentation-hardening` | `62fdc2c289dcf518adff5f3a109eba3f05ed9dc8` |
 | Player | `codex/unitframe-aura-player` | `61bbdae09c808f58dc69812c848fa2496f3cf806` |

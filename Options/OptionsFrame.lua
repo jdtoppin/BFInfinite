@@ -11,10 +11,11 @@ local LIST_WIDTH = 170
 local HEADER_HEIGHT = 35
 
 local optionsFrame
+local optionButtons = {}
 local buffsDebuffsAvailable = type(BFI.modules.BuffsDebuffs.HasAuraBackend) == "function"
     and BFI.modules.BuffsDebuffs.HasAuraBackend()
--- Keep the common map editable on 12.0.7 so it can be prepared and carried
--- forward, while the panel itself explains that only 12.1 native rows apply it.
+-- Global Colors remains a Retail settings surface; each 12.1 native row
+-- decides whether it is a supported consumer.
 local auraColorsAvailable = AF.isRetail
 
 ---------------------------------------------------------------------
@@ -37,6 +38,7 @@ local list = {
     "tooltip",
     "uiWidgets",
     "dataBars",
+    "damageMeter",
     -- "dataBroker",
     "maps",
     "chat",
@@ -117,12 +119,13 @@ local function BuildList()
         else
             item = CreateButton(name)
             tinsert(buttons, item)
+            optionButtons[item.id] = item
             if not first then first = item end
         end
 
         if last then
-            AF.SetPoint(item, "TOPLEFT", last, "BOTTOMLEFT", 0, -5)
-            AF.SetPoint(item, "TOPRIGHT", last, "BOTTOMRIGHT", 0, -5)
+            AF.SetPoint(item, "TOPLEFT", last, "BOTTOMLEFT", 0, -4)
+            AF.SetPoint(item, "TOPRIGHT", last, "BOTTOMRIGHT", 0, -4)
         else
             AF.SetPoint(item, "TOPLEFT", 7, -15)
             AF.SetPoint(item, "TOPRIGHT", -7, -15)
@@ -274,11 +277,32 @@ end
 ---------------------------------------------------------------------
 -- show
 ---------------------------------------------------------------------
-function F.ToggleOptionsFrame()
+local function EnsureOptionsFrame()
     if not optionsFrame then
         CreateOptionsFrame()
         BuildList()
         ShowAlphaNotice()
     end
+end
+
+function F.ToggleOptionsFrame()
+    EnsureOptionsFrame()
     optionsFrame:Toggle()
+end
+
+function F.OpenOptionsFrame(id)
+    EnsureOptionsFrame()
+
+    local button = optionButtons[id]
+    if button and button:IsEnabled() then
+        if button.isSelected then
+            ShowOptionsPanel(button, id)
+        else
+            button:SilentClick()
+        end
+    end
+
+    optionsFrame:Show()
+    optionsFrame:Raise()
+    return button ~= nil and button:IsEnabled()
 end
