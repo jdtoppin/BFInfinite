@@ -73,6 +73,7 @@ jobs:
           lua5.1 tests/objective_tracker_taint_boundary_test.lua
           lua5.1 tests/experience_bar_disabled_texture_test.lua
           lua5.1 tests/unit_frame_options_preview_aura_safety_test.lua
+          lua5.1 tests/style_pixel_updater_secret_geometry_test.lua
 
       - name: Test 12.1 unit-frame aura controller
         run: luajit tests/unit_frame_aura_controller_test.lua
