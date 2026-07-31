@@ -70,6 +70,10 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
 | Upper-right Debuff appearance (#103; includes #99) | `codex/buffs-debuffs-native-debuffs` | `19df3783962e9fff37c8c02f30087c5c26e22f10` |
 | Secret identity (#100) | `codex/unitframe-secret-identity` | `b8e1671ed8a1c11657416357875f9c8277051654` |
+| Unit Frame options preview safety (#114) | `codex/unitframe-options-preview-aura-safety` | `296667d9681c07ab1a7293ea8922561c44e9cb08` |
+| Objective Tracker taint boundary (#115) | `codex/objective-tracker-taint-boundary` | `b829efaffd45939e268cfa6c0c1e167ce17312fe` |
+| Secret pixel geometry (#116) | `codex/style-secret-pixel-geometry` | `3eb6642f82e81c1fb08a725727e80d0d2a1c566e` |
+| Player Spells combat deferral (#117) | `codex/player-spells-combat-style-deferral` | `50b3c30a17a05c8d82279676d248f3bc48da5d2c` |
 
 Test in this order:
 
@@ -82,8 +86,10 @@ Test in this order:
 5. Test the upper-right foundation, controller, Buffs, options, and
    forbidden-button branches in their PR order.
 6. Test #103's ordinary Debuff appearance controls with AF r33.
-7. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
-8. Run the 12.1 gates below in order.
+7. Test #114, #115, #116, and #117 independently against their documented
+   reproducers below.
+8. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
+9. Run the 12.1 gates below in order.
 
 Record the full local SHA for every installed folder. A short SHA in this
 document is a review aid, not permission to test a different head.
@@ -206,12 +212,68 @@ while it may be secret.
 
 ## 12.1 live gates
 
+### Restricted-context regression preflight
+
+Run these four checks on the clean aggregate before the longer aura gates.
+Clear and inspect the taint log after each check so one failure cannot
+contaminate later evidence.
+
+#### Unit Frame options during challenge combat
+
+1. Reload inside an active Mythic+ run without opening Unit Frame options.
+2. Enter combat, then open **BFInfinite → Unit Frames** for the first time.
+3. Switch repeatedly among General, Unit, Target, and Group; close and reopen
+   the panel while combat continues.
+4. Confirm there is no `GetUnitAuraInstanceIDs` error,
+   `BFI_ShowOptionsPanel` failure, nil `frameOptionsPane`, or nil callback.
+5. Confirm preset cards look unchanged. Their already-hidden Buff and Debuff
+   rows are intentionally not constructed, while live unit-frame aura rows
+   continue to render.
+
+#### Objective Tracker restricted-aura path
+
+1. Enable the Objective Tracker and set its position and height through
+   Blizzard Edit Mode.
+2. Reload in an active challenge run or scenario, enter combat, and force
+   several objective/scenario updates.
+3. Change only BFI's Objective Tracker font setting while the restricted
+   context remains active.
+4. Confirm there is no Maw Buffs `GetAuraDataByIndex` error or new taint.
+5. Confirm Blizzard still owns tracker position, height, managed-frame
+   membership, and layout. BFI visual and font styling remains, with no
+   duplicate tracker or BFI mover.
+
+#### Challenge reload with secret geometry
+
+1. Reload inside an active challenge dungeon while out of combat, then repeat
+   during combat.
+2. Open and close several BFI-styled Blizzard windows and, when permitted,
+   change and restore UI scale to trigger another pixel refresh.
+3. Confirm there is no Backdrop arithmetic error involving a secret width,
+   height, or scale and no corresponding taint entry.
+4. Leave the challenge context, trigger another pixel refresh, and confirm
+   ordinary public-geometry borders still update and remain aligned.
+
+#### First Spellbook load during ordinary combat
+
+1. Start from a fresh reload without opening the Spellbook.
+2. Enter ordinary combat on a training dummy and open the Spellbook for the
+   first time.
+3. Confirm there is no `ADDON_ACTION_BLOCKED` for `Frame:ClearAllPoints()` or
+   `Frame:SetPoint()`.
+4. The assisted-combat rotation block may temporarily retain Blizzard's
+   appearance and position; the rest of the Spellbook styling should load.
+5. Leave combat and confirm that block receives BFI styling and positioning
+   automatically.
+6. Open and close the Spellbook again in and out of combat and confirm no
+   further blocked action or duplicate deferred update.
+
 ### 0. Current-master compatibility preflight
 
 - Enable BFInfinite's Objective Tracker, then cover login, reload, and Edit
-  Mode. Confirm there is no missing managed-frame-container global, the
-  tracker remains attached to the BFI mover, and no Blizzard-managed copy is
-  left behind.
+  Mode. Confirm Blizzard Edit Mode remains the sole owner of its position,
+  height, managed-frame membership, and layout. BFI retains visual and font
+  styling only; no BFI tracker mover or height control should remain.
 - Exercise the Experience Bar while ordinary XP is available, while XP is
   disabled, and at effective max level. Confirm there is no
   `AF.IsMaxLevel` callback error, no screen-wide Stripe texture, and the
