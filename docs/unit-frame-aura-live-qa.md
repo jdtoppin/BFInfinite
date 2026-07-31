@@ -6,9 +6,6 @@ source at `d3915c78aba77a7a9be76acbfa35c674bbb6abe9`. Retail 12.1 is scheduled
 for August 11, 2026; repeat this entire gate against the final release build
 and replace both pins before release.
 
-Retail 12.0.7 is not a second full validation target. Use it only for the
-cross-version saved-map and legacy-gray preservation smoke described below.
-
 The disposable aggregate branch is
 `codex/unitframe-aura-full-stack-test`. It exists to prove coexistence. Never
 merge PR #91 or use its aggregate commit as a substitute for the separately
@@ -32,9 +29,11 @@ Use this clean isolated-install sequence:
    #102 at `62fdc2c289dcf518adff5f3a109eba3f05ed9dc8`.
 4. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
    #110 at `4b350b7ff7903c2e275c305980624937f4dca357`.
-5. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
+5. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
+   #112 at `a3069bc70e22e449231dbb7cd0be20e38a96412c`.
+6. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
    #103 at `19df3783962e9fff37c8c02f30087c5c26e22f10`.
-6. Validation-only AF #25 at
+7. Validation-only AF #25 at
    `d82bc3e07d4eab953d5e9a7dc82c9cc1a307e8f9` with the exact
    checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
    validation SHA. Record that full branch-head SHA immediately before
@@ -66,6 +65,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | PetTarget | `codex/unitframe-aura-pettarget` | `02a75fd22f8f04e21e7f139df214697e6350e567` |
 | Pet | `codex/unitframe-aura-pet` | `8e91a8c7616b3000d5e607a2063bf528dd8c4f59` |
 | Target partition (#110) | `codex/unitframe-aura-target-final` | `4b350b7ff7903c2e275c305980624937f4dca357` |
+| Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `a3069bc70e22e449231dbb7cd0be20e38a96412c` |
 | Party | `codex/unitframe-aura-party` | `2cfcbca80d0b2b45b9a9abb657907511152ae6b9` |
 | Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
 | Upper-right Debuff appearance (#103; includes #99) | `codex/buffs-debuffs-native-debuffs` | `19df3783962e9fff37c8c02f30087c5c26e22f10` |
@@ -78,12 +78,12 @@ Test in this order:
 2. Test the policy, spec, lifecycle/controller, provider/counter, supported
    filter-control, spell-color, and presentation-hardening PRs in isolation.
 3. Test each of the ten unit-frame integration leaves independently.
-4. Test the upper-right foundation, controller, Buffs, options, and
+4. Test #112's enemy nameplate Debuffs migration independently after #110.
+5. Test the upper-right foundation, controller, Buffs, options, and
    forbidden-button branches in their PR order.
-5. Test #103's ordinary Debuff appearance controls with AF r33.
-6. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
-7. Run the 12.1 gates below in order.
-8. Run the narrow 12.0.7 preservation smoke.
+6. Test #103's ordinary Debuff appearance controls with AF r33.
+7. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
+8. Run the 12.1 gates below in order.
 
 Record the full local SHA for every installed folder. A short SHA in this
 document is a review aid, not permission to test a different head.
@@ -228,7 +228,11 @@ while it may be secret.
   `tonumber` error when upper-right Buffs & Debuffs initializes.
 - Confirm Player, Pet, Party, Raid, Target, Boss, Focus, TargetTarget,
   FocusTarget, and PetTarget use native containers.
+- Confirm hostile NPC/player nameplate Debuffs use a native container and
+  unsupported friendly Debuffs remain absent.
 - Confirm no unit-frame row silently falls back to the legacy backend.
+- Confirm no nameplate row calls the legacy aura iterator or suppresses
+  Blizzard nameplates when the complete native backend is unavailable.
 - Confirm Party and Raid reuse their secure-header seeded containers.
 - Confirm BFI never creates a `SecureAuraHeaderTemplate` on 12.1.
 - Enter and leave BFI Config Mode and Blizzard Edit Mode repeatedly. There
@@ -333,9 +337,13 @@ BFInfinite must neither inspect nor dismiss it.
 
 The implementation must not call `IsShown`, `IsVisible`, `IsMouseOver`, or
 `GetAlpha` on holders or native aura objects; probe protected writes with
-`pcall`; call `Show`, `Hide`, `SetShown`, or enable/disable methods in combat;
+`pcall`; call `Show`, `Hide`, or `SetShown` in combat; toggle an already-built
+native container merely because a pooled nameplate is temporarily hidden;
 schedule a hover retry; inspect children, buttons, aura data, or tooltip
-ownership; or make pointer movement necessary for recovery.
+ownership; or make pointer movement necessary for recovery. The one nameplate
+first-build exception may submit the complete container's final enabled state
+after all groups, layout, unit, and refresh work, using the supported inbound
+12.1 method while the holder remains alpha-curtained.
 
 ### 5. Unit and roster churn
 
@@ -352,7 +360,61 @@ No secret identity may be cached or compared. A temporarily unavailable unit
 must wait, remain curtained, and recover to the newest clean token without
 retargeting a native container to a preview identity.
 
-### 6. Restricted content
+### 6. Enemy nameplate Debuffs
+
+Test #112 first as the clean AF #22/BFI #112 pair, then repeat this entire
+section on the aggregate. This leaf owns only enemy NPC/player Debuffs.
+Friendly dispellable Debuffs, nameplate Buffs, and nameplate Crowd Controls
+are expected to remain absent.
+
+1. Enable **Nameplates → Auras → Debuffs** and verify the notice says the row
+   is enemy-only and that Global Colors do not affect it. Confirm the shared
+   toggle changes hostile NPC/player profiles only.
+2. Apply several player-cast harmful auras to hostile NPC and player fixtures.
+   Confirm the compact native row uses the configured size, spacing,
+   orientation, capacity, placement, cooldown style, duration text, stack
+   text, frame level, and supported Debuff border treatment. Do not infer an
+   exact active-aura count from the fixed maximum footprint.
+3. Add conspicuous Global Colors entries for the same spell IDs. The nameplate
+   row must remain on its ordinary appearance; it must not create color
+   families, fixed slots, blank gaps, or a gray-complement partition.
+4. Enter combat before a previously unseen hostile plate is created. The
+   complete row may be created in combat, but it must remain alpha-curtained
+   until its group, layout, unit, refresh, and final enabled state are all
+   submitted. Require no native `Show`, `Hide`, or `SetShown` call and no
+   regen queue for that complete first build.
+5. Force repeated pool reuse: hostile-to-hostile token changes, then
+   hostile-to-friendly-to-hostile before regen. The friendly assignment must
+   show no BFI Debuffs row. The returning hostile assignment must reuse and
+   retarget the completed native carrier without a second build or an
+   enable/disable cycle.
+6. Repeat with duel, cross-faction, phased, and `UNIT_FACTION` reaction
+   changes. A combat reaction change must curtain the row immediately; the
+   protected plate rebuild completes after `PLAYER_REGEN_ENABLED`.
+7. Park the pointer over the aura area and do not move it while plates appear,
+   disappear, phase, recycle, and change reaction. No tooltip, pointer-leave,
+   visibility read, or hover retry may control recovery. Native nameplate aura
+   tooltips are expected to remain disabled.
+8. Change every supported nameplate Debuffs setting outside combat, then in
+   combat, while the pooled row is hostile, friendly/hidden, and removed.
+   Same-topology tuning must apply at the legal boundary. Construction-owned
+   changes must raise the reload-required notice. The next hostile assignment
+   must use the newest prepared snapshot; an untouched cached row must not be
+   constructed merely because settings changed.
+9. Disable Debuffs and confirm the native carrier is disabled rather than
+   only made transparent. Re-enable it out of combat, reload, and repeat the
+   combat pool sequence.
+10. Repeat the section in an ordinary dungeon, Mythic+, raid, arena/BG, and
+    Edit Mode/test-provider transitions. Confirm unsupported friendly Buffs,
+    Debuffs, and Crowd Controls do not appear opportunistically in any mode.
+
+Record UnitFrames runtime/construction counters before and after first build,
+50 hostile plate churn cycles, settings changes, and provider transitions.
+One completed controller/container per cached nameplate root is expected;
+same-combat retargets and no-op/tuning changes must not add builds, groups,
+buttons, stranded shells, or reservations.
+
+### 7. Restricted content
 
 Repeat representative gates in:
 
@@ -367,7 +429,7 @@ available. Unit-frame native groups may render only the private content
 Blizzard authorizes through its inseparable source. BFInfinite must never log
 or expose private identity, spell, duration, count, or source.
 
-### 7. Blizzard Edit Mode provider
+### 8. Blizzard Edit Mode provider
 
 - Enter Edit Mode before first construction and after rows are already built.
 - Cover all ten frame types, with special evidence for Boss, Party, Raid, and
@@ -384,7 +446,7 @@ or expose private identity, spell, duration, count, or source.
 - BFI Config Mode is not a spell-identity provider: its preview remains gray
   and must not consume or infer a Global Colors entry.
 
-### 8. Upper-right Buffs and Debuffs
+### 9. Upper-right Buffs and Debuffs
 
 - On 12.1, BFInfinite may own only the supported helpful Buffs native
   container when its complete backend and settings allow it.
@@ -425,7 +487,7 @@ or expose private identity, spell, duration, count, or source.
   script or event hooking, Blizzard update-method driving, active-state or
   visibility reads, or hidden Blizzard-owned harmful/private presentation.
 
-### 9. Counters, leaks, errors, and taint
+### 10. Counters, leaks, errors, and taint
 
 Capture these before and after the full run:
 
@@ -447,7 +509,9 @@ no-op/live-tuning/provider/unit changes, `providerMode == "live"`, and
 `reloadRequired == false`. Verify the Target state `metrics` against the
 explicit partition fixtures above. Party/Raid totals must match the fixed
 child count; Target totals must include all prebuilt relation variants while
-only one relation is active.
+only one relation is active. Nameplate totals may grow only when Blizzard
+creates a new cached plate root; token retarget, reaction changes, settings
+tuning, and provider transitions must reuse that root's completed carrier.
 
 With ordinary Debuff styling enabled, require `active == true`,
 `styledButtonCount == 16`, and `snapshotsCreated == 16`. Repeated settings,
@@ -459,25 +523,6 @@ expected.
 Reload once, log out cleanly, and inspect the error collector and flushed
 `taint.log`.
 
-## Narrow 12.0.7 preservation smoke
-
-Do not rerun the 12.1 native matrix on 12.0.7.
-
-1. Export a 12.1 profile containing several explicit spell-color families,
-   an unknown ID, and an over-budget configuration.
-2. Import it on 12.0.7.
-3. Confirm the saved spell-ID/RGBA map survives exactly through profile
-   switch, export, reload, and re-import.
-4. Confirm legacy unit-frame Block rows remain gray. The saved 12.1 map must
-   not be applied, inferred, normalized into fewer colors, or discarded.
-   The old raw `auraData.spellId` lookup must not be restored on 12.0.7; that
-   active-aura read is secret-unsafe even though the static saved map is
-   preserved.
-5. Confirm legacy upper-right Buffs/Debuffs still load without a
-   12.1-only `CreateFrame` path or error.
-6. Return the exported profile to 12.1 and confirm the exact families and IDs
-   are restored.
-
 ## Hard blockers
 
 Stop and file a failure with evidence for any of the following:
@@ -485,13 +530,17 @@ Stop and file a failure with evidence for any of the following:
 - Lua error, blocked action, forbidden-access error, or new taint;
 - secret value comparison, logging, caching, or branching;
 - any holder/native visibility, hover, or alpha read-back; a protected-call
-  write probe; or a protected visibility/enabled write attempted in combat;
+  write probe; or an unsupported/protected visibility or enabled write in
+  combat outside #112's complete first-build final enabled submission;
 - restricted intrinsic AuraButton or aura-state inspection, or
   tooltip-driving logic;
 - any transition delayed, completed, or retried because the pointer moved;
 - stale wrong-relation content visible during hover or visibility deferral;
 - refresh while presentation is disallowed or still curtained;
 - both Target relation variants visible together;
+- friendly nameplate Debuffs, nameplate Buffs, or nameplate Crowd Controls
+  appearing in #112; Global Colors affecting a nameplate row; a second build
+  on nameplate pool reuse; or a settings change constructing an untouched row;
 - Party/Raid external seeded content visible behind a hidden plain holder;
 - missing category, duplicate aura, partial color fallback, inferred spell
   family, or a listed ID using the wrong exact RGBA;
