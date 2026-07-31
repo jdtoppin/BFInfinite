@@ -74,6 +74,13 @@ function UF.CompileNativeAuraPolicy(baseFilter, filters)
             groups[#groups + 1] = {
                 key = rule.key,
                 filterString = concat(parts, "|"),
+                -- Keep source partitioning as compiler metadata instead of
+                -- reparsing filter strings later. When PLAYER is enabled it
+                -- is the first disjoint group and every later group excludes
+                -- it; otherwise the group spans both player relationships.
+                playerScope = rule.key == "player" and "player"
+                    or enabled.player and "notPlayer"
+                    or "any",
             }
             precedingTokens[#precedingTokens + 1] = rule.token
         end
