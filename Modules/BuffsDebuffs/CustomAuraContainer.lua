@@ -17,7 +17,6 @@ local InCombatLockdown = InCombatLockdown
 -- and native container shells; it never reads aura data, restricted buttons,
 -- or native container geometry.
 local NATIVE_GROUP_INITIAL_RESERVATIONS = 10
-local HOVER_RETRY_SECONDS = 0.25
 
 local registrations = {}
 local pendingControllers = {}
@@ -129,31 +128,6 @@ local function QueueController(controller)
     if not wasPending then
         NotifyControllerState(controller)
     end
-end
-
-local function IsControllerHovered(controller)
-    if controller.holder
-        and type(controller.holder.IsMouseOver) == "function"
-        and controller.holder:IsMouseOver()
-    then
-        return true
-    end
-
-    return type(BD.IsNativePublicAuraFrameHovered) == "function"
-        and BD.IsNativePublicAuraFrameHovered(controller.which) == true
-end
-
-local function QueueHoverRetry(controller)
-    QueueController(controller)
-    if controller.hoverRetryScheduled then return end
-
-    controller.hoverRetryScheduled = true
-    C_Timer.After(HOVER_RETRY_SECONDS, function()
-        controller.hoverRetryScheduled = nil
-        if pendingControllers[controller] then
-            controller:_ApplyPending()
-        end
-    end)
 end
 
 local function AssertDescriptor(descriptor)
@@ -468,11 +442,6 @@ function ControllerMixin:_ApplyRetarget()
     if not self.container or not self.buildCompleted or not self.pendingUnit then
         return false
     end
-    if IsControllerHovered(self) then
-        QueueHoverRetry(self)
-        return false
-    end
-
     AF.SetCustomAuraContainerUnit(self.container, self.pendingUnit)
     AF.UpdateCustomAuraContainer(self.container)
     self.unit = self.pendingUnit
@@ -502,11 +471,6 @@ function ControllerMixin:_ApplyPending()
         QueueController(self)
         return
     end
-    if IsControllerHovered(self) then
-        QueueHoverRetry(self)
-        return
-    end
-
     local operation = self.pendingOperation
     local descriptor = self.pendingDescriptor
     local diagnostic = self.pendingDiagnostic
@@ -607,7 +571,6 @@ function ControllerMixin:GetState()
         state = self.state,
         active = self.active == true,
         pending = pendingControllers[self] == true,
-        hoverRetryScheduled = self.hoverRetryScheduled == true,
         buildAttempted = self.buildAttempted == true,
         buildCompleted = self.buildCompleted == true,
         reloadRequired = self.reloadRequired == true,

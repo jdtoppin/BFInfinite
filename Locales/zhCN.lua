@@ -523,7 +523,7 @@ L["Separate Own is unavailable in 12.1. Blizzard Buffs remain active."] = "12.1 
 L["Use supported sorting"] = "使用受支持的排序"
 L["Reload UI to apply Buffs styling. Blizzard Buffs remain active."] = "重新加载界面以应用增益样式。暴雪增益框架将保持启用。"
 L["Reload UI"] = "重新加载界面"
-L["Buffs update is waiting for combat or hover to end."] = "增益更新正在等待战斗或鼠标悬停结束。"
+L["Buffs update is waiting for combat to end."] = "增益更新正在等待战斗结束。"
 L["Blizzard Buffs remain active because the native replacement could not be applied."] = "由于无法应用原生替换，暴雪增益框架将保持启用。"
 
 ---------------------------------------------------------------------
