@@ -132,6 +132,30 @@ local function StylePlainDialog(frame)
     end
 end
 
+local function StyleTitledDialog(frame, sourceTitle)
+    if not frame or not sourceTitle then return end
+
+    if frame.Border then
+        frame.Border:SetAlpha(0)
+    end
+
+    -- AddFriendFrame is a ResizeLayoutFrame on PTR 12.1.0.68914. Give the
+    -- shared titled-frame skin a root-owned title, while leaving Blizzard's
+    -- nested title in the layout so repeated Info/Entry resizing is stable.
+    frame.Title = frame:CreateFontString(nil, "OVERLAY")
+    local fontObject = sourceTitle:GetFontObject()
+    if fontObject then
+        frame.Title:SetFontObject(fontObject)
+    end
+    frame.Title:SetText(sourceTitle:GetText())
+    frame.Title.ignoreInLayout = true
+    sourceTitle:SetAlpha(0)
+
+    S.StyleTitledFrame(frame, false)
+    frame.BFIBg.ignoreInLayout = true
+    frame.BFIHeader.ignoreInLayout = true
+end
+
 local function StyleRoleIcon(icon, role)
     if not icon or icon._BFIRoleStyled then return end
     icon._BFIRoleStyled = true
@@ -400,14 +424,20 @@ local function StyleAddFriendFrame()
     local frame = _G.AddFriendFrame
     if frame and not frame._BFIAddFriendStyled then
         frame._BFIAddFriendStyled = true
-        StylePlainDialog(frame)
+
+        local entryFrame = frame.EntryFrame
+        local titleContainer = entryFrame and entryFrame.TitleContainer
+        if titleContainer and titleContainer.Title then
+            StyleTitledDialog(frame, titleContainer.Title)
+        else
+            StylePlainDialog(frame)
+        end
 
         local infoFrame = frame.InfoFrame
         if infoFrame then
             StyleButton(infoFrame.OkayButton or infoFrame.ContinueButton)
         end
 
-        local entryFrame = frame.EntryFrame
         local editBoxContainer = entryFrame and entryFrame.EditBoxContainer
         local nameEditBox = (editBoxContainer and editBoxContainer.NameEditBox)
             or (entryFrame and entryFrame.NameEditBox)
@@ -552,8 +582,56 @@ end
 ---------------------------------------------------------------------
 -- 12.1 SocialUI
 ---------------------------------------------------------------------
+local function LayoutSocialTabIcon(tab, yOffset)
+    local icon = tab and tab.Icon
+    if not icon then return end
+
+    AF.SetSize(icon, 24, 24)
+    AF.ClearPoints(icon)
+    AF.SetPoint(icon, "CENTER", 0, (tab.iconBaseYOffset or 0) + (yOffset or 0))
+end
+
 local function StyleSocialTab(tab)
     S.StyleSideTab(tab)
+
+    if not tab._BFISocialIconLayoutHooked then
+        tab._BFISocialIconLayoutHooked = true
+        hooksecurefunc(tab, "SetChecked", function(self)
+            LayoutSocialTabIcon(self)
+        end)
+        hooksecurefunc(tab, "RefreshIconAnchoring", function(self)
+            LayoutSocialTabIcon(self)
+        end)
+        tab:HookScript("OnMouseDown", function(self, button)
+            if button == "LeftButton" and self:IsEnabled() then
+                LayoutSocialTabIcon(self, -1)
+            end
+        end)
+        tab:HookScript("OnMouseUp", function(self, button)
+            if button == "LeftButton" then
+                LayoutSocialTabIcon(self)
+            end
+        end)
+    end
+
+    LayoutSocialTabIcon(tab)
+end
+
+local function LayoutSocialTabs(frame)
+    local previous
+    for _, tabData in ipairs(frame.availableTabData or {}) do
+        local tab = frame:GetTabByType(tabData.tabType)
+        if tab then
+            StyleSocialTab(tab)
+            AF.ClearPoints(tab)
+            if previous then
+                AF.SetPoint(tab, "TOPLEFT", previous, "BOTTOMLEFT", 0, -1)
+            else
+                AF.SetPoint(tab, "TOPLEFT", frame, "TOPRIGHT", 4, -122)
+            end
+            previous = tab
+        end
+    end
 end
 
 local function StyleSocialCard(card)
@@ -600,6 +678,14 @@ local function StyleFriendRequestCard(card)
     end
 end
 
+local function MatchSocialFilterHeight(filterBar)
+    local dropdown = filterBar and filterBar.SearchFilterDropdown
+    local searchBar = filterBar and filterBar.SearchBar
+    if dropdown and searchBar then
+        dropdown:SetHeight(searchBar:GetHeight())
+    end
+end
+
 local function StyleSocialContent(content)
     if not content or content._BFISocialContentStyled then return end
     content._BFISocialContentStyled = true
@@ -611,9 +697,23 @@ local function StyleSocialContent(content)
         SetFlatTexture(content.BottomDivider, "border", 0.8)
     end
 
-    if content.FilterBar then
-        StyleDropdown(content.FilterBar.SearchFilterDropdown)
-        S.StyleEditBox(content.FilterBar.SearchBar)
+    local filterBar = content.FilterBar
+    if filterBar then
+        StyleDropdown(filterBar.SearchFilterDropdown)
+        S.StyleEditBox(filterBar.SearchBar)
+
+        -- SocialUIShared uses different base heights and text-scale weights
+        -- for these controls. Reconcile after TextSizeManager updates all of
+        -- its registered objects so callback iteration order cannot undo it.
+        if not filterBar._BFIFilterHeightHooked then
+            filterBar._BFIFilterHeightHooked = true
+            _G.EventRegistry:RegisterCallback(
+                "TextSizeManager.OnTextScaleUpdated",
+                MatchSocialFilterHeight,
+                filterBar
+            )
+        end
+        MatchSocialFilterHeight(filterBar)
     end
 
     StyleButton(content.ActionButton, "BFI")
@@ -759,9 +859,11 @@ local function StyleSocialUI()
     StyleDropdown(controls.OnlineStatusDropdown)
     StyleArtworkButton(controls.BattleNetMenuButton)
 
-    for tab in frame:EnumerateTabs() do
-        StyleSocialTab(tab)
+    if not frame._BFISocialTabLayoutHooked then
+        frame._BFISocialTabLayoutHooked = true
+        hooksecurefunc(frame, "RefreshTabs", LayoutSocialTabs)
     end
+    LayoutSocialTabs(frame)
     frame:RefreshTabStates()
 
     for _, tabData in next, frame.tabDefinitions do
