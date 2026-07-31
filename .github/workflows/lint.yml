@@ -45,5 +45,8 @@ jobs:
       - name: Test 12.1 unit-frame aura runtime
         run: luajit tests/unit_frame_aura_runtime_test.lua
 
+      - name: Test unit-frame aura options
+        run: luajit tests/unit_frame_aura_options_test.lua
+
       - name: Test unit-frame config-mode lifecycle
         run: luajit tests/unit_frame_config_mode_lifecycle_test.lua
