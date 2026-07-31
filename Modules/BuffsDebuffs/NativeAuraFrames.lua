@@ -146,13 +146,6 @@ function BD.CanSuppressNativePublicAuras(which)
     return ResolveNativePublicAuraFrame(which) ~= nil
 end
 
-function BD.IsNativePublicAuraFrameHovered(which)
-    local target = ResolveNativePublicAuraFrame(which)
-    return target ~= nil
-        and type(target.frame.IsMouseOver) == "function"
-        and target.frame:IsMouseOver() == true
-end
-
 function BD.AreNativePublicAurasSuppressed(which)
     return suppressedStates[which] ~= nil
 end
