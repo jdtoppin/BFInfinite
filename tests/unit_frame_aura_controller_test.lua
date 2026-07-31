@@ -1437,7 +1437,7 @@ local function testGroupRetargetPrecedesStructuralTuning()
         "regen tuned holder visibility")
 end
 
-local function testGroupVisibilityWaitsForHover()
+local function testGroupVisibilityDoesNotProbeFrameState()
     local harness = makeHarness()
     local root = {}
     local seed = harness.AF.CreateCustomAuraContainer(root)
@@ -1449,20 +1449,21 @@ local function testGroupVisibilityWaitsForHover()
     )
 
     clearEvents(harness)
-    controller:GetFrame().mouseOver = true
+    controller:GetFrame().IsShown = function()
+        error("forbidden IsShown visibility read")
+    end
+    controller:GetFrame().IsMouseOver = function()
+        error("forbidden IsMouseOver visibility read")
+    end
     controller:SetShown(false)
 
-    assertEqual(seed.shown, true, "hovered group seed visibility")
-    assertEqual(controller:GetFrame().shown, true,
-        "hovered group holder visibility")
-    assertEqual(countEvents(harness, "native.hide"), 0,
-        "hovered native visibility mutation")
-
-    controller:GetFrame().mouseOver = nil
-    harness:RunTimers(0.25)
-    assertEqual(seed.shown, false, "post-hover group seed visibility")
+    assertEqual(seed.shown, false, "group seed visibility")
     assertEqual(controller:GetFrame().shown, false,
-        "post-hover group holder visibility")
+        "group holder visibility")
+    assertEqual(countEvents(harness, "native.hide"), 1,
+        "native visibility mutation")
+    assertEqual(#harness.timerCallbacks, 0,
+        "group visibility retry")
 end
 
 testCapabilityGate()
@@ -1484,6 +1485,6 @@ testGroupSeedAdoptionAndOneShotClaim()
 testGroupSeedBuildQueuesInCombat()
 testGroupCombatLiveRetarget()
 testGroupRetargetPrecedesStructuralTuning()
-testGroupVisibilityWaitsForHover()
+testGroupVisibilityDoesNotProbeFrameState()
 
 print("unit_frame_aura_controller_test.lua: ok")

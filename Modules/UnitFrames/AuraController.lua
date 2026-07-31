@@ -363,11 +363,6 @@ local function SetExternalContainerShownSafe(controller, shown)
         return true
     end
 
-    if controller.frame:IsMouseOver() then
-        controller:_QueueHoverRetry()
-        return false
-    end
-
     if shown then
         controller._container:Show()
     else
