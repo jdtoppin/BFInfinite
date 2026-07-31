@@ -8,7 +8,7 @@ local C_Timer = C_Timer
 local CreateFrame = CreateFrame
 local InCombatLockdown = InCombatLockdown
 local floor, huge = math.floor, math.huge
-local ipairs, next, pairs, pcall, type = ipairs, next, pairs, pcall, type
+local ipairs, next, pairs, type = ipairs, next, pairs, type
 
 -- Retail 12.1.0.68914 (wow-ui-source d3915c78) makes native aura
 -- groups/slots add-only and restricts their buttons after initialization.
@@ -295,19 +295,6 @@ local function HasPendingMutation(controller)
     return HasNativeMutation(controller) or controller._needsVisibility
 end
 
-function ControllerMixin:_QueueHoverRetry()
-    if self._hoverRetryScheduled or self._destroyed then return end
-
-    self._hoverRetryScheduled = true
-    C_Timer.After(0.25, function()
-        self._hoverRetryScheduled = nil
-        if self._destroyed or not HasPendingMutation(self) then return end
-
-        self:_ApplyPending()
-        UnregisterRegenIfIdle()
-    end)
-end
-
 function ControllerMixin:_QueueRegenDispatch()
     if self._regenDispatchScheduled then return end
 
@@ -328,29 +315,15 @@ function ControllerMixin:_QueueRegenDispatch()
 end
 
 local function SetHolderShownSafe(controller, shown)
-    local holder = controller.frame
-    if holder:IsShown() == shown then
+    if controller._holderShown == shown then
         return true
     end
 
-    -- IsShown/IsMouseOver are read only from BFI's plain, config-sized
-    -- holder. Native containers, restricted buttons, and aura state remain
-    -- opaque. A visibility flip while a native aura tooltip is hovered can
-    -- synchronously enter protected tooltip code, so retry after hover ends.
-    if holder:IsMouseOver() then
-        controller:_QueueHoverRetry()
-        return false
-    end
-
-    -- pcall only contains a non-secret write to BFI's own holder. It is not
-    -- an API/secret probe or a security boundary; hover avoidance above is
-    -- the defense. Verification keeps a raced or aborted write from letting
-    -- native mutations proceed while the holder is still visible.
-    local wrote = pcall(holder.SetShown, holder, shown)
-    if not wrote or holder:IsShown() ~= shown then
-        controller:_QueueHoverRetry()
-        return false
-    end
+    -- Retail 12.1.0.68914 can make visibility and hover accessors secret when
+    -- a holder is anchored to a native aura container. Keep an ordinary
+    -- write-only ledger instead of inspecting frame state.
+    controller.frame:SetShown(shown)
+    controller._holderShown = shown
     return true
 end
 
@@ -473,9 +446,8 @@ function ControllerMixin:_ApplyPending()
         return
     end
 
-    -- A pure public-holder visibility change is render-side only. It may run
-    -- in combat, but still waits for hover to end before firing tooltip
-    -- intrinsics through a native child.
+    -- A pure public-holder visibility change is render-side only and may run
+    -- in combat. Holder state is tracked only through BFI-owned writes.
     if not HasNativeMutation(self) then
         if RestoreHolderVisibility(self) then
             self._needsVisibility = nil
@@ -484,8 +456,8 @@ function ControllerMixin:_ApplyPending()
         return
     end
 
-    -- Native configuration and replacement work is OOC-only. Hide the plain
-    -- holder first so no hovered restricted child participates in the call.
+    -- Native configuration and replacement work is OOC-only. Hide the holder
+    -- before applying the complete requested presentation.
     local holderHidden = SetHolderShownSafe(self, false)
     if InCombatLockdown() then
         QueueController(self)
@@ -502,6 +474,7 @@ function ControllerMixin:_ApplyPending()
             self._container = nil
         end
         self._spec = nil
+        self._holderShown = nil
         self._destroyed = true
         pendingControllers[self] = nil
         return
@@ -592,8 +565,7 @@ end
 
 local function RequestMutation(controller)
     controller:_ApplyPending()
-    -- An ordinary out-of-combat update or hover retry may beat the queued
-    -- regen event.
+    -- An ordinary out-of-combat update may beat the queued regen event.
     UnregisterRegenIfIdle()
 end
 
@@ -727,6 +699,7 @@ function UF.CreateNativeAuraContainerController(
     local controller = setmetatable({}, ControllerMixin)
     controller.frame = CreateFrame("Frame", name, parent, frameTemplate)
     controller.frame:Hide()
+    controller._holderShown = false
 
     if completeSpec then
         controller:Rebuild(completeSpec)
@@ -856,19 +829,6 @@ local function SyncPartitionVisibility(controller)
     local shown = spec ~= nil and spec.enabled and spec.shown
     local variant = controller._variant or PARTITION_FRIENDLY
 
-    -- A relation swap while any restricted descendant is hovered must keep
-    -- the old presentation intact until hover ends. Never expose both.
-    if controller.frame:IsShown()
-        and controller.frame:IsMouseOver()
-        and (
-            not shown
-            or controller._shownVariant ~= variant
-        )
-    then
-        controller:_QueueHoverRetry()
-        return false
-    end
-
     if not shown then
         if not SetHolderShownSafe(controller, false) then
             return false
@@ -880,7 +840,7 @@ local function SyncPartitionVisibility(controller)
         return true
     end
 
-    local swapping = controller.frame:IsShown()
+    local swapping = controller._holderShown == true
         and controller._shownVariant ~= variant
     if swapping and not SetHolderShownSafe(controller, false) then
         return false
@@ -1064,6 +1024,7 @@ function PartitionControllerMixin:_ApplyPending()
         for _, key in ipairs(PARTITION_VARIANTS) do
             self[key]:Destroy()
         end
+        self._holderShown = nil
         self._spec = nil
         self._destroyed = true
         pendingControllers[self] = nil
@@ -1261,6 +1222,7 @@ function UF.CreateNativeAuraPartitionController(parent, name)
     local controller = setmetatable({}, PartitionControllerMixin)
     controller.frame = CreateFrame("Frame", name, parent)
     controller.frame:Hide()
+    controller._holderShown = false
     controller.friendly = UF.CreateNativeAuraContainerController(
         controller.frame,
         name .. "_Friendly"
