@@ -47,6 +47,7 @@ local FINALIZE_RETRY_DELAYS = {0.25, 0.50, 0.75, 0.75}
 local RUN_HYDRATION_RETRY_DELAYS = {0, 0.25, 1, 2}
 local RUN_START_MATCH_TOLERANCE = 10
 local MAX_RESTORE_IDENTITY_RETRIES = 2
+local EXPECTED_METER_RESET_WINDOW = 10
 
 local config
 local characterHistory
@@ -61,6 +62,8 @@ local updateAccumulator = 0
 local deadlineScheduled = {}
 local hydrationScheduleToken = 0
 local runStartScheduleToken = 0
+local expectedMeterResetReason
+local expectedMeterResetDeadline
 
 local RefreshDisplay
 local TryFinalizeRun
@@ -140,6 +143,29 @@ local function getTimestamp()
         end
     end
     return 0
+end
+
+function MP.PrepareForDamageMeterReset(reason)
+    if reason ~= "mythicPlusStart" then return false end
+
+    expectedMeterResetReason = reason
+    expectedMeterResetDeadline =
+        getTimestamp() + EXPECTED_METER_RESET_WINDOW
+    return true
+end
+
+local function consumeExpectedMeterReset()
+    local reason = expectedMeterResetReason
+    local deadline = expectedMeterResetDeadline
+    expectedMeterResetReason = nil
+    expectedMeterResetDeadline = nil
+
+    if reason == "mythicPlusStart"
+        and isFiniteNumber(deadline)
+        and getTimestamp() <= deadline
+    then
+        return reason
+    end
 end
 
 local function runAfter(delay, callback)
@@ -800,6 +826,21 @@ local function persistActiveRun()
     ensureHistory()
     characterHistory.activeRun = currentRun and currentRun.active
         and currentRun or nil
+end
+
+local function rebaseMeterAfterExpectedReset(run)
+    if type(run) ~= "table" or not run.active then return end
+
+    -- ResetAllCombatSessions makes Overall an authoritative zero. Recording
+    -- that state directly is deterministic even if DAMAGE_METER_RESET is
+    -- delivered after combat starts, when session reads become secret.
+    run.meterStart = nil
+    run.meterStartReason = "session_empty"
+    run.meterStartEmpty = true
+    run.meterReset = nil
+    run.liveMeterSnapshot = nil
+    run.pullSnapshots = {}
+    persistActiveRun()
 end
 
 local function persistPendingFinalization(run)
@@ -1720,7 +1761,10 @@ local function onEvent(_, event, ...)
             markOverallMeterUpdated()
         end
     elseif event == "DAMAGE_METER_RESET" then
-        if currentRun and currentRun.active then
+        local expectedReset = consumeExpectedMeterReset()
+        if currentRun and currentRun.active and expectedReset then
+            rebaseMeterAfterExpectedReset(currentRun)
+        elseif currentRun and currentRun.active then
             currentRun.meterReset = true
             persistActiveRun()
         end

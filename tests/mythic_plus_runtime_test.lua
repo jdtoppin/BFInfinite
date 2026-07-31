@@ -733,8 +733,60 @@ assertEqual(timerFrame.mouseEnabled, false,
 assertEqual(timerFrame.dragButtons[1], nil,
     "closing the preview unregisters direct drag input")
 
-tracker.alpha = secretAlpha
 state.challengeActive = true
+state.scenarioReady = true
+state.elapsed = 0
+eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_START", 2444)
+local resetAfterStartRun = MP.GetCurrentRun()
+resetAfterStartRun.liveMeterSnapshot = {stale = true}
+resetAfterStartRun.pullSnapshots = {{stale = true}}
+assertEqual(
+    MP.PrepareForDamageMeterReset("mythicPlusStart"),
+    true,
+    "Damage Meter automation can announce an intentional start reset"
+)
+eventFrame.scripts.OnEvent(eventFrame, "DAMAGE_METER_RESET")
+assertEqual(resetAfterStartRun.meterReset, nil,
+    "intentional reset after timer start does not invalidate the run")
+assertEqual(resetAfterStartRun.meterStart, nil,
+    "intentional reset rebases the stored meter snapshot")
+assertEqual(resetAfterStartRun.meterStartEmpty, true,
+    "intentional reset records an authoritative zero baseline")
+assertEqual(resetAfterStartRun.liveMeterSnapshot, nil,
+    "intentional reset clears pre-reset live data")
+assertEqual(#resetAfterStartRun.pullSnapshots, 0,
+    "intentional reset clears pre-reset pull data")
+eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_RESET")
+MP.ClearHistory()
+
+state.elapsed = 0
+assertEqual(
+    MP.PrepareForDamageMeterReset("mythicPlusStart"),
+    true,
+    "reset intent is accepted before the timer start handler"
+)
+eventFrame.scripts.OnEvent(eventFrame, "DAMAGE_METER_RESET")
+eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_START", 2444)
+local resetBeforeStartRun = MP.GetCurrentRun()
+assertEqual(resetBeforeStartRun.meterReset, nil,
+    "reset delivered before timer start leaves the new run valid")
+assertTrue(resetBeforeStartRun.meterStart,
+    "timer captures the already-reset Overall session")
+eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_RESET")
+MP.ClearHistory()
+
+state.elapsed = 0
+eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_START", 2444)
+local unexpectedResetRun = MP.GetCurrentRun()
+state.elapsed = 30
+eventFrame.scripts.OnEvent(eventFrame, "DAMAGE_METER_RESET")
+assertEqual(unexpectedResetRun.meterReset, true,
+    "an unannounced mid-run reset still invalidates meter statistics")
+eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_RESET")
+MP.ClearHistory()
+
+tracker.alpha = secretAlpha
+state.elapsed = 0
 state.scenarioReady = false
 eventFrame.scripts.OnEvent(eventFrame, "CHALLENGE_MODE_START", 2444)
 local run = MP.GetCurrentRun()

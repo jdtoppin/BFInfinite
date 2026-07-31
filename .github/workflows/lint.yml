@@ -33,6 +33,21 @@ jobs:
             ./scripts/lint.sh
           fi
 
+      - name: Test Damage Meter data adapter
+        run: luajit tests/damage_meter_data_test.lua
+
+      - name: Test Damage Meter native adapter
+        run: luajit tests/damage_meter_native_test.lua
+
+      - name: Test Damage Meter renderer, automation, defaults, lifecycle, and policy
+        run: |
+          luajit tests/damage_meter_automation_test.lua
+          luajit tests/damage_meter_defaults_test.lua
+          luajit tests/damage_meter_lifecycle_test.lua
+          luajit tests/damage_meter_options_test.lua
+          luajit tests/damage_meter_renderer_test.lua
+          luajit tests/damage_meter_renderer_policy_test.lua
+
       - name: Test Mythic+ timer, seasonal analysis, and tracker integration
         run: |
           for test_file in tests/abstract_framework_version_guard_test.lua tests/mythic_plus_*_test.lua tests/objective_tracker_taint_boundary_test.lua; do

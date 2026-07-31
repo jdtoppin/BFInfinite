@@ -26,6 +26,7 @@ BFI.requiredAFVersion = 29
 ---@field Chat Chat
 ---@field CooldownManager CooldownManager
 ---@field DataBars DataBars
+---@field DamageMeter DamageMeter
 ---@field Maps Maps
 ---@field Nameplates Nameplates
 ---@field Tooltip Tooltip
@@ -87,6 +88,8 @@ AF.AddEventHandler(BFI.modules.Maps)
 
 BFI.modules.DataBars = {}
 AF.AddEventHandler(BFI.modules.DataBars)
+
+BFI.modules.DamageMeter = {}
 
 BFI.modules.Chat = {}
 AF.AddEventHandler(BFI.modules.Chat)
