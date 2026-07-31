@@ -56,6 +56,9 @@ local function loadRenderer(
         classColorInputs = {},
         currentSessions = {},
         deathRecapCalls = {},
+        deathRecapEvents = {},
+        detailSourceCalls = {},
+        detailSources = {},
         formatInputs = {},
         formatOutputs = {},
         frames = {},
@@ -69,7 +72,9 @@ local function loadRenderer(
         openOptionsCalls = {},
         overallSessions = {},
         timers = {},
+        tooltipSpellCalls = {},
         unsafeOperations = 0,
+        inCombat = false,
     }
     if type(savedRestoreEnabled) == "boolean" then
         state.nativeOverrideState.damageMeterNativeEnabledBeforeBFI =
@@ -441,6 +446,7 @@ local function loadRenderer(
     function AF.CreateDropdown(parent, width)
         local dropdown = newFrame("Dropdown", parent, nil, width, 20)
         dropdown.button = newFrame("Button", dropdown)
+        dropdown.button.bg = newFrame("Texture", dropdown.button)
 
         function dropdown:SetItems(items)
             self.items = items
@@ -526,6 +532,8 @@ local function loadRenderer(
             return 0.1, 0.1, 0.1, alpha
         elseif name == "header" then
             return 0.18, 0.18, 0.18, alpha
+        elseif name == "none" then
+            return 0, 0, 0, 0
         end
         return 0.04, 0.04, 0.04, alpha
     end
@@ -551,7 +559,6 @@ local function loadRenderer(
     end
 
     local config = {
-        accentHeader = true,
         alwaysShowPlayer = true,
         backgroundAlpha = 0.82,
         barAlpha = 0.9,
@@ -640,6 +647,50 @@ local function loadRenderer(
         return state.availableSessions
     end
 
+    function DM.Data.GetCurrentSource(
+        meterType,
+        sourceGUID,
+        sourceCreatureID
+    )
+        state.detailSourceCalls[#state.detailSourceCalls + 1] = {
+            mode = "current",
+            meterType = meterType,
+            sourceCreatureID = sourceCreatureID,
+            sourceGUID = sourceGUID,
+        }
+        return state.detailSources[meterType]
+    end
+
+    function DM.Data.GetOverallSource(
+        meterType,
+        sourceGUID,
+        sourceCreatureID
+    )
+        state.detailSourceCalls[#state.detailSourceCalls + 1] = {
+            mode = "overall",
+            meterType = meterType,
+            sourceCreatureID = sourceCreatureID,
+            sourceGUID = sourceGUID,
+        }
+        return state.detailSources[meterType]
+    end
+
+    function DM.Data.GetHistoricalSource(
+        sessionID,
+        meterType,
+        sourceGUID,
+        sourceCreatureID
+    )
+        state.detailSourceCalls[#state.detailSourceCalls + 1] = {
+            mode = "history",
+            meterType = meterType,
+            sessionID = sessionID,
+            sourceCreatureID = sourceCreatureID,
+            sourceGUID = sourceGUID,
+        }
+        return state.detailSources[meterType]
+    end
+
     function DM.Native.GetEnabled()
         return state.nativeEnabled
     end
@@ -665,6 +716,7 @@ local function loadRenderer(
         media = {
             bar = "fallback-bar-texture",
         },
+        name = "BFInfinite",
         modules = {
             DamageMeter = DM,
         },
@@ -677,6 +729,9 @@ local function loadRenderer(
                 style = style,
                 value = value,
             }
+            if type(value) == "string" then
+                return value
+            end
             local output = state.ambiguousOutputs[value]
             if not output then
                 output = newOpaqueValue("ambiguous")
@@ -685,6 +740,26 @@ local function loadRenderer(
             return output
         end,
         BFICVarBackup = state.nativeOverrideState,
+        AbbreviateLargeNumbers = function(value)
+            return tostring(math.floor(value + 0.5))
+        end,
+        ACTION_SWING = "Melee",
+        C_DeathRecap = {
+            GetRecapEvents = function(recapID)
+                return state.deathRecapEvents[recapID] or {}
+            end,
+            GetRecapMaxHealth = function()
+                return 1000
+            end,
+        },
+        C_Spell = {
+            GetSpellName = function(spellID)
+                return "Spell " .. spellID
+            end,
+            GetSpellTexture = function(spellID)
+                return 2000 + spellID
+            end,
+        },
         C_Timer = {
             NewTimer = function(_, callback)
                 local timer = {
@@ -721,9 +796,28 @@ local function loadRenderer(
         GetCursorPosition = function()
             return state.cursorX or 0, state.cursorY or 0
         end,
+        GetBuildInfo = function()
+            return "12.1.0", "68914", "Jul 31 2026", 120100
+        end,
+        GameTooltip = {
+            Hide = function(self)
+                self.hidden = true
+            end,
+            SetOwner = function(self, owner, anchor)
+                self.owner = owner
+                self.anchor = anchor
+            end,
+            SetSpellByID = function(self, spellID)
+                state.tooltipSpellCalls[#state.tooltipSpellCalls + 1] =
+                    spellID
+            end,
+            Show = function(self)
+                self.shown = true
+            end,
+        },
         HEALING = "Healing",
         InCombatLockdown = function()
-            return false
+            return state.inCombat
         end,
         MINIMIZE = "Minimize",
         OpenDeathRecapUI = function(deathRecapID)
@@ -739,6 +833,9 @@ local function loadRenderer(
         math = math,
         pairs = pairs,
         select = select,
+        string = string,
+        table = table,
+        tostring = tostring,
         type = type,
     }
     environment._G = environment
@@ -767,6 +864,8 @@ local function loadRenderer(
             isLocalPlayer = false,
             name = newOpaqueValue("name-" .. index),
             specIconID = 1000 + index,
+            sourceCreatureID = nil,
+            sourceGUID = "source-guid-" .. index,
             totalAmount = newOpaqueValue("total-" .. index),
             deathRecapID = 0,
         }
@@ -774,11 +873,32 @@ local function loadRenderer(
             combatSources = {
                 source,
             },
+            durationSeconds = 10,
             maxAmount = newOpaqueValue("maximum-" .. index),
             totalAmount = newOpaqueValue("session-total-" .. index),
         }
         sources[index] = source
         sessions[index] = session
+        state.detailSources[meterType] = {
+            combatSpells = {
+                {
+                    amountPerSecond = 25,
+                    combatSpellDetails = {
+                        classification = "",
+                        isMob = false,
+                        isPet = false,
+                        specIconID = 3000 + index,
+                        unitClassFilename = "MAGE",
+                        unitName = "Detail Player " .. index,
+                    },
+                    creatureName = "",
+                    spellID = 100 + index,
+                    totalAmount = 250,
+                },
+            },
+            maxAmount = 250,
+            totalAmount = 250,
+        }
         state.currentSessions[meterType] = session
         state.overallSessions[meterType] = session
         state.historicalSessions[91][meterType] = session
@@ -808,31 +928,43 @@ assertEqual(type(first), "table", "first addon-owned window")
 assertEqual(type(second), "table", "second addon-owned window")
 assertEqual(type(third), "table", "third addon-owned window")
 assertEqual(
-    first.header.backgroundColorName,
-    "header",
-    "title bar uses the standard BFI header surface"
+    first.header.hasBorderlessBackdrop,
+    true,
+    "title bar uses the chat-style borderless surface"
+)
+assertEqual(first.header.backdropColor.r, 0.04, "title bar gray red")
+assertEqual(first.header.backdropColor.g, 0.04, "title bar gray green")
+assertEqual(first.header.backdropColor.b, 0.04, "title bar gray blue")
+assertEqual(first.header.backdropColor.a, 0.82, "title bar alpha")
+assertEqual(first.header.tex, nil, "title bar has no gradient texture")
+assertEqual(first.typeDropdown.backdropColor.a, 0, "type dropdown is flat")
+assertEqual(first.typeDropdown.borderColor.a, 0, "type border is hidden")
+assertEqual(
+    first.typeDropdown.button.borderColor.a,
+    0,
+    "type arrow border is hidden"
 )
 assertEqual(
-    first.header.borderColorName,
-    "border",
-    "title bar uses the standard BFI border"
+    first.typeDropdown.button.bg.shown,
+    false,
+    "type arrow background is hidden"
 )
 assertEqual(
-    first.header.tex.gradientOrientation,
-    "HORIZONTAL",
-    "title bar accent uses the standard horizontal gradient"
+    first.sessionDropdown.backdropColor.a,
+    0,
+    "session dropdown is flat"
 )
-assertEqual(first.header.tex.gradientColor1[1], 0.82, "gradient red")
-assertEqual(first.header.tex.gradientColor1[2], 0.37, "gradient green")
-assertEqual(first.header.tex.gradientColor1[3], 0.12, "gradient blue")
-assertEqual(first.header.tex.gradientColor1[4], 0.4, "gradient start alpha")
-assertEqual(first.header.tex.gradientColor2[4], 0, "gradient end alpha")
-assertSame(
-    first.header.tex.onePixelInside,
-    first.header,
-    "title bar accent is inset within its border"
+assertEqual(first.dragGrip.texture, "icon:Link", "dock control uses link icon")
+assertEqual(
+    first.dragGrip.tooltipBody,
+    "Drag this window on top to another highlighted window and release to anchor it",
+    "dock tooltip explains highlighted drop target"
 )
-assertEqual(first.header.tex.shown, true, "accent header defaults on")
+assertEqual(
+    first.lock.texture,
+    "icon:Unlock.svg",
+    "unlocked meters use the dedicated unlock icon"
+)
 assertEqual(first.shown, true, "first window shown")
 assertEqual(second.shown, true, "second window shown")
 assertEqual(third.shown, true, "third window shown")
@@ -881,7 +1013,9 @@ assertEqual(
     "native preference is not stored in the profile"
 )
 
-local firstRow = first.body.children[1]
+local firstRow = first.rows[1]
+assertEqual(firstRow.rank.justifyH, "LEFT", "row number is left aligned")
+assertEqual(firstRow.rank.width, 16, "row number uses a compact column")
 assertSame(
     firstRow.bar.maximum,
     sessions[1].maxAmount,
@@ -1208,19 +1342,58 @@ assertEqual(
 )
 
 sources[10].deathRecapID = 77
+state.deathRecapEvents[77] = {
+    {
+        amount = 600,
+        currentHP = 0,
+        event = "SPELL_DAMAGE",
+        overkill = 100,
+        spellId = 901,
+        spellName = "Final Blow",
+        timestamp = 100,
+    },
+    {
+        amount = 300,
+        currentHP = 400,
+        event = "SPELL_DAMAGE",
+        spellId = 902,
+        spellName = "Earlier Hit",
+        timestamp = 98,
+    },
+}
 first.typeDropdown:Select("Deaths")
 assertEqual(
     firstRow.hoverCard.recapHint.shown,
     true,
-    "death rows advertise Blizzard's recap"
+    "death rows advertise the detailed report"
 )
 firstRow:RunScript("OnMouseUp", "LeftButton")
-assertEqual(#state.deathRecapCalls, 1, "death row opens one native recap")
-assertEqual(state.deathRecapCalls[1], 77, "never-secret recap ID forwarded")
+assertEqual(first.detailOpen, true, "death row opens an in-meter report")
+assertEqual(first.detailPanel.shown, true, "death report panel is visible")
+assertEqual(firstRow.shown, false, "death report replaces summary rows")
+assertEqual(
+    first.detailRows[1].label.text,
+    "-2.0s  Earlier Hit",
+    "death events are displayed chronologically"
+)
+assertEqual(
+    first.detailRows[2].label.text,
+    "-0.0s  Final Blow",
+    "final death event appears last"
+)
+assertEqual(
+    first.detailRows[1].value.text,
+    "-300  40%",
+    "death report includes amount and remaining health"
+)
+assertEqual(#state.detailSourceCalls, 0, "death report uses recap data only")
+first.detailPanel:RunScript("OnMouseUp", "RightButton")
+assertEqual(first.detailOpen, nil, "right click returns from death report")
+assertEqual(firstRow.shown, true, "summary rows return after right click")
 sources[10].deathRecapID = 0
 Renderer.Refresh()
 firstRow:RunScript("OnMouseUp", "LeftButton")
-assertEqual(#state.deathRecapCalls, 1, "zero recap ID is ignored")
+assertEqual(first.detailOpen, nil, "zero recap ID is ignored")
 first.typeDropdown:Select("DamageDone")
 
 local scrollingSources = {}
@@ -1231,7 +1404,7 @@ end
 sessions[1].combatSources = scrollingSources
 Renderer.Refresh()
 
-local eighthRow = first.body.children[8]
+local eighthRow = first.rows[8]
 assertEqual(
     first.body.mouseWheelEnabled,
     true,
@@ -1421,7 +1594,7 @@ assertEqual(
 sessions[2].combatSources = scrollingSources
 Renderer.Refresh()
 second.body:RunScript("OnMouseWheel", -1)
-local secondFirstRow = second.body.children[1]
+local secondFirstRow = second.rows[1]
 assertEqual(
     secondFirstRow.rank.text,
     2,
@@ -1440,7 +1613,7 @@ assertEqual(
     "local player above the viewport remains pinned"
 )
 assertEqual(
-    first.body.children[2].rank.text,
+    first.rows[2].rank.text,
     3,
     "sources after a top pin retain Blizzard order"
 )
@@ -1474,7 +1647,7 @@ sessions[1].combatSources = {
 Renderer.Refresh()
 assertEqual(firstRow.rank.text, 1, "shorter session clamps offset to zero")
 assertEqual(
-    first.body.children[3].shown,
+    first.rows[3].shown,
     false,
     "shorter session clears rows beyond its source count"
 )
@@ -1505,6 +1678,7 @@ Renderer.Refresh()
 
 first.lock:Click()
 assertEqual(DM.config.locked, true, "lock button locks all meters")
+assertEqual(first.lock.texture, "icon:Lock.svg", "lock icon reflects locked state")
 assertEqual(first.resizable, false, "lock disables first resize")
 assertEqual(second.resizable, false, "lock disables second resize")
 assertEqual(first.resize.shown, false, "lock hides first resize grip")
@@ -1512,6 +1686,11 @@ first.dragGrip:RunScript("OnDragStart")
 assertEqual(first.moving, nil, "locked drag grip cannot start moving")
 second.lock:Click()
 assertEqual(DM.config.locked, false, "any lock button unlocks all")
+assertEqual(
+    first.lock.texture,
+    "icon:Unlock.svg",
+    "unlock icon reflects movable state"
+)
 assertEqual(first.resizable, true, "unlock restores first resize")
 assertEqual(third.resize.shown, true, "unlock restores resize grips")
 
@@ -1782,7 +1961,7 @@ assertEqual(Renderer.SetEnabled(true), true, "renderer re-enable")
 assertEqual(state.nativeEnabled, false, "native hidden after re-enable")
 local originalFirstWindow = first
 local nativeCallsBeforeLiveApply = #state.nativeSetCalls
-local thirdRow = third.body.children[1]
+local thirdRow = third.rows[1]
 thirdRow:RunScript("OnEnter")
 assertEqual(thirdRow.hoverCard.shown, true, "third hover card precondition")
 
@@ -1799,7 +1978,6 @@ DM.config.showSpecIcon = false
 DM.config.classColor = false
 DM.config.backgroundAlpha = 0.65
 DM.config.barAlpha = 0.55
-DM.config.accentHeader = false
 DM.config.windowCount = 2
 
 assertEqual(Renderer.ApplySettings(), true, "live settings apply")
@@ -1814,18 +1992,18 @@ assertEqual(second.height, 240, "second window keeps its own height")
 assertEqual(first.header.height, 26, "live header height")
 assertEqual(
     first.header.backdropColor.r,
-    0.18,
-    "title bar keeps its dark header surface"
+    0.04,
+    "title bar keeps its transparent gray surface"
 )
 assertEqual(
-    first.header.borderColor.r,
-    0.1,
-    "title bar keeps its border color"
+    first.header.backdropColor.a,
+    0.65,
+    "title bar follows the live window transparency"
 )
 assertEqual(
-    first.header.tex.shown,
-    false,
-    "disabling Accent Header hides only the gradient"
+    first.header.tex,
+    nil,
+    "title bar remains gradient-free after live settings"
 )
 assertEqual(firstRow.height, 24, "live bar height")
 assertEqual(firstRow.points[1].x, 6, "live horizontal padding")
@@ -1959,5 +2137,315 @@ assertEqual(
     true,
     "history retention renderer disables"
 )
+
+local function RunDetailReportTests()
+    local detailRenderer, _, detailState, detailSources =
+        loadRenderer()
+    assertEqual(
+        detailRenderer.SetEnabled(true),
+        true,
+        "detail-report renderer enables"
+    )
+
+    local window = detailState.namedFrames.BFIDamageMeterWindow1
+    local row = window.rows[1]
+    detailSources[1].name = "Damage Player"
+    detailSources[11].name = "Training Dummy"
+    detailState.detailSources[11] = {
+        combatSpells = {
+            {
+                combatSpellDetails = {},
+                spellID = 101,
+                totalAmount = 600,
+            },
+            {
+                combatSpellDetails = {},
+                spellID = 102,
+                totalAmount = 400,
+            },
+        },
+        maxAmount = 600,
+        totalAmount = 1000,
+    }
+    detailState.detailSources[36] = {
+        combatSpells = {
+            {
+                combatSpellDetails = {
+                    specIconID = 4101,
+                    unitClassFilename = "MAGE",
+                    unitName = "Damage Player",
+                },
+                totalAmount = 300,
+            },
+            {
+                combatSpellDetails = {
+                    specIconID = 4101,
+                    unitClassFilename = "MAGE",
+                    unitName = "Damage Player",
+                },
+                totalAmount = 200,
+            },
+            {
+                combatSpellDetails = {
+                    specIconID = 4102,
+                    unitClassFilename = "PRIEST",
+                    unitName = "Healer",
+                },
+                totalAmount = 250,
+            },
+        },
+        maxAmount = 300,
+        totalAmount = 750,
+    }
+    detailRenderer.Refresh()
+
+    row:RunScript("OnMouseUp", "LeftButton")
+    assertEqual(window.detailOpen, true, "left click opens details")
+    assertEqual(window.detailPanel.shown, true, "detail panel is visible")
+    assertEqual(row.shown, false, "summary row hides while details are open")
+    assertEqual(window.detailTitle.text, "Damage Player", "detail title")
+    assertEqual(window.detailRows[1].label.text, "Spell 101", "spell label")
+    assertEqual(
+        window.detailRows[1].value.text,
+        "600  60.0%",
+        "spell row includes total and percentage"
+    )
+    assertEqual(window.detailRows[1].icon.texture, 2101, "spell icon")
+    assertEqual(
+        window.detailRows[3].label.text,
+        "Targets",
+        "damage report includes a target section"
+    )
+    assertEqual(
+        window.detailRows[4].label.text,
+        "Training Dummy",
+        "damage report includes the top target"
+    )
+    assertEqual(
+        window.detailRows[4].value.text,
+        "500  50/s",
+        "target row includes total and rate"
+    )
+    assertEqual(
+        detailState.detailSourceCalls[1].mode,
+        "current",
+        "current details use the current-session source API"
+    )
+    window.detailRows[1]:RunScript("OnEnter")
+    assertEqual(
+        detailState.tooltipSpellCalls[1],
+        101,
+        "detail spell hover opens the spell tooltip"
+    )
+    assertEqual(
+        window.detailRows[1].highlight.shown,
+        true,
+        "detail rows retain hover highlighting"
+    )
+    window.detailRows[1]:RunScript("OnLeave")
+    window.detailRows[1]:RunScript("OnMouseUp", "RightButton")
+    assertEqual(window.detailOpen, nil, "right click returns to summary")
+    assertEqual(row.shown, true, "summary row returns after details")
+
+    window.typeDropdown:Select("Dps")
+    row:RunScript("OnMouseUp", "LeftButton")
+    assertEqual(
+        window.detailRows[1].value.text,
+        "25/s  250  100.0%",
+        "DPS details show rate first, then total and percentage"
+    )
+    assertEqual(
+        window.detailRows[1].bar.value,
+        25,
+        "DPS detail bars use the per-second value"
+    )
+    window.detailPanel:RunScript("OnMouseUp", "RightButton")
+    window.typeDropdown:Select("DamageDone")
+
+    detailState.inCombat = true
+    local callsBeforeCombat = #detailState.detailSourceCalls
+    row:RunScript("OnEnter")
+    assertEqual(
+        row.hoverCard.recapHint.text,
+        "Detailed information is secret while in combat.",
+        "combat hover explains secret detail behavior"
+    )
+    assertEqual(
+        row.hoverCard.shareBar.shown,
+        false,
+        "combat hover does not retain the out-of-combat share bar"
+    )
+    row:RunScript("OnMouseUp", "LeftButton")
+    assertEqual(window.detailOpen, nil, "combat click does not open details")
+    assertEqual(
+        #detailState.detailSourceCalls,
+        callsBeforeCombat,
+        "combat click never queries source-detail APIs"
+    )
+    row:RunScript("OnLeave")
+
+    detailState.inCombat = false
+    row:RunScript("OnMouseUp", "LeftButton")
+    local eventFrame
+    for _, frame in ipairs(detailState.frames) do
+        if frame.events.PLAYER_REGEN_DISABLED then
+            eventFrame = frame
+            break
+        end
+    end
+    assertEqual(type(eventFrame), "table", "combat event frame registered")
+    local callsBeforeCombatStart = #detailState.detailSourceCalls
+    detailState.inCombat = true
+    eventFrame:RunScript("OnEvent", "PLAYER_REGEN_DISABLED")
+    assertEqual(window.detailOpen, nil, "combat start closes open details")
+    assertEqual(window.detailSourceIndex, nil, "combat clears source index")
+    assertEqual(window.detailTitle.text, "", "combat clears detail title")
+    assertEqual(
+        window.detailRows[1].label.text,
+        "",
+        "combat clears rendered detail text"
+    )
+    assertEqual(
+        #detailState.detailSourceCalls,
+        callsBeforeCombatStart,
+        "combat teardown does not query source-detail APIs"
+    )
+
+    detailState.inCombat = false
+    window.sessionDropdown:Select("overall")
+    local overallCall = #detailState.detailSourceCalls + 1
+    row:RunScript("OnMouseUp", "LeftButton")
+    assertEqual(
+        detailState.detailSourceCalls[overallCall].mode,
+        "overall",
+        "overall details use the overall source API"
+    )
+    window.detailPanel:RunScript("OnMouseUp", "RightButton")
+
+    window.sessionDropdown:Select("history:91")
+    local historyCall = #detailState.detailSourceCalls + 1
+    row:RunScript("OnMouseUp", "LeftButton")
+    assertEqual(
+        detailState.detailSourceCalls[historyCall].mode,
+        "history",
+        "historical details use the historical source API"
+    )
+    assertEqual(
+        detailState.detailSourceCalls[historyCall].sessionID,
+        91,
+        "historical details retain the selected session ID"
+    )
+    window.detailPanel:RunScript("OnMouseUp", "RightButton")
+
+    window.sessionDropdown:Select("current")
+    window.typeDropdown:Select("EnemyDamageTaken")
+    row:RunScript("OnMouseUp", "LeftButton")
+    assertEqual(
+        window.detailRows[1].label.text,
+        "Damage Player",
+        "enemy report groups damage by player"
+    )
+    assertEqual(
+        window.detailRows[1].value.text,
+        "500  50/s",
+        "enemy player row includes total and rate"
+    )
+    assertEqual(
+        window.detailRows[2].label.text,
+        "Healer",
+        "enemy report sorts the next player"
+    )
+    window.detailPanel:RunScript("OnMouseUp", "RightButton")
+
+    local manySpells = {}
+    for index = 1, 46 do
+        manySpells[index] = {
+            combatSpellDetails = {},
+            spellID = 200 + index,
+            totalAmount = 100,
+        }
+    end
+    detailState.detailSources[11] = {
+        combatSpells = manySpells,
+        maxAmount = 100,
+        totalAmount = 4600,
+    }
+    window.typeDropdown:Select("DamageDone")
+    row:RunScript("OnMouseUp", "LeftButton")
+    assertEqual(
+        window.detailMaxOffset > 0,
+        true,
+        "long detail reports expose a scroll range"
+    )
+    assertEqual(window.detailRows[1].label.text, "Spell 201", "scroll start")
+    window.detailPanel:RunScript("OnMouseWheel", -1)
+    assertEqual(window.detailOffset, 1, "detail wheel advances one row")
+    assertEqual(
+        window.detailRows[1].label.text,
+        "Spell 202",
+        "detail scrolling advances the bounded row pool"
+    )
+    for _ = 1, 50 do
+        window.detailPanel:RunScript("OnMouseWheel", -1)
+    end
+    assertEqual(
+        window.detailOffset,
+        41,
+        "detail scrolling reaches the full uncapped report"
+    )
+    assertEqual(
+        window.detailRows[5].label.text,
+        "Spell 246",
+        "spell entries beyond the former 40-row boundary remain reachable"
+    )
+    window.detailPanel:RunScript("OnMouseUp", "RightButton")
+    assertEqual(
+        detailRenderer.SetEnabled(false),
+        true,
+        "detail-report renderer disables"
+    )
+
+    local compactRenderer, compactDM, compactState = loadRenderer()
+    compactDM.config.headerHeight = 36
+    compactDM.config.barHeight = 36
+    compactDM.config.padding = 12
+    compactDM.config.spacing = 8
+    for index = 1, 3 do
+        compactDM.config.windowHeights[index] = 120
+    end
+    assertEqual(
+        compactRenderer.SetEnabled(true),
+        true,
+        "compact detail renderer enables"
+    )
+    local compactWindow =
+        compactState.namedFrames.BFIDamageMeterWindow1
+    local compactRow = compactWindow.rows[1]
+    assertEqual(compactWindow.visibleRowCount, 1, "compact meter has one row")
+    compactRow:RunScript("OnMouseUp", "LeftButton")
+    assertEqual(
+        compactWindow.visibleDetailRowCount,
+        1,
+        "compact report keeps one visible detail row"
+    )
+    assertEqual(
+        compactWindow.detailTitle.shown,
+        false,
+        "compact report releases the in-body title row"
+    )
+    assertEqual(
+        compactWindow.detailRows[1].points[1].y,
+        -12,
+        "compact detail row stays inside the meter body"
+    )
+    compactWindow.detailPanel:RunScript("OnMouseUp", "RightButton")
+    assertEqual(
+        compactRenderer.SetEnabled(false),
+        true,
+        "compact detail renderer disables"
+    )
+end
+
+RunDetailReportTests()
 
 print("damage_meter_renderer_test.lua: ok")

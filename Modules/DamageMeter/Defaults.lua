@@ -85,7 +85,6 @@ local defaults = {
     classColor = true,
     backgroundAlpha = 0.82,
     barAlpha = 0.9,
-    accentHeader = true,
 }
 
 local validWindowTypes = {
@@ -430,9 +429,6 @@ local function NormalizeConfig(config)
         0,
         1
     )
-    if type(config.accentHeader) ~= "boolean" then
-        config.accentHeader = defaults.accentHeader
-    end
 end
 
 AF.RegisterCallback("BFI_UpdateProfile", function(_, profile)

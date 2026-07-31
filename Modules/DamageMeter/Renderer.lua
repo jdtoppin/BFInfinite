@@ -41,6 +41,8 @@ local SESSION_MODE_HISTORY = "history"
 local SESSION_DROPDOWN_WIDTH = 120
 local MIN_SESSION_DROPDOWN_WIDTH = 60
 local MIN_TYPE_DROPDOWN_WIDTH = 60
+local SVG_INTERFACE_VERSION = 120100
+local MAX_DETAIL_TARGETS = 3
 
 local TYPE_DEFINITIONS = {
     DamageDone = {
@@ -152,6 +154,10 @@ local resetPositionPending
 local activeDockTarget
 local activeDockDirection
 local ScrollWindow
+local ScrollWindowDetails
+local OpenWindowDetails
+local CloseWindowDetails
+local RefreshWindowDetails
 local sessionItems = {}
 local sessionSelections = {}
 local sessionItemsDirty = true
@@ -533,9 +539,41 @@ local function EndNativeOverride()
     nativeRestoreEnabled = nil
 end
 
-local function SetButtonIcon(button, icon, color)
-    button:SetTexture(icon, {12, 12}, {"CENTER", 0, 0})
+local function SetButtonIcon(button, icon, color, size)
+    size = size or 12
+    button:SetTexture(icon, {size, size}, {"CENTER", 0, 0})
     button:SetTextureColor(color or "white")
+end
+
+local function GetLockButtonIcon(locked)
+    local interfaceVersion = 0
+    if type(_G.GetBuildInfo) == "function" then
+        interfaceVersion = select(4, _G.GetBuildInfo()) or 0
+    end
+
+    -- Retail 12.1 adds ordinary Texture support for SVG paths. Keep the
+    -- narrow 12.0.7 compatibility fallback on AF's existing raster icons.
+    if interfaceVersion >= SVG_INTERFACE_VERSION then
+        return AF.GetIcon(
+            locked and "Lock.svg" or "Unlock.svg",
+            BFI.name
+        )
+    end
+
+    return AF.GetIcon(locked and "Unavailable" or "Anchor_CENTER")
+end
+
+local function ApplyFlatDropdownStyle(dropdown)
+    dropdown:SetBackdropColor(AF.GetColorRGB("none"))
+    dropdown:SetBackdropBorderColor(AF.GetColorRGB("none"))
+
+    local button = dropdown.button
+    if not button then return end
+
+    button:SetBackdropBorderColor(AF.GetColorRGB("none"))
+    if button.bg then
+        button.bg:Hide()
+    end
 end
 
 local function CreateRowHoverCard(row)
@@ -606,8 +644,8 @@ local function CreateRowHoverCard(row)
 
     local recapHint = AF.CreateFontString(card, nil, "gray")
     card.recapHint = recapHint
-    recapHint:SetText(L["Click for Death Recap"])
     recapHint:SetJustifyH("LEFT")
+    recapHint:SetWordWrap(true)
 
     local shareBar = _G.CreateFrame(
         "StatusBar",
@@ -625,6 +663,122 @@ local function CreateRowHoverCard(row)
     shareBar:SetValue(0)
 
     return card
+end
+
+local function ConfigureRowHoverCard(row)
+    local card = row.hoverCard
+    local inCombat = type(_G.InCombatLockdown) == "function"
+        and _G.InCombatLockdown()
+
+    card.totalLabel:SetShown(not inCombat)
+    card.totalValue:SetShown(not inCombat)
+    card.perSecondLabel:SetShown(
+        not inCombat and not row.suppressValuePerSecond
+    )
+    card.perSecondValue:SetShown(
+        not inCombat and not row.suppressValuePerSecond
+    )
+    card.groupTotalLabel:SetShown(not inCombat)
+    card.groupTotalValue:SetShown(not inCombat)
+    card.shareBar:SetShown(not inCombat)
+    card.recapHint:Show()
+    card.recapHint:ClearAllPoints()
+
+    if inCombat then
+        card.recapHint:SetText(
+            L["Detailed information is secret while in combat."]
+        )
+        card.recapHint:SetPoint(
+            "TOPLEFT",
+            card.title,
+            "BOTTOMLEFT",
+            0,
+            -10
+        )
+        card.recapHint:SetPoint(
+            "TOPRIGHT",
+            card,
+            "TOPRIGHT",
+            -8,
+            -28
+        )
+        card:SetHeight(66)
+        return
+    end
+
+    if row.isDeathMeter
+        and (not row.deathRecapID or row.deathRecapID == 0)
+    then
+        card.recapHint:SetText(L["No death recap available."])
+    else
+        card.recapHint:SetText(L["Left-click for details."])
+    end
+
+    if row.suppressValuePerSecond then
+        card.groupTotalLabel:ClearAllPoints()
+        card.groupTotalLabel:SetPoint(
+            "TOPLEFT",
+            card.totalLabel,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        card.groupTotalValue:ClearAllPoints()
+        card.groupTotalValue:SetPoint(
+            "TOPRIGHT",
+            card,
+            "TOPRIGHT",
+            -8,
+            -49
+        )
+        card.recapHint:SetPoint(
+            "TOPLEFT",
+            card.groupTotalLabel,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        card.recapHint:SetPoint(
+            "TOPRIGHT",
+            card,
+            "TOPRIGHT",
+            -8,
+            -68
+        )
+        card:SetHeight(104)
+    else
+        card.groupTotalLabel:ClearAllPoints()
+        card.groupTotalLabel:SetPoint(
+            "TOPLEFT",
+            card.perSecondLabel,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        card.groupTotalValue:ClearAllPoints()
+        card.groupTotalValue:SetPoint(
+            "TOPRIGHT",
+            card,
+            "TOPRIGHT",
+            -8,
+            -69
+        )
+        card.recapHint:SetPoint(
+            "TOPLEFT",
+            card.groupTotalLabel,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        card.recapHint:SetPoint(
+            "TOPRIGHT",
+            card,
+            "TOPRIGHT",
+            -8,
+            -88
+        )
+        card:SetHeight(124)
+    end
 end
 
 local function CreateRow(parent, window)
@@ -664,7 +818,7 @@ local function CreateRow(parent, window)
 
     local rank = AF.CreateFontString(overlay, nil, "gray")
     row.rank = rank
-    rank:SetJustifyH("RIGHT")
+    rank:SetJustifyH("LEFT")
     rank:SetWordWrap(false)
 
     local iconHolder = AF.CreateFrame(
@@ -702,6 +856,7 @@ local function CreateRow(parent, window)
     CreateRowHoverCard(row)
     row:SetScript("OnEnter", function()
         row.highlight:Show()
+        ConfigureRowHoverCard(row)
         row.hoverCard:ClearAllPoints()
         row.hoverCard:SetPoint(
             "TOPRIGHT",
@@ -718,14 +873,12 @@ local function CreateRow(parent, window)
     end)
     row:SetScript("OnMouseUp", function(_, button)
         if button ~= "LeftButton" then return end
-
-        local deathRecapID = row.deathRecapID
-        if deathRecapID
-            and deathRecapID ~= 0
-            and type(_G.OpenDeathRecapUI) == "function"
+        if row.isDeathMeter
+            and (not row.deathRecapID or row.deathRecapID == 0)
         then
-            _G.OpenDeathRecapUI(deathRecapID)
+            return
         end
+        OpenWindowDetails(window, row.sourceIndex)
     end)
 
     return row
@@ -768,19 +921,19 @@ local function ApplyRowLayout(row, index, config, texture, definition)
 
     row.rank:ClearAllPoints()
     row.rank:SetPoint("LEFT", row, "LEFT", 3, 0)
-    row.rank:SetWidth(20)
+    row.rank:SetWidth(16)
 
     local iconSize = barHeight - 4
     row.iconHolder:ClearAllPoints()
-    row.iconHolder:SetPoint("LEFT", row.rank, "RIGHT", 3, 0)
+    row.iconHolder:SetPoint("LEFT", row.rank, "RIGHT", 2, 0)
     row.iconHolder:SetSize(iconSize, iconSize)
     row.iconHolder:SetShown(showIcon)
 
     row.name:ClearAllPoints()
     if showIcon then
-        row.name:SetPoint("LEFT", row.iconHolder, "RIGHT", 4, 0)
+        row.name:SetPoint("LEFT", row.iconHolder, "RIGHT", 3, 0)
     else
-        row.name:SetPoint("LEFT", row.rank, "RIGHT", 5, 0)
+        row.name:SetPoint("LEFT", row.rank, "RIGHT", 3, 0)
     end
 
     row.total:ClearAllPoints()
@@ -834,60 +987,856 @@ local function ApplyRowLayout(row, index, config, texture, definition)
     row.hoverCard.perSecondValue:SetShown(
         not definition.suppressValuePerSecond
     )
-    row.hoverCard.groupTotalLabel:ClearAllPoints()
-    row.hoverCard.groupTotalValue:ClearAllPoints()
-    row.hoverCard.recapHint:ClearAllPoints()
-    if definition.suppressValuePerSecond then
-        row.hoverCard.groupTotalLabel:SetPoint(
-            "TOPLEFT",
-            row.hoverCard.totalLabel,
-            "BOTTOMLEFT",
-            0,
-            -7
-        )
-        row.hoverCard.groupTotalValue:SetPoint(
-            "TOPRIGHT",
-            row.hoverCard,
-            "TOPRIGHT",
-            -8,
-            -49
-        )
-        row.hoverCard.recapHint:SetPoint(
-            "TOPLEFT",
-            row.hoverCard.groupTotalLabel,
-            "BOTTOMLEFT",
-            0,
-            -7
-        )
-        row.hoverCard:SetHeight(90)
-    else
-        row.hoverCard.groupTotalLabel:SetPoint(
-            "TOPLEFT",
-            row.hoverCard.perSecondLabel,
-            "BOTTOMLEFT",
-            0,
-            -7
-        )
-        row.hoverCard.groupTotalValue:SetPoint(
-            "TOPRIGHT",
-            row.hoverCard,
-            "TOPRIGHT",
-            -8,
-            -69
-        )
-        row.hoverCard.recapHint:SetPoint(
-            "TOPLEFT",
-            row.hoverCard.groupTotalLabel,
-            "BOTTOMLEFT",
-            0,
-            -7
-        )
-        row.hoverCard:SetHeight(110)
-    end
     row.hoverCard.shareBar:SetStatusBarTexture(texture)
     row.showTotal = showTotal
     row.showPerSecond = showPerSecond
     row.suppressValuePerSecond = definition.suppressValuePerSecond
+    row.isDeathMeter = definition.enumName == "Deaths"
+    ConfigureRowHoverCard(row)
+end
+
+local function FormatDetailNumber(value)
+    if type(_G.AbbreviateLargeNumbers) == "function" then
+        return _G.AbbreviateLargeNumbers(value)
+    end
+
+    return tostring(math.floor(value + 0.5))
+end
+
+local function FormatDetailPercent(value, total)
+    local amount = FormatDetailNumber(value)
+    if total > 0 then
+        return ("%s  %.1f%%"):format(
+            amount,
+            value / total * 100
+        )
+    end
+
+    return amount
+end
+
+local function FormatDetailRate(value, duration)
+    local amount = FormatDetailNumber(value)
+    if duration and duration > 0 then
+        return ("%s  %s/s"):format(
+            amount,
+            FormatDetailNumber(value / duration)
+        )
+    end
+
+    return amount
+end
+
+local function FormatDetailSpellValues(
+    spell,
+    sourceTotal,
+    definition,
+    duration
+)
+    local total = spell.totalAmount or 0
+    if not definition.valuePerSecondAsPrimary then
+        return FormatDetailPercent(total, sourceTotal), total
+    end
+
+    local rate = spell.amountPerSecond
+    if rate == nil and duration and duration > 0 then
+        rate = total / duration
+    end
+    rate = rate or 0
+
+    local text = ("%s/s  %s"):format(
+        FormatDetailNumber(rate),
+        FormatDetailNumber(total)
+    )
+    if sourceTotal > 0 then
+        text = ("%s  %.1f%%"):format(
+            text,
+            total / sourceTotal * 100
+        )
+    end
+
+    return text, rate
+end
+
+local function GetDetailSpellName(spellID)
+    if not spellID or spellID == 0 then return end
+
+    local api = _G.C_Spell
+    if type(api) ~= "table"
+        or type(api.GetSpellName) ~= "function"
+    then
+        return
+    end
+
+    return api.GetSpellName(spellID)
+end
+
+local function GetDetailSpellTexture(spellID)
+    if not spellID or spellID == 0 then return end
+
+    local api = _G.C_Spell
+    if type(api) ~= "table"
+        or type(api.GetSpellTexture) ~= "function"
+    then
+        return
+    end
+
+    return api.GetSpellTexture(spellID)
+end
+
+local function GetDetailSourceData(
+    sessionMode,
+    sessionID,
+    meterType,
+    source
+)
+    if sessionMode == SESSION_MODE_CURRENT then
+        return DM.Data.GetCurrentSource(
+            meterType,
+            source.sourceGUID,
+            source.sourceCreatureID
+        )
+    end
+    if sessionMode == SESSION_MODE_OVERALL then
+        return DM.Data.GetOverallSource(
+            meterType,
+            source.sourceGUID,
+            source.sourceCreatureID
+        )
+    end
+
+    return DM.Data.GetHistoricalSource(
+        sessionID,
+        meterType,
+        source.sourceGUID,
+        source.sourceCreatureID
+    )
+end
+
+local function SortDetailTotals(left, right)
+    return left.total > right.total
+end
+
+local function BuildDamageTargetEntries(
+    sessionMode,
+    sessionID,
+    sourceName,
+    duration
+)
+    local enemyType = _G.Enum.DamageMeterType.EnemyDamageTaken
+    if enemyType == nil then return {} end
+
+    local enemySession = GetSessionData(
+        sessionMode,
+        sessionID,
+        enemyType
+    )
+    if not enemySession or not enemySession.combatSources then
+        return {}
+    end
+
+    local targets = {}
+    for _, enemy in ipairs(enemySession.combatSources) do
+        local enemyDetail = GetDetailSourceData(
+            sessionMode,
+            sessionID,
+            enemyType,
+            enemy
+        )
+        local total = 0
+        if enemyDetail and enemyDetail.combatSpells then
+            for _, spell in ipairs(enemyDetail.combatSpells) do
+                local details = spell.combatSpellDetails
+                if details and details.unitName == sourceName then
+                    total = total + spell.totalAmount
+                end
+            end
+        end
+
+        if total > 0 then
+            targets[#targets + 1] = {
+                name = _G.Ambiguate(enemy.name, "short"),
+                total = total,
+            }
+        end
+    end
+
+    table.sort(targets, SortDetailTotals)
+    local entries = {}
+    local count = math.min(#targets, MAX_DETAIL_TARGETS)
+    if count > 0 then
+        entries[1] = {
+            kind = "section",
+            label = L["Targets"],
+        }
+    end
+    for index = 1, count do
+        local target = targets[index]
+        entries[#entries + 1] = {
+            kind = "target",
+            label = target.name,
+            maxValue = targets[1].total,
+            total = target.total,
+            valueText = FormatDetailRate(target.total, duration),
+        }
+    end
+
+    return entries
+end
+
+local function BuildStandardDetailEntries(
+    sourceDetail,
+    source,
+    definition,
+    sessionMode,
+    sessionID,
+    duration
+)
+    local entries = {}
+    local spells = sourceDetail.combatSpells or {}
+    local spellCount = #spells
+    for index = 1, spellCount do
+        local spell = spells[index]
+        local spellID = spell.spellID
+        local spellName = GetDetailSpellName(spellID)
+        local valueText, barValue = FormatDetailSpellValues(
+            spell,
+            sourceDetail.totalAmount,
+            definition,
+            duration
+        )
+
+        if not spellName or spellName == "" then
+            spellName = spell.creatureName
+        end
+        if not spellName or spellName == "" then
+            spellName = _G.UNKNOWN or "Unknown"
+        end
+
+        entries[#entries + 1] = {
+            classFilename = source.classFilename,
+            icon = GetDetailSpellTexture(spellID),
+            kind = "spell",
+            label = spellName,
+            maxValue = sourceDetail.maxAmount,
+            spellID = spellID,
+            total = barValue,
+            valueText = valueText,
+        }
+    end
+
+    if definition.enumName == "DamageDone" then
+        local targets = BuildDamageTargetEntries(
+            sessionMode,
+            sessionID,
+            source.name,
+            duration
+        )
+        for _, entry in ipairs(targets) do
+            entries[#entries + 1] = entry
+        end
+    end
+
+    return entries
+end
+
+local function BuildEnemyPlayerEntries(sourceDetail, duration)
+    local playersByName = {}
+    local players = {}
+    for _, spell in ipairs(sourceDetail.combatSpells or {}) do
+        local details = spell.combatSpellDetails
+        local name = details and details.unitName
+        if name and name ~= "" then
+            local player = playersByName[name]
+            if not player then
+                player = {
+                    classFilename = details.unitClassFilename,
+                    icon = details.specIconID,
+                    name = name,
+                    total = 0,
+                }
+                playersByName[name] = player
+                players[#players + 1] = player
+            end
+            player.total = player.total + spell.totalAmount
+        end
+    end
+
+    table.sort(players, SortDetailTotals)
+    local entries = {}
+    local count = #players
+    local maximum = count > 0 and players[1].total or 1
+    for index = 1, count do
+        local player = players[index]
+        entries[index] = {
+            classFilename = player.classFilename,
+            icon = player.icon,
+            kind = "player",
+            label = _G.Ambiguate(player.name, "short"),
+            maxValue = maximum,
+            total = player.total,
+            valueText = FormatDetailRate(player.total, duration),
+        }
+    end
+
+    return entries
+end
+
+local function GetDeathEventName(event)
+    local name = event.spellName
+    if name and name ~= "" then return name end
+
+    if event.event == "SWING_DAMAGE" then
+        return _G.ACTION_SWING or "Melee"
+    end
+    if event.event == "ENVIRONMENTAL_DAMAGE"
+        and event.environmentalType
+    then
+        return event.environmentalType
+    end
+
+    return GetDetailSpellName(event.spellId)
+        or _G.UNKNOWN
+        or "Unknown"
+end
+
+local function BuildDeathDetailEntries(source)
+    local recapID = source.deathRecapID
+    local api = _G.C_DeathRecap
+    if not recapID or recapID == 0 or type(api) ~= "table"
+        or type(api.GetRecapEvents) ~= "function"
+    then
+        return {}
+    end
+
+    local events = api.GetRecapEvents(recapID)
+    if not events then return {} end
+
+    local maxHealth = 0
+    if type(api.GetRecapMaxHealth) == "function" then
+        maxHealth = api.GetRecapMaxHealth(recapID) or 0
+    end
+
+    local deathTimestamp = 0
+    for _, event in ipairs(events) do
+        if event.timestamp and event.timestamp > deathTimestamp then
+            deathTimestamp = event.timestamp
+        end
+    end
+
+    local entries = {}
+    local eventCount = #events
+    for displayIndex = 1, eventCount do
+        local event = events[eventCount - displayIndex + 1]
+        local timeBeforeDeath = deathTimestamp
+            - (event.timestamp or deathTimestamp)
+        local eventName = GetDeathEventName(event)
+        local label = ("-%.1fs  %s"):format(
+            timeBeforeDeath,
+            eventName
+        )
+        local amount = event.amount or 0
+        local isHeal = event.event == "SPELL_HEAL"
+            or event.event == "SPELL_PERIODIC_HEAL"
+        local valueText = (isHeal and "+" or "-")
+            .. FormatDetailNumber(math.abs(amount))
+
+        if maxHealth > 0 and event.currentHP then
+            valueText = ("%s  %.0f%%"):format(
+                valueText,
+                event.currentHP / maxHealth * 100
+            )
+        end
+        if event.overkill and event.overkill > 0 then
+            valueText = ("%s  (+%s)"):format(
+                valueText,
+                FormatDetailNumber(event.overkill)
+            )
+        end
+
+        entries[displayIndex] = {
+            color = isHeal
+                and {0.10, 0.50, 0.10}
+                or {0.60, 0.08, 0.08},
+            icon = GetDetailSpellTexture(event.spellId),
+            kind = "death",
+            label = label,
+            maxValue = maxHealth > 0 and maxHealth or 1,
+            spellID = event.spellId,
+            total = event.currentHP or 0,
+            valueText = valueText,
+        }
+    end
+
+    return entries
+end
+
+local function CreateDetailRow(parent, window)
+    local row = AF.CreateFrame(parent)
+    row:EnableMouse(true)
+    row:EnableMouseWheel(true)
+
+    local bar = _G.CreateFrame("StatusBar", nil, row, "BackdropTemplate")
+    row.bar = bar
+    bar:SetAllPoints()
+    AF.ApplyDefaultBackdrop_NoBorder(bar)
+    bar:SetBackdropColor(0, 0, 0, 0.42)
+    bar:SetMinMaxValues(0, 1)
+    bar:SetValue(0)
+
+    local highlight = AF.CreateFrame(
+        row,
+        nil,
+        nil,
+        nil,
+        "BackdropTemplate"
+    )
+    row.highlight = highlight
+    highlight:SetAllPoints()
+    highlight:SetFrameLevel(bar:GetFrameLevel() + 1)
+    AF.ApplyDefaultBackdrop_NoBorder(highlight)
+    highlight:SetBackdropColor(AF.GetColorRGB("BFI", 0.18))
+    highlight:Hide()
+
+    local overlay = AF.CreateFrame(row)
+    row.overlay = overlay
+    overlay:SetAllPoints()
+    overlay:SetFrameLevel(bar:GetFrameLevel() + 2)
+
+    local rank = AF.CreateFontString(overlay, nil, "gray")
+    row.rank = rank
+    rank:SetJustifyH("LEFT")
+    rank:SetWordWrap(false)
+
+    local iconHolder = AF.CreateFrame(
+        overlay,
+        nil,
+        nil,
+        nil,
+        "BackdropTemplate"
+    )
+    row.iconHolder = iconHolder
+    AF.ApplyDefaultBackdrop(iconHolder)
+    iconHolder:SetBackdropColor(0, 0, 0, 0.8)
+    iconHolder:SetFrameLevel(overlay:GetFrameLevel() + 1)
+
+    local icon = AF.CreateTexture(iconHolder, nil, "white")
+    row.icon = icon
+    AF.SetOnePixelInside(icon, iconHolder)
+    AF.ApplyDefaultTexCoord(icon)
+
+    local label = AF.CreateFontString(overlay, nil, "white")
+    row.label = label
+    label:SetJustifyH("LEFT")
+    label:SetWordWrap(false)
+
+    local value = AF.CreateFontString(overlay, nil, "white")
+    row.value = value
+    value:SetJustifyH("RIGHT")
+    value:SetWordWrap(false)
+
+    row:SetScript("OnMouseWheel", function(_, delta)
+        ScrollWindowDetails(window, delta)
+    end)
+    row:SetScript("OnMouseUp", function(_, button)
+        if button == "RightButton" then
+            CloseWindowDetails(window)
+        end
+    end)
+    row:SetScript("OnEnter", function()
+        row.highlight:Show()
+        if not row.spellID
+            or type(_G.InCombatLockdown) == "function"
+                and _G.InCombatLockdown()
+        then
+            return
+        end
+
+        local tooltip = _G.GameTooltip
+        if not tooltip then return end
+        tooltip:SetOwner(row, "ANCHOR_LEFT")
+        tooltip:SetSpellByID(row.spellID)
+        tooltip:Show()
+    end)
+    row:SetScript("OnLeave", function()
+        row.highlight:Hide()
+        if _G.GameTooltip then
+            _G.GameTooltip:Hide()
+        end
+    end)
+
+    return row
+end
+
+local function CreateDetailPanel(window)
+    local panel = AF.CreateFrame(
+        window.body,
+        nil,
+        nil,
+        nil,
+        "BackdropTemplate"
+    )
+    window.detailPanel = panel
+    panel:SetAllPoints()
+    panel:EnableMouse(true)
+    panel:EnableMouseWheel(true)
+    panel:Hide()
+    panel:SetScript("OnMouseWheel", function(_, delta)
+        ScrollWindowDetails(window, delta)
+    end)
+    panel:SetScript("OnMouseUp", function(_, button)
+        if button == "RightButton" then
+            CloseWindowDetails(window)
+        end
+    end)
+
+    local title = AF.CreateFontString(panel, nil, "white")
+    window.detailTitle = title
+    title:SetJustifyH("LEFT")
+    title:SetWordWrap(false)
+
+    local hint = AF.CreateFontString(panel, nil, "gray")
+    window.detailHint = hint
+    hint:SetText(L["Right-click to return"])
+    hint:SetJustifyH("RIGHT")
+    hint:SetWordWrap(false)
+
+    local empty = AF.CreateFontString(panel, nil, "gray")
+    window.detailEmpty = empty
+    empty:SetText(L["No detailed information available."])
+    empty:SetPoint("CENTER")
+    empty:SetJustifyH("CENTER")
+    empty:Hide()
+
+    window.detailRows = {}
+end
+
+local function EnsureDetailRows(window, count)
+    for index = #window.detailRows + 1, count do
+        window.detailRows[index] = CreateDetailRow(
+            window.detailPanel,
+            window
+        )
+    end
+end
+
+local function ApplyDetailRowLayout(
+    row,
+    slotIndex,
+    config,
+    texture,
+    titleRowCount
+)
+    local y = -config.padding
+        - (titleRowCount * (config.barHeight + config.spacing))
+        - ((slotIndex - 1) * (config.barHeight + config.spacing))
+    row:ClearAllPoints()
+    row:SetPoint(
+        "TOPLEFT",
+        row:GetParent(),
+        "TOPLEFT",
+        config.padding,
+        y
+    )
+    row:SetPoint(
+        "TOPRIGHT",
+        row:GetParent(),
+        "TOPRIGHT",
+        -config.padding,
+        y
+    )
+    row:SetHeight(config.barHeight)
+    row.bar:SetStatusBarTexture(texture)
+
+    row.rank:ClearAllPoints()
+    row.rank:SetPoint("LEFT", row, "LEFT", 3, 0)
+    row.rank:SetWidth(16)
+
+    local iconSize = config.barHeight - 4
+    row.iconHolder:ClearAllPoints()
+    row.iconHolder:SetPoint("LEFT", row.rank, "RIGHT", 2, 0)
+    row.iconHolder:SetSize(iconSize, iconSize)
+
+    row.value:ClearAllPoints()
+    row.value:SetPoint("RIGHT", row, "RIGHT", -5, 0)
+    row.value:SetWidth(104)
+
+    row.label:ClearAllPoints()
+    row.label:SetPoint("LEFT", row.iconHolder, "RIGHT", 3, 0)
+    row.label:SetPoint("RIGHT", row.value, "LEFT", -5, 0)
+end
+
+local function ApplyDetailLayout(window, config, texture)
+    local titleRowCount = window.visibleRowCount > 1 and 1 or 0
+    local visibleRows = math.max(
+        1,
+        window.visibleRowCount - titleRowCount
+    )
+    window.visibleDetailRowCount = visibleRows
+    window.detailTitleRowCount = titleRowCount
+    EnsureDetailRows(window, visibleRows)
+
+    window.detailPanel:ClearAllPoints()
+    window.detailPanel:SetAllPoints(window.body)
+
+    window.detailTitle:ClearAllPoints()
+    window.detailTitle:SetPoint(
+        "TOPLEFT",
+        window.detailPanel,
+        "TOPLEFT",
+        config.padding + 3,
+        -config.padding
+    )
+    window.detailTitle:SetPoint(
+        "RIGHT",
+        window.detailHint,
+        "LEFT",
+        -5,
+        0
+    )
+
+    window.detailHint:ClearAllPoints()
+    window.detailHint:SetPoint(
+        "TOPRIGHT",
+        window.detailPanel,
+        "TOPRIGHT",
+        -config.padding - 3,
+        -config.padding
+    )
+    window.detailHint:SetWidth(110)
+    window.detailTitle:SetShown(titleRowCount == 1)
+    window.detailHint:SetShown(titleRowCount == 1)
+
+    for index, row in ipairs(window.detailRows) do
+        if index <= visibleRows then
+            ApplyDetailRowLayout(
+                row,
+                index,
+                config,
+                texture,
+                titleRowCount
+            )
+        else
+            row:Hide()
+        end
+    end
+end
+
+local function UpdateDetailRow(row, entry, index, config)
+    if entry.kind == "section" then
+        row.rank:SetText("")
+        row.iconHolder:Hide()
+        row.label:ClearAllPoints()
+        row.label:SetPoint("LEFT", row, "LEFT", 3, 0)
+        row.label:SetPoint("RIGHT", row, "RIGHT", -5, 0)
+        row.label:SetText(entry.label)
+        row.value:SetText("")
+        row.bar:SetMinMaxValues(0, 1)
+        row.bar:SetValue(0)
+        row.bar:SetStatusBarColor(0, 0, 0, 0.22)
+        row.spellID = nil
+        row:Show()
+        return
+    end
+
+    local r, g, b
+    if entry.color then
+        r, g, b = entry.color[1], entry.color[2], entry.color[3]
+    elseif config.classColor and entry.classFilename
+        and entry.classFilename ~= ""
+    then
+        r, g, b = AF.GetClassColor(entry.classFilename)
+    else
+        r, g, b = AF.GetColorRGB("BFI")
+    end
+
+    row.rank:SetText(index)
+    row.iconHolder:SetShown(entry.icon ~= nil and entry.icon ~= 0)
+    row.icon:SetTexture(entry.icon)
+    row.iconHolder:SetBackdropBorderColor(r, g, b, 1)
+    row.label:ClearAllPoints()
+    if entry.icon ~= nil and entry.icon ~= 0 then
+        row.label:SetPoint("LEFT", row.iconHolder, "RIGHT", 3, 0)
+    else
+        row.label:SetPoint("LEFT", row.rank, "RIGHT", 3, 0)
+    end
+    row.label:SetPoint("RIGHT", row.value, "LEFT", -5, 0)
+    row.label:SetText(entry.label)
+    row.value:SetText(entry.valueText)
+    row.bar:SetMinMaxValues(0, entry.maxValue or 1)
+    row.bar:SetValue(entry.total or 0)
+    row.bar:SetStatusBarColor(r, g, b, config.barAlpha)
+    row.spellID = entry.spellID
+    row:Show()
+end
+
+local function RenderDetailEntries(window, entries, source, config)
+    local maximumOffset = math.max(
+        0,
+        #entries - window.visibleDetailRowCount
+    )
+    window.detailOffset = Clamp(
+        window.detailOffset or 0,
+        0,
+        maximumOffset
+    )
+    window.detailMaxOffset = maximumOffset
+    window.detailTitle:SetText(_G.Ambiguate(source.name, "short"))
+    window.detailEmpty:SetShown(#entries == 0)
+
+    for slotIndex = 1, window.visibleDetailRowCount do
+        local row = window.detailRows[slotIndex]
+        local entryIndex = window.detailOffset + slotIndex
+        local entry = entries[entryIndex]
+        if entry then
+            UpdateDetailRow(row, entry, entryIndex, config)
+        else
+            row.spellID = nil
+            row:Hide()
+        end
+    end
+end
+
+RefreshWindowDetails = function(window)
+    if not window.detailOpen then return false end
+    if type(_G.InCombatLockdown) == "function"
+        and _G.InCombatLockdown()
+    then
+        return false
+    end
+
+    local config = GetConfig()
+    local definition = GetWindowDefinition(window.index)
+    local meterType = GetMeterType(definition)
+    if meterType == nil then return false end
+
+    local sessionMode, sessionID = GetWindowSessionSelection(
+        config,
+        window.index
+    )
+    local session = GetSessionData(sessionMode, sessionID, meterType)
+    if not session or not session.combatSources then return false end
+
+    local source = session.combatSources[window.detailSourceIndex]
+    if not source then return false end
+
+    local entries
+    if definition.enumName == "Deaths" then
+        entries = BuildDeathDetailEntries(source)
+    else
+        local sourceDetail = GetDetailSourceData(
+            sessionMode,
+            sessionID,
+            meterType,
+            source
+        )
+        if not sourceDetail then return false end
+
+        if definition.enumName == "EnemyDamageTaken" then
+            entries = BuildEnemyPlayerEntries(
+                sourceDetail,
+                session.durationSeconds
+            )
+        else
+            entries = BuildStandardDetailEntries(
+                sourceDetail,
+                source,
+                definition,
+                sessionMode,
+                sessionID,
+                session.durationSeconds
+            )
+        end
+    end
+
+    RenderDetailEntries(window, entries, source, config)
+    return true
+end
+
+CloseWindowDetails = function(window, skipRefresh)
+    if not window then return false end
+
+    local wasOpen = window.detailOpen == true
+    window.detailOpen = nil
+    window.detailSourceIndex = nil
+    window.detailOffset = 0
+    window.detailMaxOffset = 0
+    if window.detailPanel then
+        window.detailPanel:Hide()
+    end
+    if window.detailTitle then
+        window.detailTitle:SetText("")
+    end
+    if window.detailEmpty then
+        window.detailEmpty:Hide()
+    end
+    for _, row in ipairs(window.detailRows or {}) do
+        row.spellID = nil
+        row.icon:SetTexture(nil)
+        row.label:SetText("")
+        row.value:SetText("")
+        row:Hide()
+        row.highlight:Hide()
+    end
+
+    if wasOpen and not skipRefresh and rendererEnabled then
+        Renderer.Refresh()
+    end
+    return wasOpen
+end
+
+OpenWindowDetails = function(window, sourceIndex)
+    if not rendererEnabled or type(sourceIndex) ~= "number" then
+        return false
+    end
+    if type(_G.InCombatLockdown) == "function"
+        and _G.InCombatLockdown()
+    then
+        return false
+    end
+
+    window.detailOpen = true
+    window.detailSourceIndex = sourceIndex
+    window.detailOffset = 0
+    window.detailPanel:Show()
+    for _, row in ipairs(window.rows) do
+        row:Hide()
+        row.hoverCard:Hide()
+        row.highlight:Hide()
+    end
+
+    if not RefreshWindowDetails(window) then
+        CloseWindowDetails(window, true)
+        Renderer.Refresh()
+        return false
+    end
+    return true
+end
+
+ScrollWindowDetails = function(window, delta)
+    if not rendererEnabled or not window.detailOpen then return end
+    if type(_G.InCombatLockdown) == "function"
+        and _G.InCombatLockdown()
+    then
+        return
+    end
+
+    local offset = window.detailOffset or 0
+    local nextOffset = offset
+    if delta < 0 then
+        nextOffset = offset + 1
+    elseif delta > 0 then
+        nextOffset = offset - 1
+    end
+    nextOffset = Clamp(
+        nextOffset,
+        0,
+        window.detailMaxOffset or 0
+    )
+    if nextOffset == offset then return end
+
+    window.detailOffset = nextOffset
+    RefreshWindowDetails(window)
 end
 
 local function ToggleMinimized(window)
@@ -1290,6 +2239,9 @@ function Renderer.SetWindowType(index, typeName, options)
 
     options = type(options) == "table" and options or {}
     local config = GetConfig()
+    if windows[index] then
+        CloseWindowDetails(windows[index], true)
+    end
     config.windowTypes[index] = typeName
     if windows[index] then
         ResetWindowScrollOffset(windows[index], typeName)
@@ -1364,6 +2316,9 @@ function Renderer.SetWindowSession(
         if targetIndex == index
             or shouldSync and syncSettings[targetIndex] == true
         then
+            if windows[targetIndex] then
+                CloseWindowDetails(windows[targetIndex], true)
+            end
             SetWindowSessionState(
                 config,
                 targetIndex,
@@ -1431,6 +2386,8 @@ local function CreateWindow(index)
     window.sessionKey = DEFAULT_SESSION_KEY
     window.scrollOffsets = {}
     window.maxScrollOffsets = {}
+    window.detailOffset = 0
+    window.detailMaxOffset = 0
     window:SetClampedToScreen(true)
     window:SetMovable(true)
     window:SetFrameStrata("LOW")
@@ -1439,24 +2396,15 @@ local function CreateWindow(index)
         OnWindowSizeChanged(window, width, height)
     end)
 
-    local header = AF.CreateBorderedFrame(
+    local header = AF.CreateFrame(
         window,
         nil,
         nil,
         nil,
-        "header",
-        "border"
+        "BackdropTemplate"
     )
     window.header = header
-    header.tex = AF.CreateGradientTexture(
-        header,
-        "HORIZONTAL",
-        AF.GetColorTable("BFI", 0.4),
-        AF.GetColorTable("BFI", 0),
-        nil,
-        "ARTWORK"
-    )
-    AF.SetOnePixelInside(header.tex, header)
+    AF.ApplyDefaultBackdrop_NoBorder(header)
     header:EnableMouse(true)
     header:RegisterForDrag("LeftButton")
     header:SetScript("OnDragStart", function()
@@ -1468,6 +2416,7 @@ local function CreateWindow(index)
 
     local typeDropdown = AF.CreateDropdown(header, 140, 11)
     window.typeDropdown = typeDropdown
+    ApplyFlatDropdownStyle(typeDropdown)
     typeDropdown:SetItems(GetTypeItems())
     typeDropdown:SetOnSelect(function(typeName)
         Renderer.SetWindowType(index, typeName)
@@ -1479,6 +2428,7 @@ local function CreateWindow(index)
         11
     )
     window.sessionDropdown = sessionDropdown
+    ApplyFlatDropdownStyle(sessionDropdown)
     EnsureSessionItems()
     sessionDropdown:SetItems(sessionItems)
     sessionDropdown:SetOnSelect(function(key)
@@ -1501,7 +2451,7 @@ local function CreateWindow(index)
         ""
     )
     window.dragGrip = dragGrip
-    SetButtonIcon(dragGrip, AF.GetIcon("Menu3"), "gray")
+    SetButtonIcon(dragGrip, AF.GetIcon("Link"), "gray")
     dragGrip:RegisterForDrag("LeftButton")
     dragGrip:SetScript("OnDragStart", function()
         BeginWindowDrag(window)
@@ -1516,7 +2466,7 @@ local function CreateWindow(index)
         2,
         L["Dock Meter"],
         L[
-            "Release to anchor this meter to the highlighted window."
+            "Drag this window on top to another highlighted window and release to anchor it"
         ]
     )
 
@@ -1581,7 +2531,7 @@ local function CreateWindow(index)
         ""
     )
     window.lock = lock
-    SetButtonIcon(lock, AF.GetIcon("SmallLock"))
+    SetButtonIcon(lock, GetLockButtonIcon(false))
     AF.SetTooltip(
         lock,
         "TOPRIGHT",
@@ -1607,6 +2557,7 @@ local function CreateWindow(index)
     body:SetScript("OnMouseWheel", function(_, delta)
         ScrollWindow(window, delta)
     end)
+    CreateDetailPanel(window)
 
     local resize = AF.CreateResizeButton(
         window,
@@ -1694,9 +2645,9 @@ local function ApplyWindowLayout(window, config)
     window.header:SetPoint("TOPLEFT")
     window.header:SetPoint("TOPRIGHT")
     window.header:SetHeight(config.headerHeight)
-    window.header:SetBackdropColor(AF.GetColorRGB("header"))
-    window.header:SetBackdropBorderColor(AF.GetColorRGB("border"))
-    window.header.tex:SetShown(config.accentHeader)
+    window.header:SetBackdropColor(
+        AF.GetColorRGB("background", config.backgroundAlpha)
+    )
 
     window.minimize:SetSize(controlSize, controlSize)
     window.minimize:ClearAllPoints()
@@ -1715,7 +2666,7 @@ local function ApplyWindowLayout(window, config)
     window.lock:SetPoint("RIGHT", window.settings, "LEFT", -2, 0)
     SetButtonIcon(
         window.lock,
-        AF.GetIcon("SmallLock"),
+        GetLockButtonIcon(config.locked),
         config.locked and "white" or "gray"
     )
     AF.SetTooltip(
@@ -1738,7 +2689,7 @@ local function ApplyWindowLayout(window, config)
     window.dragGrip:SetPoint("LEFT", window.header, "LEFT", 2, 0)
     SetButtonIcon(
         window.dragGrip,
-        AF.GetIcon("Menu3"),
+        AF.GetIcon("Link"),
         config.locked and "gray" or "white"
     )
 
@@ -1792,6 +2743,10 @@ local function ApplyWindowLayout(window, config)
     window.body:SetShown(not window.minimized)
 
     EnsureRows(window, visibleRows)
+    ApplyDetailLayout(window, config, texture)
+    window.detailPanel:SetShown(
+        window.detailOpen == true and not window.minimized
+    )
     for index, row in ipairs(window.rows) do
         row.hoverCard:Hide()
         row.highlight:Hide()
@@ -1804,8 +2759,10 @@ local function ApplyWindowLayout(window, config)
 end
 
 local function HideWindowTransient(window)
+    CloseWindowDetails(window, true)
     for _, row in ipairs(window.rows) do
         row.deathRecapID = nil
+        row.sourceIndex = nil
         row.hoverCard:Hide()
         row.highlight:Hide()
     end
@@ -1815,6 +2772,7 @@ local function HideUnusedRows(window, firstUnused)
     for index = firstUnused, #window.rows do
         local row = window.rows[index]
         row.deathRecapID = nil
+        row.sourceIndex = nil
         row:Hide()
         row.hoverCard:Hide()
         row.highlight:Hide()
@@ -1839,9 +2797,7 @@ local function UpdateRow(row, source, index, session, config)
     row.hoverCard.title:SetText(_G.Ambiguate(source.name, "short"))
     row.hoverCard.playerBadge:SetShown(source.isLocalPlayer == true)
     row.deathRecapID = source.deathRecapID
-    row.hoverCard.recapHint:SetShown(
-        row.deathRecapID ~= nil and row.deathRecapID ~= 0
-    )
+    row.sourceIndex = index
     row.hoverCard.groupTotalValue:SetText(
         AF.FormatSecretNumber(session.totalAmount)
     )
@@ -1904,6 +2860,13 @@ end
 
 local function UpdateWindow(window, config)
     if window.minimized then return end
+
+    if window.detailOpen then
+        if RefreshWindowDetails(window) then
+            return
+        end
+        CloseWindowDetails(window, true)
+    end
 
     local definition = GetWindowDefinition(window.index)
     local meterType = GetMeterType(definition)
@@ -2016,6 +2979,12 @@ local function ResetCurrentSessionScrollOffsets()
     end
 end
 
+local function CloseAllWindowDetails()
+    for _, window in ipairs(windows) do
+        CloseWindowDetails(window, true)
+    end
+end
+
 function Renderer.ResetPosition()
     local config = GetConfig()
     EnsureInteractionConfig(config)
@@ -2082,7 +3051,13 @@ local function EnsureEventFrame()
     eventFrame = _G.CreateFrame("Frame")
     eventFrame:SetScript("OnEvent", function(_, event)
         if event == "PLAYER_LOGOUT" then
+            CloseAllWindowDetails()
             EndNativeOverride()
+        elseif event == "PLAYER_REGEN_DISABLED" then
+            -- Source-detail APIs become secret in combat. Tear down every
+            -- report before returning to the combat-safe aggregate renderer.
+            CloseAllWindowDetails()
+            Renderer.Refresh()
         else
             -- Retail PTR 12.1.0.68914 FrameXML retains scroll for
             -- DAMAGE_METER_COMBAT_SESSION_UPDATED, but discards Current
@@ -2094,12 +3069,17 @@ local function EnsureEventFrame()
                 sessionItemsDirty = true
             end
             if event == "DAMAGE_METER_CURRENT_SESSION_UPDATED" then
+                CloseAllWindowDetails()
                 ResetCurrentSessionScrollOffsets()
             end
             if event == "DAMAGE_METER_RESET" then
+                CloseAllWindowDetails()
                 sessionItemsDirty = true
                 ResetHistoricalSelections()
                 ResetScrollOffsets()
+            end
+            if event == "PLAYER_ENTERING_WORLD" then
+                CloseAllWindowDetails()
             end
             ScheduleRefresh()
         end
@@ -2112,6 +3092,8 @@ local function RegisterEvents()
     eventFrame:RegisterEvent("DAMAGE_METER_CURRENT_SESSION_UPDATED")
     eventFrame:RegisterEvent("DAMAGE_METER_RESET")
     eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     eventFrame:RegisterEvent("PLAYER_LOGOUT")
 end
 
@@ -2134,6 +3116,7 @@ function Renderer.ApplySettings()
     ValidateHistoricalSelections(config)
     for index = 1, MAX_WINDOWS do
         local window = windows[index]
+        CloseWindowDetails(window, true)
         ApplyWindowLayout(window, config)
         window:Hide()
     end

@@ -656,16 +656,6 @@ local function CreateAppearancePane()
         RefreshDamageMeter()
     end)
 
-    local accentHeader = AF.CreateCheckButton(
-        appearancePane,
-        L["Accent Header"]
-    )
-    AF.SetPoint(accentHeader, "TOPLEFT", appearancePane, 390, -250)
-    accentHeader:SetOnCheck(function(checked)
-        DM.config.accentHeader = checked
-        RefreshDamageMeter()
-    end)
-
     function appearancePane.Load()
         local config = DM.config
         width:SetValue(config.width)
@@ -679,7 +669,6 @@ local function CreateAppearancePane()
         numberMode:SetSelectedValue(config.numberMode)
         showSpecIcon:SetChecked(config.showSpecIcon)
         classColor:SetChecked(config.classColor)
-        accentHeader:SetChecked(config.accentHeader)
     end
 end
 

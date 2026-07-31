@@ -179,7 +179,6 @@ local function assertDefaults(config, message)
     assertEqual(config.classColor, true, message .. " class color")
     assertEqual(config.backgroundAlpha, 0.82, message .. " background alpha")
     assertEqual(config.barAlpha, 0.9, message .. " bar alpha")
-    assertEqual(config.accentHeader, true, message .. " accent header")
 end
 
 local DM, callbacks, state = loadDefaults()
@@ -284,7 +283,6 @@ updateProfile(nil, partialProfile)
 assertEqual(partialProfile.damageMeter, partialConfig, "partial config identity")
 assertEqual(DM.config, partialConfig, "active partial config identity")
 assertEqual(partialConfig.enabled, false, "partial enabled default")
-assertEqual(partialConfig.accentHeader, true, "partial accent default")
 assertEqual(partialConfig.locked, false, "partial lock default")
 assertEqual(
     partialConfig.resetOnMythicPlusStart,
@@ -295,7 +293,6 @@ assertEqual(partialConfig.alwaysShowPlayer, true, "partial player pin default")
 assertEqual(partialConfig.extra, "preserved", "unknown config preserved")
 
 local invalidConfig = {
-    accentHeader = 1,
     alwaysShowPlayer = "yes",
     backgroundAlpha = -1,
     barAlpha = 2,
@@ -523,7 +520,6 @@ assertEqual(invalidConfig.showSpecIcon, true, "spec icon normalization")
 assertEqual(invalidConfig.classColor, true, "class color normalization")
 assertEqual(invalidConfig.backgroundAlpha, 0, "background alpha clamp")
 assertEqual(invalidConfig.barAlpha, 1, "bar alpha clamp")
-assertEqual(invalidConfig.accentHeader, true, "accent normalization")
 
 local legacyHeightConfig = {
     height = 277,
@@ -617,7 +613,6 @@ end
 
 local configIdentity = DM.config
 configIdentity.enabled = true
-configIdentity.accentHeader = false
 configIdentity.extra = "remove"
 configIdentity.windowTypes[1] = "DamageTaken"
 configIdentity.windowSessions[1].mode = "overall"

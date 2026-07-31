@@ -239,7 +239,6 @@ local function createHarness()
     end
 
     local config = {
-        accentHeader = false,
         alwaysShowPlayer = false,
         backgroundAlpha = 0.73,
         barAlpha = 0.66,
@@ -561,6 +560,11 @@ assertEqual(
     state.controls["Frame Height"],
     nil,
     "shared frame height control removed"
+)
+assertEqual(
+    state.controls["Accent Header"],
+    nil,
+    "obsolete Accent Header control removed"
 )
 assertEqual(texture.selectedValue, "TestTexture", "texture loaded value")
 assertEqual(texture.selectedText, "Test Texture", "texture visible text")
