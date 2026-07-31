@@ -11,10 +11,11 @@ local CreateFrame = CreateFrame
 local InCombatLockdown = InCombatLockdown
 
 -- Retail 12.1.0.68914 (wow-ui-source d3915c78) makes aura groups and
--- item-enchantment sources add-only and restricts their buttons immediately
--- after AF's initializer returns. This controller owns configuration state,
--- plain holders, and native container shells; it never reads aura data,
--- restricted buttons, or native container geometry.
+-- item-enchantment sources add-only. Their buttons receive conditional access
+-- restrictions after AF's initializer returns and deny tainted access whenever
+-- aura data is secret. This controller owns configuration state, plain holders,
+-- and native container shells; it never reads aura data, restricted buttons,
+-- or native container geometry.
 local NATIVE_GROUP_INITIAL_RESERVATIONS = 10
 
 local registrations = {}

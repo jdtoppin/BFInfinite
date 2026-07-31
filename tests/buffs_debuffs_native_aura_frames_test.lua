@@ -205,14 +205,20 @@ function _G.HelpTip:HideAll(button)
     self.hidden[#self.hidden + 1] = button
 end
 
-local BD = {}
-local BFI = {
-    modules = {
-        BuffsDebuffs = BD,
-    },
-}
-local chunk = assert(loadfile("Modules/BuffsDebuffs/NativeAuraFrames.lua"))
-chunk("BFInfinite", BFI)
+local function LoadAdapter(hasRestrictedAuraButtons)
+    _G.C_AuraContainerUtil = hasRestrictedAuraButtons and {} or nil
+    local adapter = {}
+    local BFI = {
+        modules = {
+            BuffsDebuffs = adapter,
+        },
+    }
+    local chunk = assert(loadfile("Modules/BuffsDebuffs/NativeAuraFrames.lua"))
+    chunk("BFInfinite", BFI)
+    return adapter
+end
+
+local BD = LoadAdapter(false)
 
 assertEqual(BD.CanSuppressNativePublicAuras("buffs"), true, "buff capability")
 assertEqual(BD.CanSuppressNativePublicAuras("debuffs"), true, "debuff capability")
@@ -317,6 +323,65 @@ assertEqual(debuffFrame.privateAnchor.mutationCount, 0, "private anchor restore 
 assertEqual(deadlyDebuffFrame.mutationCount, 0, "deadly debuff restore boundary")
 assertEqual(#_G.GameTooltip.hidden, 9, "restore debuff tooltip cleanup")
 assertEqual(#_G.HelpTip.hidden, 9, "restore debuff help-tip cleanup")
+
+local restrictedButtonCalls = 0
+local restrictedButton = {
+    GetParent = function()
+        restrictedButtonCalls = restrictedButtonCalls + 1
+        error("restricted AuraButton was inspected", 2)
+    end,
+}
+local restrictedFrame = NewDebuffFrame()
+restrictedFrame.publicButton = restrictedButton
+restrictedFrame.auraFrames = {restrictedButton}
+_G.DebuffFrame = restrictedFrame
+_G.GameTooltip = {
+    IsOwned = function()
+        error("restricted AuraButton tooltip owner was inspected", 2)
+    end,
+    Hide = function()
+        error("restricted AuraButton tooltip was hidden", 2)
+    end,
+}
+_G.HelpTip = {
+    HideAll = function()
+        error("restricted AuraButton help tip was inspected", 2)
+    end,
+}
+
+local restrictedBD = LoadAdapter(true)
+assertEqual(
+    restrictedBD.CanSuppressNativePublicAuras("debuffs"),
+    true,
+    "restricted debuff capability"
+)
+assertEqual(
+    restrictedBD.SetNativePublicAurasSuppressed("debuffs", true),
+    true,
+    "restricted debuff suppression"
+)
+assertWrites(
+    restrictedFrame.AuraContainer.shownWrites,
+    {false},
+    "restricted debuff container suppression"
+)
+assertEqual(restrictedButtonCalls, 0, "restricted suppression button calls")
+assertEqual(hooks[restrictedFrame], nil, "restricted update hook omitted")
+assertEqual(restrictedFrame.privateAnchor.mutationCount, 0,
+    "restricted private anchor boundary")
+assertEqual(deadlyDebuffFrame.mutationCount, 0,
+    "restricted deadly debuff boundary")
+assertEqual(
+    restrictedBD.SetNativePublicAurasSuppressed("debuffs", false),
+    true,
+    "restricted debuff restoration"
+)
+assertWrites(
+    restrictedFrame.AuraContainer.shownWrites,
+    {false, true},
+    "restricted debuff container restoration"
+)
+assertEqual(restrictedButtonCalls, 0, "restricted restoration button calls")
 
 local sourceFile = assert(io.open("Modules/BuffsDebuffs/NativeAuraFrames.lua", "r"))
 local source = sourceFile:read("*a")
