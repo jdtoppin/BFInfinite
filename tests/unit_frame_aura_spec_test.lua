@@ -109,6 +109,11 @@ local function makeHarness(withNativeSchema)
     })
 
     local BFI = {
+        L = setmetatable({}, {
+            __index = function(_, key)
+                return key
+            end,
+        }),
         funcs = {
             isValueNonSecret = forbidden("F.isValueNonSecret"),
         },
@@ -132,6 +137,9 @@ local function makeHarness(withNativeSchema)
         tostring = tostring,
         type = type,
         AbstractFramework = AF,
+        GetCVar = function()
+            return "0"
+        end,
         CreateFrame = forbidden("CreateFrame"),
         InCombatLockdown = forbidden("InCombatLockdown"),
         C_Timer = forbiddenTable("C_Timer"),
@@ -142,6 +150,14 @@ local function makeHarness(withNativeSchema)
         C_UnitAuras = forbiddenTable("C_UnitAuras"),
         C_Secrets = forbiddenTable("C_Secrets"),
         AuraData = forbiddenTable("AuraData"),
+        AuraUtil = {
+            AuraFilters = withNativeSchema
+                and {
+                    Important = "IMPORTANT",
+                    Dispellable = "DISPELLABLE",
+                }
+                or {},
+        },
     }
     environment["is" .. "secretvalue"] = forbidden("secret-value API")
     environment._G = environment
@@ -172,6 +188,7 @@ local function makeHarness(withNativeSchema)
     })
 
     for _, path in ipairs({
+        "Utils.lua",
         "Modules/UnitFrames/AuraPolicy.lua",
         "Modules/UnitFrames/AuraSpec.lua",
     }) do
@@ -462,8 +479,10 @@ local function testCompleteSpecContract()
         frameLevel = 7,
     }, "placement")
     assertDeepEqual(descriptor.visibility, {
-        requiresVisible = true,
+        requiresVisible = false,
         requiresAssist = false,
+        spellIDFilterRequiresPublicAssist = false,
+        spellIDFilterRequiresPublicNonAssist = false,
     }, "visibility")
     assertEqual(descriptor.partition, nil, "partition")
 
@@ -485,6 +504,9 @@ local function testCompleteSpecContract()
         perGroupSort = true,
         privateAuraSourceUnseparable = true,
         bossAuraUsesCuratedRaidInCombat = true,
+        legacySourceFilterUsesSuperset = false,
+        legacyDispellableUsesRaidPlayerDispellable = false,
+        unsupportedPtr7CategoryUsesBaseFilter = false,
         defaultSortPriority = true,
         fixedHolderExtent = true,
         spellIDListsIgnored = false,
@@ -970,6 +992,9 @@ local function testEmptyPolicies()
         perGroupSort = false,
         privateAuraSourceUnseparable = false,
         bossAuraUsesCuratedRaidInCombat = false,
+        legacySourceFilterUsesSuperset = false,
+        legacyDispellableUsesRaidPlayerDispellable = false,
+        unsupportedPtr7CategoryUsesBaseFilter = false,
         defaultSortPriority = false,
         fixedHolderExtent = false,
         spellIDListsIgnored = false,
@@ -1005,9 +1030,45 @@ local function testEmptyPolicies()
         castByOthers = true,
         castByUnit = true,
     }
-    local unsupported = compile("target", "HARMFUL", config)
-    assertEqual(unsupported.empty, true, "unsupported harmful state")
-    assertEqual(unsupported.completeSpec, nil, "unsupported harmful spec")
+    local widened = compile("target", "HARMFUL", config)
+    assertEqual(widened.empty, false, "widened harmful state")
+    assertEqual(
+        widened.completeSpec.groups[1].key,
+        "all",
+        "cast-by-unit all group"
+    )
+    assertEqual(
+        widened.completeSpec.groups[1].filterString,
+        "HARMFUL",
+        "cast-by-unit base filter"
+    )
+    assertEqual(
+        widened.degradations.legacySourceFilterUsesSuperset,
+        true,
+        "cast-by-unit widening metadata"
+    )
+
+    config.filters = {
+        castByOthers = true,
+    }
+    local notPlayer = compile("target", "HARMFUL", config)
+    assertEqual(notPlayer.empty, false, "source-only harmful state")
+    assertEqual(
+        notPlayer.completeSpec.groups[1].key,
+        "notPlayer",
+        "source-only not-player group"
+    )
+    assertEqual(
+        notPlayer.completeSpec.groups[1].filterString,
+        "HARMFUL|!PLAYER",
+        "source-only not-player filter"
+    )
+    assertDeepEqual(notPlayer.visibility, {
+        requiresVisible = true,
+        requiresAssist = false,
+        spellIDFilterRequiresPublicAssist = false,
+        spellIDFilterRequiresPublicNonAssist = false,
+    }, "source-only visibility")
 
     config = baseConfig()
     config.enabled = false
@@ -1084,10 +1145,10 @@ local function testCapacityMetrics()
         "single-group sort degradation"
     )
 
-    local five = baseConfig()
-    five.numPerLine = 11
-    five.numTotal = 22
-    five.filters = {
+    local legacyAll = baseConfig()
+    legacyAll.numPerLine = 11
+    legacyAll.numTotal = 22
+    legacyAll.filters = {
         castByMe = true,
         castByOthers = true,
         castByUnit = true,
@@ -1095,25 +1156,151 @@ local function testCapacityMetrics()
         isBossAura = true,
         dispellable = true,
     }
-    local fiveDescriptor = compile("target", "HELPFUL", five)
-    assertDeepEqual(fiveDescriptor.metrics, {
-        groupCount = 5,
+    local allDescriptor =
+        compile("target", "HELPFUL", legacyAll)
+    assertEqual(
+        allDescriptor.completeSpec.groups[1].filterString,
+        "HELPFUL",
+        "legacy all base filter"
+    )
+    assertDeepEqual(allDescriptor.metrics, {
+        groupCount = 1,
         legacyMaxFrameCount = 22,
-        nativeVisibleCapacity = 110,
+        nativeVisibleCapacity = 22,
         nativeBatchSize = 10,
-        initialRestrictedButtonCount = 50,
-        freshContainerRestrictedButtonCountCeiling = 150,
-    }, "five-group metrics")
+        initialRestrictedButtonCount = 10,
+        freshContainerRestrictedButtonCountCeiling = 30,
+    }, "legacy all metrics")
     assertEqual(
-        fiveDescriptor.degradations.perGroupLimit,
-        true,
-        "five-group limit degradation"
+        allDescriptor.degradations.perGroupLimit,
+        false,
+        "legacy all limit degradation"
     )
     assertEqual(
-        fiveDescriptor.degradations.perGroupSort,
-        true,
-        "five-group sort degradation"
+        allDescriptor.degradations.perGroupSort,
+        false,
+        "legacy all sort degradation"
     )
+    assertDeepEqual(allDescriptor.visibility, {
+        requiresVisible = false,
+        requiresAssist = false,
+        spellIDFilterRequiresPublicAssist = false,
+        spellIDFilterRequiresPublicNonAssist = false,
+    }, "legacy all visibility")
+
+    local canonicalAll = copy(legacyAll)
+    canonicalAll.filters = {
+        all = true,
+    }
+    local canonicalAllDescriptor =
+        compile("target", "HELPFUL", canonicalAll)
+    assertDeepEqual(
+        canonicalAllDescriptor.completeSpec.groups,
+        allDescriptor.completeSpec.groups,
+        "legacy and canonical all groups"
+    )
+    assertDeepEqual(
+        canonicalAllDescriptor.constructionKey,
+        allDescriptor.constructionKey,
+        "legacy and canonical all construction keys"
+    )
+
+    local seven = baseConfig()
+    seven.numPerLine = 11
+    seven.numTotal = 22
+    seven.filters = {
+        player = true,
+        notPlayer = false,
+        raidInCombat = true,
+        raidPlayerDispellable = true,
+        bigDefensive = true,
+        externalDefensive = true,
+        important = true,
+        anyDispellable = true,
+    }
+    local sevenDescriptor =
+        compile("target", "HELPFUL", seven)
+    assertDeepEqual(sevenDescriptor.metrics, {
+        groupCount = 7,
+        legacyMaxFrameCount = 22,
+        nativeVisibleCapacity = 154,
+        nativeBatchSize = 10,
+        initialRestrictedButtonCount = 70,
+        freshContainerRestrictedButtonCountCeiling = 210,
+    }, "seven-category metrics")
+    assertEqual(
+        sevenDescriptor.degradations.perGroupLimit,
+        true,
+        "seven-category limit degradation"
+    )
+    assertEqual(
+        sevenDescriptor.degradations.perGroupSort,
+        true,
+        "seven-category sort degradation"
+    )
+    assertEqual(
+        sevenDescriptor.completeSpec.groups[6].key,
+        "important",
+        "important spec group order"
+    )
+    assertEqual(
+        sevenDescriptor.completeSpec.groups[6].filterString,
+        "HELPFUL|IMPORTANT|!PLAYER|!RAID_IN_COMBAT"
+            .. "|!RAID_PLAYER_DISPELLABLE|!BIG_DEFENSIVE"
+            .. "|!EXTERNAL_DEFENSIVE",
+        "important spec filter"
+    )
+    assertEqual(
+        sevenDescriptor.completeSpec.groups[7].key,
+        "anyDispellable",
+        "any-dispellable spec group order"
+    )
+    assertEqual(
+        sevenDescriptor.completeSpec.groups[7].filterString,
+        "HELPFUL|DISPELLABLE|!PLAYER|!RAID_IN_COMBAT"
+            .. "|!RAID_PLAYER_DISPELLABLE|!BIG_DEFENSIVE"
+            .. "|!EXTERNAL_DEFENSIVE|!IMPORTANT",
+        "any-dispellable spec filter"
+    )
+    assertEqual(
+        sevenDescriptor.visibility.spellIDFilterRequiresPublicAssist,
+        false,
+        "category-only helpful policy has no spell-ID assist gate"
+    )
+    assertEqual(
+        sevenDescriptor.visibility.spellIDFilterRequiresPublicNonAssist,
+        false,
+        "category-only helpful policy has no spell-ID non-assist gate"
+    )
+
+    local splitDefensive = baseConfig()
+    splitDefensive.filters = {
+        player = false,
+        raidInCombat = false,
+        raidPlayerDispellable = false,
+        bigDefensive = true,
+        externalDefensive = false,
+    }
+    local splitDescriptor =
+        compile("target", "HELPFUL", splitDefensive)
+    assertEqual(
+        #splitDescriptor.completeSpec.groups,
+        1,
+        "split defensive group count"
+    )
+    assertEqual(
+        splitDescriptor.completeSpec.groups[1].filterString,
+        "HELPFUL|BIG_DEFENSIVE",
+        "split defensive filter"
+    )
+    assertDeepEqual(splitDescriptor.metrics, {
+        groupCount = 1,
+        legacyMaxFrameCount = 4,
+        nativeVisibleCapacity = 4,
+        nativeBatchSize = 10,
+        initialRestrictedButtonCount = 10,
+        freshContainerRestrictedButtonCountCeiling = 10,
+    }, "split defensive metrics")
 
     local spellFilter = baseConfig()
     spellFilter.blacklist = {12345}
@@ -1135,6 +1322,16 @@ local function testCapacityMetrics()
             .spellIDFiltersRestrictedByUnitReaction,
         true,
         "spell-filter reaction degradation"
+    )
+    assertEqual(
+        spellDescriptor.visibility.spellIDFilterRequiresPublicAssist,
+        false,
+        "harmful spell filter does not require assist"
+    )
+    assertEqual(
+        spellDescriptor.visibility.spellIDFilterRequiresPublicNonAssist,
+        true,
+        "harmful spell filter requires a public non-assist reaction"
     )
 end
 
@@ -1181,6 +1378,18 @@ local function testSpellIDCandidateFilters()
         whitelistDescriptor.visibility.requiresAssist,
         true,
         "helpful identity filter assist gate"
+    )
+    assertEqual(
+        whitelistDescriptor.visibility
+            .spellIDFilterRequiresPublicAssist,
+        true,
+        "helpful identity filter requires a public assist reaction"
+    )
+    assertEqual(
+        whitelistDescriptor.visibility
+            .spellIDFilterRequiresPublicNonAssist,
+        false,
+        "helpful identity filter does not require non-assist"
     )
     assertEqual(
         whitelistDescriptor.degradations.spellIDListsIgnored,
@@ -1240,6 +1449,18 @@ local function testSpellIDCandidateFilters()
         "empty helpful whitelist assist gate"
     )
     assertEqual(
+        emptyWhitelistDescriptor.visibility
+            .spellIDFilterRequiresPublicAssist,
+        true,
+        "empty helpful whitelist remains an active assist gate"
+    )
+    assertEqual(
+        emptyWhitelistDescriptor.visibility
+            .spellIDFilterRequiresPublicNonAssist,
+        false,
+        "empty helpful whitelist does not require non-assist"
+    )
+    assertEqual(
         emptyWhitelistDescriptor.degradations
             .spellIDFiltersRestrictedByUnitReaction,
         true,
@@ -1263,6 +1484,44 @@ local function testSpellIDCandidateFilters()
         false,
         "harmful identity filter assist gate"
     )
+    assertEqual(
+        blacklistDescriptor.visibility
+            .spellIDFilterRequiresPublicAssist,
+        false,
+        "harmful identity filter does not require assist"
+    )
+    assertEqual(
+        blacklistDescriptor.visibility
+            .spellIDFilterRequiresPublicNonAssist,
+        true,
+        "harmful identity filter requires a public non-assist reaction"
+    )
+
+    local importantWhitelist = baseConfig()
+    importantWhitelist.filters = {
+        important = true,
+    }
+    importantWhitelist.mode = "whitelist"
+    importantWhitelist.whitelist = {505}
+    local importantWhitelistDescriptor =
+        compile("focus", "HELPFUL", importantWhitelist)
+    assertEqual(
+        importantWhitelistDescriptor.completeSpec.groups[1].key,
+        "important",
+        "important category remains selected with a spell-ID whitelist"
+    )
+    assertEqual(
+        importantWhitelistDescriptor.visibility
+            .spellIDFilterRequiresPublicAssist,
+        true,
+        "important whitelist retains the strict assist gate"
+    )
+    assertEqual(
+        importantWhitelistDescriptor.visibility
+            .spellIDFilterRequiresPublicNonAssist,
+        false,
+        "important whitelist does not add a non-assist gate"
+    )
 
     local emptyBlacklist = baseConfig()
     emptyBlacklist.blacklist = {}
@@ -1283,6 +1542,18 @@ local function testSpellIDCandidateFilters()
             .spellIDFiltersRestrictedByUnitReaction,
         false,
         "empty blacklist reaction degradation"
+    )
+    assertEqual(
+        emptyBlacklistDescriptor.visibility
+            .spellIDFilterRequiresPublicAssist,
+        false,
+        "empty blacklist has no strict assist gate"
+    )
+    assertEqual(
+        emptyBlacklistDescriptor.visibility
+            .spellIDFilterRequiresPublicNonAssist,
+        false,
+        "empty blacklist has no strict non-assist gate"
     )
     assertEqual(
         #emptyBlacklistDescriptor.diagnostics,

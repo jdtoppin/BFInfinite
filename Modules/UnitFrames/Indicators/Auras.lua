@@ -319,7 +319,12 @@ local function Auras_LoadConfig(self, config)
     Auras_SetupAuras(self, config, false)
     Auras_UpdateSize(self, 0)
 
-    self:SetMatchFilters(F.GetSecretSafeAuraMatchFilters(self.auraFilter, config.filters))
+    self:SetMatchFilters(
+        F.GetSecretSafeUnitFrameAuraMatchFilters(
+            self.auraFilter,
+            config.filters
+        )
+    )
 
     self.subFrameEnabled = false
     if self.subFrame and config.subFrame then
