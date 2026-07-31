@@ -170,7 +170,7 @@ select(2, ...).L = setmetatable({
     ["Use supported sorting"] = "Use supported sorting",
     ["Reload UI to apply Buffs styling. Blizzard Buffs remain active."] = "Reload UI to apply Buffs styling. Blizzard Buffs remain active.",
     ["Reload UI"] = "Reload UI",
-    ["Buffs update is waiting for combat or hover to end."] = "Buffs update is waiting for combat or hover to end.",
+    ["Buffs update is waiting for combat to end."] = "Buffs update is waiting for combat to end.",
     ["Blizzard Buffs remain active because the native replacement could not be applied."] = "Blizzard Buffs remain active because the native replacement could not be applied.",
     ["Maps"] = _G.BRAWL_TOOLTIP_MAPS,
 }, {
