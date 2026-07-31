@@ -8,7 +8,7 @@ local C_Timer = C_Timer
 local CreateFrame = CreateFrame
 local InCombatLockdown = InCombatLockdown
 local floor, huge = math.floor, math.huge
-local ipairs, next, pairs, pcall, type = ipairs, next, pairs, pcall, type
+local ipairs, next, pairs, type = ipairs, next, pairs, type
 
 -- Retail 12.1.0.68914 (wow-ui-source d3915c78) makes native aura
 -- groups/slots add-only and restricts their buttons after initialization.
@@ -391,19 +391,6 @@ local function HasPendingMutation(controller)
     return HasNativeMutation(controller) or controller._needsVisibility
 end
 
-function ControllerMixin:_QueueHoverRetry()
-    if self._hoverRetryScheduled or self._destroyed then return end
-
-    self._hoverRetryScheduled = true
-    C_Timer.After(0.25, function()
-        self._hoverRetryScheduled = nil
-        if self._destroyed or not HasPendingMutation(self) then return end
-
-        self:_ApplyPending()
-        UnregisterRegenIfIdle()
-    end)
-end
-
 function ControllerMixin:_QueueRegenDispatch()
     if self._regenDispatchScheduled then return end
 
@@ -431,8 +418,8 @@ local function SetHolderCurtained(controller, curtained)
     if controller._holderAlpha == alpha then return end
 
     -- This is BFI's own plain holder, never a native aura container or
-    -- restricted child. Alpha provides an immediate fail-closed curtain when
-    -- a hovered descendant makes the corresponding visibility write wait.
+    -- restricted child. Alpha provides an immediate fail-closed curtain while
+    -- the complete presentation is changed through constant writes.
     controller.frame:SetAlpha(alpha)
     controller._holderAlpha = alpha
 end
@@ -460,32 +447,18 @@ local function SetPresentationCurtained(controller, curtained)
 end
 
 local function SetHolderShownSafe(controller, shown)
-    local holder = controller.frame
     if not shown then
         SetHolderCurtained(controller, true)
     end
-    if holder:IsShown() == shown then
+    if controller._holderShown == shown then
         return true
     end
 
-    -- IsShown/IsMouseOver are read only from BFI's plain, config-sized
-    -- holder. Native containers, restricted buttons, and aura state remain
-    -- opaque. A visibility flip while a native aura tooltip is hovered can
-    -- synchronously enter protected tooltip code, so retry after hover ends.
-    if holder:IsMouseOver() then
-        controller:_QueueHoverRetry()
-        return false
-    end
-
-    -- pcall only contains a non-secret write to BFI's own holder. It is not
-    -- an API/secret probe or a security boundary; hover avoidance above is
-    -- the defense. Verification keeps a raced or aborted write from letting
-    -- native mutations proceed while the holder is still visible.
-    local wrote = pcall(holder.SetShown, holder, shown)
-    if not wrote or holder:IsShown() ~= shown then
-        controller:_QueueHoverRetry()
-        return false
-    end
+    -- Retail 12.1.0.68914 can make visibility and hover accessors secret when
+    -- a holder is anchored to a native aura container. Keep an ordinary
+    -- write-only ledger instead of inspecting frame state.
+    controller.frame:SetShown(shown)
+    controller._holderShown = shown
     return true
 end
 
@@ -495,11 +468,6 @@ local function SetExternalContainerShownSafe(controller, shown)
         or controller._containerShown == shown
     then
         return true
-    end
-
-    if controller.frame:IsMouseOver() then
-        controller:_QueueHoverRetry()
-        return false
     end
 
     if shown then
@@ -632,7 +600,7 @@ function ControllerMixin:_Build()
         + #spec.slots
 
     -- Build the complete container while the public holder is hidden by the
-    -- hover-safe lifecycle gate. Native groups/slots are add-only, so this
+    -- write-only presentation gate. Native groups/slots are add-only, so this
     -- controller deliberately has no replacement/rebuild path after this.
     local container = self._seedContainer
     local containerIsExternal = container ~= nil
@@ -750,9 +718,8 @@ function ControllerMixin:_ApplyPending()
         return
     end
 
-    -- A pure public-holder visibility change is render-side only. It may run
-    -- in combat, but still waits for hover to end before firing tooltip
-    -- intrinsics through a native child.
+    -- A pure public-holder visibility change is render-side only and may run
+    -- in combat. Holder state is tracked only through BFI-owned writes.
     if not HasNativeMutation(self) then
         if RestoreControllerVisibility(self) then
             self._needsVisibility = nil
@@ -762,7 +729,7 @@ function ControllerMixin:_ApplyPending()
     end
 
     -- Native configuration and initial-build work is OOC-only. Hide the
-    -- plain holder first so no hovered restricted child participates.
+    -- complete BFI-owned presentation before applying native mutations.
     local holderHidden = SetControllerShownSafe(self, false)
     if InCombatLockdown() then
         if holderHidden then
@@ -814,6 +781,7 @@ function ControllerMixin:_ApplyPending()
         self._nativeShellStranded = nil
         self._knownInitialReservations = nil
         self._spec = nil
+        self._holderShown = nil
         self._destroyed = true
         constructionStats.destroyCompletions =
             constructionStats.destroyCompletions + 1
@@ -909,8 +877,7 @@ end
 
 local function RequestMutation(controller)
     controller:_ApplyPending()
-    -- An ordinary out-of-combat update or hover retry may beat the queued
-    -- regen event.
+    -- An ordinary out-of-combat update may beat the queued regen event.
     UnregisterRegenIfIdle()
 end
 
@@ -929,7 +896,7 @@ function ControllerMixin:IsPresentationApplied()
 end
 
 -- Queue the latest configuration-only holder mutation behind the same
--- combat and hover gate as native work. This is intentionally a callback:
+-- combat gate as native work. This is intentionally a callback:
 -- indicator placement can resolve anchors only through UnitFrames/Common.
 function ControllerMixin:ApplyHolderConfig(configure)
     assert(not self._destroyed and not self._destroyRequested,
@@ -1059,6 +1026,7 @@ local function CreateController(parent, name, completeSpec, options)
     local controller = setmetatable({}, ControllerMixin)
     controller.frame = CreateFrame("Frame", name, parent)
     controller.frame:Hide()
+    controller._holderShown = false
     controller._seedContainer = options.seedContainer
     controller._liveUnitChanges = options.liveUnitChanges == true
     constructionStats.controllersCreated = constructionStats.controllersCreated + 1
