@@ -32,7 +32,8 @@ Use this clean isolated-install sequence:
    #102 at `5bbd4948ec55353ab31418f30a39b4c592ae7457`.
 4. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
    #103 at `3a15584af39f69cde28d5d00e80a1d29d8934e29`.
-5. AF #23 at `43f79cf2e9e91c47c9142c3546c900baf8fe092f` with the exact
+5. Validation-only AF #25 at
+   `d82bc3e07d4eab953d5e9a7dc82c9cc1a307e8f9` with the exact
    checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
    validation SHA. Record that full branch-head SHA immediately before
    installation.
@@ -42,14 +43,17 @@ ancestors, never sibling integrations; do not merge branches or overlay
 folders to manufacture a test build. PR #91 is validation-only and must never
 be merged. Closed PR #98 is superseded and is not an install input.
 
-For the final stack, use AbstractFramework PR #23, branch
-`codex/secret-unit-identity`, exact head
-`43f79cf2e9e91c47c9142c3546c900baf8fe092f` (r35).
+For the final stack, use validation-only AbstractFramework PR #25, branch
+`codex/aura-full-stack-test`, exact head
+`d82bc3e07d4eab953d5e9a7dc82c9cc1a307e8f9`. It combines AF #23/r35 with
+current AF `main` `a4eade2b8da69c095d7f9224f5537f09c0cc357f`, including #24's
+Retail 12.1 max-level fix. Never merge AF #25.
 
 The aggregate must contain these exact BFInfinite terminal heads:
 
 | Coverage | Branch | Exact head |
 |---|---|---|
+| Current BFInfinite master compatibility (#104) | `master` | `977f2b3908c7b9dcda2011b15bf3cc67a36948f0` |
 | Global exact spell colors (#101) | `codex/unitframe-aura-spell-colors` | `3a0d80a38247f6487dbbff2371f681672a61adc8` |
 | Presentation hardening (#102) | `codex/unitframe-aura-presentation-hardening` | `5bbd4948ec55353ab31418f30a39b4c592ae7457` |
 | Player | `codex/unitframe-aura-player` | `3f0fd66` |
@@ -67,14 +71,15 @@ The aggregate must contain these exact BFInfinite terminal heads:
 
 Test in this order:
 
-1. Test AF r35 alone, including duration abbreviations and secret identity.
+1. Test AF #25 alone, including effective max-level compatibility, duration
+   abbreviations, and secret identity.
 2. Test the policy, spec, lifecycle/controller, provider/counter, supported
    filter-control, spell-color, and presentation-hardening PRs in isolation.
 3. Test each of the ten unit-frame integration leaves independently.
 4. Test the upper-right foundation, controller, Buffs, options, and
    forbidden-button branches in their PR order.
 5. Test #103's ordinary Debuff appearance controls with AF r33.
-6. Install AF r35 and the disposable aggregate as clean, complete folders.
+6. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
 7. Run the 12.1 gates below in order.
 8. Run the narrow 12.0.7 preservation smoke.
 
@@ -189,6 +194,21 @@ Do not dump a unit API, aura value, native child, or private-aura identity
 while it may be secret.
 
 ## 12.1 live gates
+
+### 0. Current-master compatibility preflight
+
+- Enable BFInfinite's Objective Tracker, then cover login, reload, and Edit
+  Mode. Confirm there is no missing managed-frame-container global, the
+  tracker remains attached to the BFI mover, and no Blizzard-managed copy is
+  left behind.
+- Exercise the Experience Bar while ordinary XP is available, while XP is
+  disabled, and at effective max level. Confirm there is no
+  `AF.IsMaxLevel` callback error, no screen-wide Stripe texture, and the
+  disabled overlay remains bounded to the inner bar and hidden when it should
+  not be shown.
+- Stop the aura certification if either baseline regression produces a Lua
+  error or contaminates the taint log; those failures can mask later aura
+  evidence.
 
 ### 1. Backend, load, and ownership
 
