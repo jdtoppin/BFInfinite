@@ -37,3 +37,6 @@ jobs:
         run: |
           lua5.1 tests/objective_tracker_12_1_compat_test.lua
           lua5.1 tests/experience_bar_disabled_texture_test.lua
+
+      - name: Test first-load mouse deselection default
+        run: lua5.1 tests/core_mouse_deselect_default_test.lua

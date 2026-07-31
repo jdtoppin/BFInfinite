@@ -252,6 +252,7 @@ local function InitAndBackupCVars()
         "fstack_preferParentKeys",
         "screenshotQuality",
         "showInGameNavigation",
+        "deselectOnClick",
         "CameraReduceUnexpectedMovement",
         "ActionButtonUseKeyDown",
         "chatMouseScroll",
@@ -295,6 +296,11 @@ local function InitAndBackupCVars()
         SetCVar("fstack_preferParentKeys", 0)
         SetCVar("screenshotQuality", 10)
         SetCVar("showInGameNavigation", 1)
+        -- Retail 12.1.0.68914 (d3915c78),
+        -- Blizzard_SettingsDefinitions_Frame/Controls.lua:43-47 negates this
+        -- CVar as "Sticky Targeting". Set it only during BFI's one-time init
+        -- so later user changes remain authoritative.
+        SetCVar("deselectOnClick", 1)
         -- SetCVar("cameraDistanceMaxZoomFactor", 2.6)
         SetCVar("CameraReduceUnexpectedMovement", 1)
         -- SetCVar("ResampleAlwaysSharpen", 1)
