@@ -89,8 +89,6 @@ local defaults = {
     },
     objectiveTracker = {
         enabled = true,
-        position = {"TOPRIGHT", -1, -200},
-        height = 500,
         font = {"BFI", 12, "none", true},
         -- order = {
         --     "ScenarioObjectiveTracker", -- 地下城/挑战/试炼场/托加斯特，罪魂之塔/... - TRACKER_HEADER_DUNGEON

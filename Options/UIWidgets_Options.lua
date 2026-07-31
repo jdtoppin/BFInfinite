@@ -54,8 +54,6 @@ local settings = {
         "markerSpacing",
     },
     objectiveTracker = {
-        -- "trackerOrder",
-        "height",
         "font",
     },
 }
@@ -250,30 +248,6 @@ builder["width,height"] = function(parent)
     function pane.Load(t)
         pane.t = t
         width:SetValue(t.cfg.width)
-        height:SetValue(t.cfg.height)
-    end
-
-    return pane
-end
-
----------------------------------------------------------------------
--- height
----------------------------------------------------------------------
-builder["height"] = function(parent)
-    if created["height"] then return created["height"] end
-
-    local pane = AF.CreateBorderedFrame(parent, "BFI_UIWidgetOption_Height", nil, 55)
-    created["height"] = pane
-
-    local height = AF.CreateSlider(pane, L["Height"], 150, 200, 1000, 1, nil, true)
-    AF.SetPoint(height, "LEFT", 15, 0)
-    height:SetOnValueChanged(function(value)
-        pane.t.cfg.height = value
-        AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
-    end)
-
-    function pane.Load(t)
-        pane.t = t
         height:SetValue(t.cfg.height)
     end
 
