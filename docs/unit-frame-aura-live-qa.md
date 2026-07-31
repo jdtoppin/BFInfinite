@@ -30,9 +30,11 @@ Use this clean isolated-install sequence:
    #101 at `b114db40fb586d37b048c58ff0f8166f00b63883`.
 3. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
    #102 at `b88bb4fbd5430fdb7d26090d4a9c9650c1f39bb9`.
-4. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
+4. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
+   #110 at `69319793765c62009e39bab4ee30a67b7c226f1a`.
+5. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
    #103 at `19df3783962e9fff37c8c02f30087c5c26e22f10`.
-5. Validation-only AF #25 at
+6. Validation-only AF #25 at
    `d82bc3e07d4eab953d5e9a7dc82c9cc1a307e8f9` with the exact
    checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
    validation SHA. Record that full branch-head SHA immediately before
@@ -63,7 +65,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | FocusTarget | `codex/unitframe-aura-focustarget` | `58a60e011cb2dbd2d3b54d62cdb6ffc6b8df2df9` |
 | PetTarget | `codex/unitframe-aura-pettarget` | `02a75fd22f8f04e21e7f139df214697e6350e567` |
 | Pet | `codex/unitframe-aura-pet` | `8e91a8c7616b3000d5e607a2063bf528dd8c4f59` |
-| Target partition | `codex/unitframe-aura-target` | `45e166b3dab0ad96a29c775d7bb4dd761a4767e7` |
+| Target partition (#110) | `codex/unitframe-aura-target-final` | `69319793765c62009e39bab4ee30a67b7c226f1a` |
 | Party | `codex/unitframe-aura-party` | `2cfcbca80d0b2b45b9a9abb657907511152ae6b9` |
 | Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
 | Upper-right Debuff appearance (#103; includes #99) | `codex/buffs-debuffs-native-debuffs` | `19df3783962e9fff37c8c02f30087c5c26e22f10` |
