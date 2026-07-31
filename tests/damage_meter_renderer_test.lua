@@ -132,11 +132,13 @@ local function loadRenderer(
     end
 
     function frameMethods:SetAllPoints(relativeTo)
+        self.points = {}
         self.allPoints = relativeTo or true
     end
 
     function frameMethods:ClearAllPoints()
         self.points = {}
+        self.allPoints = nil
     end
 
     function frameMethods:SetPoint(
@@ -1723,13 +1725,32 @@ assertEqual(
 )
 third:RunScript("OnUpdate")
 assertEqual(first.dockPreview.shown, true, "top docking preview shown")
-assertEqual(
-    first.dockPreview.points[1].point,
-    "TOPLEFT",
-    "top preview covers target top half"
+assertSame(
+    first.dockPreview.allPoints,
+    first,
+    "top drop highlights the complete target window"
 )
+assertEqual(
+    #first.dockPreview.points,
+    0,
+    "top docking preview has no split anchors"
+)
+state.cursorY = 250
+third:RunScript("OnUpdate")
+assertSame(
+    first.dockPreview.allPoints,
+    first,
+    "crossing the midpoint preserves one target highlight"
+)
+state.cursorY = 350
+third:RunScript("OnUpdate")
 third.dragGrip:RunScript("OnDragStop")
 assertEqual(first.dockPreview.shown, false, "preview clears on drop")
+assertEqual(
+    first.dockPreview.allPoints,
+    nil,
+    "preview clears its full-window anchor on drop"
+)
 assertEqual(
     DM.config.windowAnchors[3].relativeTo,
     1,
@@ -1770,10 +1791,15 @@ state.cursorY = 250
 third.header:RunScript("OnDragStart")
 third:RunScript("OnUpdate")
 assertEqual(first.dockPreview.shown, true, "bottom docking preview shown")
+assertSame(
+    first.dockPreview.allPoints,
+    first,
+    "bottom drop keeps one complete target highlight"
+)
 assertEqual(
-    first.dockPreview.points[1].relativePoint,
-    "LEFT",
-    "bottom preview starts at target midpoint"
+    #first.dockPreview.points,
+    0,
+    "bottom docking preview has no split anchors"
 )
 third.header:RunScript("OnDragStop")
 assertEqual(

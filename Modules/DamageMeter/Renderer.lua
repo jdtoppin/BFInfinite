@@ -1925,27 +1925,16 @@ local function ClearDockPreview()
 end
 
 local function ShowDockPreview(target, direction)
-    if activeDockTarget == target
-        and activeDockDirection == direction
-    then
+    if activeDockTarget == target then
+        -- Keep the insertion side as internal drop state, but present the
+        -- target as one window instead of two competing visual zones.
+        activeDockDirection = direction
         return
     end
 
     ClearDockPreview()
     local preview = target.dockPreview
-    if direction == "above" then
-        preview:SetPoint("TOPLEFT", target, "TOPLEFT", 0, 0)
-        preview:SetPoint("BOTTOMRIGHT", target, "RIGHT", 0, 0)
-    else
-        preview:SetPoint("TOPLEFT", target, "LEFT", 0, 0)
-        preview:SetPoint(
-            "BOTTOMRIGHT",
-            target,
-            "BOTTOMRIGHT",
-            0,
-            0
-        )
-    end
+    preview:SetAllPoints(target)
     preview:Show()
     activeDockTarget = target
     activeDockDirection = direction
