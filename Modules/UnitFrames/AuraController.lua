@@ -149,8 +149,13 @@ function UF.CreateNativeGroupAuraContainerSeed(parent)
 
     local container = AF.CreateCustomAuraContainer(parent)
     constructionStats.seedsAllocated = constructionStats.seedsAllocated + 1
-    container:Hide()
-    AF.SetCustomAuraContainerEnabled(container, false)
+    -- A newly allocated/header-adjacent shell must be visually inert even if
+    -- it is created while protected visibility writes are unavailable.
+    container:SetAlpha(0)
+    if not InCombatLockdown() then
+        container:Hide()
+        AF.SetCustomAuraContainerEnabled(container, false)
+    end
     return container
 end
 
@@ -379,6 +384,7 @@ ControllerMixin.__index = ControllerMixin
 
 local function HasNativeMutation(controller)
     return controller._destroyRequested
+        or controller._needsClaimInitialization
         or controller._holderConfig
         or controller._needsRebuild
         or controller._needsTuning
@@ -479,12 +485,30 @@ local function SetExternalContainerShownSafe(controller, shown)
     return true
 end
 
+local function IsControllerVisibilityApplied(controller, shown)
+    if controller._holderShown ~= shown then
+        return false
+    end
+    return not controller._containerIsExternal
+        or not controller._container
+        or controller._containerShown == shown
+end
+
 local function SetControllerShownSafe(controller, shown)
     -- A header-born/seeded container is parented to the secure unit button,
     -- not to BFI's plain holder. Hide it explicitly before hiding the holder;
     -- show it only after the holder is restored. No native visibility is
     -- read: _containerShown tracks only BFI's own successful writes.
     SetPresentationCurtained(controller, true)
+    if InCombatLockdown() then
+        if not IsControllerVisibilityApplied(controller, shown) then
+            return false
+        end
+        if shown then
+            SetPresentationCurtained(controller, false)
+        end
+        return true
+    end
     if not shown and not SetExternalContainerShownSafe(controller, false) then
         return false
     end
@@ -732,6 +756,8 @@ function ControllerMixin:_ApplyPending()
         if RestoreControllerVisibility(self) then
             self._needsVisibility = nil
             pendingControllers[self] = nil
+        else
+            QueueController(self)
         end
         return
     end
@@ -740,9 +766,13 @@ function ControllerMixin:_ApplyPending()
     -- complete BFI-owned presentation before applying native mutations.
     local holderHidden = SetControllerShownSafe(self, false)
     if InCombatLockdown() then
-        if holderHidden then
-            ApplyLiveUnitRetarget(self)
-        end
+        -- SetUnit/UpdateAllAuras are the only native operations explicitly
+        -- supported live. The alpha curtain is already active; protected
+        -- Show/Hide/SetShown calls are deferred until regen.
+        -- Register recovery before the supported inbound calls as well: an
+        -- unexpected adapter error must not strand a curtained controller.
+        QueueController(self)
+        ApplyLiveUnitRetarget(self)
         if HasNativeMutation(self) then
             QueueController(self)
         else
@@ -750,6 +780,8 @@ function ControllerMixin:_ApplyPending()
             if RestoreControllerVisibility(self) then
                 self._needsVisibility = nil
                 pendingControllers[self] = nil
+            else
+                QueueController(self)
             end
         end
         return
@@ -788,6 +820,7 @@ function ControllerMixin:_ApplyPending()
         self._containerAlpha = nil
         self._nativeShellStranded = nil
         self._knownInitialReservations = nil
+        self._needsClaimInitialization = nil
         self._spec = nil
         self._holderShown = nil
         self._destroyed = true
@@ -795,6 +828,14 @@ function ControllerMixin:_ApplyPending()
             constructionStats.destroyCompletions + 1
         pendingControllers[self] = nil
         return
+    end
+
+    if self._needsClaimInitialization then
+        if self._seedContainer then
+            self._seedContainer:Hide()
+            AF.SetCustomAuraContainerEnabled(self._seedContainer, false)
+        end
+        self._needsClaimInitialization = nil
     end
 
     if self._holderConfig then
@@ -1033,11 +1074,19 @@ local function CreateController(parent, name, completeSpec, options)
 
     local controller = setmetatable({}, ControllerMixin)
     controller.frame = CreateFrame("Frame", name, parent)
-    controller.frame:Hide()
-    controller._holderShown = false
+    controller.frame:SetAlpha(0)
+    controller._holderAlpha = 0
+    if not InCombatLockdown() then
+        controller.frame:Hide()
+        controller._holderShown = false
+    end
     controller._seedContainer = options.seedContainer
     controller._liveUnitChanges = options.liveUnitChanges == true
     constructionStats.controllersCreated = constructionStats.controllersCreated + 1
+    if InCombatLockdown() then
+        controller._needsClaimInitialization = true
+        QueueController(controller)
+    end
 
     if controller._seedContainer then
         claimedGroupAuraContainers[controller._seedContainer] = true
@@ -1047,8 +1096,10 @@ local function CreateController(parent, name, completeSpec, options)
         -- cannot expose Blizzard's baseline or a stale prior assignment even
         -- if the protected Hide call is blocked.
         controller._seedContainer:SetAlpha(0)
-        controller._seedContainer:Hide()
-        AF.SetCustomAuraContainerEnabled(controller._seedContainer, false)
+        if not InCombatLockdown() then
+            controller._seedContainer:Hide()
+            AF.SetCustomAuraContainerEnabled(controller._seedContainer, false)
+        end
     end
 
     if completeSpec then
