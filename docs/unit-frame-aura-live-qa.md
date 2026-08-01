@@ -27,27 +27,32 @@ Use this clean isolated-install sequence:
    #101 at `5f221bdd1679ebcafb2a4cab381188f080d81572`.
 3. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
    #102 at `62fdc2c289dcf518adff5f3a109eba3f05ed9dc8`.
-4. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
-   #110 at `4b350b7ff7903c2e275c305980624937f4dca357`.
-5. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
-   #112 at `a3069bc70e22e449231dbb7cd0be20e38a96412c`.
+4. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
+   #120 at `022c49a4beb8a92b3145f268a9ad92bd8dc30342`, then #110 at
+   `8ef7d1387575e72e96bde99e020bff8dec7e077d`.
+5. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
+   #112 at `01a009ded164aa1fc973867fb2827f0dc79e8346`.
 6. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
-   #103 at `5a35935c5ab2ba9db240dbb4d3dbbbc7b5935a1c`. Verify the
+   #103 at `dc0546639fec885ced82bdf1399d998f2c2f03bd`. Verify the
    ordinary upper-right Debuffs use BFI's neutral square outline while
    Blizzard continues to own their data and layout.
-7. AF #26 at `e534c7438c569e4517074ff077953b2bdad6cfd7` with BFInfinite
-   #110 at `4b350b7ff7903c2e275c305980624937f4dca357`. Verify Target
-   Debuffs use a square border while Blizzard's native dispel type still
-   controls its colour and visibility. Target Buffs must remain unchanged.
+7. Validation-only AF #25 at
+   `64fb9b7830f0fcafe3fb02043771e22cc0d67d51` with BFInfinite #110
+   at `8ef7d1387575e72e96bde99e020bff8dec7e077d`. This is the clean
+   combined check for AF #26's square border and AF #27's required r36
+   runtime. Verify Target Debuffs use a square border while Blizzard's native
+   dispel type still controls its colour and visibility. Target Buffs must
+   remain unchanged.
 8. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #110 at `4b350b7ff7903c2e275c305980624937f4dca357`. On Target Buffs
+   #110 at `8ef7d1387575e72e96bde99e020bff8dec7e077d`. On Target Buffs
    and Debuffs, test every cooldown choice after its required reload and
    require exactly one graphical timer.
 9. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #112 at `a3069bc70e22e449231dbb7cd0be20e38a96412c`. Repeat every
+   #112 at `01a009ded164aa1fc973867fb2827f0dc79e8346`. Repeat every
    cooldown choice on hostile nameplate Debuffs.
 10. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-    #103 at `5a35935c5ab2ba9db240dbb4d3dbbbc7b5935a1c`. Verify the
+    #121 at `d1a5fe741fc703458b5d0830e620cd6ac6f070b9`, then #103 at
+    `dc0546639fec885ced82bdf1399d998f2c2f03bd`. Verify the
     fixed-clock upper-right native Buff groups and temporary enchants have a
     circular swipe only, never a second vertical fill.
 11. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
@@ -92,11 +97,13 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | FocusTarget | `codex/unitframe-aura-focustarget` | `58a60e011cb2dbd2d3b54d62cdb6ffc6b8df2df9` |
 | PetTarget | `codex/unitframe-aura-pettarget` | `02a75fd22f8f04e21e7f139df214697e6350e567` |
 | Pet | `codex/unitframe-aura-pet` | `8e91a8c7616b3000d5e607a2063bf528dd8c4f59` |
-| Target partition (#110) | `codex/unitframe-aura-target-final` | `4b350b7ff7903c2e275c305980624937f4dca357` |
-| Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `a3069bc70e22e449231dbb7cd0be20e38a96412c` |
+| Unit/nameplate AF r36 gate (#120) | `codex/native-aura-r36-unitframe-gate` | `022c49a4beb8a92b3145f268a9ad92bd8dc30342` |
+| Target partition (#110) | `codex/unitframe-aura-target-final` | `8ef7d1387575e72e96bde99e020bff8dec7e077d` |
+| Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `01a009ded164aa1fc973867fb2827f0dc79e8346` |
 | Party | `codex/unitframe-aura-party` | `2cfcbca80d0b2b45b9a9abb657907511152ae6b9` |
 | Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
-| Upper-right Debuff appearance (#103; includes #99) | `codex/buffs-debuffs-native-debuffs` | `5a35935c5ab2ba9db240dbb4d3dbbbc7b5935a1c` |
+| Upper-right AF r36 gate (#121) | `codex/native-aura-r36-upper-right-gate` | `d1a5fe741fc703458b5d0830e620cd6ac6f070b9` |
+| Upper-right Debuff appearance (#103; includes #99 and #121) | `codex/buffs-debuffs-native-debuffs` | `dc0546639fec885ced82bdf1399d998f2c2f03bd` |
 | Tooltip/status safety (#85) | `codex/combat-secret-tooltip-fixes` | `b13a19842e7db7c19a447a97c009a4c968757d18` |
 | Native AuraButton tooltip skin (#118) | `codex/native-aura-tooltip-skin` | `24c26df850ee0730982a1263e0770d5a5e7296c4` |
 | Secret identity (#100) | `codex/unitframe-secret-identity` | `b8e1671ed8a1c11657416357875f9c8277051654` |
@@ -119,9 +126,11 @@ Test in this order:
 6. Test #103's ordinary Debuff appearance controls with AF r33, including the
    neutral square outline and exact restoration of Blizzard's rounded border
    when styling is disabled.
-7. Test AF #26 with #110, then repeat its square, native-dispel-colour check
-   across every harmful unit-frame row on the final aggregate.
-8. Test AF #27 with #110, #112, and #103 as three clean pairs. Run the
+7. Test AF #26's focused regression, then test its square border in the
+   AF #25/BFI #110 combined pair because #110 now correctly requires AF r36.
+   Repeat the square, native-dispel-colour check across every harmful
+   unit-frame row on the final aggregate.
+8. Test AF #27 with #120/#110, #112, and #121/#103 as three clean paths. Run the
    single-graphical-timer matrix below on unit-frame groups, nameplate groups,
    and upper-right Buff groups/temporary enchants, then repeat it on the final
    aggregate.
@@ -541,7 +550,7 @@ retargeting a native container to a preview identity.
 
 ### 6. Enemy nameplate Debuffs
 
-Test #112 first as the clean AF #22/BFI #112 pair, then repeat this entire
+Test #112 first as the clean AF #27/BFI #112 pair, then repeat this entire
 section on the aggregate. This leaf owns only enemy NPC/player Debuffs.
 Friendly dispellable Debuffs, nameplate Buffs, and nameplate Crowd Controls
 are expected to remain absent.
