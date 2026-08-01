@@ -31,9 +31,9 @@ local unpack = unpack
 -- SetIsEditing, or a secure post-hook) contaminates Blizzard's pooled item
 -- state and file-local caches. This module therefore has a strict boundary:
 -- it never writes a Blizzard Lua field, hooks a Blizzard object, or calls a
--- Cooldown Viewer mixin. It reads static pool/template state plus the guarded
--- shown/alpha presentation state of Blizzard's proc-alert Frame and viewer
--- parent; event payloads and alert-manager tables remain untouched.
+-- Cooldown Viewer mixin. It reads static pool/template state plus guarded
+-- widget presentation, and keeps reversible viewer/item geometry in BFI-owned
+-- side tables; event payloads and alert-manager tables remain untouched.
 -- Presentation is applied through captured C widget methods. Protected
 -- geometry is changed only outside combat and after CheckAllowProtectedFunctions.
 local viewerDefinitions = {
@@ -47,6 +47,7 @@ local viewerDefinitions = {
         previewCount = 12,
         hasIconLimit = true,
         assistedHighlight = true,
+        managedRoot = true,
     },
     utility = {
         globalName = "UtilityCooldownViewer",
@@ -58,6 +59,7 @@ local viewerDefinitions = {
         previewCount = 7,
         hasIconLimit = true,
         assistedHighlight = true,
+        managedRoot = true,
     },
     buffIcon = {
         globalName = "BuffIconCooldownViewer",
@@ -68,6 +70,7 @@ local viewerDefinitions = {
         itemHeight = 40,
         previewCount = 6,
         isBuff = true,
+        managedRoot = true,
     },
     buffBar = {
         globalName = "BuffBarCooldownViewer",
@@ -171,7 +174,6 @@ local FrameSetAlpha = methodFrame.SetAlpha
 local FrameSetAllPoints = methodFrame.SetAllPoints
 local FrameCreateFontString = methodFrame.CreateFontString
 local FrameSetMouseMotionEnabled = methodFrame.SetMouseMotionEnabled
-local FrameSetScale = methodFrame.SetScale
 local FontStringClearAllPoints = methodFontString.ClearAllPoints
 local FontStringGetAlpha = methodFontString.GetAlpha
 local FontStringIsShown = methodFontString.IsShown
@@ -218,6 +220,7 @@ local PresentationMethods = {
     SetShadowColor = methodFontString.SetShadowColor,
     SetShadowOffset = methodFontString.SetShadowOffset,
 }
+PresentationMethods.activationSettlementDelays = {0, 0.2, 1, 3, 6}
 methodFrame:Hide()
 methodStatusBar:Hide()
 
@@ -249,7 +252,7 @@ local HighlightState = {
 }
 local presentationController = CreateFrame("Frame")
 presentationController.buffVisibility = {}
-presentationController.targetObserver = CreateFrame("Frame")
+presentationController.rootIntegrity = CreateFrame("Frame")
 local presentationGeneration = 1
 local hotkeyGeneration = 1
 local fallbackOrder = 0
@@ -1404,7 +1407,8 @@ local function IsBlizzardEditModeActive()
     if not editMode then return false end
 
     local shown = FrameIsShown(editMode)
-    return IsSafeBoolean(shown) and shown
+    if not IsSafeBoolean(shown) then return nil end
+    return shown
 end
 
 local function BuildLayout(definition, config, count)
@@ -1437,24 +1441,23 @@ local function BuildLayout(definition, config, count)
 end
 
 function PresentationMethods.GetPixelSnappedScale(
-    item,
+    referenceFrame,
     itemHeight,
     configuredScale
 )
-    local currentScale = FrameGetScale(item)
-    local effectiveScale = FrameGetEffectiveScale(item)
-    if not IsSafeNumber(currentScale)
-        or currentScale <= 0
-        or not IsSafeNumber(effectiveScale)
+    local effectiveScale = FrameGetEffectiveScale(referenceFrame)
+    if not IsSafeNumber(effectiveScale)
         or effectiveScale <= 0
     then
         return configuredScale
     end
 
-    local parentScale = effectiveScale / currentScale
-    if parentScale <= 0 then return configuredScale end
     local renderedHeight = itemHeight * configuredScale
-    local snappedHeight = AF.GetNearestPixelSize(renderedHeight, parentScale, 1)
+    local snappedHeight = AF.GetNearestPixelSize(
+        renderedHeight,
+        effectiveScale,
+        1
+    )
     if not IsSafeNumber(snappedHeight) or snappedHeight <= 0 then
         return configuredScale
     end
@@ -1519,28 +1522,6 @@ local function GetLayoutPosition(layout, index)
     return x, y
 end
 
-local function GetHolderScaleRatio(holder, item, configuredScale)
-    local holderScale = FrameGetEffectiveScale(holder)
-    if not IsSafeNumber(holderScale) or holderScale <= 0 then
-        return configuredScale
-    end
-
-    local effectiveScale
-    if item then
-        effectiveScale = FrameGetEffectiveScale(item)
-    else
-        effectiveScale = FrameGetEffectiveScale(_G.UIParent)
-        if IsSafeNumber(effectiveScale) then
-            effectiveScale = effectiveScale * configuredScale
-        end
-    end
-
-    if not IsSafeNumber(effectiveScale) or effectiveScale <= 0 then
-        return configuredScale
-    end
-    return effectiveScale / holderScale
-end
-
 local function EnsurePreviewFrame(state, index)
     local preview = state.previewFrames[index]
     if preview then return preview end
@@ -1569,9 +1550,12 @@ local function EnsurePreviewFrame(state, index)
     return preview
 end
 
-local function UpdateHolderPreview(state, layout, firstItem, config)
+local function UpdateHolderPreview(state, layout, _firstItem, config)
     local holder = state.holder
-    local scaleRatio = GetHolderScaleRatio(holder, firstItem, layout.scale)
+    -- Preview frames are BFI-owned children of the holder, so their local
+    -- presentation ratio is exactly the configured layout scale. Native item
+    -- and viewer scale compensation applies only to Blizzard-owned children.
+    local scaleRatio = layout.scale
     local width, height = GetLayoutBounds(layout)
     FrameSetSize(holder, max(1, width * scaleRatio), max(1, height * scaleRatio))
 
@@ -1876,6 +1860,223 @@ local function CaptureNativeGeometry(item, itemState)
     return true
 end
 
+-- Retail 12.1.0.68914 (wow-ui-source d3915c78aba7) uses the native
+-- Cooldown Viewer itself as its GridLayout item container. RefreshLayout
+-- clears and rebuilds item anchors but leaves this root anchor alone. Keep
+-- the root centered on BFI's holder so a native rebuild lands at the desired
+-- location before BFI restores its exact centered grid. Preserve the root's
+-- native scale because BottomManagedFrameContainer includes child scale in
+-- the layout space it reserves for every managed sibling.
+function PresentationMethods.CaptureViewerGeometry(state)
+    if state.viewerGeometryApplied
+        and state.nativeViewerPoints
+    then
+        return true
+    end
+    if state.viewerGeometryApplied then return false end
+
+    -- An earlier bind attempt can be denied by combat, a secret geometry
+    -- read, or incomplete native construction. Until BFI actually commits
+    -- its root geometry, recapture on every attempt so restoration never
+    -- preserves a transient BottomManagedFrame position.
+    local points = CapturePoints(state.viewer)
+    if not points
+        or #points == 0
+    then
+        return false
+    end
+
+    state.nativeViewerPoints = points
+    return true
+end
+
+function PresentationMethods.ViewerAnchorMatches(state)
+    local viewer = state.viewer
+    local numPoints = FrameGetNumPoints(viewer)
+    if not IsSafeNumber(numPoints) then return nil end
+    if numPoints ~= 1 then return false end
+
+    local point, relativeTo, relativePoint, x, y =
+        FrameGetPoint(viewer, 1)
+    if not IsSafeString(point)
+        or not IsValueNonSecret(relativeTo)
+        or not IsSafeString(relativePoint)
+        or not IsSafeNumber(x)
+        or not IsSafeNumber(y)
+    then
+        return nil
+    end
+    return point == "CENTER"
+        and relativeTo == state.holder
+        and relativePoint == "CENTER"
+        and NearlyEqual(x, 0)
+        and NearlyEqual(y, 0)
+end
+
+function PresentationMethods.CaptureManagedViewerPoints(state)
+    local points = CapturePoints(state.viewer)
+    if not points or #points == 0 then return false, false end
+
+    -- A non-BFI anchor is the latest native managed-frame layout. If another
+    -- writer merely added a conflicting point relative to BFI's own holder,
+    -- retain the prior native baseline instead of restoring that conflict.
+    for _, point in ipairs(points) do
+        if point[2] == state.holder then return true, false end
+    end
+    state.nativeViewerPoints = points
+    return true, true
+end
+
+function PresentationMethods.ApplyViewerGeometry(state)
+    local anchorsMatch = PresentationMethods.ViewerAnchorMatches(state)
+    if anchorsMatch == nil then return false, false end
+    if not anchorsMatch then
+        if state.viewerGeometryApplied
+            and not PresentationMethods.CaptureManagedViewerPoints(state)
+        then
+            return false, false
+        end
+        if not CanChangeGeometry(state.viewer) then
+            return false, false
+        end
+        FrameClearAllPoints(state.viewer)
+        FrameSetPoint(
+            state.viewer,
+            "CENTER",
+            state.holder,
+            "CENTER",
+            0,
+            0
+        )
+    end
+    return true, not anchorsMatch
+end
+
+function PresentationMethods.BindViewerGeometry(
+    state
+)
+    if not PresentationMethods.CaptureViewerGeometry(state) then
+        return false, false
+    end
+
+    local applied, changed = PresentationMethods.ApplyViewerGeometry(
+        state
+    )
+    if not applied then return false, false end
+
+    state.viewerGeometryApplied = true
+    return true, changed
+end
+
+function PresentationMethods.GetItemPresentationRatio(
+    state,
+    item,
+    itemState,
+    configuredScale
+)
+    local holderScale = FrameGetEffectiveScale(state.holder)
+    local viewerEffectiveScale = FrameGetEffectiveScale(state.viewer)
+    local nativeItemScale = FrameGetScale(item)
+    if not IsSafeNumber(nativeItemScale) or nativeItemScale <= 0 then
+        nativeItemScale = itemState and itemState.nativeScale
+    end
+    if not IsSafeNumber(holderScale)
+        or holderScale <= 0
+        or not IsSafeNumber(viewerEffectiveScale)
+        or viewerEffectiveScale <= 0
+        or not IsSafeNumber(nativeItemScale)
+        or nativeItemScale <= 0
+        or not IsSafeNumber(configuredScale)
+        or configuredScale <= 0
+    then
+        return nil
+    end
+
+    -- Keep both Blizzard scales untouched. Raw item dimensions, anchor
+    -- offsets, and text presentation are expanded or contracted instead so
+    -- their rendered size equals the BFI holder's configured scale.
+    local ratio = holderScale * configuredScale
+        / (viewerEffectiveScale * nativeItemScale)
+    if IsSafeNumber(ratio) and ratio > 0 then
+        return ratio, nativeItemScale
+    end
+    return nil
+end
+
+function PresentationMethods.ApplyScaledPoints(region, points, ratio)
+    if not region or not points or not IsSafeNumber(ratio) or ratio <= 0 then
+        return false
+    end
+    FrameClearAllPoints(region)
+    for _, point in ipairs(points) do
+        FrameSetPoint(
+            region,
+            point[1],
+            point[2],
+            point[3],
+            point[4] * ratio,
+            point[5] * ratio
+        )
+    end
+    return true
+end
+
+function PresentationMethods.ApplyScaledFontStringPoints(
+    presentation,
+    fontString,
+    ratio
+)
+    if not presentation
+        or presentation.fontString ~= fontString
+        or not IsSafeNumber(ratio)
+        or ratio <= 0
+    then
+        return false
+    end
+    FontStringClearAllPoints(fontString)
+    for _, point in ipairs(presentation.points) do
+        FontStringSetPoint(
+            fontString,
+            point[1],
+            point[2],
+            point[3],
+            point[4] * ratio,
+            point[5] * ratio
+        )
+    end
+    return true
+end
+
+function PresentationMethods.RestoreViewerGeometry(state)
+    if not state.viewerGeometryApplied then
+        state.nativeViewerPoints = nil
+        return true
+    end
+    local anchorsMatch = PresentationMethods.ViewerAnchorMatches(state)
+    if anchorsMatch == nil then return false end
+
+    local currentIsNative = false
+    if not anchorsMatch then
+        local captured
+        captured, currentIsNative =
+            PresentationMethods.CaptureManagedViewerPoints(state)
+        if not captured then return false end
+    end
+
+    if not currentIsNative then
+        if not state.nativeViewerPoints
+            or not CanChangeGeometry(state.viewer)
+        then
+            return false
+        end
+        RestorePoints(state.viewer, state.nativeViewerPoints)
+    end
+
+    state.viewerGeometryApplied = nil
+    state.nativeViewerPoints = nil
+    return true
+end
+
 local function CaptureShown(region, getShown)
     if not IsValueNonSecret(region) or not region then return nil end
     local shown = getShown(region)
@@ -1924,18 +2125,39 @@ local function CapturePresentationDefaults(item, definition, itemState)
         complete = itemState.nativeHideCountdownNumbers ~= nil and complete
     end
 
+    local debuffBorder = GetSafeField(item, "DebuffBorder")
+    if debuffBorder then
+        if not itemState.nativeDebuffBorderPoints then
+            itemState.nativeDebuffBorderPoints = CapturePoints(debuffBorder)
+        end
+        complete = itemState.nativeDebuffBorderPoints and complete
+    end
+
     if definition.isBar then
         local icon = GetSafeField(item, "Icon")
         local bar = GetSafeField(item, "Bar")
         if icon then
+            if not itemState.nativeIconPoints then
+                itemState.nativeIconPoints = CapturePoints(icon)
+            end
             if itemState.nativeIconShown == nil then
                 itemState.nativeIconShown = CaptureShown(icon, FrameIsShown)
             end
             if itemState.nativeIconAlpha == nil then
                 itemState.nativeIconAlpha = CaptureAlpha(icon, FrameGetAlpha)
             end
-            complete = itemState.nativeIconShown ~= nil
+            if not itemState.nativeIconWidth then
+                local width, height = FrameGetSize(icon)
+                if IsSafeNumber(width) and IsSafeNumber(height) then
+                    itemState.nativeIconWidth = width
+                    itemState.nativeIconHeight = height
+                end
+            end
+            complete = itemState.nativeIconPoints
+                and itemState.nativeIconShown ~= nil
                 and itemState.nativeIconAlpha ~= nil
+                and itemState.nativeIconWidth ~= nil
+                and itemState.nativeIconHeight ~= nil
                 and complete
         else
             complete = false
@@ -1943,6 +2165,13 @@ local function CapturePresentationDefaults(item, definition, itemState)
         if bar then
             if not itemState.nativeBarPoints then
                 itemState.nativeBarPoints = CapturePoints(bar)
+            end
+            if not itemState.nativeBarWidth then
+                local width, height = FrameGetSize(bar)
+                if IsSafeNumber(width) and IsSafeNumber(height) then
+                    itemState.nativeBarWidth = width
+                    itemState.nativeBarHeight = height
+                end
             end
             local name = GetSafeField(bar, "Name")
             local duration = GetSafeField(bar, "Duration")
@@ -1975,6 +2204,8 @@ local function CapturePresentationDefaults(item, definition, itemState)
                 )
             end
             complete = itemState.nativeBarPoints
+                and itemState.nativeBarWidth ~= nil
+                and itemState.nativeBarHeight ~= nil
                 and itemState.nativeNameShown ~= nil
                 and itemState.nativeNameAlpha ~= nil
                 and itemState.nativeDurationShown ~= nil
@@ -1995,11 +2226,17 @@ local function RecapturePresentationDefaults(item, definition, itemState)
     itemState.nativeMouseMotion = nil
     itemState.nativeHideCountdownNumbers = nil
     itemState.nativeCooldownPoints = nil
+    itemState.nativeDebuffBorderPoints = nil
     itemState.nativeCountdownText = nil
     itemState.nativeCountText = nil
     itemState.nativeBarPoints = nil
+    itemState.nativeIconPoints = nil
     itemState.nativeIconShown = nil
     itemState.nativeIconAlpha = nil
+    itemState.nativeIconWidth = nil
+    itemState.nativeIconHeight = nil
+    itemState.nativeBarWidth = nil
+    itemState.nativeBarHeight = nil
     itemState.nativeNameShown = nil
     itemState.nativeNameAlpha = nil
     itemState.nativeNameText = nil
@@ -2065,16 +2302,38 @@ local function RestoreItemPresentation(item, definition, itemState)
         GetCountText(item, definition)
     )
 
+    local debuffBorder = GetSafeField(item, "DebuffBorder")
+    if debuffBorder and itemState.nativeDebuffBorderPoints then
+        RestorePoints(debuffBorder, itemState.nativeDebuffBorderPoints)
+    end
+
     if definition.isBar then
         local icon = GetSafeField(item, "Icon")
         local bar = GetSafeField(item, "Bar")
         if icon then
+            if itemState.nativeIconPoints then
+                RestorePoints(icon, itemState.nativeIconPoints)
+            end
+            if itemState.nativeIconWidth and itemState.nativeIconHeight then
+                FrameSetSize(
+                    icon,
+                    itemState.nativeIconWidth,
+                    itemState.nativeIconHeight
+                )
+            end
             SetShown(icon, itemState.nativeIconShown, FrameShow, FrameHide)
             if itemState.nativeIconAlpha ~= nil then
                 FrameSetAlpha(icon, itemState.nativeIconAlpha)
             end
         end
         if bar then
+            if itemState.nativeBarWidth and itemState.nativeBarHeight then
+                FrameSetSize(
+                    bar,
+                    itemState.nativeBarWidth,
+                    itemState.nativeBarHeight
+                )
+            end
             if not PresentationMethods.RestoreTrackedBarPip(bar, itemState) then
                 return false
             end
@@ -2109,6 +2368,7 @@ local function RestoreItemPresentation(item, definition, itemState)
     HideItemHotkey(item)
     itemState.hotkeyGeneration = nil
     itemState.hotkeyStyleGeneration = nil
+    itemState.hotkeyPresentationRatio = nil
     itemState.hotkeyCooldownID = nil
     itemState.presentationGeneration = nil
     return true
@@ -2133,6 +2393,10 @@ local function CanRestoreItemPresentation(item, definition)
     if countText and not CanChangeGeometry(countText) then
         return false
     end
+    local debuffBorder = GetSafeField(item, "DebuffBorder")
+    if debuffBorder and not CanChangeGeometry(debuffBorder) then
+        return false
+    end
 
     if definition.isBar then
         local icon = GetSafeField(item, "Icon")
@@ -2148,6 +2412,55 @@ local function CanRestoreItemPresentation(item, definition)
         then
             return false
         end
+    end
+    return true
+end
+
+function PresentationMethods.RefreshNativeItemGeometry(item, itemState)
+    local expected = itemState.expected
+    if not expected then return true end
+    local owner = itemState.owner
+    if not owner or not owner.viewer then return false end
+
+    local points = CapturePoints(item)
+    local width, height = FrameGetSize(item)
+    local scale = FrameGetScale(item)
+    if not points
+        or not IsSafeNumber(width)
+        or not IsSafeNumber(height)
+        or not IsSafeNumber(scale)
+    then
+        return false
+    end
+    if #points == 0 then return true end
+
+    local point = points[1]
+    local anchorMatches = #points == 1
+        and point[1] == "CENTER"
+        and point[2] == owner.holder
+        and point[3] == "CENTER"
+        and NearlyEqual(point[4], expected.x)
+        and NearlyEqual(point[5], expected.y)
+    local matches = anchorMatches
+        and NearlyEqual(width, expected.width)
+        and NearlyEqual(height, expected.height)
+        and NearlyEqual(scale, expected.scale)
+    if matches then return true end
+
+    -- RefreshLayout can reclaim a child by restoring its viewer-relative
+    -- points and OnAcquire always restores Blizzard's item scale. Capture only
+    -- a genuinely native anchor as the disable/edit-mode restoration point;
+    -- a size-only rewrite must not replace that baseline with BFI's holder.
+    if not anchorMatches then
+        itemState.nativePoints = points
+    end
+    itemState.nativeScale = scale
+    -- BuffBar OnAcquire also calls SetBarWidth. Its height and icon-viewer
+    -- dimensions are not reset there, so retain their original native values.
+    if itemState.definition.isBar
+        and not NearlyEqual(width, expected.width)
+    then
+        itemState.nativeWidth = width
     end
     return true
 end
@@ -2174,9 +2487,11 @@ local function RestoreItem(item, itemState)
     if bar and not CanChangeGeometry(bar) then
         return false
     end
+    if not PresentationMethods.RefreshNativeItemGeometry(item, itemState) then
+        return false
+    end
 
     FrameSetSize(item, itemState.nativeWidth, itemState.nativeHeight)
-    FrameSetScale(item, itemState.nativeScale)
     RestorePoints(item, itemState.nativePoints)
     if bar and itemState.nativeBarPoints then
         RestorePoints(bar, itemState.nativeBarPoints)
@@ -2462,7 +2777,13 @@ ApplyFont = function(fontString, config, scale)
     FontStringSetTextColor(fontString, AF.UnpackColor(config.color))
 end
 
-local function ApplyHotkeyPresentation(item, definition, config, itemState)
+local function ApplyHotkeyPresentation(
+    item,
+    definition,
+    config,
+    itemState,
+    presentationRatio
+)
     local cooldownID = GetNonSecretSpellID(item.cooldownID)
     local cooldownKey = cooldownID or false
     if config.showHotkeys == false then
@@ -2483,16 +2804,22 @@ local function ApplyHotkeyPresentation(item, definition, config, itemState)
         return false
     end
 
-    if itemState.hotkeyStyleGeneration ~= presentationGeneration then
+    if itemState.hotkeyStyleGeneration ~= presentationGeneration
+        or not NearlyEqual(
+            itemState.hotkeyPresentationRatio or 0,
+            presentationRatio
+        )
+    then
         if not CanChangeGeometry(overlay.text)
             or not CanChangeGeometry(target)
         then
             return false
         end
-        ApplyFont(overlay.text, config.hotkeyText)
-        PositionHotkey(overlay.text, target, config)
+        ApplyFont(overlay.text, config.hotkeyText, presentationRatio)
+        PositionHotkey(overlay.text, target, config, presentationRatio)
         FontStringShow(overlay.text)
         itemState.hotkeyStyleGeneration = presentationGeneration
+        itemState.hotkeyPresentationRatio = presentationRatio
     end
 
     if itemState.hotkeyGeneration == hotkeyGeneration
@@ -2615,11 +2942,13 @@ local function CanApplyStaticPresentation(item, state, itemState)
     local countdownText = cooldown
         and PresentationMethods.GetCooldownCountdownText(cooldown)
     local countText = GetCountText(item, definition)
+    local debuffBorder = GetSafeField(item, "DebuffBorder")
     if (iconParent and not CanChangeGeometry(iconParent))
         or (icon and not CanChangeGeometry(icon))
         or (cooldown and not CanChangeGeometry(cooldown))
         or (countdownText and not CanChangeGeometry(countdownText))
         or (countText and not CanChangeGeometry(countText))
+        or (debuffBorder and not CanChangeGeometry(debuffBorder))
     then
         return false
     end
@@ -2663,12 +2992,16 @@ local function CanApplyStaticPresentation(item, state, itemState)
     )
 end
 
-local function ApplyBarContent(item, config, itemState)
+local function ApplyBarContent(item, config, itemState, presentationRatio)
     local icon = GetSafeField(item, "Icon")
     local bar = GetSafeField(item, "Bar")
+    local expected = itemState.expected
+    local visualWidth = expected and expected.visualWidth
     if not icon
         or not bar
         or not itemState.nativeBarPoints
+        or not IsSafeNumber(visualWidth)
+        or visualWidth <= 0
         or itemState.nativeIconShown == nil
         or itemState.nativeNameShown == nil
         or itemState.nativeDurationShown == nil
@@ -2704,15 +3037,28 @@ local function ApplyBarContent(item, config, itemState)
         "LEFT",
         icon,
         nameOnly and "LEFT" or "RIGHT",
-        nameOnly and 0 or 2,
+        nameOnly and 0 or 2 * presentationRatio,
         0
     )
-    FrameSetPoint(bar, "RIGHT", item, "RIGHT", 0, 0)
+    FrameSetPoint(
+        bar,
+        "RIGHT",
+        item,
+        "CENTER",
+        visualWidth / 2,
+        0
+    )
     itemState.barExpectedNameOnly = nameOnly
     return true
 end
 
-local function ApplyStaticPresentation(item, state, config, itemState)
+local function ApplyStaticPresentation(
+    item,
+    state,
+    config,
+    itemState,
+    presentationRatio
+)
     if not CapturePresentationDefaults(
         item,
         state.definition,
@@ -2722,6 +3068,18 @@ local function ApplyStaticPresentation(item, state, config, itemState)
         return false
     end
     local complete = true
+
+    local debuffBorder = GetSafeField(item, "DebuffBorder")
+    if debuffBorder
+        and itemState.nativeDebuffBorderPoints
+        and not PresentationMethods.ApplyScaledPoints(
+            debuffBorder,
+            itemState.nativeDebuffBorderPoints,
+            presentationRatio
+        )
+    then
+        complete = false
+    end
 
     if state.definition.assistedHighlight
         and CM.config.assistedHighlight
@@ -2780,7 +3138,7 @@ local function ApplyStaticPresentation(item, state, config, itemState)
         and itemState.nativeCountdownText
         and countdownText == itemState.nativeCountdownText.fontString
     then
-        ApplyFont(countdownText, config.cooldownText)
+        ApplyFont(countdownText, config.cooldownText, presentationRatio)
         PresentationMethods.PositionText(
             countdownText,
             cooldown,
@@ -2788,17 +3146,71 @@ local function ApplyStaticPresentation(item, state, config, itemState)
             "CENTER",
             "CENTER",
             0,
-            0
+            0,
+            presentationRatio
         )
     end
 
-    ApplyFont(GetCountText(item, state.definition), config.countText)
+    local countText = GetCountText(item, state.definition)
+    ApplyFont(countText, config.countText, presentationRatio)
+    if countText
+        and not PresentationMethods.ApplyScaledFontStringPoints(
+            itemState.nativeCountText,
+            countText,
+            presentationRatio
+        )
+    then
+        complete = false
+    end
 
     local bar = state.definition.isBar and GetSafeField(item, "Bar")
     if bar then
-        ApplyFont(GetSafeField(bar, "Name"), config.barText)
+        local icon = GetSafeField(item, "Icon")
+        local expected = itemState.expected
+        local visualWidth = expected and expected.visualWidth
+        if icon
+            and itemState.nativeIconWidth
+            and itemState.nativeIconHeight
+            and IsSafeNumber(visualWidth)
+            and visualWidth > 0
+        then
+            FrameSetSize(
+                icon,
+                itemState.nativeIconWidth * presentationRatio,
+                itemState.nativeIconHeight * presentationRatio
+            )
+            FrameClearAllPoints(icon)
+            FrameSetPoint(
+                icon,
+                "LEFT",
+                item,
+                "CENTER",
+                -visualWidth / 2,
+                0
+            )
+        else
+            complete = false
+        end
+        if itemState.nativeBarWidth and itemState.nativeBarHeight then
+            FrameSetSize(
+                bar,
+                itemState.nativeBarWidth * presentationRatio,
+                itemState.nativeBarHeight * presentationRatio
+            )
+        end
+        local name = GetSafeField(bar, "Name")
+        ApplyFont(name, config.barText, presentationRatio)
+        if name
+            and not PresentationMethods.ApplyScaledFontStringPoints(
+                itemState.nativeNameText,
+                name,
+                presentationRatio
+            )
+        then
+            complete = false
+        end
         local duration = GetSafeField(bar, "Duration")
-        ApplyFont(duration, config.durationText)
+        ApplyFont(duration, config.durationText, presentationRatio)
         if duration
             and itemState.nativeDurationText
             and duration == itemState.nativeDurationText.fontString
@@ -2810,10 +3222,16 @@ local function ApplyStaticPresentation(item, state, config, itemState)
                 "RIGHT",
                 "RIGHT",
                 -8,
-                0
+                0,
+                presentationRatio
             )
         end
-        if not ApplyBarContent(item, config, itemState) then
+        if not ApplyBarContent(
+            item,
+            config,
+            itemState,
+            presentationRatio
+        ) then
             complete = false
         end
     end
@@ -2838,7 +3256,12 @@ local function GetPresentationAlpha(config)
     return alpha
 end
 
-local function ApplyRuntimePresentation(item, config, itemState)
+local function ApplyRuntimePresentation(
+    item,
+    config,
+    itemState,
+    presentationRatio
+)
     CapturePresentationDefaults(item, itemState.definition, itemState)
 
     if itemState.nativeAlpha ~= nil then
@@ -2860,7 +3283,13 @@ local function ApplyRuntimePresentation(item, config, itemState)
         end
     end
     itemState.presentationRestored = nil
-    ApplyHotkeyPresentation(item, itemState.definition, config, itemState)
+    ApplyHotkeyPresentation(
+        item,
+        itemState.definition,
+        config,
+        itemState,
+        presentationRatio
+    )
     UpdateItemAssistedHighlight(item)
 end
 
@@ -2971,39 +3400,13 @@ local function CurrentGeometryMatches(item, holder, desired)
         and NearlyEqual(y, desired.y)
 end
 
-local function IsAnchoredToHolder(item, holder)
-    local numPoints = FrameGetNumPoints(item)
-    if not IsSafeNumber(numPoints) then
-        return nil
-    end
-    if numPoints ~= 1 then
-        return false
-    end
-
-    local point, relativeTo, relativePoint, x, y = FrameGetPoint(item, 1)
-    if not IsSafeString(point)
-        or not IsValueNonSecret(relativeTo)
-        or not IsSafeString(relativePoint)
-        or not IsSafeNumber(x)
-        or not IsSafeNumber(y)
-    then
-        return nil
-    end
-    return relativeTo == holder
-end
-
 local function PrepareItemGeometry(entry, state, desired)
     local item = entry.item
     local itemState = entry.itemState
-    if itemState.applied then
-        local stillAnchored = IsAnchoredToHolder(item, state.holder)
-        if stillAnchored == nil then
-            return false
-        end
-        if not stillAnchored then
-            itemState.applied = nil
-            itemState.expected = nil
-        end
+    if itemState.applied
+        and not PresentationMethods.RefreshNativeItemGeometry(item, itemState)
+    then
+        return false
     end
 
     if not itemState.applied and not CaptureNativeGeometry(item, itemState) then
@@ -3016,7 +3419,19 @@ local function PrepareItemGeometry(entry, state, desired)
     end
 
     entry.desired = desired
-    entry.needsGeometry = not matches or not itemState.applied
+    local visualGeometryChanged = state.definition.isBar
+        and (not itemState.expected
+            or not NearlyEqual(
+                itemState.expected.visualWidth or 0,
+                desired.visualWidth
+            )
+            or not NearlyEqual(
+                itemState.expected.visualHeight or 0,
+                desired.visualHeight
+            ))
+    entry.needsGeometry = not matches
+        or not itemState.applied
+        or visualGeometryChanged
     return true
 end
 
@@ -3025,8 +3440,12 @@ local function ApplyItemGeometry(entry, state)
 
     local item = entry.item
     local desired = entry.desired
-    FrameSetSize(item, desired.width, desired.height)
-    FrameSetScale(item, desired.scale)
+    -- BuffBar OnAcquire always restores Blizzard's outer bar width. Keep that
+    -- native footprint untouched and size the centered visual children
+    -- instead, so an in-combat reacquire cannot undo BFI's rendered scale.
+    if not entry.itemState.definition.isBar then
+        FrameSetSize(item, desired.width, desired.height)
+    end
     FrameClearAllPoints(item)
     FrameSetPoint(item, "CENTER", state.holder, "CENTER", desired.x, desired.y)
 
@@ -3056,12 +3475,17 @@ local function ReconcileViewer(state, config)
         activeSet[entry.item] = true
     end
 
-    if IsBlizzardEditModeActive() then
+    local editModeActive = IsBlizzardEditModeActive()
+    if editModeActive == nil then return false, false end
+    if editModeActive then
         local restored = true
         for _, entry in ipairs(allItems) do
             restored = RestoreItem(entry.item, entry.itemState) and restored
         end
         restored = RestoreMissingItems(state, activeSet) and restored
+        if restored then
+            restored = PresentationMethods.RestoreViewerGeometry(state)
+        end
 
         local previewLayout = BuildLayout(state.definition, config, state.definition.previewCount)
         UpdateHolderPreview(state, previewLayout, nil, config)
@@ -3074,16 +3498,36 @@ local function ReconcileViewer(state, config)
     local displayCount = layoutCount > 0 and layoutCount or state.definition.previewCount
     local layout = BuildLayout(state.definition, config, displayCount)
 
-    if layoutCount == 0 then
-        if CM.config.skin then
-            layout.scale = PresentationMethods.GetPixelSnappedScale(
-                _G.UIParent,
-                layout.height,
-                layout.scale
-            )
-        end
+    if CM.config.skin then
+        layout.scale = PresentationMethods.GetPixelSnappedScale(
+            state.holder,
+            layout.height,
+            layout.scale
+        )
+    end
+    local viewerBound, viewerGeometryChanged =
+        PresentationMethods.BindViewerGeometry(state)
+    if not viewerBound then
         UpdateHolderPreview(state, layout, nil, config)
-        return missingItemsRestored, false
+        return false, false
+    end
+
+    if #allItems == 0 then
+        -- Pinned 12.1 OnShow synchronously acquires the viewer's minimum two
+        -- pooled items before returning. Pre-binding a safely hidden viewer
+        -- makes that acquisition land at BFI's center; a shown-but-empty
+        -- viewer remains construction-incomplete.
+        local viewerShown = FrameIsShown(state.viewer)
+        UpdateHolderPreview(state, layout, nil, config)
+        return IsSafeBoolean(viewerShown)
+            and not viewerShown
+            and missingItemsRestored,
+            viewerGeometryChanged
+    end
+
+    if layoutCount == 0 then
+        UpdateHolderPreview(state, layout, nil, config)
+        return missingItemsRestored, viewerGeometryChanged
     end
 
     layout.count = layoutCount
@@ -3091,22 +3535,63 @@ local function ReconcileViewer(state, config)
     -- physical pixels. Snap the requested scale by the fixed native height so
     -- all four one-pixel skin edges remain crisp at values such as Essential's
     -- default 0.75 scale.
-    if CM.config.skin then
-        layout.scale = PresentationMethods.GetPixelSnappedScale(
-            layoutItems[1].item,
-            layout.height,
-            layout.scale
-        )
-    end
-    local needsGeometry = false
+    local needsGeometry = viewerGeometryChanged
     for index, entry in ipairs(layoutItems) do
         local x, y = GetLayoutPosition(layout, index)
+        local presentationRatio, nativeItemScale =
+            PresentationMethods.GetItemPresentationRatio(
+                state,
+                entry.item,
+                entry.itemState,
+                layout.scale
+            )
+        if not presentationRatio then
+            UpdateHolderPreview(state, layout, layoutItems[1].item, config)
+            return false, false
+        end
+        entry.presentationRatio = presentationRatio
+        local desiredWidth = layout.width * presentationRatio
+        local desiredHeight = layout.height * presentationRatio
+        local visualWidth
+        local visualHeight
+        if state.definition.isBar then
+            visualWidth = desiredWidth
+            visualHeight = desiredHeight
+            desiredWidth = entry.itemState.nativeWidth
+            desiredHeight = entry.itemState.nativeHeight
+            if not IsSafeNumber(desiredWidth)
+                or not IsSafeNumber(desiredHeight)
+            then
+                desiredWidth, desiredHeight = FrameGetSize(entry.item)
+            end
+            if not IsSafeNumber(desiredWidth)
+                or desiredWidth <= 0
+                or not IsSafeNumber(desiredHeight)
+                or desiredHeight <= 0
+            then
+                UpdateHolderPreview(
+                    state,
+                    layout,
+                    layoutItems[1].item,
+                    config
+                )
+                return false, false
+            end
+        end
         local desired = {
-            x = x,
-            y = y,
-            width = layout.width,
-            height = layout.height,
-            scale = layout.scale,
+            -- Blizzard retains ownership of both root and item scales. Apply
+            -- the inverse rendered-scale ratio to raw dimensions and offsets,
+            -- then claim the stable child directly on BFI's holder. Tracked
+            -- bars retain their native outer footprint and center the scaled
+            -- visual group within it because OnAcquire resets the outer width.
+            x = x * presentationRatio,
+            y = y * presentationRatio,
+            width = desiredWidth,
+            height = desiredHeight,
+            visualWidth = visualWidth,
+            visualHeight = visualHeight,
+            scale = nativeItemScale,
+            presentationRatio = presentationRatio,
         }
         if not PrepareItemGeometry(entry, state, desired) then
             UpdateHolderPreview(state, layout, layoutItems[1].item, config)
@@ -3116,6 +3601,21 @@ local function ReconcileViewer(state, config)
     end
 
     for _, entry in ipairs(allItems) do
+        local presentationRatio = entry.presentationRatio
+        if not presentationRatio then
+            presentationRatio =
+                PresentationMethods.GetItemPresentationRatio(
+                    state,
+                    entry.item,
+                    entry.itemState,
+                    layout.scale
+                )
+            if not presentationRatio then
+                UpdateHolderPreview(state, layout, layoutItems[1].item, config)
+                return false, false
+            end
+            entry.presentationRatio = presentationRatio
+        end
         if entry.itemState.recapturePresentation then
             RecapturePresentationDefaults(
                 entry.item,
@@ -3123,7 +3623,12 @@ local function ReconcileViewer(state, config)
                 entry.itemState
             )
         end
-        ApplyRuntimePresentation(entry.item, config, entry.itemState)
+        ApplyRuntimePresentation(
+            entry.item,
+            config,
+            entry.itemState,
+            presentationRatio
+        )
     end
 
     if needsGeometry then
@@ -3168,7 +3673,8 @@ local function ReconcileViewer(state, config)
                     entry.item,
                     state,
                     config,
-                    entry.itemState
+                    entry.itemState,
+                    entry.presentationRatio
                 ) and staticComplete
             end
         end
@@ -3188,6 +3694,9 @@ local function RestoreViewer(state)
         if itemState.owner == state then
             restored = RestoreItem(item, itemState) and restored
         end
+    end
+    if restored then
+        restored = PresentationMethods.RestoreViewerGeometry(state)
     end
 
     local holder = state.holder
@@ -3222,177 +3731,65 @@ local function InitializeViewers()
     end
 end
 
--- Retail 12.1.0.68914 (wow-ui-source d3915c78aba7)
--- PLAYER_TARGET_CHANGED only refreshes target-sensitive item data; it does
--- not run the native GridLayout. A later full UNIT_AURA for
--- either player or target, or CooldownViewerSettings.OnDataChanged when the
--- category count changes, can release the pool and reclaim every item anchor.
--- Keep a short observer window separate from the visual curtain so an ordinary
--- target change never creates a blank flash. The payload-opaque observer
--- curtains only at a possible native layout barrier, and the first complete
--- reconciliation restores the exact captured alpha while observation remains
--- armed for a late druid form update.
-function PresentationMethods.BeginTargetTransition(observePlayer, observeTarget)
+-- Essential, Utility, and Buff Icon inherit BottomManagedFrameTemplate in
+-- pinned Retail 12.1. BottomManagedFrameContainer has no public Add/Remove
+-- callback and its Layout can rewrite every shown child's root points when an
+-- unrelated managed sibling changes visibility. Keep this guard deliberately
+-- geometry-only: it never enumerates the secure pool or reapplies styling,
+-- and avoids the native Layout/SetPoint hooks that can taint CDM execution.
+function PresentationMethods.ProcessManagedRootIntegrity()
     local config = CM.config
+    local enabled = config
+        and config.enabled
+        and type(config.viewers) == "table"
+    if not enabled then
+        presentationController.rootIntegrity:SetScript("OnUpdate", nil)
+        return
+    end
+    local editModeActive = IsBlizzardEditModeActive()
+    if editModeActive ~= false then return end
+
     local locked = InCombatLockdown()
-    if not config
-        or not config.enabled
-        or type(config.viewers) ~= "table"
-        or not IsSafeBoolean(locked)
-        or locked
-        or IsBlizzardEditModeActive()
-    then
-        return false
-    end
+    if not IsValueNonSecret(locked) or locked then return end
 
-    local transition = presentationController.targetTransition
-    if not transition then
-        transition = {viewerAlphas = {}}
-        presentationController.targetTransition = transition
-    end
-
-    -- A stale combat latch can remain set for one event turn after lockdown
-    -- ends. The guarded check above proves this layout watch can make
-    -- progress, so release that BFI-owned latch before arming observation.
-    presentationController.combatBlocked = nil
-    presentationController.disabledRestored = nil
-
-    local wasActive = transition.active
-    transition.active = true
-    transition.elapsed = wasActive and transition.elapsed or 0
-    transition.observePlayer = observePlayer or transition.observePlayer
-    transition.observeTarget = observeTarget or transition.observeTarget
-
-    if transition.registeredPlayer ~= transition.observePlayer
-        or transition.registeredTarget ~= transition.observeTarget
-    then
-        presentationController.targetObserver:UnregisterEvent("UNIT_AURA")
-        if transition.observePlayer and transition.observeTarget then
-            presentationController.targetObserver:RegisterUnitEvent(
-                "UNIT_AURA",
-                "player",
-                "target"
-            )
-        elseif transition.observePlayer then
-            presentationController.targetObserver:RegisterUnitEvent(
-                "UNIT_AURA",
-                "player"
-            )
-        elseif transition.observeTarget then
-            presentationController.targetObserver:RegisterUnitEvent(
-                "UNIT_AURA",
-                "target"
-            )
-        end
-        transition.registeredPlayer = transition.observePlayer
-        transition.registeredTarget = transition.observeTarget
-    end
-    QueuePresentationUpdate()
-    return true
-end
-
--- SetAlpha accepts tainted execution in the audited client; GetAlpha can be a
--- secret aspect, so capture only guarded native values and never recapture the
--- zero applied by an earlier barrier in the same bounded transaction.
-function PresentationMethods.CurtainTargetTransition()
-    if not PresentationMethods.BeginTargetTransition() then return false end
-
-    local transition = presentationController.targetTransition
-    InitializeViewers()
-    local curtained = false
+    local presentationChanged = false
     for _, state in ipairs(viewerStates) do
-        local viewer = state.viewer
-        local alpha = transition.viewerAlphas[viewer]
-        if alpha == nil then
-            alpha = CaptureAlpha(viewer, FrameGetAlpha)
-            if IsSafeNumber(alpha) then
-                transition.viewerAlphas[viewer] = alpha
+        if state.definition.managedRoot
+            and state.viewerGeometryApplied
+        then
+            local anchorsMatch =
+                PresentationMethods.ViewerAnchorMatches(state)
+            if anchorsMatch == false then
+                local applied, changed =
+                    PresentationMethods.ApplyViewerGeometry(state)
+                presentationChanged = applied and changed
+                    or presentationChanged
             end
         end
-        if IsSafeNumber(alpha) then
-            FrameSetAlpha(viewer, 0)
-            curtained = true
-        end
     end
-    if not curtained then return false end
-
-    transition.curtained = true
-    transition.geometryCorrected = false
-    return true
+    if presentationChanged then
+        -- A newly shown viewer can acquire or restyle pooled children in the
+        -- same native turn that its managed root is reclaimed. Route that
+        -- rare drift through the ordinary finite presentation pipeline after
+        -- repairing the landing point; the stable per-frame path stays root-
+        -- geometry-only.
+        MarkPresentationDirty()
+    end
 end
 
-function PresentationMethods.NoteTargetTransitionBarrier()
-    local transition = presentationController.targetTransition
-    if not transition or not transition.active then return false end
-    return PresentationMethods.CurtainTargetTransition()
+function presentationController:UpdateRootIntegrity(enabled)
+    self.rootIntegrity:SetScript(
+        "OnUpdate",
+        enabled and PresentationMethods.ProcessManagedRootIntegrity or nil
+    )
 end
 
--- Keep the temporary transaction observer separate from the presentation
--- controller's normal player/target aura wakes. This callback deliberately
--- binds no event or payload, so secret aura data never enters addon logic.
-presentationController.targetObserver:SetScript("OnEvent", function()
-    PresentationMethods.NoteTargetTransitionBarrier()
-end)
-
-function PresentationMethods.AdvanceTargetTransition(
-    allComplete,
-    anyGeometryChanged,
-    elapsed
-)
-    local transition = presentationController.targetTransition
-    if not transition or not transition.active then return true end
-
-    elapsed = IsSafeNumber(elapsed) and max(0, min(elapsed, 0.1)) or 1 / 60
-    transition.elapsed = transition.elapsed + elapsed
-
-    if anyGeometryChanged then
-        transition.geometryCorrected = true
-    end
-
-    local config = CM.config
-    local locked = InCombatLockdown()
-    local forceRestore = not config
-        or not config.enabled
-        or not IsSafeBoolean(locked)
-        or locked
-        or IsBlizzardEditModeActive()
-        or transition.elapsed >= 0.25
-    if not forceRestore and transition.curtained and not allComplete then
-        return false
-    end
-
-    if forceRestore or transition.curtained then
-        for viewer, alpha in next, transition.viewerAlphas do
-            if IsValueNonSecret(viewer)
-                and viewer
-                and IsSafeNumber(alpha)
-            then
-                FrameSetAlpha(viewer, alpha)
-            end
-        end
-        transition.curtained = nil
-        transition.geometryCorrected = false
-    end
-
-    -- A completed barrier can uncover immediately, but an armed player/target
-    -- observer stays alive until the original hard deadline so a later full
-    -- aura update can safely re-curtain before the next reconciliation pass.
-    if not forceRestore
-        and (transition.observePlayer or transition.observeTarget)
-    then
-        return false
-    end
-
-    transition.active = false
-    transition.elapsed = 0
-    transition.observePlayer = nil
-    transition.observeTarget = nil
-    transition.registeredPlayer = nil
-    transition.registeredTarget = nil
-    transition.viewerAlphas = {}
-    presentationController.targetObserver:UnregisterEvent("UNIT_AURA")
-    return true
-end
+-- UNIT_AURA is payload-opaque on Retail 12.1, so BFI cannot safely tell an
+-- ordinary form aura update from the full update that invokes RefreshLayout.
+-- Every relevant lifecycle edge only wakes finite reconciliation. The native
+-- viewer-root landing geometry above keeps either path visible at BFI's
+-- location without an alpha curtain or a payload-derived branch; the same
+-- finite pass restores each child's exact BFI size and centered layout.
 
 presentationController.buffVisibility.weakKeys = {__mode = "k"}
 
@@ -3583,26 +3980,54 @@ function presentationController:ReleaseCombatBlock()
     return true
 end
 
-local function ProcessPresentationUpdate(_, elapsed)
-    local transition = presentationController.targetTransition
-    local targetActive = transition and transition.active
-    if targetActive then
-        -- A late full aura or form-driven data rebuild can land anywhere in
-        -- the bounded watch window. Reconcile at frame cadence only while that
-        -- window is active; ordinary work retains the 0.15s gate.
-        presentationController.updateTimeLeft = 0
-    else
-        presentationController.updateTimeLeft =
-            presentationController.updateTimeLeft - elapsed
-        if presentationController.updateTimeLeft > 0 then return end
-        presentationController.updateTimeLeft = 0.15
+function presentationController:UpdateActivationSettlement(enabled, force)
+    local wasEnabled = self.lastEnabled
+    self.lastEnabled = enabled and true or nil
+    if not enabled then
+        -- Invalidate callbacks that were armed by the previous enable.
+        self.activationGeneration = (self.activationGeneration or 0) + 1
+        return false
     end
+    if wasEnabled and not force then return false end
+
+    self.activationGeneration = (self.activationGeneration or 0) + 1
+    local generation = self.activationGeneration
+    if not C_Timer or type(C_Timer.After) ~= "function" then
+        MarkPresentationDirty()
+        return false
+    end
+
+    -- Native pool acquisition and its final presentation writes are spread
+    -- across several startup turns. Use a sparse, finite tokened wake-up
+    -- window so no construction worker remains active afterward.
+    for _, delay in ipairs(PresentationMethods.activationSettlementDelays) do
+        C_Timer.After(delay, function()
+            if presentationController.activationGeneration ~= generation then
+                return
+            end
+            local config = CM.config
+            if not config
+                or not config.enabled
+                or type(config.viewers) ~= "table"
+            then
+                return
+            end
+            MarkPresentationDirty()
+        end)
+    end
+    return true
+end
+
+local function ProcessPresentationUpdate(_, elapsed)
+    presentationController.updateTimeLeft =
+        presentationController.updateTimeLeft - elapsed
+    if presentationController.updateTimeLeft > 0 then return end
+    presentationController.updateTimeLeft = 0.15
     presentationController.dirty = nil
 
     local config = CM.config
     local enabled = config and config.enabled and type(config.viewers) == "table"
     local complete = true
-    local anyGeometryChanged = false
 
     InitializeViewers()
     if not enabled then
@@ -3617,10 +4042,8 @@ local function ProcessPresentationUpdate(_, elapsed)
     for _, state in ipairs(viewerStates) do
         local viewerConfig = enabled and config.viewers[state.key]
         if type(viewerConfig) == "table" then
-            local reconciled, geometryChanged =
-                ReconcileViewer(state, viewerConfig)
+            local reconciled = ReconcileViewer(state, viewerConfig)
             complete = reconciled and complete
-            anyGeometryChanged = geometryChanged or anyGeometryChanged
         else
             complete = RestoreViewer(state) and complete
         end
@@ -3628,31 +4051,15 @@ local function ProcessPresentationUpdate(_, elapsed)
 
     presentationController.buffVisibility:Update()
 
-    local targetComplete = PresentationMethods.AdvanceTargetTransition(
-        complete,
-        anyGeometryChanged,
-        elapsed
-    )
-    targetActive = transition and transition.active
-    if targetActive then
-        presentationController.updateTimeLeft = 0
-    end
-
     if presentationController.dirty then
         return
     end
 
-    if complete and targetComplete then
+    if complete then
         presentationController.combatBlocked = nil
         presentationController.disabledRestored = not enabled or nil
         presentationController:SetScript("OnUpdate", nil)
         presentationController.retryPassesRemaining = nil
-        return
-    end
-
-    if targetActive then
-        -- The layout watch owns its 0.25s hard deadline. Do not consume the
-        -- ordinary construction retry budget or sleep before it expires.
         return
     end
 
@@ -3700,7 +4107,7 @@ QueuePresentationUpdate = function()
     presentationController:SetScript("OnUpdate", ProcessPresentationUpdate)
 end
 
-local function UpdateCooldownManager(_, module)
+local function UpdateCooldownManager(_, module, forceSettlement)
     if module == "actionBars" then
         local config = CM.config
         if presentationController.disabledRestored
@@ -3713,6 +4120,16 @@ local function UpdateCooldownManager(_, module)
         return
     end
     if module and module ~= "cooldownManager" then return end
+
+    local config = CM.config
+    local enabled = config
+        and config.enabled
+        and type(config.viewers) == "table"
+    presentationController:UpdateActivationSettlement(
+        not not enabled,
+        forceSettlement == true
+    )
+    presentationController:UpdateRootIntegrity(not not enabled)
 
     -- A user-driven module/profile update is authoritative and may represent
     -- either a re-enable or another cleanup attempt.
@@ -3752,16 +4169,8 @@ local function OnPresentationEvent(_, event)
     then
         presentationController:ReleaseCombatBlock()
     end
-    if event == "PLAYER_TARGET_CHANGED" then
-        PresentationMethods.BeginTargetTransition(false, true)
-    elseif event == "UPDATE_SHAPESHIFT_FORM"
-        or event == "UPDATE_SHAPESHIFT_FORMS"
-    then
-        -- A form change can be followed by both a player full-aura rebuild
-        -- and an end-of-frame SPELLS_CHANGED category rebuild. Native CDM
-        -- treats a full aura from either registered unit identically, so keep
-        -- both payload-opaque observers armed during this short form window.
-        PresentationMethods.BeginTargetTransition(true, true)
+    if event == "PLAYER_ENTERING_WORLD" and config and config.enabled then
+        presentationController:UpdateActivationSettlement(true, true)
     end
     if hotkeyRefreshEvents[event] then
         hotkeyGeneration = hotkeyGeneration + 1
@@ -3817,11 +4226,9 @@ presentationController:RegisterEvent("COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED")
 presentationController:SetScript("OnEvent", OnPresentationEvent)
 
 function PresentationMethods.OnCooldownDataChanged()
-    -- Listener order is intentionally unspecified by CallbackRegistry. Hide
-    -- in the callback turn whether BFI runs before or after the native viewers,
-    -- then reconcile after every listener has completed. Equal-count updates
-    -- are harmless and uncover on that first complete pass.
-    PresentationMethods.CurtainTargetTransition()
+    -- Listener order is intentionally unspecified by CallbackRegistry. The
+    -- viewer root remains at BFI's landing geometry regardless of whether the
+    -- native listener rebuilds its child anchors before or after this wake.
     MarkPresentationDirty()
 end
 
@@ -3850,6 +4257,11 @@ EventRegistry:RegisterCallback(
     MarkPresentationDirty,
     presentationController
 )
+EventRegistry:RegisterCallback(
+    "UI.TopLevelParentShown",
+    MarkPresentationDirty,
+    presentationController
+)
 
 EventUtil.ContinueOnAddOnLoaded("Blizzard_CooldownViewer", function()
     CVarCallbackRegistry:RegisterCallback(
@@ -3857,7 +4269,7 @@ EventUtil.ContinueOnAddOnLoaded("Blizzard_CooldownViewer", function()
         MarkPresentationDirty,
         presentationController
     )
-    UpdateCooldownManager(nil, "cooldownManager")
+    UpdateCooldownManager(nil, "cooldownManager", true)
 end)
 AF.RegisterCallback("BFI_UpdateModule", UpdateCooldownManager)
 AF.RegisterCallback("AF_SCALE_CHANGED", UpdateCooldownManager)
@@ -3869,5 +4281,5 @@ AF.RegisterCallback("BFI_UpdateProfile", function()
             break
         end
     end
-    UpdateCooldownManager(nil, "cooldownManager")
+    UpdateCooldownManager(nil, "cooldownManager", true)
 end, "low")
