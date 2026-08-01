@@ -75,7 +75,13 @@ Use this clean isolated-install sequence:
     Debuffs visibly different settings, then switch between them slowly and
     rapidly outside combat and during ordinary combat. No value from the
     previous row may render on the selected row.
-15. Validation-only AF #25 at
+15. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
+    with BFInfinite #124 at
+    `5b01b20408e3044b18e8fc12a574f8c70befa6bf`. Start after a reload
+    without opening Achievements, enter Challenge Mode combat, and open
+    Achievements for the first time. Require no nil edit-box error, protected
+    action, or taint.
+16. Validation-only AF #25 at
     `64fb9b7830f0fcafe3fb02043771e22cc0d67d51` with the exact
     checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
     validation SHA. Record that full branch-head SHA immediately before
@@ -98,6 +104,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Coverage | Branch | Exact head |
 |---|---|---|
 | Current BFInfinite master compatibility | `master` | `56c5a66c9156c29c9dd732e4f5571686a06dd305` |
+| Achievement UI 12.1 search topology (#124) | `codex/achievement-ui-12-1-search-path` | `5b01b20408e3044b18e8fc12a574f8c70befa6bf` |
 | Unit Frame pane-switch lifecycle (#122) | `codex/unitframe-aura-settings-switch` | `7334f0ba2b6ec8434d94f79050642a99c8ef37a5` |
 | Plain aura control labels (#123) | `codex/unitframe-aura-plain-option-labels` | `6840357a27c4473672227b8d4d9b25a73cc53596` |
 | Global exact spell colors (#101) | `codex/unitframe-aura-spell-colors` | `32ea029e6b605559f67314829e9359679aee4d8c` |
@@ -158,8 +165,11 @@ Test in this order:
 12. Test #119 independently after a reload. In restricted content, require
     the custom Movement Speed row to be absent while Blizzard's supported
     tertiary Speed row and BFI's presentation styling remain.
-13. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
-14. Run the 12.1 gates below in order.
+13. Test #124 independently. The first Achievement UI load must occur during
+    Challenge Mode combat; then exercise search, filter visibility, and
+    comparison-mode layout as described below.
+14. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
+15. Run the 12.1 gates below in order.
 
 Record the full local SHA for every installed folder. A short SHA in this
 document is a review aid, not permission to test a different head.
@@ -284,7 +294,7 @@ while it may be secret.
 
 ### Restricted-context regression preflight
 
-Run these six checks on the clean aggregate before the longer aura gates.
+Run these seven checks on the clean aggregate before the longer aura gates.
 Clear and inspect the taint log after each check so one failure cannot
 contaminate later evidence.
 
@@ -341,6 +351,21 @@ contaminate later evidence.
    automatically.
 6. Open and close the Spellbook again in and out of combat and confirm no
    further blocked action or duplicate deferred update.
+
+#### First Achievement UI load during challenge combat
+
+1. Start from a fresh reload without opening Achievements.
+2. Enter Challenge Mode combat and open Achievements for the first time so
+   `Blizzard_AchievementUI` loads through its Bootstrap path.
+3. Require no `StyleEditBox: box is nil`, other Lua error, protected action,
+   or new taint.
+4. Exercise search text, category changes, filter visibility, and repeated
+   close/reopen while the restricted context remains active. Blizzard must
+   continue to own the search and filter layout.
+5. Leave combat, then enter and leave achievement comparison mode. The search
+   box, filter dropdown, comparison header, and search preview must remain
+   aligned without a stale anchor or duplicate style hook.
+6. Repeat the first-load check outside combat and flush the taint log.
 
 #### Native AuraButton tooltip shell and hover
 
