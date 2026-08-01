@@ -39,21 +39,32 @@ Use this clean isolated-install sequence:
    #110 at `4b350b7ff7903c2e275c305980624937f4dca357`. Verify Target
    Debuffs use a square border while Blizzard's native dispel type still
    controls its colour and visibility. Target Buffs must remain unchanged.
-8. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
+8. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
+   #110 at `4b350b7ff7903c2e275c305980624937f4dca357`. On Target Buffs
+   and Debuffs, test every cooldown choice after its required reload and
+   require exactly one graphical timer.
+9. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
+   #112 at `a3069bc70e22e449231dbb7cd0be20e38a96412c`. Repeat every
+   cooldown choice on hostile nameplate Debuffs.
+10. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
+    #103 at `5a35935c5ab2ba9db240dbb4d3dbbbc7b5935a1c`. Verify the
+    fixed-clock upper-right native Buff groups and temporary enchants have a
+    circular swipe only, never a second vertical fill.
+11. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
    with BFInfinite #118 at
    `24c26df850ee0730982a1263e0770d5a5e7296c4`. Test the native tooltip
    shell on Blizzard's TargetFrame with BFI Unit Frames disabled, then on any
    upper-right native AuraButtons available to the fixture.
-9. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
+12. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
    with BFInfinite #119 at
    `d555ad11c49cb8e598340e7d273778d33f285b39`. Reload before testing,
    then open the Character panel inside an active Challenge Mode both outside
    and during combat.
-10. Validation-only AF #25 at
-   `333860a452c09fbf75ad109776c12f364225f55d` with the exact
-   checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
-   validation SHA. Record that full branch-head SHA immediately before
-   installation.
+13. Validation-only AF #25 at
+    `64fb9b7830f0fcafe3fb02043771e22cc0d67d51` with the exact
+    checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
+    validation SHA. Record that full branch-head SHA immediately before
+    installation.
 
 Delete and replace both addon folders between pairs. Descendants include their
 ancestors, never sibling integrations; do not merge branches or overlay
@@ -62,9 +73,10 @@ be merged. Closed PR #98 is superseded and is not an install input.
 
 For the final stack, use validation-only AbstractFramework PR #25, branch
 `codex/aura-full-stack-test`, exact head
-`333860a452c09fbf75ad109776c12f364225f55d`. It combines AF #23/r35 and
-AF #26 with current AF `main` `d95ae87f4538d6d3f40be8534ec220eace42f265`,
-including #24's Retail 12.1 max-level fix. Never merge AF #25.
+`64fb9b7830f0fcafe3fb02043771e22cc0d67d51`. It combines AF #23/r35,
+AF #26, and AF #27/r36 with current AF `main`
+`d95ae87f4538d6d3f40be8534ec220eace42f265`, including #24's Retail 12.1
+max-level fix. Never merge AF #25.
 
 The aggregate must contain these exact BFInfinite terminal heads:
 
@@ -109,16 +121,20 @@ Test in this order:
    when styling is disabled.
 7. Test AF #26 with #110, then repeat its square, native-dispel-colour check
    across every harmful unit-frame row on the final aggregate.
-8. Test #85 and then #118 independently. For #118 alone, disable BFI Unit
+8. Test AF #27 with #110, #112, and #103 as three clean pairs. Run the
+   single-graphical-timer matrix below on unit-frame groups, nameplate groups,
+   and upper-right Buff groups/temporary enchants, then repeat it on the final
+   aggregate.
+9. Test #85 and then #118 independently. For #118 alone, disable BFI Unit
    Frames and exercise Blizzard's native TargetFrame AuraButtons; the final
    aggregate carries both PRs for their combined restricted-context gate.
-9. Test #114, #115, #116, and #117 independently against their documented
+10. Test #114, #115, #116, and #117 independently against their documented
    reproducers below.
-10. Test #119 independently after a reload. In restricted content, require the
-   custom Movement Speed row to be absent while Blizzard's supported tertiary
-   Speed row and BFI's presentation styling remain.
-11. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
-12. Run the 12.1 gates below in order.
+11. Test #119 independently after a reload. In restricted content, require
+    the custom Movement Speed row to be absent while Blizzard's supported
+    tertiary Speed row and BFI's presentation styling remain.
+12. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
+13. Run the 12.1 gates below in order.
 
 Record the full local SHA for every installed folder. A short SHA in this
 document is a review aid, not permission to test a different head.
@@ -390,6 +406,31 @@ picker is absent; color ownership lives only in Global Colors.
 Verify that live-tunable values update without allocation and that
 construction-owned values produce one reload-required state. Reverting to the
 exact applied construction clears the prompt. The newest saved mutation wins.
+
+#### Single graphical cooldown display
+
+Cooldown style is construction-owned on native rows. After selecting each
+style below, reload before judging the result. Keep Duration Text enabled for
+one pass and disabled for another; numeric text is independent and is not a
+second graphical timer.
+
+- **None:** no circular swipe and no vertical fill.
+- **Vertical** and **Block Vertical:** one vertical fill and no circular
+  swipe, including behind the block colour.
+- **Clock**, **Clock (With Leading Edge)**, **Block Clock**, and **Block Clock
+  (With Leading Edge):** one circular swipe and no vertical fill.
+
+Run the complete selector matrix on visible Target Buffs and Debuffs, then on
+hostile nameplate Debuffs. Repeat representative helpful and harmful rows on
+Player, Pet, Party, Raid, Boss, Focus, TargetTarget, FocusTarget, and PetTarget.
+For upper-right native Buffs, which intentionally use a fixed Clock style,
+verify ordinary Buff groups and both temporary-weapon-enchantment positions
+show only the circular swipe. Upper-right ordinary Debuffs remain on
+Blizzard's legacy duration presentation and are outside this selector matrix.
+
+Inspect the full duration: immediately after application, below one minute,
+across the minute boundary, and near expiration. No native update may reveal
+an AF-created second carrier that was hidden only at initialization.
 
 Check every locale available to the tester. Long explanations must wrap and
 remain readable; no help text may be clipped, including the native-category
@@ -699,6 +740,9 @@ Stop and file a failure with evidence for any of the following:
 - Party/Raid external seeded content visible behind a hidden plain holder;
 - missing category, duplicate aura, partial color fallback, inferred spell
   family, or a listed ID using the wrong exact RGBA;
+- more than one graphical duration display on a native AuraButton, including
+  a circular swipe beneath Vertical/Block Vertical or a vertical fill beneath
+  any Clock style;
 - more than eight color-expanded active groups, except an unchanged baseline
   gray policy that already exceeds eight;
 - reload prompt for same-family ID tuning, or no reload for a new family;
