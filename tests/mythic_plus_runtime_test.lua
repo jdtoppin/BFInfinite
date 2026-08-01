@@ -325,8 +325,8 @@ end
 function AF.Fire(...)
     fires[#fires + 1] = {...}
 end
-function AF.GetColorRGB()
-    return 1, 1, 1, 1
+function AF.GetColorRGB(color)
+    return color
 end
 function AF.WrapTextInColor(text)
     return text
@@ -711,6 +711,52 @@ assertEqual(timerFrame.title.truncateWidth, timerFrame.title.width,
     "preview truncation uses the pixel-snapped title width")
 assertEqual(timerFrame.info.truncateWidth, timerFrame.info.width,
     "preview truncation uses the pixel-snapped stats width")
+assertEqual(timerFrame.plusThreeThreshold.text, "+3 +3:13",
+    "preview shows time remaining to the +3 threshold")
+assertEqual(timerFrame.plusTwoThreshold.text, "+2 +9:13",
+    "preview shows time remaining to the +2 threshold")
+assertEqual(timerFrame.plusThreeThreshold.width,
+    math.ceil(304 * 0.20 - 4),
+    "+3 preview label leaves space between threshold markers")
+assertEqual(timerFrame.plusTwoThreshold.width,
+    math.ceil(304 * 0.20 - 4),
+    "+2 preview label leaves space between threshold markers")
+assertEqual(timerFrame.plusThreeThreshold.justifyH, "CENTER",
+    "+3 threshold text is centered")
+assertEqual(timerFrame.plusTwoThreshold.justifyH, "CENTER",
+    "+2 threshold text is centered")
+assertEqual(timerFrame.plusThreeThreshold.textColor[1], "softlime",
+    "+3 threshold uses the green tick color")
+assertEqual(timerFrame.plusThreeThreshold.textColor[1],
+    timerFrame.plusThreeTick.color[1],
+    "+3 threshold and tick share one color")
+assertEqual(timerFrame.plusTwoThreshold.textColor[1], "skyblue",
+    "+2 threshold uses the blue tick color")
+assertEqual(timerFrame.plusTwoThreshold.textColor[1],
+    timerFrame.plusTwoTick.color[1],
+    "+2 threshold and tick share one color")
+assertEqual(timerFrame.plusThreeThreshold.point[1], "BOTTOM",
+    "+3 threshold uses a centered bottom anchor")
+assertEqual(timerFrame.plusThreeThreshold.point[2],
+    timerFrame.plusThreeTick,
+    "+3 threshold is anchored to its tick")
+assertEqual(timerFrame.plusThreeThreshold.point[3], "TOP",
+    "+3 threshold sits above its tick")
+assertEqual(timerFrame.plusThreeThreshold.point[4], 0,
+    "+3 threshold has no horizontal drift from its tick")
+assertEqual(timerFrame.plusThreeThreshold.point[5], 3,
+    "+3 threshold uses the standard bar gap")
+assertEqual(timerFrame.plusTwoThreshold.point[1], "BOTTOM",
+    "+2 threshold uses a centered bottom anchor")
+assertEqual(timerFrame.plusTwoThreshold.point[2],
+    timerFrame.plusTwoTick,
+    "+2 threshold is anchored to its tick")
+assertEqual(timerFrame.plusTwoThreshold.point[3], "TOP",
+    "+2 threshold sits above its tick")
+assertEqual(timerFrame.plusTwoThreshold.point[4], 0,
+    "+2 threshold has no horizontal drift from its tick")
+assertEqual(timerFrame.plusTwoThreshold.point[5], 3,
+    "+2 threshold uses the standard bar gap")
 assertEqual(timerFrame.mouseEnabled, true,
     "preview enables direct window dragging")
 assertEqual(timerFrame.dragButtons[1], "LeftButton",
@@ -832,6 +878,14 @@ assertEqual(timerFrame.plusThreeTick.shown, true,
     "threshold option shows the +3 bar marker")
 assertEqual(timerFrame.plusTwoTick.shown, true,
     "threshold option shows the +2 bar marker")
+assertEqual(timerFrame.plusThreeThreshold.shown, true,
+    "threshold option shows the +3 time")
+assertEqual(timerFrame.plusTwoThreshold.shown, true,
+    "threshold option shows the +2 time")
+assertEqual(timerFrame.plusThreeThreshold.text, "+3 +18:00",
+    "live timer shows time remaining to +3")
+assertEqual(timerFrame.plusTwoThreshold.text, "+2 +24:00",
+    "live timer shows time remaining to +2")
 
 local affixHideCalls = timerFrame.affixIcons[1].hideCalls or 0
 local objectiveHideCalls =
@@ -845,6 +899,24 @@ assertEqual(timerFrame.objectiveRows[1].hideCalls or 0,
 
 W.config.mythicPlus.width = 260
 W.config.mythicPlus.font[2] = 24
+callbacks.BFI_UpdateModule(nil, "uiWidgets", "mythicPlus")
+assertEqual(timerFrame.plusThreeTick.point[4], 244 * 0.60,
+    "+3 marker follows the resized bar")
+assertEqual(timerFrame.plusTwoTick.point[4], 244 * 0.80,
+    "+2 marker follows the resized bar")
+assertEqual(timerFrame.plusThreeThreshold.width,
+    math.ceil(244 * 0.20 - 4),
+    "+3 time stays bounded at minimum width")
+assertEqual(timerFrame.plusTwoThreshold.width,
+    math.ceil(244 * 0.20 - 4),
+    "+2 time stays bounded at minimum width")
+assertEqual(timerFrame.plusThreeThreshold.point[2],
+    timerFrame.plusThreeTick,
+    "+3 time stays centered after resizing")
+assertEqual(timerFrame.plusTwoThreshold.point[2],
+    timerFrame.plusTwoTick,
+    "+2 time stays centered after resizing")
+
 W.config.mythicPlus.showThresholds = false
 callbacks.BFI_UpdateModule(nil, "uiWidgets", "mythicPlus")
 assertEqual(timerFrame.timerBar.width, 244,
@@ -853,8 +925,10 @@ assertEqual(timerFrame.title.width, math.ceil(244 * 0.62),
     "title column uses responsive content width")
 assertTrue(timerFrame.objectiveRows[1].height > 15,
     "row height follows the configured AF font size")
-assertEqual(timerFrame.thresholds.shown, false,
-    "threshold option hides its text")
+assertEqual(timerFrame.plusThreeThreshold.shown, false,
+    "threshold option hides the +3 time")
+assertEqual(timerFrame.plusTwoThreshold.shown, false,
+    "threshold option hides the +2 time")
 assertEqual(timerFrame.plusThreeTick.shown, false,
     "threshold option hides the +3 marker")
 assertEqual(timerFrame.plusTwoTick.shown, false,
@@ -864,6 +938,16 @@ W.config.mythicPlus.width = 320
 W.config.mythicPlus.font[2] = 12
 W.config.mythicPlus.showThresholds = true
 callbacks.BFI_UpdateModule(nil, "uiWidgets", "mythicPlus")
+assertEqual(timerFrame.plusThreeThreshold.shown, true,
+    "restoring thresholds shows the +3 time")
+assertEqual(timerFrame.plusTwoThreshold.shown, true,
+    "restoring thresholds shows the +2 time")
+assertEqual(timerFrame.plusThreeThreshold.point[2],
+    timerFrame.plusThreeTick,
+    "restored +3 time remains centered")
+assertEqual(timerFrame.plusTwoThreshold.point[2],
+    timerFrame.plusTwoTick,
+    "restored +2 time remains centered")
 
 state.inCombat = true
 state.elapsed = 10

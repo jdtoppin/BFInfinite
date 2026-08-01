@@ -48,6 +48,8 @@ local RUN_HYDRATION_RETRY_DELAYS = {0, 0.25, 1, 2}
 local RUN_START_MATCH_TOLERANCE = 10
 local MAX_RESTORE_IDENTITY_RETRIES = 2
 local EXPECTED_METER_RESET_WINDOW = 10
+local PLUS_THREE_COLOR = "softlime"
+local PLUS_TWO_COLOR = "skyblue"
 
 local config
 local characterHistory
@@ -1943,7 +1945,8 @@ local function createTimerFrame()
         icon:SetScript("OnLeave", AF.HideTooltip)
         timerFrame.affixIcons[index] = icon
     end
-    timerFrame.thresholds = createText(timerFrame, "RIGHT")
+    timerFrame.plusThreeThreshold = createText(timerFrame, "CENTER")
+    timerFrame.plusTwoThreshold = createText(timerFrame, "CENTER")
     timerFrame.timerBar = AF.CreateBlizzardStatusBar(
         timerFrame,
         0,
@@ -1957,14 +1960,14 @@ local function createTimerFrame()
     timerFrame.plusThreeTick = AF.CreateTexture(
         timerFrame.timerBar,
         nil,
-        "softlime",
+        PLUS_THREE_COLOR,
         "OVERLAY"
     )
     AF.SetWidth(timerFrame.plusThreeTick, 1)
     timerFrame.plusTwoTick = AF.CreateTexture(
         timerFrame.timerBar,
         nil,
-        "skyblue",
+        PLUS_TWO_COLOR,
         "OVERLAY"
     )
     AF.SetWidth(timerFrame.plusTwoTick, 1)
@@ -2065,7 +2068,8 @@ local function applyFrameConfig()
 
     setFont(timerFrame.title, 2)
     setFont(timerFrame.time, 2)
-    setFont(timerFrame.thresholds, -1)
+    setFont(timerFrame.plusThreeThreshold, -1)
+    setFont(timerFrame.plusTwoThreshold, -1)
     setFont(timerFrame.info, -1)
     setFont(timerFrame.remaining, -1)
     setFont(timerFrame.forcesLabel, -1)
@@ -2948,15 +2952,30 @@ local function renderRun(run)
     local showThresholds = hasTimeLimit
         and config.showThresholds ~= false
     if showThresholds then
-        timerFrame.thresholds:SetText(L["+3 %s   +2 %s"]:format(
-            Model.FormatClock(plusThree - elapsed, true),
-            Model.FormatClock(plusTwo - elapsed, true)
+        local thresholdLabelWidth = max(
+            1,
+            contentWidth * (plusTwo - plusThree) / timeLimit - 4
+        )
+        setTruncatedText(
+            timerFrame.plusThreeThreshold,
+            L["+3 %s"]:format(
+                Model.FormatClock(plusThree - elapsed, true)
+            ),
+            thresholdLabelWidth
+        )
+        timerFrame.plusThreeThreshold:SetTextColor(AF.GetColorRGB(
+            PLUS_THREE_COLOR
         ))
-        timerFrame.thresholds:SetTextColor(AF.GetColorRGB("gray"))
-        anchorText(timerFrame.thresholds, "TOPRIGHT", timerFrame,
-            "TOPRIGHT", -8, detailsY)
-        AF.SetWidth(timerFrame.thresholds, contentWidth)
-        timerFrame.thresholds:Show()
+        setTruncatedText(
+            timerFrame.plusTwoThreshold,
+            L["+2 %s"]:format(
+                Model.FormatClock(plusTwo - elapsed, true)
+            ),
+            thresholdLabelWidth
+        )
+        timerFrame.plusTwoThreshold:SetTextColor(AF.GetColorRGB(
+            PLUS_TWO_COLOR
+        ))
         y = min(
             y,
             detailsY - getLineHeight(-1, 19, 6)
@@ -3030,10 +3049,29 @@ local function renderRun(run)
             ),
             0
         )
+        anchorText(
+            timerFrame.plusThreeThreshold,
+            "BOTTOM",
+            timerFrame.plusThreeTick,
+            "TOP",
+            0,
+            3
+        )
+        anchorText(
+            timerFrame.plusTwoThreshold,
+            "BOTTOM",
+            timerFrame.plusTwoTick,
+            "TOP",
+            0,
+            3
+        )
+        timerFrame.plusThreeThreshold:Show()
+        timerFrame.plusTwoThreshold:Show()
         timerFrame.plusThreeTick:Show()
         timerFrame.plusTwoTick:Show()
     else
-        timerFrame.thresholds:Hide()
+        timerFrame.plusThreeThreshold:Hide()
+        timerFrame.plusTwoThreshold:Hide()
         timerFrame.plusThreeTick:Hide()
         timerFrame.plusTwoTick:Hide()
     end
