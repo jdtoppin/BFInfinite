@@ -25,9 +25,14 @@ Before the supported pairs, run one deliberate dependency-mismatch preflight:
 install AF #23/r35 at
 `43f79cf2e9e91c47c9142c3546c900baf8fe092f` with the exact checked-out
 head of BFInfinite #91. A dependency warning is acceptable. Every BFI-owned
-unit-frame and nameplate aura row must remain hidden, and the error log must
-contain no `GetUnitAuraInstanceIDs`, `UNIT_AURA`, Lua, or taint error. Then
-delete both addon folders before installing the supported AF #25/r36 pair.
+unit-frame and nameplate aura row must remain hidden. Begin with a reload in
+an active Challenge Mode dungeon, then enter combat and exercise hostile,
+friendly, cleared, and restored targets; party/raid roster and target changes;
+and hostile nameplate creation, removal, and token reuse. Blizzard-owned
+upper-right Buffs/Debuffs and any fallback unit/nameplate aura surfaces must
+remain available. The error log must contain no `GetUnitAuraInstanceIDs`,
+`UNIT_AURA`, Lua, or taint error. Then delete both addon folders before
+installing the supported AF #25/r36 pair.
 
 1. AF #19 at `d6858f3997a1014a7ab9ce05ddaaf53efe4df9c6` with BFInfinite
    #90 at `d9c5a23246a01572e1fb75d470a250032f802b33`.
@@ -40,27 +45,27 @@ delete both addon folders before installing the supported AF #25/r36 pair.
 4. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
    #102 at `9fedb173cc7da9a4152ca3bd077fd2c3bf203df7`.
 5. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #120 at `e205ec51605b3ceee2687d1339b428057d921277`, then #110 at
-   `b10ffbf7b5e1a4f8970a448c8fad0d0a9aa64742`.
+   #120 at `6061a987bb14cae2ad0c2bba03275b885bee7d00`, then #110 at
+   `31492ff69acfee27f371b746a0f4eb4d75a8f674`.
 6. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #112 at `ab05284aae32d9478ac7181ea9db92b8c2c7f947`.
+   #112 at `6f6027e81efbe021f3c73c5fb6ec3912ebb31605`.
 7. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
    #103 at `dc0546639fec885ced82bdf1399d998f2c2f03bd`. Verify the
    ordinary upper-right Debuffs use BFI's neutral square outline while
    Blizzard continues to own their data and layout.
 8. Validation-only AF #25 at
    `d5a0984f5dc7f14b0b75314a0cae6d190bf61b88` with BFInfinite #110
-   at `b10ffbf7b5e1a4f8970a448c8fad0d0a9aa64742`. This is the clean
+   at `31492ff69acfee27f371b746a0f4eb4d75a8f674`. This is the clean
    combined check for AF #26's square border and AF #27's required r36
    runtime. Verify Target Debuffs use a square border while Blizzard's native
    dispel type still controls its colour and visibility. Target Buffs must
    remain unchanged.
 9. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #110 at `b10ffbf7b5e1a4f8970a448c8fad0d0a9aa64742`. On Target Buffs
+   #110 at `31492ff69acfee27f371b746a0f4eb4d75a8f674`. On Target Buffs
    and Debuffs, test every cooldown choice after its required reload and
    require exactly one graphical timer.
 10. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-    #112 at `ab05284aae32d9478ac7181ea9db92b8c2c7f947`. Repeat every
+    #112 at `6f6027e81efbe021f3c73c5fb6ec3912ebb31605`. Repeat every
     cooldown choice on hostile nameplate Debuffs.
 11. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
     #121 at `d1a5fe741fc703458b5d0830e620cd6ac6f070b9`, then #103 at
@@ -124,9 +129,9 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | FocusTarget | `codex/unitframe-aura-focustarget` | `58a60e011cb2dbd2d3b54d62cdb6ffc6b8df2df9` |
 | PetTarget | `codex/unitframe-aura-pettarget` | `02a75fd22f8f04e21e7f139df214697e6350e567` |
 | Pet | `codex/unitframe-aura-pet` | `8e91a8c7616b3000d5e607a2063bf528dd8c4f59` |
-| Unit/nameplate AF r36 gate (#120) | `codex/native-aura-r36-unitframe-gate` | `e205ec51605b3ceee2687d1339b428057d921277` |
-| Target partition (#110) | `codex/unitframe-aura-target-final` | `b10ffbf7b5e1a4f8970a448c8fad0d0a9aa64742` |
-| Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `ab05284aae32d9478ac7181ea9db92b8c2c7f947` |
+| Unit/nameplate AF r36 gate (#120) | `codex/native-aura-r36-unitframe-gate` | `6061a987bb14cae2ad0c2bba03275b885bee7d00` |
+| Target partition (#110) | `codex/unitframe-aura-target-final` | `31492ff69acfee27f371b746a0f4eb4d75a8f674` |
+| Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `6f6027e81efbe021f3c73c5fb6ec3912ebb31605` |
 | Party | `codex/unitframe-aura-party` | `2cfcbca80d0b2b45b9a9abb657907511152ae6b9` |
 | Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
 | Upper-right AF r36 gate (#121) | `codex/native-aura-r36-upper-right-gate` | `d1a5fe741fc703458b5d0830e620cd6ac6f070b9` |
