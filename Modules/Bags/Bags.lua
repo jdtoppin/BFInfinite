@@ -16,7 +16,6 @@ local GetCVarBool = _G.GetCVarBool
 local GetInventoryItemTexture = _G.GetInventoryItemTexture
 local SetCVar = _G.SetCVar
 local GetCurrentItemLevel = _G.C_Item.GetCurrentItemLevel
-local GetItemQualityColor = _G.C_Item.GetItemQualityColor
 local IsEquippableItem = _G.C_Item.IsEquippableItem
 local ItemLocation = _G.ItemLocation
 
@@ -44,12 +43,6 @@ local EMPTY_BAG_ICON = 133633
 local EMPTY_KIND_BAG = 1
 local EMPTY_KIND_REAGENT = 2
 local NON_EQUIPMENT_LOCATION = "INVTYPE_NON_EQUIP_IGNORE"
-local ITEM_LEVEL_OUTLINE_OFFSETS = {
-    {-1, -1},
-    {1, -1},
-    {-1, 1},
-    {1, 1},
-}
 
 local equipmentSlotAliases = {
     INVTYPE_ROBE = "INVTYPE_CHEST",
@@ -172,11 +165,10 @@ local cleanupTooltipState = {}
 -- Item-level evidence: Retail 12.0.7.68887 source commit
 -- 4383ced30106d51b27e3e86d1987f1552f0d259d and Retail 12.1.0.68914
 -- source commit d3915c78aba77a7a9be76acbfa35c674bbb6abe9.
--- ItemDocumentation.lua documents IsEquippableItem, GetCurrentItemLevel, and
--- GetItemQualityColor; ContainerFrame.lua waits on ContinuableContainer
--- before UpdateItems. UI.xsd has no independent outline-color setter, while
--- Blizzard_SharedTalentUI/TalentButtonArt.xml uses four diagonal FontStrings
--- for a separately colored text backdrop.
+-- ItemDocumentation.lua documents IsEquippableItem and GetCurrentItemLevel;
+-- ContainerFrame.lua waits on ContinuableContainer before UpdateItems.
+-- ItemButtonTemplate.xml gives stack counts NumberFontNormal, while
+-- ItemButtonTemplate.lua applies HIGHLIGHT_FONT_COLOR; item levels mirror both.
 
 local function IsEnabled()
     return moduleEnabled and B.config and B.config.enabled
@@ -346,51 +338,19 @@ local function ClearItemLevelText(button)
     if not text then return end
     text:SetText("")
     text:Hide()
-
-    for _, outline in ipairs(button.BFIItemLevelOutline) do
-        outline:SetText("")
-        outline:Hide()
-    end
 end
 
 local function GetItemLevelText(button)
     local text = button.BFIItemLevel
-    if text then return text, button.BFIItemLevelOutline end
+    if text then return text end
 
-    text = AF.CreateFontString(button, nil, "white", "AF_FONT_NORMAL")
-    AF.SetPoint(text, "BOTTOMLEFT", 2, 2)
+    text = AF.CreateFontString(button, nil, nil, "NumberFontNormal", "ARTWORK")
+    AF.SetPoint(text, "BOTTOMLEFT", 5, 2)
     text:SetJustifyH("LEFT")
-    text:SetShadowColor(0, 0, 0, 0)
-    text:SetShadowOffset(0, 0)
-    text:SetDrawLayer("OVERLAY", 7)
-
-    local outlines = {}
-    for index, offset in ipairs(ITEM_LEVEL_OUTLINE_OFFSETS) do
-        local outline = AF.CreateFontString(
-            button,
-            nil,
-            "white",
-            "AF_FONT_NORMAL"
-        )
-        AF.SetPoint(
-            outline,
-            "CENTER",
-            text,
-            "CENTER",
-            offset[1],
-            offset[2]
-        )
-        outline:SetJustifyH("LEFT")
-        outline:SetShadowColor(0, 0, 0, 0)
-        outline:SetShadowOffset(0, 0)
-        outline:SetDrawLayer("OVERLAY", 6)
-        outlines[index] = outline
-    end
 
     button.BFIItemLevel = text
-    button.BFIItemLevelOutline = outlines
     itemLevelButtons[button] = true
-    return text, outlines
+    return text
 end
 
 local function UpdateItemLevelText(button)
@@ -413,19 +373,9 @@ local function UpdateItemLevelText(button)
         return
     end
 
-    local text, outlines = GetItemLevelText(button)
+    local text = GetItemLevelText(button)
     text:SetText(itemLevel)
-    text:SetTextColor(1, 1, 1)
-
-    local r, g, b = 0, 0, 0
-    if info.quality ~= nil then
-        r, g, b = GetItemQualityColor(info.quality)
-    end
-    for _, outline in ipairs(outlines) do
-        outline:SetText(itemLevel)
-        outline:SetTextColor(r, g, b)
-        outline:Show()
-    end
+    text:SetTextColor(_G.HIGHLIGHT_FONT_COLOR:GetRGB())
     text:Show()
 end
 
