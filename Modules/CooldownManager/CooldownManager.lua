@@ -32,10 +32,10 @@ local unpack = unpack
 -- state and file-local caches. This module therefore has a strict boundary:
 -- it never writes a Blizzard Lua field, hooks a Blizzard object, or calls a
 -- Cooldown Viewer mixin. It reads static pool/template state plus the guarded
--- shown/alpha presentation state of Blizzard's proc-alert Frame; event
--- payloads and alert-manager tables remain untouched. Presentation is applied
--- through captured C widget methods. Protected geometry is changed only
--- outside combat and after CheckAllowProtectedFunctions.
+-- shown/alpha presentation state of Blizzard's proc-alert Frame and viewer
+-- parent; event payloads and alert-manager tables remain untouched.
+-- Presentation is applied through captured C widget methods. Protected
+-- geometry is changed only outside combat and after CheckAllowProtectedFunctions.
 local viewerDefinitions = {
     essential = {
         globalName = "EssentialCooldownViewer",
@@ -2884,7 +2884,7 @@ end
 
 local function ReconcileViewer(state, config)
     if not BindHolderPosition(state, config) then
-        return false
+        return false, false
     end
     local allItems, layoutItems = GetOrderedItems(state)
     local activeSet = {}
@@ -2901,7 +2901,7 @@ local function ReconcileViewer(state, config)
 
         local previewLayout = BuildLayout(state.definition, config, state.definition.previewCount)
         UpdateHolderPreview(state, previewLayout, nil, config)
-        return restored
+        return restored, false
     end
 
     RestoreMissingItems(state, activeSet)
@@ -2919,7 +2919,7 @@ local function ReconcileViewer(state, config)
             )
         end
         UpdateHolderPreview(state, layout, nil, config)
-        return true
+        return true, false
     end
 
     layout.count = layoutCount
@@ -2946,7 +2946,7 @@ local function ReconcileViewer(state, config)
         }
         if not PrepareItemGeometry(entry, state, desired) then
             UpdateHolderPreview(state, layout, layoutItems[1].item, config)
-            return false
+            return false, false
         end
         needsGeometry = needsGeometry or entry.needsGeometry
     end
@@ -2969,7 +2969,7 @@ local function ReconcileViewer(state, config)
                 or (bar and not CanChangeGeometry(bar)))
             then
                 UpdateHolderPreview(state, layout, layoutItems[1].item, config)
-                return false
+                return false, false
             end
         end
         for _, entry in ipairs(layoutItems) do
@@ -3010,12 +3010,12 @@ local function ReconcileViewer(state, config)
         end
         if not staticComplete then
             UpdateHolderPreview(state, layout, layoutItems[1].item, config)
-            return false
+            return false, needsGeometry
         end
     end
 
     UpdateHolderPreview(state, layout, layoutItems[1].item, config)
-    return true
+    return true, needsGeometry
 end
 
 local function RestoreViewer(state)
@@ -3058,24 +3058,148 @@ local function InitializeViewers()
     end
 end
 
+-- A full target UNIT_AURA makes Retail 12.1 release every pooled item, clear
+-- its anchors, and run the native GridLayout against the Blizzard viewer.
+-- Event-handler order and LayoutFrame OnUpdate order are not an ownership
+-- boundary, so keep the native parent visually curtained until BFI has
+-- corrected that rewrite and then observed two complete stable passes.
+-- SetAlpha accepts tainted execution in the audited client; GetAlpha can be a
+-- secret aspect, so only a guarded native value is retained for restoration.
+function PresentationMethods.BeginTargetTransition()
+    local config = CM.config
+    local locked = InCombatLockdown()
+    if not config
+        or not config.enabled
+        or type(config.viewers) ~= "table"
+        or not IsSafeBoolean(locked)
+        or locked
+        or IsBlizzardEditModeActive()
+    then
+        return false
+    end
+
+    InitializeViewers()
+    local transition = presentationController.targetTransition
+    if not transition then
+        transition = {viewerAlphas = {}}
+        presentationController.targetTransition = transition
+    end
+
+    local curtained = false
+    for _, state in ipairs(viewerStates) do
+        local viewer = state.viewer
+        local alpha = transition.viewerAlphas[viewer]
+        if alpha == nil then
+            alpha = CaptureAlpha(viewer, FrameGetAlpha)
+            if IsSafeNumber(alpha) then
+                transition.viewerAlphas[viewer] = alpha
+            end
+        end
+        if IsSafeNumber(alpha) then
+            FrameSetAlpha(viewer, 0)
+            curtained = true
+        end
+    end
+    if not curtained then
+        return false
+    end
+
+    local wasActive = transition.active
+    transition.active = true
+    transition.geometryCorrected = false
+    transition.stablePasses = 0
+    transition.elapsed = wasActive and transition.elapsed or 0
+    presentationController:RegisterUnitEvent("UNIT_AURA", "target")
+    return true
+end
+
+function PresentationMethods.NoteTargetTransitionBarrier()
+    local transition = presentationController.targetTransition
+    if not transition or not transition.active then return false end
+    transition.stablePasses = 0
+    return true
+end
+
+function PresentationMethods.AdvanceTargetTransition(
+    allComplete,
+    anyGeometryChanged,
+    elapsed
+)
+    local transition = presentationController.targetTransition
+    if not transition or not transition.active then return true end
+
+    elapsed = IsSafeNumber(elapsed) and max(0, min(elapsed, 0.1)) or 1 / 60
+    transition.elapsed = transition.elapsed + elapsed
+
+    if anyGeometryChanged then
+        transition.geometryCorrected = true
+        transition.stablePasses = 0
+    elseif allComplete and transition.geometryCorrected then
+        transition.stablePasses = transition.stablePasses + 1
+    else
+        transition.stablePasses = 0
+    end
+
+    local config = CM.config
+    local locked = InCombatLockdown()
+    local forceRestore = not config
+        or not config.enabled
+        or not IsSafeBoolean(locked)
+        or locked
+        or IsBlizzardEditModeActive()
+        or transition.elapsed >= 0.25
+    if not forceRestore and transition.stablePasses < 2 then
+        return false
+    end
+
+    for viewer, alpha in next, transition.viewerAlphas do
+        if IsValueNonSecret(viewer)
+            and viewer
+            and IsSafeNumber(alpha)
+        then
+            FrameSetAlpha(viewer, alpha)
+        end
+    end
+    transition.active = false
+    transition.geometryCorrected = false
+    transition.stablePasses = 0
+    transition.elapsed = 0
+    transition.viewerAlphas = {}
+    presentationController:UnregisterEvent("UNIT_AURA")
+    return true
+end
+
 local function PollPresentation(_, elapsed)
     presentationUpdateTimeLeft = presentationUpdateTimeLeft - elapsed
     if presentationUpdateTimeLeft > 0 then return end
-    presentationUpdateTimeLeft = 0.15
 
     InitializeViewers()
     local config = CM.config
     local enabled = config and config.enabled and type(config.viewers) == "table"
     local allRestored = true
+    local allComplete = true
+    local anyGeometryChanged = false
 
     for _, state in ipairs(viewerStates) do
         local viewerConfig = enabled and config.viewers[state.key]
         if type(viewerConfig) == "table" then
-            ReconcileViewer(state, viewerConfig)
+            local complete, geometryChanged = ReconcileViewer(state, viewerConfig)
+            allComplete = complete and allComplete
+            anyGeometryChanged = geometryChanged or anyGeometryChanged
         else
-            allRestored = RestoreViewer(state) and allRestored
+            local restored = RestoreViewer(state)
+            allRestored = restored and allRestored
+            allComplete = restored and allComplete
         end
     end
+
+    PresentationMethods.AdvanceTargetTransition(
+        allComplete,
+        anyGeometryChanged,
+        elapsed
+    )
+    local transition = presentationController.targetTransition
+    presentationUpdateTimeLeft = transition and transition.active and 0 or 0.15
 
     if not enabled and allRestored then
         presentationController:SetScript("OnUpdate", nil)
@@ -3119,15 +3243,15 @@ local hotkeyRefreshEvents = {
 
 local function OnPresentationEvent(_, event)
     if event == "UNIT_AURA" then
-        -- The opaque payload is intentionally ignored. One target aura wake is
-        -- enough to catch the full refresh that can follow a target change;
-        -- disarm immediately so ordinary aura churn keeps the 0.15s throttle.
-        presentationController:UnregisterEvent("UNIT_AURA")
+        -- The opaque payload is intentionally ignored. An incremental target
+        -- aura event can precede the full update that rewrites pooled anchors,
+        -- so observe until the guarded transition completes or times out.
+        PresentationMethods.NoteTargetTransitionBarrier()
         StartPresentationPolling()
         return
     end
     if event == "PLAYER_TARGET_CHANGED" then
-        presentationController:RegisterUnitEvent("UNIT_AURA", "target")
+        PresentationMethods.BeginTargetTransition()
     end
     if event == "COOLDOWN_VIEWER_DATA_LOADED"
         or event == "COOLDOWN_VIEWER_TABLE_HOTFIXED"
