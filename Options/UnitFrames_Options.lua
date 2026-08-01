@@ -2827,7 +2827,7 @@ end
 builder["stackText"] = function(parent)
     if created["stackText"] then return created["stackText"] end
 
-    created["stackText"] = CreateFontPositionExtraPane(parent, "stackText", "BFI_UnitFrameOption_StackText", AF.GetGradientText(L["Stack Text"], "BFI", "white"))
+    created["stackText"] = CreateFontPositionExtraPane(parent, "stackText", "BFI_UnitFrameOption_StackText", L["Stack Text"])
     return created["stackText"]
 end
 
@@ -2837,7 +2837,7 @@ end
 builder["durationText"] = function(parent)
     if created["durationText"] then return created["durationText"] end
 
-    created["durationText"] = CreateFontPositionExtraPane(parent, "durationText", "BFI_UnitFrameOption_DurationText", AF.GetGradientText(L["Duration Text"], "BFI", "white"), "duration")
+    created["durationText"] = CreateFontPositionExtraPane(parent, "durationText", "BFI_UnitFrameOption_DurationText", L["Duration Text"], "duration")
     return created["durationText"]
 end
 
@@ -4052,7 +4052,7 @@ builder["auraTypeColor"] = function(parent)
     local pane = AF.CreateBorderedFrame(parent, "BFI_UnitFrameOption_AuraTypeColor", nil, 72)
     created["auraTypeColor"] = pane
 
-    local tip = AF.CreateFontString(pane, AF.GetGradientText(L["Border Color"], "BFI", "white") .. "\n" .. L["Priority: top to bottom"])
+    local tip = AF.CreateFontString(pane, L["Border Color"] .. "\n" .. L["Priority: top to bottom"])
     AF.SetPoint(tip, "TOPLEFT", 15, -8)
     AF.SetPoint(tip, "BOTTOMLEFT", 15, 8)
     tip:SetColor("tip")
@@ -4084,7 +4084,7 @@ builder["auraTypeColor"] = function(parent)
     function pane.Load(t)
         pane.t = t
         if AF.isRetail then
-            tip:SetText(AF.GetGradientText(L["Border Color"], "BFI", "white") .. "\n" .. L["Retail supports debuff type coloring"])
+            tip:SetText(L["Border Color"] .. "\n" .. L["Retail supports debuff type coloring"])
             castByMe:Hide()
             dispellable:Hide()
             AF.ClearPoints(debuffType)
@@ -4127,7 +4127,7 @@ builder["auraSubFrame"] = function(parent)
 
     -- TODO: more filters and separate arrangement
 
-    local enabled = AF.CreateCheckButton(pane, AF.GetGradientText(L["Enable Sub Frame"], "BFI", "white"))
+    local enabled = AF.CreateCheckButton(pane, L["Enable Sub Frame"])
     AF.SetPoint(enabled, "TOPLEFT", 15, -8)
 
     local filter = AF.CreateDropdown(pane, 150)
@@ -4180,11 +4180,7 @@ builder["auraSubFrame"] = function(parent)
         pane.t = t
         if AF.isRetail then
             enabled:SetText(
-                AF.GetGradientText(
-                    L["Separate Auras Not from Player, Pet, or Vehicle"],
-                    "BFI",
-                    "white"
-                )
+                L["Separate Auras Not from Player, Pet, or Vehicle"]
             )
             filter:Hide()
             enabled:SetTooltip(
@@ -4224,7 +4220,7 @@ builder["auraArrangement"] = function(parent)
     created["auraArrangement"] = pane
 
     local arrangement = AF.CreateDropdown(pane, 150)
-    arrangement:SetLabel(AF.GetGradientText(L["Arrangement"], "BFI", "white"))
+    arrangement:SetLabel(L["Arrangement"])
     AF.SetPoint(arrangement, "TOPLEFT", 15, -25)
     arrangement:SetItems(AF.GetDropdownItems_Arrangement_Simple())
     arrangement:SetOnSelect(function(value)
