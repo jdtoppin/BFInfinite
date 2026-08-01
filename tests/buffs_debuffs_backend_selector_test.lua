@@ -137,7 +137,7 @@ local function NewHarness(options)
 
     local AF = {
         isRetail = options.isRetail ~= false,
-        versionNum = options.afVersion or 33,
+        versionNum = options.afVersion or 36,
         UIParent = {},
     }
     if options.customMethods ~= false then
@@ -288,7 +288,7 @@ end
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 33,
+        afVersion = 36,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
     })
@@ -331,7 +331,7 @@ end
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 33,
+        afVersion = 36,
         registerCustomBackend = true,
     })
     local BD = harness.BD
@@ -346,7 +346,7 @@ end
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 33,
+        afVersion = 36,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
         inCombat = true,
@@ -415,7 +415,7 @@ end
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 33,
+        afVersion = 36,
         registerBlizzardDebuffStyle = true,
     })
     local BD = harness.BD
@@ -435,27 +435,27 @@ end
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 32,
+        afVersion = 35,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
     })
     local BD = harness.BD
 
-    assertEqual(BD.HasCustomAuraContainerCapability(), false, "AF r32 custom capability")
-    assertEqual(BD.GetAuraBackend("buffs"), nil, "AF r32 12.1 backend")
+    assertEqual(BD.HasCustomAuraContainerCapability(), false, "AF r35 custom capability")
+    assertEqual(BD.GetAuraBackend("buffs"), nil, "AF r35 12.1 backend")
     assertEqual(
         BD.GetAuraBackend("debuffs"),
         BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
         "Debuffs style remains independent of custom AF revision"
     )
     harness.update()
-    assertEqual(harness.getCreateFrameCalls(), 0, "AF r32 12.1 legacy fallback")
+    assertEqual(harness.getCreateFrameCalls(), 0, "AF r35 12.1 legacy fallback")
 end
 
 do
     local harness = NewHarness({
         interfaceVersion = 120200,
-        afVersion = 33,
+        afVersion = 36,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
     })
@@ -473,7 +473,7 @@ end
 for _, missingMethod in ipairs(REQUIRED_CUSTOM_AF_METHODS) do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 33,
+        afVersion = 36,
         missingCustomMethod = missingMethod,
         registerCustomBackend = true,
     })
@@ -505,7 +505,7 @@ end
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 33,
+        afVersion = 36,
         registerCustomBackend = true,
     })
     local BD = harness.BD

@@ -14,7 +14,8 @@ local mainHandSlot = GetInventorySlotInfo("MainHandSlot")
 local secondaryHandSlot = GetInventorySlotInfo("SecondaryHandSlot")
 
 local REQUIRED_LEGACY_AF_VERSION = 21
-local REQUIRED_CUSTOM_AF_VERSION = 33
+-- AF #27/r36 registers only the selected native aura duration carrier.
+local REQUIRED_CUSTOM_AF_VERSION = 36
 local RETAIL_12_0_INTERFACE_MIN = 120000
 local RETAIL_12_1_INTERFACE_MIN = 120100
 local RETAIL_12_2_INTERFACE_MIN = 120200
