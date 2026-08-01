@@ -787,7 +787,7 @@ local function testDormancyAndFallback()
 
     local unavailable = makeHarness({
         backend = false,
-        unavailableFrameBudget = 1,
+        unavailableFrameBudget = 2,
     })
     assertEqual(next(unavailable.registered), nil,
         "12.1 unavailable provider observer")
