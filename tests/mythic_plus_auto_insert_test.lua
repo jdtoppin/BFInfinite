@@ -930,6 +930,13 @@ end
 assertTrue(autoInsertControl, "auto-insert option control")
 assertEqual(autoInsertControl.checked, false,
     "auto-insert option loads disabled")
+assertEqual(autoInsertControl.tooltip[1], "Auto Insert Matching Keystone",
+    "auto-insert tooltip title")
+assertEqual(
+    autoInsertControl.tooltip[2],
+    "Automatically inserts your usable Mythic Keystone when the dungeon pedestal opens. It never starts the key.",
+    "auto-insert tooltip body"
+)
 autoInsertControl.onCheck(true)
 assertEqual(optionInfo.cfg.autoInsertKeystone.enabled, true,
     "auto-insert option stores enabled state")

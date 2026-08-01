@@ -393,7 +393,10 @@ builder["autoInsertKeystone"] = function(parent)
 
     local enabled = AF.CreateCheckButton(pane, L["Auto Insert Matching Keystone"])
     AF.SetPoint(enabled, "LEFT", 15, 0)
-    enabled:SetTooltip(L["Automatically inserts your usable Mythic Keystone when the dungeon pedestal opens. It never starts the key."])
+    enabled:SetTooltip(
+        L["Auto Insert Matching Keystone"],
+        L["Automatically inserts your usable Mythic Keystone when the dungeon pedestal opens. It never starts the key."]
+    )
 
     enabled:SetOnCheck(function(checked)
         pane.t.cfg.autoInsertKeystone.enabled = checked
