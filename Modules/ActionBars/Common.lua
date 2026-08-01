@@ -171,6 +171,85 @@ local function OnSizeChanged(self, width, height)
     end
 end
 
+local function SetButtonBackdropColor(self, r, g, b, a)
+    self.BFIBackdropBackground:SetVertexColor(r, g, b, a or 1)
+end
+
+local function SetButtonBackdropBorderColor(self, r, g, b, a)
+    for _, border in ipairs(self.BFIBackdropBorders) do
+        border:SetVertexColor(r, g, b, a or 1)
+    end
+end
+
+local function UpdateButtonPixels(self)
+    AF.DefaultUpdatePixels(self)
+
+    if self.BFIBackdropBackground then
+        AF.RePoint(self.BFIBackdropBackground)
+    end
+
+    if self.BFIBackdropBorders then
+        for _, border in ipairs(self.BFIBackdropBorders) do
+            AF.ReSize(border)
+            AF.RePoint(border)
+        end
+    end
+end
+
+local function CreateSolidTexture(b, layer, subLevel)
+    local texture = b:CreateTexture(nil, layer, nil, subLevel)
+    texture:SetColorTexture(1, 1, 1, 1)
+    return texture
+end
+
+-- Retail 12.1.0.68914 (d3915c78aba7)'s BackdropTemplate expands this solid
+-- skin into nine regions. Match its layers with one fill and four edge strips.
+local function ApplyLightweightBackdrop(b)
+    local created
+    if not b.BFIBackdropBackground then
+        created = true
+        if b.ClearBackdrop then
+            b:ClearBackdrop()
+        end
+
+        local background = CreateSolidTexture(b, "BACKGROUND", 0)
+        AF.SetOnePixelInside(background, b)
+
+        local top = CreateSolidTexture(b, "BORDER", 0)
+        AF.SetPoint(top, "TOPLEFT", b, "TOPLEFT")
+        AF.SetPoint(top, "TOPRIGHT", b, "TOPRIGHT")
+        AF.SetHeight(top, 1)
+
+        local bottom = CreateSolidTexture(b, "BORDER", 0)
+        AF.SetPoint(bottom, "BOTTOMLEFT", b, "BOTTOMLEFT")
+        AF.SetPoint(bottom, "BOTTOMRIGHT", b, "BOTTOMRIGHT")
+        AF.SetHeight(bottom, 1)
+
+        local left = CreateSolidTexture(b, "BORDER", 0)
+        AF.SetPoint(left, "TOPLEFT", top, "BOTTOMLEFT")
+        AF.SetPoint(left, "BOTTOMLEFT", bottom, "TOPLEFT")
+        AF.SetWidth(left, 1)
+
+        local right = CreateSolidTexture(b, "BORDER", 0)
+        AF.SetPoint(right, "TOPRIGHT", top, "BOTTOMRIGHT")
+        AF.SetPoint(right, "BOTTOMRIGHT", bottom, "TOPRIGHT")
+        AF.SetWidth(right, 1)
+
+        b.BFIBackdropBackground = background
+        b.BFIBackdropBorders = {top, bottom, left, right}
+    end
+
+    -- LibActionButton uses this method to show equipped and macro borders.
+    b.SetBackdropColor = SetButtonBackdropColor
+    b.SetBackdropBorderColor = SetButtonBackdropBorderColor
+    b.UpdatePixels = UpdateButtonPixels
+
+    if created then
+        b:SetBackdropColor(AF.GetColorRGB("background"))
+        b:SetBackdropBorderColor(AF.GetColorRGB("border"))
+    end
+end
+
 function AB.StylizeButton(b)
     b.MasqueSkinned = true
 
@@ -280,9 +359,7 @@ function AB.StylizeButton(b)
     end
 
     -- backdrop -------------------------------------------------------------- --
-    Mixin(b, BackdropTemplateMixin)
-    AF.ApplyDefaultBackdrop(b)
-    AF.ApplyDefaultBackdropColors(b)
+    ApplyLightweightBackdrop(b)
 end
 
 ---------------------------------------------------------------------
