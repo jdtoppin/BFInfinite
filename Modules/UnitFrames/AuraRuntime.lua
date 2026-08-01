@@ -7,6 +7,8 @@ local F = BFI.funcs
 local AF = _G.AbstractFramework
 
 local C_Timer = C_Timer
+local CreateFrame = CreateFrame
+local GetBuildInfo = GetBuildInfo
 local InCombatLockdown = InCombatLockdown
 local UnitCanAssist = UnitCanAssist
 local UnitIsVisible = UnitIsVisible
@@ -14,6 +16,7 @@ local ipairs, next, pairs, setmetatable, type =
     ipairs, next, pairs, setmetatable, type
 
 local CONFIG_COMMIT_DELAY = 0.15
+local RETAIL_12_1_INTERFACE_MIN = 120100
 
 local STATE_NEW = "NEW"
 local STATE_WAITING_FOR_UNIT = "WAITING_FOR_UNIT"
@@ -23,6 +26,20 @@ local STATE_PARTITION_DEFERRED = "PARTITION_DEFERRED"
 local STATE_ERROR = "ERROR"
 local STATE_DESTROYED = "DESTROYED"
 local GROUP_EMPTY_UNIT = "none"
+
+-- Retail 12.1.0.68914 (wow-ui-source d3915c78) makes general unit-aura
+-- enumeration fail with a Lua error whenever unit-aura access is restricted.
+-- Select the legacy iterator only on a known pre-12.1 Retail client. A
+-- missing, incomplete, or outdated native backend on 12.1 must stay inert;
+-- combat state is not a valid proxy for the broader restriction contexts.
+local function RequiresNativeAuraContainer()
+    local _, _, _, interfaceVersion = GetBuildInfo()
+    interfaceVersion = tonumber(interfaceVersion)
+    return interfaceVersion == nil
+        or interfaceVersion >= RETAIL_12_1_INTERFACE_MIN
+end
+
+local requiresNativeAuraContainer = RequiresNativeAuraContainer()
 
 ---------------------------------------------------------------------
 -- native aura data-provider observation
@@ -1141,6 +1158,62 @@ end, "low")
 ---------------------------------------------------------------------
 -- create
 ---------------------------------------------------------------------
+local UnavailableAuraIndicatorMixin = {}
+
+function UnavailableAuraIndicatorMixin:LoadConfig()
+    self.enabled = false
+end
+
+function UnavailableAuraIndicatorMixin:Enable()
+    self.enabled = false
+end
+
+UnavailableAuraIndicatorMixin.Disable = UnavailableAuraIndicatorMixin.Enable
+UnavailableAuraIndicatorMixin.Update = UnavailableAuraIndicatorMixin.Enable
+UnavailableAuraIndicatorMixin.EnableConfigMode =
+    UnavailableAuraIndicatorMixin.Enable
+UnavailableAuraIndicatorMixin.DisableConfigMode =
+    UnavailableAuraIndicatorMixin.Enable
+
+function UnavailableAuraIndicatorMixin:GetNativeAuraState()
+    return {
+        state = "UNAVAILABLE",
+        active = false,
+        built = false,
+        nativeBackendAvailable = false,
+    }
+end
+
+function UnavailableAuraIndicatorMixin:RequiresReloadForConfig()
+    return false
+end
+
+local function CreateUnavailableAuraIndicator(parent, name, auraFilter)
+    local frame = CreateFrame("Frame", name, parent)
+    frame:SetAllPoints(parent)
+    frame:Hide()
+    for key, value in pairs(UnavailableAuraIndicatorMixin) do
+        frame[key] = value
+    end
+    frame._nativeAuraUnavailable = true
+    frame.auraFilter = auraFilter
+    frame.enabled = false
+    frame.root = parent
+    return frame
+end
+
+local function CreateLegacyOrUnavailableAuraIndicator(
+    parent,
+    name,
+    auraFilter,
+    hasSubFrame
+)
+    if requiresNativeAuraContainer then
+        return CreateUnavailableAuraIndicator(parent, name, auraFilter)
+    end
+    return UF.CreateAuras(parent, name, auraFilter, hasSubFrame)
+end
+
 local function CreateNativeAuraRuntime(
     parent,
     auraFilter,
@@ -1224,7 +1297,11 @@ end
 -- that map nor sets any 12.1-only header/container state.
 function UF.CreateGroupNativeAuras(parent, name, auraFilter, containerKey)
     if not UF.HasNativeAuraContainerBackend() then
-        return UF.CreateAuras(parent, name, auraFilter)
+        return CreateLegacyOrUnavailableAuraIndicator(
+            parent,
+            name,
+            auraFilter
+        )
     end
 
     local containers = parent._nativeAuraContainers
@@ -1238,11 +1315,17 @@ function UF.CreateGroupNativeAuras(parent, name, auraFilter, containerKey)
     )
 end
 
--- Keep the 12.0.7 path and Target's complementary subframe exact until a
--- frame-specific PR explicitly adopts a migration-ready native contract.
+-- Keep the known 12.0.7 compatibility path exact. On 12.1, an unavailable
+-- backend or an unported complementary subframe is dormant instead of
+-- reopening the prohibited legacy iterator.
 function UF.CreateNativeAuras(parent, name, auraFilter, hasSubFrame)
     if hasSubFrame or not UF.HasNativeAuraContainerBackend() then
-        return UF.CreateAuras(parent, name, auraFilter, hasSubFrame)
+        return CreateLegacyOrUnavailableAuraIndicator(
+            parent,
+            name,
+            auraFilter,
+            hasSubFrame
+        )
     end
     return UF.CreateNativeAuraIndicator(
         parent,
