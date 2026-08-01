@@ -363,8 +363,8 @@ local core = assert(io.open("Core.lua", "r"))
 local coreSource = core:read("*a")
 core:close()
 assertTrue(
-    coreSource:find("REQUIRED_AF_VERSION = 35", 1, true) ~= nil,
-    "AF r35 dependency gate"
+    coreSource:find("REQUIRED_AF_VERSION = 36", 1, true) ~= nil,
+    "AF r36 dependency gate"
 )
 
 print("unit_frame_secret_identity_test.lua: ok")

@@ -227,7 +227,7 @@ local function makeHarness()
     }
     local AF = {
         isRetail = true,
-        versionNum = 34,
+        versionNum = 36,
     }
     local UF = {}
     local F = {}

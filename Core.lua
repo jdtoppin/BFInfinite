@@ -5,9 +5,9 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF #23/r35 includes caller-supplied native Block colors and rejects PTR 7
--- secret UnitClass values before they reach BFI.
-local REQUIRED_AF_VERSION = 35
+-- AF #27/r36 carries #23's native Block-color and secret UnitClass guards
+-- and registers only the selected native aura duration carrier.
+local REQUIRED_AF_VERSION = 36
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar
