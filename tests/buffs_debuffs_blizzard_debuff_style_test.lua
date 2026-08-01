@@ -41,6 +41,7 @@ local function NewRegion(options)
         shadowOffset = options.shadowOffset or {2, -2},
         justifyH = options.justifyH or "CENTER",
         justifyV = options.justifyV or "MIDDLE",
+        shown = options.shown ~= false,
     }
 
     function region:GetWidth()
@@ -64,6 +65,21 @@ local function NewRegion(options)
     end
     function region:SetAlpha(alpha)
         self.alpha = alpha
+    end
+    function region:SetAllPoints(relativeTo)
+        self.allPoints = relativeTo
+    end
+    function region:SetTexture(texture)
+        self.texture = texture
+    end
+    function region:SetVertexColor(...)
+        self.vertexColor = {...}
+    end
+    function region:Show()
+        self.shown = true
+    end
+    function region:Hide()
+        self.shown = false
     end
     function region:GetFont()
         return unpack(self.font)
@@ -157,9 +173,16 @@ local function NewHarness(options)
 
     local buttons = {}
     for index = 1, frame.maxAuras do
-        local button = {}
+        local button = {
+            createdTextures = {},
+        }
         function button:GetParent()
             return container
+        end
+        function button:CreateTexture()
+            local texture = NewRegion({shown = false})
+            self.createdTextures[#self.createdTextures + 1] = texture
+            return texture
         end
         button.Icon = NewRegion({
             width = 30,
@@ -169,6 +192,7 @@ local function NewHarness(options)
         button.DebuffBorder = NewRegion({
             width = 40,
             height = 40,
+            alpha = 0.9,
         })
         button.Count = NewRegion({
             alpha = 0.75,
@@ -200,6 +224,14 @@ local function NewHarness(options)
             region:SetShadowOffset(0, 0)
             region:SetShadowColor(0, 0, 0, 0)
         end
+    end
+    function AF.GetColorRGB(color)
+        assertEqual(color, "border", "square border colour")
+        return 0.05, 0.06, 0.07, 1
+    end
+    function AF.GetTexture(texture)
+        assertEqual(texture, "Border", "square border texture")
+        return "AF-square-border"
     end
     environment.AbstractFramework = AF
 
@@ -292,6 +324,16 @@ do
         )
         assertEqual(button.DebuffBorder.width, 36, "border width")
         assertEqual(button.DebuffBorder.height, 34, "border height")
+        assertEqual(button.DebuffBorder.alpha, 0, "rounded border hidden")
+        assertEqual(#button.createdTextures, 1, "one square border created")
+        local squareBorder = button.createdTextures[1]
+        assertEqual(squareBorder.allPoints, button.Icon,
+            "square border follows icon")
+        assertEqual(squareBorder.texture, "AF-square-border",
+            "square border asset")
+        assertTableEqual(squareBorder.vertexColor,
+            {0.05, 0.06, 0.07, 1}, "square border colour")
+        assertTrue(squareBorder.shown, "square border shown")
         assertTableEqual(
             button.Count.font,
             {"resolved:Expressway", 11, "outline"},
@@ -321,6 +363,8 @@ do
     assertTrue(state.active, "style state active")
     assertEqual(state.styledButtonCount, 16, "styled button count")
     assertEqual(state.snapshotsCreated, 16, "snapshot count")
+    assertEqual(state.squareBordersCreated, 16,
+        "fixed square border construction count")
 
     config.width = 100
     config.height = 5
@@ -332,11 +376,15 @@ do
     )
     state = BD.GetBlizzardDebuffStyleState()
     assertEqual(state.snapshotsCreated, 16, "snapshots are not duplicated")
+    assertEqual(state.squareBordersCreated, 16,
+        "square borders are not duplicated")
     for _, button in ipairs(harness.buttons) do
         assertEqual(button.Icon.width, 30, "icon width clamps to cell")
         assertEqual(button.Icon.height, 10, "icon height clamps to cell")
         assertEqual(button.Count.alpha, 0, "count disabled")
         assertEqual(button.Duration.alpha, 1, "duration enabled")
+        assertEqual(#button.createdTextures, 1,
+            "style updates reuse square border")
     end
 
     config.enabled = false
@@ -360,6 +408,10 @@ do
             40,
             "restored border width"
         )
+        assertEqual(button.DebuffBorder.alpha, 0.9,
+            "restored rounded border alpha")
+        assertFalse(button.createdTextures[1].shown,
+            "square border hidden on restore")
         assertEqual(button.Count.alpha, 0.75, "restored count alpha")
         assertEqual(
             button.Duration.alpha,

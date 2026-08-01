@@ -24,9 +24,11 @@ local ICON_CROP_MIN = 0.08
 local ICON_CROP_MAX = 0.92
 
 local snapshots = setmetatable({}, {__mode = "k"})
+local squareBorders = setmetatable({}, {__mode = "k"})
 local cachedTarget
 local styleState = {
     active = false,
+    squareBordersCreated = 0,
     styledButtonCount = 0,
     snapshotsCreated = 0,
 }
@@ -40,8 +42,10 @@ local REQUIRED_ICON_METHODS = {
 }
 
 local REQUIRED_BORDER_METHODS = {
+    "GetAlpha",
     "GetHeight",
     "GetWidth",
+    "SetAlpha",
     "SetSize",
 }
 
@@ -83,6 +87,7 @@ end
 
 local function IsStaticDebuffButton(button, container)
     return button
+        and type(button.CreateTexture) == "function"
         and type(button.GetParent) == "function"
         and button:GetParent() == container
         and HasMethods(button.Icon, REQUIRED_ICON_METHODS)
@@ -152,6 +157,7 @@ local function SnapshotButton(button)
         iconTexCoord = {button.Icon:GetTexCoord()},
         borderWidth = button.DebuffBorder:GetWidth(),
         borderHeight = button.DebuffBorder:GetHeight(),
+        borderAlpha = button.DebuffBorder:GetAlpha(),
         countFont = {button.Count:GetFont()},
         countPoints = CopyPoints(button.Count),
         countTextColor = {button.Count:GetTextColor()},
@@ -202,6 +208,21 @@ local function ClampIconSize(value)
     return max(10, min(MAX_NATIVE_ICON_SIZE, value))
 end
 
+local function GetSquareBorder(button)
+    local border = squareBorders[button]
+    if border then return border end
+
+    border = button:CreateTexture(nil, "OVERLAY")
+    border:SetAllPoints(button.Icon)
+    border:SetTexture(AF.GetTexture("Border"))
+    border:SetVertexColor(AF.GetColorRGB("border"))
+    border:Hide()
+    squareBorders[button] = border
+    styleState.squareBordersCreated =
+        styleState.squareBordersCreated + 1
+    return border
+end
+
 local function ApplyButtonStyle(button, config)
     SnapshotButton(button)
 
@@ -215,6 +236,11 @@ local function ApplyButtonStyle(button, config)
         ICON_CROP_MAX
     )
     button.DebuffBorder:SetSize(width + 10, height + 10)
+    -- Blizzard refreshes this rounded atlas from secret dispel data. Keep its
+    -- data path intact but hide the art statically; the neutral BFI ring does
+    -- not inspect or imply a dispel classification.
+    button.DebuffBorder:SetAlpha(0)
+    GetSquareBorder(button):Show()
 
     local stack = config.stack
     AF.SetFont(button.Count, unpack(stack.font))
@@ -238,6 +264,11 @@ local function RestoreButton(button)
         snapshot.borderWidth,
         snapshot.borderHeight
     )
+    button.DebuffBorder:SetAlpha(snapshot.borderAlpha)
+    local squareBorder = squareBorders[button]
+    if squareBorder then
+        squareBorder:Hide()
+    end
 
     button.Count:SetFont(unpack(snapshot.countFont))
     button.Count:ClearAllPoints()
@@ -266,6 +297,8 @@ end
 function BD.HasBlizzardDebuffStyleCapability()
     return ResolveTarget() ~= nil
         and type(AF.SetFont) == "function"
+        and type(AF.GetColorRGB) == "function"
+        and type(AF.GetTexture) == "function"
 end
 
 function BD.UpdateBlizzardDebuffStyle(config)
@@ -293,6 +326,7 @@ end
 function BD.GetBlizzardDebuffStyleState()
     return {
         active = styleState.active,
+        squareBordersCreated = styleState.squareBordersCreated,
         styledButtonCount = styleState.styledButtonCount,
         snapshotsCreated = styleState.snapshotsCreated,
     }
