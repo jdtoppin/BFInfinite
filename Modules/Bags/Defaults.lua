@@ -11,7 +11,7 @@ local defaults = {
     categories = false,
     showBagSlots = true,
     showBlizzardBagBar = false,
-    showItemLevel = false,
+    showItemLevel = true,
     columns = 12,
     spacing = 4,
 }

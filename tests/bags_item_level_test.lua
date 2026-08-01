@@ -78,8 +78,8 @@ local function loadDefaults()
 end
 
 local defaultsBags, defaultsCallbacks = loadDefaults()
-assertEqual(defaultsBags.GetDefaults().showItemLevel, false,
-    "item level default is opt-in")
+assertEqual(defaultsBags.GetDefaults().showItemLevel, true,
+    "item level default is enabled")
 
 local profile = {
     bags = {
@@ -88,17 +88,17 @@ local profile = {
     },
 }
 defaultsCallbacks.BFI_UpdateProfile(nil, profile)
-assertEqual(profile.bags.showItemLevel, false,
+assertEqual(profile.bags.showItemLevel, true,
     "missing item level setting is normalized")
 
 profile.bags.showItemLevel = "yes"
 defaultsCallbacks.BFI_UpdateProfile(nil, profile)
-assertEqual(profile.bags.showItemLevel, false,
+assertEqual(profile.bags.showItemLevel, true,
     "invalid item level setting is normalized")
 
-profile.bags.showItemLevel = true
+profile.bags.showItemLevel = false
 defaultsCallbacks.BFI_UpdateProfile(nil, profile)
-assertEqual(profile.bags.showItemLevel, true,
+assertEqual(profile.bags.showItemLevel, false,
     "valid item level setting is preserved")
 
 local createdTextCount = 0
@@ -121,6 +121,10 @@ local function makeFontString()
         self.justify = justify
     end
 
+    function text:SetDrawLayer(...)
+        self.drawLayer = {...}
+    end
+
     function text:SetPoint(...)
         self.point = {...}
     end
@@ -134,6 +138,14 @@ local function makeFontString()
         self.color = {...}
     end
 
+    function text:SetShadowColor(...)
+        self.shadowColor = {...}
+    end
+
+    function text:SetShadowOffset(...)
+        self.shadowOffset = {...}
+    end
+
     function text:Show()
         self.shown = true
     end
@@ -144,7 +156,7 @@ end
 local AF = {
     CreateFontString = function(_, _, color, font)
         assertEqual(color, "white", "item level initial color")
-        assertEqual(font, "AF_FONT_OUTLINE", "item level font")
+        assertEqual(font, "AF_FONT_NORMAL", "item level font")
         createdTextCount = createdTextCount + 1
         return makeFontString()
     end,
@@ -154,6 +166,9 @@ local AF = {
     end,
     GetIcon = function(name)
         return name
+    end,
+    SetPoint = function(region, ...)
+        region:SetPoint(...)
     end,
     RegisterCallback = function() end,
     player = {
@@ -273,12 +288,16 @@ assertEqual(type(updateItemLevelText), "function",
 local button = {
     bagID = 0,
     slotID = 1,
+    borderColorCalls = 0,
 }
 function button:GetBagID()
     return self.bagID
 end
 function button:GetID()
     return self.slotID
+end
+function button:SetBackdropBorderColor()
+    self.borderColorCalls = self.borderColorCalls + 1
 end
 
 currentInfoBySlot["0:1"] = {
@@ -300,16 +319,52 @@ assertEqual(currentLevelCalls, 0, "disabled display skips item level query")
 bags.config.showItemLevel = true
 refreshItemLevelTexts()
 
-assertEqual(createdTextCount, 1, "item level text creation")
+assertEqual(createdTextCount, 5, "item level text and outline creation")
 assertEqual(button.BFIItemLevel.value, 678, "current item level text")
 assertEqual(button.BFIItemLevel.shown, true, "equipment item level visibility")
 assertEqual(button.BFIItemLevel.point[1], "BOTTOMLEFT", "item level anchor")
 assertEqual(button.BFIItemLevel.point[2], 2, "item level x offset")
 assertEqual(button.BFIItemLevel.point[3], 2, "item level y offset")
 assertEqual(button.BFIItemLevel.justify, "LEFT", "item level justification")
-assertEqual(button.BFIItemLevel.color[1], 0.4, "item quality red")
-assertEqual(button.BFIItemLevel.color[2], 0.5, "item quality green")
-assertEqual(button.BFIItemLevel.color[3], 0.25, "item quality blue")
+assertEqual(button.BFIItemLevel.color[1], 1, "item level text red")
+assertEqual(button.BFIItemLevel.color[2], 1, "item level text green")
+assertEqual(button.BFIItemLevel.color[3], 1, "item level text blue")
+assertEqual(button.BFIItemLevel.shadowColor[4], 0,
+    "item level text shadow")
+assertEqual(button.BFIItemLevel.shadowOffset[1], 0,
+    "item level text shadow x")
+assertEqual(button.BFIItemLevel.shadowOffset[2], 0,
+    "item level text shadow y")
+assertEqual(#button.BFIItemLevelOutline, 4, "item level outline layers")
+assertEqual(button.BFIItemLevel.drawLayer[2], 7,
+    "item level text draw sublayer")
+local expectedOutlinePoints = {
+    {-1, -1},
+    {1, -1},
+    {-1, 1},
+    {1, 1},
+}
+for index, outline in ipairs(button.BFIItemLevelOutline) do
+    assertEqual(outline.value, 678, "item level outline text")
+    assertEqual(outline.shown, true, "item level outline visibility")
+    assertEqual(outline.point[1], "CENTER", "item level outline anchor")
+    assertEqual(outline.point[2], button.BFIItemLevel,
+        "item level outline relative region")
+    assertEqual(outline.point[3], "CENTER",
+        "item level outline relative anchor")
+    assertEqual(outline.point[4], expectedOutlinePoints[index][1],
+        "item level outline x offset")
+    assertEqual(outline.point[5], expectedOutlinePoints[index][2],
+        "item level outline y offset")
+    assertEqual(outline.color[1], 0.4, "item quality outline red")
+    assertEqual(outline.color[2], 0.5, "item quality outline green")
+    assertEqual(outline.color[3], 0.25, "item quality outline blue")
+    assertEqual(outline.shadowColor[4], 0, "item level outline shadow")
+    assertEqual(outline.shadowOffset[1], 0, "item level outline shadow x")
+    assertEqual(outline.shadowOffset[2], 0, "item level outline shadow y")
+    assertEqual(outline.drawLayer[2], 6, "item level outline draw sublayer")
+end
+assertEqual(button.borderColorCalls, 0, "item border remains unchanged")
 
 local isEnabled = findUpvalue(bags.Refresh, "IsEnabled")
 assertEqual(type(isEnabled), "function", "bags enabled upvalue")
@@ -329,6 +384,10 @@ bags.config.showItemLevel = false
 bags.Refresh()
 assertEqual(button.BFIItemLevel.value, "", "toggle off clears item level")
 assertEqual(button.BFIItemLevel.shown, false, "toggle off hides item level")
+for _, outline in ipairs(button.BFIItemLevelOutline) do
+    assertEqual(outline.value, "", "toggle off clears item level outline")
+    assertEqual(outline.shown, false, "toggle off hides item level outline")
+end
 local disabledContainerCalls = containerInfoCalls
 local disabledEquippableCalls = equippableCalls
 local disabledLevelCalls = currentLevelCalls
@@ -348,7 +407,7 @@ assertEqual(setUpvalue(refreshItemLevelTexts, "combinedFrame", {
 refreshItemLevelTexts()
 assertEqual(button.BFIItemLevel.value, 679,
     "same pooled slot refreshes current item level")
-assertEqual(createdTextCount, 1, "same pooled slot reuses item level text")
+assertEqual(createdTextCount, 5, "same pooled slot reuses item level text")
 
 local priorLevelCalls = currentLevelCalls
 currentInfoBySlot["0:1"] = {
@@ -367,16 +426,22 @@ currentInfoBySlot["0:1"] = {
 }
 currentLevelBySlot["0:1"] = 701
 updateItemLevelText(button)
-assertEqual(createdTextCount, 1, "pooled button reuses item level text")
+assertEqual(createdTextCount, 5, "pooled button reuses item level text")
 assertEqual(button.BFIItemLevel.value, 701, "reused button item level")
-assertEqual(button.BFIItemLevel.color[1], 1, "missing quality red fallback")
-assertEqual(button.BFIItemLevel.color[2], 1, "missing quality green fallback")
-assertEqual(button.BFIItemLevel.color[3], 1, "missing quality blue fallback")
+for _, outline in ipairs(button.BFIItemLevelOutline) do
+    assertEqual(outline.color[1], 0, "missing quality outline red fallback")
+    assertEqual(outline.color[2], 0, "missing quality outline green fallback")
+    assertEqual(outline.color[3], 0, "missing quality outline blue fallback")
+end
 
 currentLevelBySlot["0:1"] = nil
 updateItemLevelText(button)
 assertEqual(button.BFIItemLevel.value, "", "nil item level clears text")
 assertEqual(button.BFIItemLevel.shown, false, "nil item level hides text")
+for _, outline in ipairs(button.BFIItemLevelOutline) do
+    assertEqual(outline.value, "", "nil item level clears outline")
+    assertEqual(outline.shown, false, "nil item level hides outline")
+end
 
 local emptyButton = {
     GetBagID = function() return 0 end,
