@@ -169,10 +169,12 @@ local function makeHarness(options)
 
     local harness = {
         backend = options.backend ~= false,
+        interfaceVersion = options.interfaceVersion or 120100,
         events = {},
         timers = {},
         controllers = {},
         legacyFrames = {},
+        unavailableFrames = {},
         compiles = {},
         registered = {},
         afCallbacks = {},
@@ -183,7 +185,9 @@ local function makeHarness(options)
         inCombat = false,
     }
     local UF = {}
-    local AF = {}
+    local AF = {
+        isRetail = options.isRetail ~= false,
+    }
     local F = {}
 
     function AF.Copy(value)
@@ -593,12 +597,6 @@ local function makeHarness(options)
         },
     }
 
-    local function forbidden(name)
-        return function()
-            error("forbidden aura-runtime dependency: " .. name, 2)
-        end
-    end
-
     local environment = {
         _G = false,
         AbstractFramework = AF,
@@ -611,6 +609,9 @@ local function makeHarness(options)
                 record(harness, "timer", delay, callback)
             end,
         },
+        GetBuildInfo = function()
+            return "test", "test", "test", harness.interfaceVersion
+        end,
         UnitCanAssist = function(sourceUnit, unit)
             assertEqual(sourceUnit, "player", "assist source unit")
             record(harness, "wow.assist", sourceUnit, unit)
@@ -635,7 +636,32 @@ local function makeHarness(options)
                 error("forbidden aura-runtime dependency: C_UnitAuras", 2)
             end,
         }),
-        CreateFrame = forbidden("CreateFrame"),
+        CreateFrame = function(objectType, name, parent)
+            assertEqual(objectType, "Frame", "unavailable frame type")
+            local frame = {
+                name = name,
+                objectType = objectType,
+                parent = parent,
+                shown = true,
+            }
+            function frame:GetName()
+                return self.name
+            end
+            function frame:GetObjectType()
+                return self.objectType
+            end
+            function frame:SetAllPoints(relativeTo)
+                self.allPoints = relativeTo
+                record(harness, "unavailable.all-points", self, relativeTo)
+            end
+            function frame:Hide()
+                self.shown = false
+                record(harness, "unavailable.hide", self)
+            end
+            harness.unavailableFrames[#harness.unavailableFrames + 1] = frame
+            record(harness, "unavailable.create", frame, parent, name)
+            return frame
+        end,
         InCombatLockdown = function()
             return harness.inCombat
         end,
@@ -647,6 +673,7 @@ local function makeHarness(options)
         select = select,
         setmetatable = setmetatable,
         tostring = tostring,
+        tonumber = tonumber,
         type = type,
     }
     environment._G = environment
@@ -754,12 +781,12 @@ local function testDormancyAndFallback()
 
     local unavailable = makeHarness({backend = false})
     assertEqual(next(unavailable.registered), nil,
-        "12.0.7 provider observer")
+        "12.1 unavailable provider observer")
     local unavailableStats = unavailable.UF.GetNativeAuraRuntimeStats()
     assertEqual(unavailableStats.nativeBackendAvailable, false,
-        "12.0.7 provider backend state")
+        "12.1 unavailable provider backend state")
     assertEqual(unavailableStats.providerSwitchEvents, 0,
-        "12.0.7 provider switch count")
+        "12.1 unavailable provider switch count")
     local root = newRoot("Fallback", "target")
     local direct, directError = unavailable.UF.CreateNativeAuraIndicator(
         root,
@@ -778,11 +805,39 @@ local function testDormancyAndFallback()
         "HELPFUL",
         false
     )
-    assertEqual(fallback, unavailable.legacyFrames[1], "12.0.7 legacy fallback")
-    assertEqual(fallback.parent, root, "fallback parent")
-    assertEqual(fallback.name, "Fallback_Auras", "fallback name")
-    assertEqual(fallback.auraFilter, "HELPFUL", "fallback filter")
-    assertEqual(fallback.hasSubFrame, false, "fallback subframe")
+    assertEqual(fallback._nativeAuraUnavailable, true,
+        "12.1 unavailable indicator marker")
+    assertEqual(fallback.root, root, "12.1 unavailable root")
+    assertEqual(fallback:GetObjectType(), "Frame",
+        "12.1 unavailable anchor object type")
+    assertEqual(fallback.allPoints, root,
+        "12.1 unavailable anchor shell")
+    assertEqual(fallback.shown, false,
+        "12.1 unavailable shell visibility")
+    assertEqual(fallback:GetName(), "Fallback_Auras",
+        "12.1 unavailable name")
+    assertEqual(fallback.auraFilter, "HELPFUL",
+        "12.1 unavailable filter")
+    assertEqual(#unavailable.legacyFrames, 0,
+        "12.1 unavailable legacy count")
+    assertEqual(#unavailable.unavailableFrames, 1,
+        "12.1 unavailable frame count")
+    fallback.enabled = true
+    fallback:LoadConfig(validConfig())
+    assertEqual(fallback.enabled, false,
+        "12.1 unavailable config state")
+    fallback:Enable()
+    assertEqual(fallback.enabled, false,
+        "12.1 unavailable enable state")
+    local unavailableState = fallback:GetNativeAuraState()
+    assertEqual(unavailableState.state, "UNAVAILABLE",
+        "12.1 unavailable runtime state")
+    assertEqual(unavailableState.active, false,
+        "12.1 unavailable active state")
+    assertEqual(unavailableState.built, false,
+        "12.1 unavailable built state")
+    assertEqual(unavailableState.nativeBackendAvailable, false,
+        "12.1 unavailable backend state")
 
     local nativePartitionDirect, nativePartitionError =
         unavailable.UF.CreateNativePartitionedAuraIndicator(
@@ -803,10 +858,12 @@ local function testDormancyAndFallback()
             "HARMFUL",
             true
         )
-    assertEqual(nativePartitionFallback, unavailable.legacyFrames[2],
-        "12.0.7 partition legacy fallback")
-    assertEqual(nativePartitionFallback.hasSubFrame, true,
-        "partition fallback subframe")
+    assertEqual(nativePartitionFallback._nativeAuraUnavailable, true,
+        "12.1 native partition unavailable marker")
+    assertEqual(nativePartitionFallback:GetObjectType(), "Frame",
+        "12.1 native partition anchor object type")
+    assertEqual(#unavailable.legacyFrames, 0,
+        "12.1 native partition legacy count")
 
     local partitionFallback = harness.UF.CreateNativeAuras(
         root,
@@ -814,9 +871,42 @@ local function testDormancyAndFallback()
         "HARMFUL",
         true
     )
-    assertEqual(partitionFallback, harness.legacyFrames[1],
-        "partition legacy fallback")
+    assertEqual(partitionFallback._nativeAuraUnavailable, true,
+        "12.1 partition unavailable marker")
+    assertEqual(#harness.legacyFrames, 0,
+        "12.1 partition legacy count")
+    assertEqual(#harness.unavailableFrames, 1,
+        "12.1 partition unavailable frame count")
     assertEqual(#harness.controllers, 0, "partition controller count")
+
+    local legacy = makeHarness({
+        backend = false,
+        interfaceVersion = 120007,
+    })
+    local legacyFallback = legacy.UF.CreateNativeAuras(
+        root,
+        "Legacy_Auras",
+        "HELPFUL",
+        false
+    )
+    assertEqual(legacyFallback, legacy.legacyFrames[1],
+        "12.0.7 legacy fallback")
+    assertEqual(legacyFallback.parent, root, "12.0.7 fallback parent")
+    assertEqual(legacyFallback.name, "Legacy_Auras", "12.0.7 fallback name")
+    assertEqual(legacyFallback.auraFilter, "HELPFUL",
+        "12.0.7 fallback filter")
+    assertEqual(legacyFallback.hasSubFrame, false,
+        "12.0.7 fallback subframe")
+    local legacyPartitionFallback = legacy.UF.CreateNativePartitionedAuras(
+        root,
+        "Legacy_PartitionAuras",
+        "HARMFUL",
+        true
+    )
+    assertEqual(legacyPartitionFallback, legacy.legacyFrames[2],
+        "12.0.7 partition legacy fallback")
+    assertEqual(legacyPartitionFallback.hasSubFrame, true,
+        "12.0.7 partition fallback subframe")
 
     local native = harness.UF.CreateNativeAuras(
         root,
@@ -2372,18 +2462,41 @@ local function testGroupRuntimeSelectionAndFallback()
         "HELPFUL",
         "buffs"
     )
-    assertEqual(fallback, unavailable.legacyFrames[1],
-        "group 12.0.7 legacy fallback")
+    assertEqual(fallback._nativeAuraUnavailable, true,
+        "group 12.1 unavailable marker")
     assertEqual(#unavailable.controllers, 0,
-        "group 12.0.7 native controller count")
-    assertEqual(fallback.parent, fallbackRoot,
-        "group fallback parent")
-    assertEqual(fallback.name, "GroupFallback_Buffs",
-        "group fallback name")
+        "group 12.1 native controller count")
+    assertEqual(#unavailable.legacyFrames, 0,
+        "group 12.1 legacy count")
+    assertEqual(#unavailable.unavailableFrames, 1,
+        "group 12.1 unavailable frame count")
+    assertEqual(fallback.root, fallbackRoot,
+        "group unavailable root")
+    assertEqual(fallback:GetName(), "GroupFallback_Buffs",
+        "group unavailable name")
     assertEqual(fallback.auraFilter, "HELPFUL",
-        "group fallback filter")
-    assertEqual(fallback.hasSubFrame, nil,
-        "group fallback subframe")
+        "group unavailable filter")
+
+    local legacy = makeHarness({
+        backend = false,
+        interfaceVersion = 120007,
+    })
+    local legacyFallback = legacy.UF.CreateGroupNativeAuras(
+        fallbackRoot,
+        "GroupLegacy_Buffs",
+        "HELPFUL",
+        "buffs"
+    )
+    assertEqual(legacyFallback, legacy.legacyFrames[1],
+        "group 12.0.7 legacy fallback")
+    assertEqual(legacyFallback.parent, fallbackRoot,
+        "group 12.0.7 fallback parent")
+    assertEqual(legacyFallback.name, "GroupLegacy_Buffs",
+        "group 12.0.7 fallback name")
+    assertEqual(legacyFallback.auraFilter, "HELPFUL",
+        "group 12.0.7 fallback filter")
+    assertEqual(legacyFallback.hasSubFrame, nil,
+        "group 12.0.7 fallback subframe")
 
     local harness = makeHarness()
     local root = newRoot("GroupNative", "party1")
