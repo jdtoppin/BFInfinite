@@ -64,6 +64,10 @@ local FrameIsMouseMotionEnabled = function(region) return region.mouseMotion end
 local FrameIsShown = function(region) return region.shown end
 local FontStringIsShown = FrameIsShown
 local FontStringGetAlpha = FrameGetAlpha
+local methodTexture = {
+    GetAlpha = FrameGetAlpha,
+    SetAlpha = function(region, alpha) region.alpha = alpha end,
+}
 local CooldownGetHideCountdownNumbers = function(cooldown)
     return cooldown.hideCountdownNumbers
 end
@@ -80,6 +84,10 @@ local AF = {GetDefaultTexCoord = function() return 0, 1, 0, 1 end}
 local GetIconMaskAndOverlay = function(iconParent)
     return iconParent.mask, iconParent.overlay
 end
+local TextureIsObjectType = function() return true end
+local IsWidgetObjectType = function(region, objectType, isObjectType)
+    return region ~= nil and objectType == "Texture" and isObjectType(region)
+end
 local CreateNativeChildSkin = function(_parent, target, withBackground)
     return {
         border = {},
@@ -90,10 +98,17 @@ end
 local MaskTextureHide = function(region) region.hidden = true end
 local TextureHide = MaskTextureHide
 local TextureSetTexCoord = function() end
+local TextureSetTexture = function(region, asset)
+    if region.textureReady == false then return false end
+    region.asset = asset
+    return true
+end
 local FrameShow = function(region) region.shown = true end
 local StatusBarGetStatusBarTexture = function(bar) return bar.fill end
-local StatusBarSetStatusBarTexture = function() end
-local TextureSetDrawLayer = function() end
+local TextureSetDrawLayer = function(region, layer, subLevel)
+    region.drawLayer = layer
+    region.subLevel = subLevel
+end
 local PresentationMethods = {
     PositionCooldownInside = function() return true end,
     GetCooldownCountdownText = function() return nil end,
@@ -122,6 +137,9 @@ LUA
         "$module" | sed '$d'
     sed -n \
         '/^local function CapturePresentationDefaults(/,/^local function RecapturePresentationDefaults(/p' \
+        "$module" | sed '$d'
+    sed -n \
+        '/^function PresentationMethods.RestoreTrackedBarPip/,/^local function RestoreItemPresentation(/p' \
         "$module" | sed '$d'
     sed -n \
         '/^local function ApplyStaticPresentation(/,/^local function GetPresentationAlpha(/p' \
@@ -192,12 +210,50 @@ check(itemState.presentationGeneration == nil,
     "missing bar background was not scheduled for retry")
 
 item.Bar.BarBG = {}
+check(not ApplyStaticPresentation(item, state, config, itemState),
+    "missing tracked-bar pip unexpectedly marked presentation complete")
+check(itemState.presentationGeneration == nil,
+    "missing tracked-bar pip was not scheduled for retry")
+
+item.Bar.Pip = {shown = true, alpha = 1}
+local nativeTrackedBarFill = item.Bar.fill
+item.Bar.fill.textureReady = false
+check(not ApplyStaticPresentation(item, state, config, itemState),
+    "failed tracked-bar fill swap unexpectedly marked presentation complete")
+check(itemState.presentationGeneration == nil,
+    "failed tracked-bar fill swap was not scheduled for retry")
+check(item.Bar.BarBG.hidden ~= true,
+    "failed tracked-bar fill swap hid the native background")
+
+item.Bar.fill.textureReady = true
 check(ApplyStaticPresentation(item, state, config, itemState),
     "completed startup presentation did not succeed on retry")
 check(itemState.presentationGeneration == presentationGeneration,
     "successful retry was not marked current")
 check(itemState.presentationCaptured == true,
     "successful retry did not complete native-default capture")
+check(item.Bar.BarBG.hidden == true,
+    "tracked-bar native background remained visible")
+check(item.Bar.fill.asset == BFI.media.bar,
+    "tracked-bar fill did not use BFI bar media")
+check(item.Bar.fill == nativeTrackedBarFill,
+    "tracked-bar skin replaced Blizzard's managed fill object")
+check(item.Bar.fill.drawLayer == "BORDER" and item.Bar.fill.subLevel == -1,
+    "tracked-bar fill draw layer did not match AF")
+local trackedBarSkin = barSkins[item.Bar]
+check(trackedBarSkin
+    and trackedBarSkin.background.shown == true
+    and trackedBarSkin.border.shown == true,
+    "tracked-bar AF background or border was not shown")
+check(item.Bar.Pip.alpha == 0,
+    "tracked-bar native pip alpha was not suppressed")
+item.Bar.Pip.shown = true
+check(item.Bar.Pip.alpha == 0,
+    "native pip visibility update restored Blizzard styling")
+check(PresentationMethods.RestoreTrackedBarPip(item.Bar, itemState),
+    "tracked-bar native pip could not be restored")
+check(item.Bar.Pip.alpha == 1,
+    "tracked-bar native pip alpha was not restored")
 
 -- Blizzard 12.1 briefly hides assigned items during a target refresh. Those
 -- items remain layout children natively and must remain in BFI's centered

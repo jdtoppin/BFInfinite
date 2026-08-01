@@ -72,7 +72,7 @@ local viewerDefinitions = {
     buffBar = {
         globalName = "BuffBarCooldownViewer",
         holderName = "BFI_CooldownManagerBuffBarHolder",
-        moverName = L["Buff Bars"],
+        moverName = L["Tracked Bars"],
         defaultPosition = {"BOTTOM", 420, 430},
         itemWidth = 220,
         itemHeight = 30,
@@ -194,16 +194,16 @@ local TextureSetDrawLayer = methodTexture.SetDrawLayer
 local TextureSetHeight = methodTexture.SetHeight
 local TextureSetPoint = methodTexture.SetPoint
 local TextureSetTexCoord = methodTexture.SetTexCoord
+local TextureSetTexture = methodTexture.SetTexture
 local TextureSetWidth = methodTexture.SetWidth
 local CooldownGetHideCountdownNumbers = methodCooldown.GetHideCountdownNumbers
 local CooldownSetHideCountdownNumbers = methodCooldown.SetHideCountdownNumbers
 local CooldownSetSwipeTexture = methodCooldown.SetSwipeTexture
 local StatusBarGetStatusBarTexture = methodStatusBar.GetStatusBarTexture
-local StatusBarSetStatusBarTexture = methodStatusBar.SetStatusBarTexture
--- Both audited builds expose Cooldown:GetCountdownFontString without secret
--- return annotations. The returned FontString's color and anchor getters can
--- still yield secret aspects, so their receiver-correct captures are guarded
--- together and styling fails closed if any part is unsafe.
+-- The audited 12.1 client exposes Cooldown:GetCountdownFontString without
+-- secret return annotations. Its returned FontString color and anchor getters
+-- can still yield secret aspects, so the receiver-correct captures are
+-- guarded together and styling fails closed if any part is unsafe.
 local PresentationMethods = {
     GetCountdownFontString = methodCooldown.GetCountdownFontString,
     GetFontObject = methodFontString.GetFontObject,
@@ -299,7 +299,7 @@ local function CanChangeGeometry(frame)
     return IsSafeBoolean(allowed) and allowed
 end
 
--- Both audited clients expose item pools through ObjectPoolProxyMixin. The
+-- The audited 12.1 client exposes item pools through ObjectPoolProxyMixin. The
 -- backing SecureMap is private, so the proxy's read-only EnumerateActive
 -- method is the sole supported way to discover items. Unlike Cooldown Viewer
 -- mixins, this method only returns the SecureMap iterator and performs no
@@ -1778,6 +1778,14 @@ local function CapturePresentationDefaults(item, definition, itemState)
             end
             local name = GetSafeField(bar, "Name")
             local duration = GetSafeField(bar, "Duration")
+            local pip = GetSafeField(bar, "Pip")
+            if pip and not IsWidgetObjectType(
+                pip,
+                "Texture",
+                TextureIsObjectType
+            ) then
+                pip = nil
+            end
             if itemState.nativeNameShown == nil then
                 itemState.nativeNameShown = CaptureShown(name, FontStringIsShown)
             end
@@ -1792,11 +1800,18 @@ local function CapturePresentationDefaults(item, definition, itemState)
                 itemState.nativeDurationAlpha =
                     CaptureAlpha(duration, FontStringGetAlpha)
             end
+            if itemState.nativePipAlpha == nil then
+                itemState.nativePipAlpha = CaptureAlpha(
+                    pip,
+                    methodTexture.GetAlpha
+                )
+            end
             complete = itemState.nativeBarPoints
                 and itemState.nativeNameShown ~= nil
                 and itemState.nativeNameAlpha ~= nil
                 and itemState.nativeDurationShown ~= nil
                 and itemState.nativeDurationAlpha ~= nil
+                and itemState.nativePipAlpha ~= nil
                 and complete
         else
             complete = false
@@ -1823,6 +1838,7 @@ local function RecapturePresentationDefaults(item, definition, itemState)
     itemState.nativeDurationShown = nil
     itemState.nativeDurationAlpha = nil
     itemState.nativeDurationText = nil
+    itemState.nativePipAlpha = nil
     CapturePresentationDefaults(item, definition, itemState)
     itemState.recapturePresentation = nil
 end
@@ -1834,6 +1850,20 @@ local function SetShown(region, shown, show, hide)
     else
         hide(region)
     end
+end
+
+function PresentationMethods.RestoreTrackedBarPip(bar, itemState)
+    if not IsValueNonSecret(bar) or not bar or not itemState then return false end
+    local pip = GetSafeField(bar, "Pip")
+    local alpha = itemState.nativePipAlpha
+    if not pip
+        or not IsWidgetObjectType(pip, "Texture", TextureIsObjectType)
+        or not IsSafeNumber(alpha)
+    then
+        return false
+    end
+    methodTexture.SetAlpha(pip, alpha)
+    return true
 end
 
 local function RestoreItemPresentation(item, definition, itemState)
@@ -1877,6 +1907,9 @@ local function RestoreItemPresentation(item, definition, itemState)
             end
         end
         if bar then
+            if not PresentationMethods.RestoreTrackedBarPip(bar, itemState) then
+                return false
+            end
             local name = GetSafeField(bar, "Name")
             local duration = GetSafeField(bar, "Duration")
             SetShown(name, itemState.nativeNameShown, FontStringShow, FontStringHide)
@@ -1942,10 +1975,12 @@ local function CanRestoreItemPresentation(item, definition)
         local bar = GetSafeField(item, "Bar")
         local name = bar and GetSafeField(bar, "Name")
         local duration = bar and GetSafeField(bar, "Duration")
+        local pip = bar and GetSafeField(bar, "Pip")
         if (icon and not CanChangeGeometry(icon))
             or (bar and not CanChangeGeometry(bar))
             or (name and not CanChangeGeometry(name))
             or (duration and not CanChangeGeometry(duration))
+            or (pip and not CanChangeGeometry(pip))
         then
             return false
         end
@@ -2201,12 +2236,25 @@ local function SkinIcon(iconParent, icon)
     return true
 end
 
-local function SkinBar(bar)
-    if not IsValueNonSecret(bar) then return false end
+local function SkinBar(bar, itemState)
+    if not IsValueNonSecret(bar) or not bar or not itemState then return false end
 
     local background = GetSafeField(bar, "BarBG")
+    local pip = GetSafeField(bar, "Pip")
     local fill = StatusBarGetStatusBarTexture(bar)
-    if not background or not IsValueNonSecret(fill) or not fill then
+    if not background
+        or not pip
+        or not IsWidgetObjectType(
+            background,
+            "Texture",
+            TextureIsObjectType
+        )
+        or not IsWidgetObjectType(pip, "Texture", TextureIsObjectType)
+        or not IsValueNonSecret(fill)
+        or not fill
+        or not IsWidgetObjectType(fill, "Texture", TextureIsObjectType)
+        or not IsSafeNumber(itemState.nativePipAlpha)
+    then
         return false
     end
 
@@ -2217,12 +2265,20 @@ local function SkinBar(bar)
         barSkins[bar] = skin
     end
 
-    TextureHide(background)
-    StatusBarSetStatusBarTexture(bar, BFI.media.bar)
-    fill = StatusBarGetStatusBarTexture(bar)
-    if not IsValueNonSecret(fill) or not fill or not skin.background then
+    -- Retail 12.1 anchors Pip to the managed fill during item OnLoad, then
+    -- toggles only its shown state from the native active-bar update. Keep the
+    -- same fill object and suppress the pip with its alpha so neither operation
+    -- needs a hook or access to the aura-driven bar state. Its captured native
+    -- alpha remains available for the normal presentation restore path.
+    local textureSet = TextureSetTexture(fill, BFI.media.bar)
+    if not IsSafeBoolean(textureSet) or not textureSet then
         return false
     end
+    if not skin.background then
+        return false
+    end
+    TextureHide(background)
+    methodTexture.SetAlpha(pip, 0)
     TextureSetDrawLayer(fill, "BORDER", -1)
     FrameShow(skin.background)
     if not PresentationMethods.UpdateNativeChildSkinPixels(skin) then
@@ -2282,7 +2338,7 @@ local function ApplyHotkeyPresentation(item, definition, config, itemState)
     end
 
     local hotkey = cooldownID and ResolveItemHotkey(item)
-    -- SetText accepts tainted execution in both audited clients; unlike
+    -- SetText accepts tainted execution in the audited 12.1 client; unlike
     -- geometry/visibility methods it is safe here because the resolver only
     -- returns guarded, non-secret strings. Keep bindings current in combat.
     FontStringSetText(overlay.text, hotkey or "")
@@ -2418,16 +2474,21 @@ local function CanApplyStaticPresentation(item, state, itemState)
         local name = bar and GetSafeField(bar, "Name")
         local duration = bar and GetSafeField(bar, "Duration")
         local background = bar and GetSafeField(bar, "BarBG")
+        local pip = bar and GetSafeField(bar, "Pip")
         local fill = bar and StatusBarGetStatusBarTexture(bar)
         if (bar and not CanChangeGeometry(bar))
             or (name and not CanChangeGeometry(name))
             or (duration and not CanChangeGeometry(duration))
             or (background and not CanChangeGeometry(background))
+            or (pip and not CanChangeGeometry(pip))
             or (IsValueNonSecret(fill) and fill and not CanChangeGeometry(fill))
         then
             return false
         end
         if not IsValueNonSecret(fill) then
+            return false
+        end
+        if CM.config.skin and (not background or not pip or not fill) then
             return false
         end
     end
@@ -2523,7 +2584,9 @@ local function ApplyStaticPresentation(item, state, config, itemState)
             complete = false
         end
         local bar = state.definition.isBar and GetSafeField(item, "Bar")
-        if state.definition.isBar and (not bar or not SkinBar(bar)) then
+        if state.definition.isBar
+            and (not bar or not SkinBar(bar, itemState))
+        then
             complete = false
         end
 
