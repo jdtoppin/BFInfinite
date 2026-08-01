@@ -1,6 +1,5 @@
 ---@type BFI
 local BFI = select(2, ...)
-local L = BFI.L
 ---@class BuffsDebuffs
 local BD = BFI.modules.BuffsDebuffs
 
@@ -31,8 +30,8 @@ local enchantmentPlacement =
     _G.CustomAuraContainerItemEnchantmentPlacement
 
 local defaults = BD.GetDefaults().buffs
-local CONSTRUCTION_SCHEMA = 1
-local MAX_POSITION_OFFSET = 10000
+local CONSTRUCTION_SCHEMA = 2
+local FOLLOWER_GAP = 5
 
 local VALID_ANCHORS = {
     BOTTOM = true,
@@ -181,51 +180,6 @@ local function NormalizeTextPosition(value, fallback)
     }
 end
 
-local function NormalizeHolderPosition(value)
-    local fallback = defaults.position
-    if type(value) ~= "table" then value = {} end
-
-    local point = NormalizeAnchor(value[1], fallback[1])
-    if type(value[2]) == "string" then
-        return {
-            point,
-            NormalizeAnchor(value[2], point),
-            NormalizeNumber(
-                value[3],
-                fallback[2],
-                -MAX_POSITION_OFFSET,
-                MAX_POSITION_OFFSET,
-                false
-            ),
-            NormalizeNumber(
-                value[4],
-                fallback[3],
-                -MAX_POSITION_OFFSET,
-                MAX_POSITION_OFFSET,
-                false
-            ),
-        }
-    end
-
-    return {
-        point,
-        NormalizeNumber(
-            value[2],
-            fallback[2],
-            -MAX_POSITION_OFFSET,
-            MAX_POSITION_OFFSET,
-            false
-        ),
-        NormalizeNumber(
-            value[3],
-            fallback[3],
-            -MAX_POSITION_OFFSET,
-            MAX_POSITION_OFFSET,
-            false
-        ),
-    }
-end
-
 local function NormalizeStackText(config)
     if type(config) ~= "table" then config = {} end
     return {
@@ -326,8 +280,10 @@ local function CompileBuffs(config)
         true
     )
 
-    local orientation = ORIENTATIONS[config.orientation]
-        or ORIENTATIONS[defaults.orientation]
+    -- Blizzard's DebuffFrame is the 12.1 location owner. Keep the custom
+    -- Buff container's bottom-right edge fixed above it and grow left/up so
+    -- neither live aura count nor secret geometry is needed for alignment.
+    local orientation = ORIENTATIONS.right_to_left_then_up
     local nativeSortMethod = SORT_METHODS[config.sortMethod]
         or SORT_METHODS[defaults.sortMethod]
     local nativeSortDirection = SORT_DIRECTIONS[config.sortDirection]
@@ -390,11 +346,6 @@ local function CompileBuffs(config)
         cancelAuraButtons = "RightButtonUp",
     }
 
-    local moverText = _G.HUD_EDIT_MODE_BUFF_FRAME_LABEL
-    if type(moverText) ~= "string" or moverText == "" then
-        moverText = L["Buffs"]
-    end
-
     return {
         enabled = config.enabled == true,
         constructionKey = {
@@ -404,6 +355,14 @@ local function CompileBuffs(config)
         holder = {
             width = holderWidth,
             height = holderHeight,
+        },
+        holderRolesets = "buffs",
+        holderAnchor = {
+            point = "BOTTOMRIGHT",
+            relativeGlobal = "DebuffFrame",
+            relativePoint = "TOPRIGHT",
+            x = 0,
+            y = FOLLOWER_GAP,
         },
         containerPoint = {
             point = orientation.anchorPoint,
@@ -455,11 +414,6 @@ local function CompileBuffs(config)
             direction = sortDirection.Normal,
         },
         itemEnchantmentLayout = itemEnchantmentLayout,
-        position = NormalizeHolderPosition(config.position),
-        positionSave = type(config.position) == "table"
-            and config.position
-            or nil,
-        moverText = moverText,
     }
 end
 

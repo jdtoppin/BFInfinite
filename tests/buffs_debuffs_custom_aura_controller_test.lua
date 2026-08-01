@@ -112,6 +112,11 @@ local function NewHarness()
             record(label .. ".SetPoint", ...)
         end
 
+        function frame:SetRolesets(rolesets)
+            self.rolesets = rolesets
+            record(label .. ".SetRolesets", rolesets)
+        end
+
         return frame
     end
 
@@ -287,6 +292,9 @@ local function NewHarness()
     local BFI = {
         L = L,
         funcs = {
+            isValueNonSecret = function(value)
+                return type(value) == "boolean"
+            end,
             LoadPosition = function(frame, position)
                 record("BFI.LoadPosition", frame.label, position)
             end,
@@ -319,6 +327,7 @@ local function NewHarness()
     return {
         AF = AF,
         BD = BD,
+        environment = environment,
         state = state,
     }
 end
@@ -392,6 +401,30 @@ local function CompileBuffs(config)
     }
 end
 
+local function CompileFollowingBuffs(config)
+    local descriptor, diagnostic = CompileBuffs(config)
+    if not descriptor then return nil, diagnostic end
+
+    descriptor.position = nil
+    descriptor.positionSave = nil
+    descriptor.moverText = nil
+    descriptor.holderRolesets = "buffs"
+    descriptor.holderAnchor = {
+        point = "BOTTOMRIGHT",
+        relativeGlobal = "DebuffFrame",
+        relativePoint = "TOPRIGHT",
+        x = 0,
+        y = 5,
+    }
+    descriptor.containerPoint = {
+        point = "BOTTOMRIGHT",
+        relativePoint = "BOTTOMRIGHT",
+        x = 0,
+        y = 0,
+    }
+    return descriptor
+end
+
 do
     local harness = NewHarness()
     local BD = harness.BD
@@ -458,6 +491,133 @@ do
         "shared queue preserves buffs callback state")
     assertTrue(sawDebuffsTuning == true,
         "shared queue preserves debuffs callback state")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local environment = harness.environment
+    local state = harness.state
+    BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+
+    environment.DebuffFrame = false
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+    local unavailable = BD.GetCustomAuraContainerState("buffs")
+    assertEqual(unavailable.state, "NATIVE_UNAVAILABLE",
+        "missing follower target state")
+    assertEqual(unavailable.diagnostic, "HOLDER_ANCHOR_UNAVAILABLE",
+        "missing follower target diagnostic")
+    assertFalse(unavailable.buildAttempted,
+        "missing follower target preserves retry")
+    assertEqual(countCalls(state.calls, "CreateFrame.Holder"), 0,
+        "missing target allocates no holder")
+    assertEqual(countCalls(state.calls, "AF.CreateCustomAuraContainer"), 0,
+        "missing target allocates no native shell")
+    assertEqual(countCalls(state.calls, "Timer.After"), 1,
+        "missing target schedules one bounded retry")
+    for _, call in ipairs(state.calls) do
+        if call.name == "BD.SetNativePublicAurasSuppressed" then
+            assertFalse(call.args[2] == true,
+                "missing target never suppresses Blizzard Buffs")
+        end
+    end
+
+    environment.DebuffFrame = {
+        CanBeAccessedInContext = function()
+            return {}
+        end,
+    }
+    state.runTimers(0)
+    assertEqual(countCalls(state.calls, "CreateFrame.Holder"), 0,
+        "secret access result allocates no holder")
+    assertEqual(countCalls(state.calls, "AF.CreateCustomAuraContainer"), 0,
+        "secret access result allocates no native shell")
+    assertEqual(countCalls(state.calls, "Timer.After"), 1,
+        "failed bounded retry does not loop")
+
+    local securityReads = {}
+    local debuffFrame = {
+        CanBeAccessedInContext = function()
+            securityReads[#securityReads + 1] = "CanBeAccessedInContext"
+            return true
+        end,
+        GetPoint = function()
+            error("follower must not read DebuffFrame geometry", 2)
+        end,
+        GetSize = function()
+            error("follower must not read DebuffFrame size", 2)
+        end,
+        IsShown = function()
+            error("follower must not read DebuffFrame visibility", 2)
+        end,
+    }
+    environment.DebuffFrame = debuffFrame
+
+    local retryStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true, tuning = 2})
+    local active = BD.GetCustomAuraContainerState("buffs")
+    assertEqual(active.state, "ACTIVE", "follower retry state")
+    assertTrue(active.active, "follower retry activates")
+    assertEqual(#securityReads, 1, "current-context native access read")
+    assertEqual(securityReads[1], "CanBeAccessedInContext",
+        "documented current-context access check")
+
+    local rolesetCall = findCall(
+        state.calls,
+        "holder1.SetRolesets",
+        retryStart
+    )
+    assertEqual(rolesetCall.args[1], "buffs", "follower roleset")
+    local anchorCall = findCall(
+        state.calls,
+        "holder1.SetPoint",
+        retryStart
+    )
+    assertEqual(anchorCall.args[1], "BOTTOMRIGHT", "follower point")
+    assertEqual(anchorCall.args[2], debuffFrame, "follower target identity")
+    assertEqual(anchorCall.args[3], "TOPRIGHT", "follower relative point")
+    assertEqual(anchorCall.args[4], 0, "follower X")
+    assertEqual(anchorCall.args[5], 5, "follower Y")
+    assertEqual(countCalls(state.calls, "AF.CreateMover"), 0,
+        "follower creates no mover")
+    assertEqual(countCalls(state.calls, "BFI.LoadPosition"), 0,
+        "follower ignores dormant saved position")
+    assertEqual(countCalls(state.calls, "AF.UpdateMoverSave"), 0,
+        "follower owns no mover save")
+
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true, tuning = 3})
+    assertEqual(countCalls(state.calls, "holder1.SetPoint"), 1,
+        "fixed follower anchor is written only once")
+    assertEqual(#securityReads, 1,
+        "live tuning performs no further native reads")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local environment = harness.environment
+    local state = harness.state
+    BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+
+    environment.DebuffFrame = false
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+    assertEqual(countCalls(state.calls, "Timer.After"), 1,
+        "failed follower build queues a retry")
+
+    BD.DisableCustomAuraContainer("buffs")
+    environment.DebuffFrame = {
+        CanBeAccessedInContext = function()
+            return true
+        end,
+    }
+    state.runTimers(0)
+
+    assertEqual(countCalls(state.calls, "CreateFrame.Holder"), 0,
+        "disable invalidates a queued follower retry")
+    assertEqual(countCalls(state.calls, "AF.CreateCustomAuraContainer"), 0,
+        "invalidated retry allocates no native shell")
+    assertFalse(BD.GetCustomAuraContainerState("buffs").active,
+        "invalidated retry cannot reactivate Buffs")
 end
 
 do
