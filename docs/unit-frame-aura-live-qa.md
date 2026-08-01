@@ -32,19 +32,25 @@ Use this clean isolated-install sequence:
 5. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
    #112 at `a3069bc70e22e449231dbb7cd0be20e38a96412c`.
 6. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
-   #103 at `19df3783962e9fff37c8c02f30087c5c26e22f10`.
-7. Current AF `main` at `a4eade2b8da69c095d7f9224f5537f09c0cc357f`
+   #103 at `5a35935c5ab2ba9db240dbb4d3dbbbc7b5935a1c`. Verify the
+   ordinary upper-right Debuffs use BFI's neutral square outline while
+   Blizzard continues to own their data and layout.
+7. AF #26 at `e534c7438c569e4517074ff077953b2bdad6cfd7` with BFInfinite
+   #110 at `4b350b7ff7903c2e275c305980624937f4dca357`. Verify Target
+   Debuffs use a square border while Blizzard's native dispel type still
+   controls its colour and visibility. Target Buffs must remain unchanged.
+8. Current AF `main` at `d95ae87f5104918183597136b503239316f151bc`
    with BFInfinite #118 at
    `24c26df850ee0730982a1263e0770d5a5e7296c4`. Test the native tooltip
    shell on Blizzard's TargetFrame with BFI Unit Frames disabled, then on any
    upper-right native AuraButtons available to the fixture.
-8. Current AF `main` at `a4eade2b8da69c095d7f9224f5537f09c0cc357f`
+9. Current AF `main` at `d95ae87f5104918183597136b503239316f151bc`
    with BFInfinite #119 at
    `d555ad11c49cb8e598340e7d273778d33f285b39`. Reload before testing,
    then open the Character panel inside an active Challenge Mode both outside
    and during combat.
-9. Validation-only AF #25 at
-   `d82bc3e07d4eab953d5e9a7dc82c9cc1a307e8f9` with the exact
+10. Validation-only AF #25 at
+   `333860a452c09fbf75ad109776c12f364225f55d` with the exact
    checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
    validation SHA. Record that full branch-head SHA immediately before
    installation.
@@ -56,9 +62,9 @@ be merged. Closed PR #98 is superseded and is not an install input.
 
 For the final stack, use validation-only AbstractFramework PR #25, branch
 `codex/aura-full-stack-test`, exact head
-`d82bc3e07d4eab953d5e9a7dc82c9cc1a307e8f9`. It combines AF #23/r35 with
-current AF `main` `a4eade2b8da69c095d7f9224f5537f09c0cc357f`, including #24's
-Retail 12.1 max-level fix. Never merge AF #25.
+`333860a452c09fbf75ad109776c12f364225f55d`. It combines AF #23/r35 and
+AF #26 with current AF `main` `d95ae87f5104918183597136b503239316f151bc`,
+including #24's Retail 12.1 max-level fix. Never merge AF #25.
 
 The aggregate must contain these exact BFInfinite terminal heads:
 
@@ -78,7 +84,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `a3069bc70e22e449231dbb7cd0be20e38a96412c` |
 | Party | `codex/unitframe-aura-party` | `2cfcbca80d0b2b45b9a9abb657907511152ae6b9` |
 | Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
-| Upper-right Debuff appearance (#103; includes #99) | `codex/buffs-debuffs-native-debuffs` | `19df3783962e9fff37c8c02f30087c5c26e22f10` |
+| Upper-right Debuff appearance (#103; includes #99) | `codex/buffs-debuffs-native-debuffs` | `5a35935c5ab2ba9db240dbb4d3dbbbc7b5935a1c` |
 | Tooltip/status safety (#85) | `codex/combat-secret-tooltip-fixes` | `b13a19842e7db7c19a447a97c009a4c968757d18` |
 | Native AuraButton tooltip skin (#118) | `codex/native-aura-tooltip-skin` | `24c26df850ee0730982a1263e0770d5a5e7296c4` |
 | Secret identity (#100) | `codex/unitframe-secret-identity` | `b8e1671ed8a1c11657416357875f9c8277051654` |
@@ -98,17 +104,21 @@ Test in this order:
 4. Test #112's enemy nameplate Debuffs migration independently after #110.
 5. Test the upper-right foundation, controller, Buffs, options, and
    forbidden-button branches in their PR order.
-6. Test #103's ordinary Debuff appearance controls with AF r33.
-7. Test #85 and then #118 independently. For #118 alone, disable BFI Unit
+6. Test #103's ordinary Debuff appearance controls with AF r33, including the
+   neutral square outline and exact restoration of Blizzard's rounded border
+   when styling is disabled.
+7. Test AF #26 with #110, then repeat its square, native-dispel-colour check
+   across every harmful unit-frame row on the final aggregate.
+8. Test #85 and then #118 independently. For #118 alone, disable BFI Unit
    Frames and exercise Blizzard's native TargetFrame AuraButtons; the final
    aggregate carries both PRs for their combined restricted-context gate.
-8. Test #114, #115, #116, and #117 independently against their documented
+9. Test #114, #115, #116, and #117 independently against their documented
    reproducers below.
-9. Test #119 independently after a reload. In restricted content, require the
+10. Test #119 independently after a reload. In restricted content, require the
    custom Movement Speed row to be absent while Blizzard's supported tertiary
    Speed row and BFI's presentation styling remain.
-10. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
-11. Run the 12.1 gates below in order.
+11. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
+12. Run the 12.1 gates below in order.
 
 Record the full local SHA for every installed folder. A short SHA in this
 document is a review aid, not permission to test a different head.
@@ -468,6 +478,13 @@ after all groups, layout, unit, and refresh work, using the supported inbound
 
 ### 5. Unit and roster churn
 
+Before starting churn, place a visible harmful aura on each supported frame
+type and inspect every cooldown style. Debuff borders must use the complete
+square asset with no rounded atlas corners or cropped edge. Blizzard's native
+dispel classification must still control the border colour and visibility;
+helpful Buff rows must remain visually unchanged. Repeat this check on Player,
+Pet, Party, Raid, Target, Boss, Focus, TargetTarget, FocusTarget, and PetTarget.
+
 Exercise:
 
 - target/focus changes and rapid target swaps;
@@ -575,31 +592,40 @@ or expose private identity, spell, duration, count, or source.
   layout, updates, tooltips, and visibility. BFInfinite only applies static
   appearance settings to the fixed pool of 16 ordinary Blizzard Debuff
   buttons.
-- Private-aura anchors are independent siblings of that ordinary pool.
-  BFInfinite must not style, hide, inspect, move, or otherwise operate on
-  them. `DeadlyDebuffFrame` is separate and must also remain unchanged. If
-  Blizzard routes one of their tooltips through the shared native AuraButton
-  tooltip, only its global outer shell may use BFI's static background and
-  border; the anchor, button, contents, visibility, and lifetime remain
-  Blizzard-owned.
+- Private-aura anchors are separate Blizzard-owned objects, but Blizzard lays
+  them out in the same `DebuffFrame` flow as ordinary Debuffs. BFInfinite must
+  not style, hide, inspect, or move them, and must not reanchor the containing
+  `DebuffFrame`. `DeadlyDebuffFrame` is separate and must also remain
+  unchanged. If Blizzard routes one of their tooltips through the shared
+  native AuraButton tooltip, only its global outer shell may use BFI's static
+  background and border; the anchor, button, contents, visibility, and
+  lifetime remain Blizzard-owned.
 - Toggle Buffs, Separate Own, supported appearance options, profiles, Edit
   Mode, combat, hover, reload, and temporary enchants.
 - For ordinary Debuffs, verify the main enable toggle, icon width and height
-  from 10 through 30, icon crop, native Debuff border fit, and all supported
-  stack-count font, position, color, shadow, and visibility controls.
+  from 10 through 30, icon crop, neutral square outline fit, and all supported
+  stack-count font, position, color, shadow, and visibility controls. The
+  rounded Blizzard atlas must be fully hidden while BFI styling is enabled;
+  the square outline must not depend on reading the active dispel type.
 - Confirm the ordinary Debuff duration control only shows or hides Blizzard's
   text. Blizzard must continue to supply and abbreviate the value in seconds,
   minutes, hours, and days.
 - Confirm the Debuff arrangement, sorting, spacing, per-line limit, total cap,
   Separate Own, and duration font, position, and color controls are disabled.
   Their plain-language explanations must wrap without clipping.
+- This aggregate does not claim exact right-edge parity between BFI's native
+  Buff container and Blizzard's legacy Debuff row. Confirm no attempted fix
+  reanchors `DebuffFrame`, changes Blizzard Edit Mode state, or moves a private
+  anchor. Record the visible right-edge difference for the pending product
+  decision rather than treating private-anchor movement as a pass.
 - Generate ordinary, private, and deadly debuffs together. Confirm ordinary
   Debuffs receive the selected appearance with no duplicates, while private
   auras and deadly debuffs retain their original Blizzard presentation apart
   from the permitted shared native-tooltip outer shell.
-- Disable ordinary Debuff styling and confirm the icon, native border, stack
-  count, and duration visibility return exactly to their original Blizzard
-  values. Re-enable it and confirm the same fixed 16 buttons are reused.
+- Disable ordinary Debuff styling and confirm the icon, rounded native border,
+  stack count, and duration visibility return exactly to their original
+  Blizzard values. Re-enable it and confirm the same fixed 16 buttons and the
+  same BFI-owned square outlines are reused.
 - Change every supported ordinary Debuff setting in combat. Confirm the old
   presentation remains stable until combat ends, the options report a pending
   update, and the new presentation applies afterward without a reload.
