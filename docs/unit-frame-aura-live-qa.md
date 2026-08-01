@@ -39,12 +39,12 @@ Use this clean isolated-install sequence:
    #110 at `4b350b7ff7903c2e275c305980624937f4dca357`. Verify Target
    Debuffs use a square border while Blizzard's native dispel type still
    controls its colour and visibility. Target Buffs must remain unchanged.
-8. Current AF `main` at `d95ae87f5104918183597136b503239316f151bc`
+8. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
    with BFInfinite #118 at
    `24c26df850ee0730982a1263e0770d5a5e7296c4`. Test the native tooltip
    shell on Blizzard's TargetFrame with BFI Unit Frames disabled, then on any
    upper-right native AuraButtons available to the fixture.
-9. Current AF `main` at `d95ae87f5104918183597136b503239316f151bc`
+9. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
    with BFInfinite #119 at
    `d555ad11c49cb8e598340e7d273778d33f285b39`. Reload before testing,
    then open the Character panel inside an active Challenge Mode both outside
@@ -63,7 +63,7 @@ be merged. Closed PR #98 is superseded and is not an install input.
 For the final stack, use validation-only AbstractFramework PR #25, branch
 `codex/aura-full-stack-test`, exact head
 `333860a452c09fbf75ad109776c12f364225f55d`. It combines AF #23/r35 and
-AF #26 with current AF `main` `d95ae87f5104918183597136b503239316f151bc`,
+AF #26 with current AF `main` `d95ae87f4538d6d3f40be8534ec220eace42f265`,
 including #24's Retail 12.1 max-level fix. Never merge AF #25.
 
 The aggregate must contain these exact BFInfinite terminal heads:
