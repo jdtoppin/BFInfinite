@@ -2352,12 +2352,13 @@ ScrollWindow = function(window, delta)
 end
 
 local function CreateWindow(index)
-    local window = AF.CreateFrame(
+    local window = AF.CreateBorderedFrame(
         _G.UIParent,
         "BFIDamageMeterWindow" .. index,
         300,
         220,
-        "BackdropTemplate"
+        "background",
+        "border"
     )
     window.index = index
     window.rows = {}
@@ -2369,20 +2370,12 @@ local function CreateWindow(index)
     window:SetClampedToScreen(true)
     window:SetMovable(true)
     window:SetFrameStrata("LOW")
-    AF.ApplyDefaultBackdrop_NoBackground(window)
     window:SetScript("OnSizeChanged", function(_, width, height)
         OnWindowSizeChanged(window, width, height)
     end)
 
-    local header = AF.CreateFrame(
-        window,
-        nil,
-        nil,
-        nil,
-        "BackdropTemplate"
-    )
+    local header = AF.CreateFrame(window)
     window.header = header
-    AF.ApplyDefaultBackdrop_NoBorder(header)
     header:EnableMouse(true)
     header:RegisterForDrag("LeftButton")
     header:SetScript("OnDragStart", function()
@@ -2522,15 +2515,8 @@ local function CreateWindow(index)
     )
     lock:SetOnClick(ToggleLocked)
 
-    local body = AF.CreateFrame(
-        window,
-        nil,
-        nil,
-        nil,
-        "BackdropTemplate"
-    )
+    local body = AF.CreateFrame(window)
     window.body = body
-    AF.ApplyDefaultBackdrop_NoBorder(body)
     body:EnableMouseWheel(true)
     body:SetScript("OnMouseWheel", function(_, delta)
         ScrollWindow(window, delta)
@@ -2617,15 +2603,15 @@ local function ApplyWindowLayout(window, config)
     )
     window.applyingLayout = nil
     window:SetResizable(not config.locked and not window.minimized)
+    window:SetBackdropColor(
+        AF.GetColorRGB("background", config.backgroundAlpha)
+    )
     window:SetBackdropBorderColor(AF.GetColorRGB("border"))
 
     window.header:ClearAllPoints()
     window.header:SetPoint("TOPLEFT")
     window.header:SetPoint("TOPRIGHT")
     window.header:SetHeight(config.headerHeight)
-    window.header:SetBackdropColor(
-        AF.GetColorRGB("background", config.backgroundAlpha)
-    )
 
     window.minimize:SetSize(controlSize, controlSize)
     window.minimize:ClearAllPoints()
@@ -2715,9 +2701,6 @@ local function ApplyWindowLayout(window, config)
     window.body:ClearAllPoints()
     window.body:SetPoint("TOPLEFT", window.header, "BOTTOMLEFT")
     window.body:SetPoint("BOTTOMRIGHT")
-    window.body:SetBackdropColor(
-        AF.GetColorRGB("background", config.backgroundAlpha)
-    )
     window.body:SetShown(not window.minimized)
 
     EnsureRows(window, visibleRows)

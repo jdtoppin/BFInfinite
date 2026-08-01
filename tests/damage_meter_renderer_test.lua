@@ -537,7 +537,7 @@ local function loadRenderer(
         if name == "BFI" then
             return 0.82, 0.37, 0.12, alpha
         elseif name == "border" then
-            return 0.1, 0.1, 0.1, alpha
+            return 0, 0, 0, alpha or 1
         elseif name == "header" then
             return 0.18, 0.18, 0.18, alpha
         elseif name == "none" then
@@ -936,14 +936,22 @@ assertEqual(type(first), "table", "first addon-owned window")
 assertEqual(type(second), "table", "second addon-owned window")
 assertEqual(type(third), "table", "third addon-owned window")
 assertEqual(
-    first.header.hasBorderlessBackdrop,
-    true,
-    "title bar uses the chat-style borderless surface"
+    first.kind,
+    "BorderedFrame",
+    "window uses the shared bordered surface"
 )
-assertEqual(first.header.backdropColor.r, 0.04, "title bar gray red")
-assertEqual(first.header.backdropColor.g, 0.04, "title bar gray green")
-assertEqual(first.header.backdropColor.b, 0.04, "title bar gray blue")
-assertEqual(first.header.backdropColor.a, 0.82, "title bar alpha")
+assertEqual(first.backgroundColorName, "background", "window background")
+assertEqual(first.borderColorName, "border", "window border token")
+assertEqual(first.backdropColor.r, 0.04, "window gray red")
+assertEqual(first.backdropColor.g, 0.04, "window gray green")
+assertEqual(first.backdropColor.b, 0.04, "window gray blue")
+assertEqual(first.backdropColor.a, 0.82, "window background alpha")
+assertEqual(first.borderColor.r, 0, "window border red")
+assertEqual(first.borderColor.g, 0, "window border green")
+assertEqual(first.borderColor.b, 0, "window border blue")
+assertEqual(first.borderColor.a, 1, "window border is opaque")
+assertEqual(first.header.hasBorderlessBackdrop, nil, "header is transparent")
+assertEqual(first.body.hasBorderlessBackdrop, nil, "body is transparent")
 assertEqual(first.header.tex, nil, "title bar has no gradient texture")
 assertEqual(first.typeDropdown.backdropColor.a, 0, "type dropdown is flat")
 assertEqual(first.typeDropdown.borderColor.a, 0, "type border is hidden")
@@ -1021,6 +1029,18 @@ assertEqual(
     nil,
     "native preference is not stored in the profile"
 )
+
+local expandedHeight = first.height
+first.minimize:Click()
+assertEqual(first.height, DM.config.headerHeight, "minimized window height")
+assertEqual(first.body.shown, false, "minimized window hides its body")
+assertEqual(first.backdropColor.a, 0.82, "minimized background alpha")
+assertEqual(first.borderColor.r, 0, "minimized border remains black")
+assertEqual(first.borderColor.a, 1, "minimized border remains opaque")
+first.minimize:Click()
+assertEqual(first.height, expandedHeight, "expanded window height restored")
+assertEqual(first.body.shown, true, "expanded window restores its body")
+assertEqual(#state.nativeSetCalls, 1, "minimize keeps native override stable")
 
 local firstRow = first.rows[1]
 assertEqual(firstRow.rank.justifyH, "LEFT", "row number is left aligned")
@@ -2030,14 +2050,14 @@ assertEqual(first.height, 260, "live height")
 assertEqual(second.height, 240, "second window keeps its own height")
 assertEqual(first.header.height, 26, "live header height")
 assertEqual(
-    first.header.backdropColor.r,
+    first.backdropColor.r,
     0.04,
-    "title bar keeps its transparent gray surface"
+    "window keeps its gray surface"
 )
 assertEqual(
-    first.header.backdropColor.a,
+    first.backdropColor.a,
     0.65,
-    "title bar follows the live window transparency"
+    "window follows the live transparency"
 )
 assertEqual(
     first.header.tex,
@@ -2059,7 +2079,7 @@ assertEqual(firstRow.bar.statusBarColor.r, 0.82, "accent bar red")
 assertEqual(firstRow.bar.statusBarColor.g, 0.37, "accent bar green")
 assertEqual(firstRow.bar.statusBarColor.b, 0.12, "accent bar blue")
 assertEqual(firstRow.bar.statusBarColor.a, 0.55, "live bar alpha")
-assertEqual(first.body.backdropColor.a, 0.65, "live background alpha")
+assertEqual(first.borderColor.r, 0, "live window border remains black")
 assertEqual(second.shown, true, "second remains shown")
 assertEqual(third.shown, false, "window count applies live")
 assertEqual(
