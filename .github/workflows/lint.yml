@@ -73,6 +73,9 @@ jobs:
           lua5.1 tests/character_frame_unit_stats_safety_test.lua
           luajit tests/character_frame_unit_stats_safety_test.lua
           lua5.1 tests/objective_tracker_taint_boundary_test.lua
+          lua5.1 tests/objective_tracker_12_1_compat_test.lua
+          lua5.1 tests/achievement_frame_12_1_topology_test.lua
+          luajit tests/achievement_frame_12_1_topology_test.lua
           lua5.1 tests/experience_bar_disabled_texture_test.lua
           lua5.1 tests/unit_frame_options_preview_aura_safety_test.lua
           lua5.1 tests/style_pixel_updater_secret_geometry_test.lua

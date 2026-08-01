@@ -7,14 +7,41 @@ local AF = _G.AbstractFramework
 
 local achievementFrame
 local guildTab
+local searchBox
+local filterDropdown
+local searchPreviewContainer
 
 local UnitClassBase = UnitClassBase
 local PanelTemplates_SetTabEnabled = PanelTemplates_SetTabEnabled
-local GetNumFilteredAchievements = GetNumFilteredAchievements
 local CRITERIA_TYPE_ACHIEVEMENT = _G.CRITERIA_TYPE_ACHIEVEMENT
 local EVALUATION_TREE_FLAG_PROGRESS_BAR = _G.EVALUATION_TREE_FLAG_PROGRESS_BAR
 local GetAchievementNumCriteria = GetAchievementNumCriteria
 local GetAchievementCriteriaInfo = GetAchievementCriteriaInfo
+
+-- Retail 12.1.0.68914 parents both controls to HeaderDetails.Filters.
+-- Source: Blizzard_AchievementUI/Mainline/Blizzard_AchievementUI.xml
+local function ResolveSearchControls(frame)
+    local headerDetails = frame and frame.HeaderDetails
+    local filters = headerDetails and headerDetails.Filters
+    if not filters then return end
+
+    local resolvedSearchBox = filters.SearchBox
+    local resolvedFilterDropdown = filters.FilterDropdown
+    local resolvedSearchPreview = resolvedSearchBox
+        and resolvedSearchBox.SearchPreviewContainer
+    if not resolvedSearchBox or not resolvedFilterDropdown
+        or not resolvedSearchPreview
+    then
+        return
+    end
+
+    return resolvedSearchBox, resolvedFilterDropdown, resolvedSearchPreview
+end
+
+local function StyleSearchControls()
+    S.StyleEditBox(searchBox, -4)
+    S.StyleDropdownButton(filterDropdown)
+end
 
 ---------------------------------------------------------------------
 -- shared
@@ -164,33 +191,7 @@ local function StyleAchievementFrame()
 
     _G.AchievementFrameWaterMark:Hide()
 
-    -- search box
-    local searchBox = achievementFrame.SearchBox
-    S.StyleEditBox(searchBox, -4)
-    AF.SetSize(searchBox, 150, 20)
-    AF.ClearPoints(searchBox)
-    AF.SetPoint(searchBox, "TOPRIGHT", closeButton, "TOPLEFT", 1, 0)
-
-    -- dropdown
-    local dropdown = achievementFrame.FilterDropdown
-    S.StyleDropdownButton(dropdown)
-    AF.SetSize(dropdown, 150, 20)
-    dropdown.displacedRegions = nil -- WowStyle1FilterDropdownMixin
-
-    AF.ClearPoints(dropdown)
-    AF.SetPoint(dropdown, "TOPRIGHT", searchBox, "TOPLEFT", -3, 0)
-
-    local anchor = AnchorUtil.CreateAnchor("TOPLEFT", dropdown, "BOTTOMLEFT", 0, 0)
-	dropdown:SetMenuAnchor(anchor)
-
-    dropdown:SetText(_G.ACHIEVEMENTFRAME_FILTER_ALL)
-    hooksecurefunc(dropdown, "UpdateToMenuSelections", function(_, menuDescription, currentSelections)
-        dropdown:SetText(currentSelections[1].text)
-    end)
-
-    dropdown.Text:SetJustifyH("LEFT")
-    dropdown.Text:ClearAllPoints()
-    dropdown.Text:SetPoint("LEFT", 10, 0)
+    StyleSearchControls()
 end
 
 ---------------------------------------------------------------------
@@ -428,8 +429,6 @@ end
 -- AchievementFrameAchievementsObjectives
 ---------------------------------------------------------------------
 local function StyleObjectives()
-    local objectives = _G.AchievementFrameAchievementsObjectives
-
     hooksecurefunc("AchievementButton_LocalizeProgressBar", function(frame)
         if frame._BFIStyled then return end
         frame.Text:ClearAllPoints()
@@ -455,12 +454,13 @@ local function StyleObjectives()
     end)
 
     hooksecurefunc("AchievementObjectives_DisplayCriteria", function(objectivesFrame, id)
-        local textStrings, progressBars, metas = 0, 0, 0
+        local textStrings, metas = 0, 0
         local numCriteria = GetAchievementNumCriteria(id)
         local label, border, icon
 
         for i = 1, numCriteria do
-            local criteriaString, criteriaType, completed, quantity, reqQuantity, charName, flags, assetID, quantityString = GetAchievementCriteriaInfo(id, i)
+            local _, criteriaType, completed, _, _, _, flags, assetID =
+                GetAchievementCriteriaInfo(id, i)
             if criteriaType == CRITERIA_TYPE_ACHIEVEMENT and assetID then
                 metas = metas + 1
                 local metaCriteria = objectivesFrame:GetMeta(metas)
@@ -523,26 +523,27 @@ local function StyleComparison()
     _G["AchievementFrameComparisonHeaderBG"]:Hide()
 
     local points = header.Points
+    local name = _G["AchievementFrameComparisonHeaderName"]
+    local portrait = _G["AchievementFrameComparisonHeaderPortrait"]
     points:SetSize(0, 0)
     -- points:SetParent(achievementFrame.BFIHeader)
     points:ClearAllPoints()
-    points:SetPoint("RIGHT", achievementFrame.SearchBox, "LEFT", -15, 0)
+    points:SetPoint("RIGHT", searchBox, "LEFT", -15, 0)
 
-    local name = _G["AchievementFrameComparisonHeaderName"]
     name:SetSize(0, 0)
     -- name:SetParent(achievementFrame.BFIHeader)
     name:ClearAllPoints()
     name:SetPoint("RIGHT", points, "LEFT", -5, 0)
+
+    -- portrait:SetParent(achievementFrame.BFIHeader)
+    portrait:ClearAllPoints()
+    portrait:SetPoint("RIGHT", name, "LEFT", -5, 0)
 
     hooksecurefunc("AchievementFrameComparison_SetUnit", function(unit)
         local class = UnitClassBase(unit)
         name:SetTextColor(AF.GetColorRGB(class))
     end)
 
-    local portrait = _G["AchievementFrameComparisonHeaderPortrait"]
-    -- portrait:SetParent(achievementFrame.BFIHeader)
-    portrait:ClearAllPoints()
-    portrait:SetPoint("RIGHT", name, "LEFT", -5, 0)
     AF.SetSize(portrait, 27, 20)
     portrait:SetTexCoord(AF.CalcTexCoordPreCrop(nil, 27 / 20, 1, nil, true))
     S.CreateBackdrop(portrait, true, 0, 1)
@@ -654,14 +655,14 @@ local function StyleTabs()
     local function UpdateTabs()
         PanelTemplates_SetTabEnabled(achievementFrame, 2, not comparison:IsShown())
 
-        local i = 1
-        local tab = _G["AchievementFrameTab" .. i]
-        while tab do
-            tab.Text:ClearAllPoints()
-            tab.Text:SetPoint("CENTER", tab, "CENTER", 0, 0)
-            tab:Show()
-            i = i + 1
-            tab = _G["AchievementFrameTab" .. i]
+        local tabIndex = 1
+        local currentTab = _G["AchievementFrameTab" .. tabIndex]
+        while currentTab do
+            currentTab.Text:ClearAllPoints()
+            currentTab.Text:SetPoint("CENTER", currentTab, "CENTER", 0, 0)
+            currentTab:Show()
+            tabIndex = tabIndex + 1
+            currentTab = _G["AchievementFrameTab" .. tabIndex]
         end
     end
 
@@ -674,9 +675,7 @@ end
 -- SearchPreviewContainer
 ---------------------------------------------------------------------
 local function StyleSearchPreview()
-    local container = achievementFrame.SearchPreviewContainer
-    AF.ClearPoints(container)
-    AF.SetPoint(container, "TOPLEFT", achievementFrame.SearchBox, "BOTTOMLEFT", -4, -1)
+    local container = searchPreviewContainer
 
     S.RemoveTextures(container)
     -- S.CreateBackdrop(container)
@@ -726,6 +725,9 @@ end
 local function StyleBlizzard()
     achievementFrame = _G.AchievementFrame
     guildTab = _G.AchievementFrameTab2
+    searchBox, filterDropdown, searchPreviewContainer =
+        ResolveSearchControls(achievementFrame)
+    if not searchBox then return end
 
     StyleAchievementFrame()
     StyleTabs()
