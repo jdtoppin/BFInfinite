@@ -887,6 +887,20 @@ assertEqual(timerFrame.plusThreeThreshold.text, "+3 +18:00",
 assertEqual(timerFrame.plusTwoThreshold.text, "+2 +24:00",
     "live timer shows time remaining to +2")
 
+state.elapsed = 1080
+timerFrame.scripts.OnUpdate(timerFrame, 0.11)
+assertEqual(timerFrame.plusThreeThreshold.text, "+3 18:00",
+    "+3 timer stops at its elapsed cutoff")
+assertEqual(timerFrame.plusTwoThreshold.text, "+2 +6:00",
+    "+2 timer continues after the +3 cutoff")
+state.elapsed = 1500
+timerFrame.scripts.OnUpdate(timerFrame, 0.11)
+assertEqual(timerFrame.plusThreeThreshold.text, "+3 18:00",
+    "+3 cutoff remains fixed instead of becoming negative")
+assertEqual(timerFrame.plusTwoThreshold.text, "+2 24:00",
+    "+2 timer stops at its elapsed cutoff")
+state.elapsed = 0
+
 local affixHideCalls = timerFrame.affixIcons[1].hideCalls or 0
 local objectiveHideCalls =
     timerFrame.objectiveRows[1].hideCalls or 0

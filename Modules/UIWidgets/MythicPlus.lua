@@ -2905,6 +2905,14 @@ local function renderSummary(run, y)
     return y - getTextBlockHeight(timerFrame.footer, 28, 6)
 end
 
+local function formatThresholdTimer(threshold, elapsed)
+    local remaining = threshold - elapsed
+    if remaining <= 0 then
+        return Model.FormatClock(threshold)
+    end
+    return Model.FormatClock(remaining, true)
+end
+
 local function renderRun(run)
     if not timerFrame or not run then return end
 
@@ -2959,7 +2967,7 @@ local function renderRun(run)
         setTruncatedText(
             timerFrame.plusThreeThreshold,
             L["+3 %s"]:format(
-                Model.FormatClock(plusThree - elapsed, true)
+                formatThresholdTimer(plusThree, elapsed)
             ),
             thresholdLabelWidth
         )
@@ -2969,7 +2977,7 @@ local function renderRun(run)
         setTruncatedText(
             timerFrame.plusTwoThreshold,
             L["+2 %s"]:format(
-                Model.FormatClock(plusTwo - elapsed, true)
+                formatThresholdTimer(plusTwo, elapsed)
             ),
             thresholdLabelWidth
         )
