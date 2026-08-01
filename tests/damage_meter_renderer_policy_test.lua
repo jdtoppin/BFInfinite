@@ -847,6 +847,11 @@ assertContains(
     "each BFI meter exposes a live independent height"
 )
 assertContains(
+    rendererCode,
+    'AF.Fire("BFI_RefreshOptions", "damageMeter")',
+    "completed meter resizes must refresh open Damage Meter options"
+)
+assertContains(
     options,
     "DM.config.locked = checked",
     "BFI meter movement and resizing expose a shared live lock"

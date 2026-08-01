@@ -59,6 +59,7 @@ local function loadRenderer(
         deathRecapEvents = {},
         detailSourceCalls = {},
         detailSources = {},
+        fires = {},
         formatInputs = {},
         formatOutputs = {},
         frames = {},
@@ -478,6 +479,10 @@ local function loadRenderer(
 
     function AF.CloseDropdown()
         state.closedDropdowns = (state.closedDropdowns or 0) + 1
+    end
+
+    function AF.Fire(...)
+        state.fires[#state.fires + 1] = {...}
     end
 
     function AF.ApplyDefaultBackdrop_NoBorder(frame)
@@ -1729,7 +1734,9 @@ assertEqual(first.lock.textureColor, "gray", "unlocked icon returns to gray")
 assertEqual(first.resizable, true, "unlock restores first resize")
 assertEqual(third.resize.shown, true, "unlock restores resize grips")
 
+local firesBeforeResize = #state.fires
 first:SetSize(410, 275)
+assertEqual(#state.fires, firesBeforeResize, "drag resize does not reload options")
 first.resize:RunScript("OnMouseUp", "LeftButton")
 assertEqual(DM.config.width, 410, "resize stores shared width")
 assertEqual(
@@ -1741,6 +1748,17 @@ assertEqual(first.width, 410, "resized window keeps shared width")
 assertEqual(second.width, 410, "second receives shared width")
 assertEqual(third.width, 410, "third receives shared width")
 assertEqual(second.height, 220, "second height remains independent")
+assertEqual(#state.fires, firesBeforeResize + 1, "resize fires one callback")
+assertEqual(
+    state.fires[#state.fires][1],
+    "BFI_RefreshOptions",
+    "resize refreshes open options"
+)
+assertEqual(
+    state.fires[#state.fires][2],
+    "damageMeter",
+    "resize refresh targets Damage Meter options"
+)
 
 first.mouseOver = true
 first.centerY = 300

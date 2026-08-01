@@ -2196,6 +2196,7 @@ local function FinishWindowResize(window)
     if GetConfig().locked or window.minimized then return end
     OnWindowSizeChanged(window, window:GetWidth(), window:GetHeight())
     Renderer.ApplySettings()
+    AF.Fire("BFI_RefreshOptions", "damageMeter")
 end
 
 local function ToggleLocked()
