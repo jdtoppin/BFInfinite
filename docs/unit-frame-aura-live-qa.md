@@ -23,49 +23,59 @@ Use this clean isolated-install sequence:
 
 1. AF #19 at `d6858f3997a1014a7ab9ce05ddaaf53efe4df9c6` with BFInfinite
    #90 at `d9c5a23246a01572e1fb75d470a250032f802b33`.
-2. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
-   #101 at `5f221bdd1679ebcafb2a4cab381188f080d81572`.
+2. AF #19 at `d6858f3997a1014a7ab9ce05ddaaf53efe4df9c6` with BFInfinite
+   #123 at `6840357a27c4473672227b8d4d9b25a73cc53596`. Verify the
+   Buff/Debuff control labels are plain while the Unit Frame Presets heading
+   and semantic enabled/disabled colours remain unchanged.
 3. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
-   #102 at `62fdc2c289dcf518adff5f3a109eba3f05ed9dc8`.
-4. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #120 at `022c49a4beb8a92b3145f268a9ad92bd8dc30342`, then #110 at
-   `8ef7d1387575e72e96bde99e020bff8dec7e077d`.
+   #101 at `32ea029e6b605559f67314829e9359679aee4d8c`.
+4. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
+   #102 at `9fedb173cc7da9a4152ca3bd077fd2c3bf203df7`.
 5. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #112 at `01a009ded164aa1fc973867fb2827f0dc79e8346`.
-6. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
+   #120 at `512a89ec4c20744fa3f9ad99782f6f6f522f9cc5`, then #110 at
+   `3f7815ce7166ae16707e4e527fd43908fb7e5acb`.
+6. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
+   #112 at `091d174ee745f95e662b4d9f3227b7d6cfdae3f1`.
+7. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
    #103 at `dc0546639fec885ced82bdf1399d998f2c2f03bd`. Verify the
    ordinary upper-right Debuffs use BFI's neutral square outline while
    Blizzard continues to own their data and layout.
-7. Validation-only AF #25 at
+8. Validation-only AF #25 at
    `64fb9b7830f0fcafe3fb02043771e22cc0d67d51` with BFInfinite #110
-   at `8ef7d1387575e72e96bde99e020bff8dec7e077d`. This is the clean
+   at `3f7815ce7166ae16707e4e527fd43908fb7e5acb`. This is the clean
    combined check for AF #26's square border and AF #27's required r36
    runtime. Verify Target Debuffs use a square border while Blizzard's native
    dispel type still controls its colour and visibility. Target Buffs must
    remain unchanged.
-8. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #110 at `8ef7d1387575e72e96bde99e020bff8dec7e077d`. On Target Buffs
+9. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
+   #110 at `3f7815ce7166ae16707e4e527fd43908fb7e5acb`. On Target Buffs
    and Debuffs, test every cooldown choice after its required reload and
    require exactly one graphical timer.
-9. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #112 at `01a009ded164aa1fc973867fb2827f0dc79e8346`. Repeat every
-   cooldown choice on hostile nameplate Debuffs.
 10. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
+    #112 at `091d174ee745f95e662b4d9f3227b7d6cfdae3f1`. Repeat every
+    cooldown choice on hostile nameplate Debuffs.
+11. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
     #121 at `d1a5fe741fc703458b5d0830e620cd6ac6f070b9`, then #103 at
     `dc0546639fec885ced82bdf1399d998f2c2f03bd`. Verify the
     fixed-clock upper-right native Buff groups and temporary enchants have a
     circular swipe only, never a second vertical fill.
-11. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
+12. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
    with BFInfinite #118 at
    `24c26df850ee0730982a1263e0770d5a5e7296c4`. Test the native tooltip
    shell on Blizzard's TargetFrame with BFI Unit Frames disabled, then on any
    upper-right native AuraButtons available to the fixture.
-12. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
+13. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
    with BFInfinite #119 at
    `d555ad11c49cb8e598340e7d273778d33f285b39`. Reload before testing,
    then open the Character panel inside an active Challenge Mode both outside
    and during combat.
-13. Validation-only AF #25 at
+14. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
+    with BFInfinite #122 at
+    `7334f0ba2b6ec8434d94f79050642a99c8ef37a5`. Give Target Buffs and
+    Debuffs visibly different settings, then switch between them slowly and
+    rapidly outside combat and during ordinary combat. No value from the
+    previous row may render on the selected row.
+15. Validation-only AF #25 at
     `64fb9b7830f0fcafe3fb02043771e22cc0d67d51` with the exact
     checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
     validation SHA. Record that full branch-head SHA immediately before
@@ -87,9 +97,11 @@ The aggregate must contain these exact BFInfinite terminal heads:
 
 | Coverage | Branch | Exact head |
 |---|---|---|
-| Current BFInfinite master compatibility | `master` | `151353453b28639404d29dc2aa3f751487c8f2bb` |
-| Global exact spell colors (#101) | `codex/unitframe-aura-spell-colors` | `5f221bdd1679ebcafb2a4cab381188f080d81572` |
-| Presentation hardening (#102) | `codex/unitframe-aura-presentation-hardening` | `62fdc2c289dcf518adff5f3a109eba3f05ed9dc8` |
+| Current BFInfinite master compatibility | `master` | `56c5a66c9156c29c9dd732e4f5571686a06dd305` |
+| Unit Frame pane-switch lifecycle (#122) | `codex/unitframe-aura-settings-switch` | `7334f0ba2b6ec8434d94f79050642a99c8ef37a5` |
+| Plain aura control labels (#123) | `codex/unitframe-aura-plain-option-labels` | `6840357a27c4473672227b8d4d9b25a73cc53596` |
+| Global exact spell colors (#101) | `codex/unitframe-aura-spell-colors` | `32ea029e6b605559f67314829e9359679aee4d8c` |
+| Presentation hardening (#102) | `codex/unitframe-aura-presentation-hardening` | `9fedb173cc7da9a4152ca3bd077fd2c3bf203df7` |
 | Player | `codex/unitframe-aura-player` | `673838dc5dea739617155bf6806d4bb42fcaea97` |
 | Boss | `codex/unitframe-aura-boss` | `9f01f432289b6b2457c5bb9cc6f023582ad85b5c` |
 | Focus | `codex/unitframe-aura-focus` | `03b75af042fd84b93a3e3eaeb09ac68b1ff46440` |
@@ -97,9 +109,9 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | FocusTarget | `codex/unitframe-aura-focustarget` | `58a60e011cb2dbd2d3b54d62cdb6ffc6b8df2df9` |
 | PetTarget | `codex/unitframe-aura-pettarget` | `02a75fd22f8f04e21e7f139df214697e6350e567` |
 | Pet | `codex/unitframe-aura-pet` | `8e91a8c7616b3000d5e607a2063bf528dd8c4f59` |
-| Unit/nameplate AF r36 gate (#120) | `codex/native-aura-r36-unitframe-gate` | `022c49a4beb8a92b3145f268a9ad92bd8dc30342` |
-| Target partition (#110) | `codex/unitframe-aura-target-final` | `8ef7d1387575e72e96bde99e020bff8dec7e077d` |
-| Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `01a009ded164aa1fc973867fb2827f0dc79e8346` |
+| Unit/nameplate AF r36 gate (#120) | `codex/native-aura-r36-unitframe-gate` | `512a89ec4c20744fa3f9ad99782f6f6f522f9cc5` |
+| Target partition (#110) | `codex/unitframe-aura-target-final` | `3f7815ce7166ae16707e4e527fd43908fb7e5acb` |
+| Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `091d174ee745f95e662b4d9f3227b7d6cfdae3f1` |
 | Party | `codex/unitframe-aura-party` | `2cfcbca80d0b2b45b9a9abb657907511152ae6b9` |
 | Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
 | Upper-right AF r36 gate (#121) | `codex/native-aura-r36-upper-right-gate` | `d1a5fe741fc703458b5d0830e620cd6ac6f070b9` |
@@ -117,33 +129,37 @@ Test in this order:
 
 1. Test AF #25 alone, including effective max-level compatibility, duration
    abbreviations, and secret identity.
-2. Test the policy, spec, lifecycle/controller, provider/counter, supported
-   filter-control, spell-color, and presentation-hardening PRs in isolation.
-3. Test each of the ten unit-frame integration leaves independently.
-4. Test #112's enemy nameplate Debuffs migration independently after #110.
-5. Test the upper-right foundation, controller, Buffs, options, and
+2. Test #122 independently from current `master`. Give Buffs and Debuffs
+   visibly different values and verify both slow and rapid selection changes
+   bind the chosen pane immediately.
+3. Test the policy, spec, lifecycle/controller, provider/counter, and #90
+   supported-filter PRs in isolation. Test #123 next for plain aura labels,
+   then test refreshed #101 spell colours and #102 presentation hardening.
+4. Test each of the ten unit-frame integration leaves independently.
+5. Test #112's enemy nameplate Debuffs migration independently after #110.
+6. Test the upper-right foundation, controller, Buffs, options, and
    forbidden-button branches in their PR order.
-6. Test #103's ordinary Debuff appearance controls with AF r33, including the
+7. Test #103's ordinary Debuff appearance controls with AF r33, including the
    neutral square outline and exact restoration of Blizzard's rounded border
    when styling is disabled.
-7. Test AF #26's focused regression, then test its square border in the
+8. Test AF #26's focused regression, then test its square border in the
    AF #25/BFI #110 combined pair because #110 now correctly requires AF r36.
    Repeat the square, native-dispel-colour check across every harmful
    unit-frame row on the final aggregate.
-8. Test AF #27 with #120/#110, #112, and #121/#103 as three clean paths. Run the
+9. Test AF #27 with #120/#110, #112, and #121/#103 as three clean paths. Run the
    single-graphical-timer matrix below on unit-frame groups, nameplate groups,
    and upper-right Buff groups/temporary enchants, then repeat it on the final
    aggregate.
-9. Test #85 and then #118 independently. For #118 alone, disable BFI Unit
+10. Test #85 and then #118 independently. For #118 alone, disable BFI Unit
    Frames and exercise Blizzard's native TargetFrame AuraButtons; the final
    aggregate carries both PRs for their combined restricted-context gate.
-10. Test #114, #115, #116, and #117 independently against their documented
+11. Test #114, #115, #116, and #117 independently against their documented
    reproducers below.
-11. Test #119 independently after a reload. In restricted content, require
+12. Test #119 independently after a reload. In restricted content, require
     the custom Movement Speed row to be absent while Blizzard's supported
     tertiary Speed row and BFI's presentation styling remain.
-12. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
-13. Run the 12.1 gates below in order.
+13. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
+14. Run the 12.1 gates below in order.
 
 Record the full local SHA for every installed folder. A short SHA in this
 document is a review aid, not permission to test a different head.
@@ -278,9 +294,13 @@ contaminate later evidence.
 2. Enter combat, then open **BFInfinite → Unit Frames** for the first time.
 3. Switch repeatedly among General, Unit, Target, and Group; close and reopen
    the panel while combat continues.
-4. Confirm there is no `GetUnitAuraInstanceIDs` error,
+4. Open Target, give Buffs and Debuffs visibly different values, then alternate
+   between their sidebar rows at least 20 times, including rapid clicks. Every
+   visible field must belong to the selected row immediately; the previous
+   row's values must never flash for one frame.
+5. Confirm there is no `GetUnitAuraInstanceIDs` error,
    `BFI_ShowOptionsPanel` failure, nil `frameOptionsPane`, or nil callback.
-5. Confirm preset cards look unchanged. Their already-hidden Buff and Debuff
+6. Confirm preset cards look unchanged. Their already-hidden Buff and Debuff
    rows are intentionally not constructed, while live unit-frame aura rows
    continue to render.
 
@@ -402,6 +422,20 @@ Mutate every supported setting for both Buffs and Debuffs:
 - Copy, Paste, Reset, profile switch, import, export, and reload;
 - same-value changes, multiple changes before commit, changes in combat, and
   changes while hovered.
+
+Before the broad mutation pass, configure one Target Buff value and the
+matching Target Debuff value differently for size, cooldown style, Stack Text,
+and Duration Text. Alternate between Buffs and Debuffs slowly, then rapidly.
+Repeat outside combat, during training-dummy combat, and during Challenge Mode
+combat. The selected pane must show its own values before it is rendered; no
+stale check, slider, dropdown, text, or tooltip state may flash from the other
+row, and an older deferred refresh must not change the current selection.
+
+Inspect the aura controls in every available locale. **Stack Text**,
+**Duration Text**, **Border Color**, **Aura Arrangement**, and the Target
+Debuff partition label must use ordinary plain text without a per-character
+gradient. The Unit Frame Presets page heading, cast-bar labels, Party/Raid/Boss
+layout labels, and semantic enabled/disabled colours must remain unchanged.
 
 Exercise Global Colors as a complete CRUD surface: add, inspect, search,
 change, and delete exact IDs; cancel without mutation; confirm exactly one
@@ -757,6 +791,11 @@ Stop and file a failure with evidence for any of the following:
 - reload prompt for same-family ID tuning, or no reload for a new family;
 - duplicate/stranded restricted buttons, unbounded counter growth, or
   construction during provider-only changes;
+- Buffs showing Debuff settings, Debuffs showing Buff settings, any one-frame
+  stale-value flash while switching, or an obsolete deferred refresh changing
+  the current pane;
+- a per-character gradient on an ordinary aura control label, or loss of the
+  intended presets heading and enabled/disabled state colours;
 - BFI replacing or hiding Blizzard's harmful container, touching private
   anchors or `DeadlyDebuffFrame`, hooking their scripts or update methods, or
   reading an ordinary Debuff button's aura, active, or visibility state;
