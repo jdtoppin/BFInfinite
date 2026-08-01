@@ -15,6 +15,7 @@ local function loadAutomation()
         operations = {},
         refreshCalls = 0,
         resetCalls = 0,
+        resetSequence = {},
         runtimeSessions = {
             [1] = {mode = "history", sessionID = 10},
             [3] = {mode = "history", sessionID = 30},
@@ -72,6 +73,7 @@ local function loadAutomation()
         Data = {
             Reset = function()
                 state.resetCalls = state.resetCalls + 1
+                state.resetSequence[#state.resetSequence + 1] = "reset"
                 return true
             end,
         },
@@ -129,6 +131,16 @@ local function loadAutomation()
     local BFI = {
         modules = {
             DamageMeter = damageMeter,
+            UIWidgets = {
+                MythicPlus = {
+                    PrepareForDamageMeterReset = function(reason)
+                        state.resetSequence[
+                            #state.resetSequence + 1
+                        ] = "prepare:" .. tostring(reason)
+                        return true
+                    end,
+                },
+            },
         },
     }
     local environment = {
@@ -184,6 +196,16 @@ assertEqual(state.refreshCalls, 1, "combat automation refreshed once")
 state.operations = {}
 frame.OnEvent(frame, "CHALLENGE_MODE_START")
 assertEqual(state.resetCalls, 1, "challenge start reset is opt-in")
+assertEqual(
+    state.resetSequence[1],
+    "prepare:mythicPlusStart",
+    "timer is prepared before the intentional reset"
+)
+assertEqual(
+    state.resetSequence[2],
+    "reset",
+    "intentional reset follows timer preparation"
+)
 assertEqual(DM.config.windowTypes[1], "DamageDone", "first type retained")
 assertEqual(DM.config.windowTypes[2], "Dps", "second type selected")
 assertEqual(DM.config.windowTypes[3], "HealingDone", "third type selected")

@@ -46,9 +46,11 @@ local BD = {
     BLIZZARD_DEBUFF_STYLE_BACKEND = "blizzardDebuffStyle",
     config = {
         buffs = {
+            enabled = true,
             separateOwn = 0,
         },
         debuffs = {
+            enabled = true,
             separateOwn = 0,
         },
     },
@@ -68,6 +70,11 @@ end
 
 local BFI = {
     L = L,
+    funcs = {
+        isValueNonSecret = function(value)
+            return type(value) == "boolean"
+        end,
+    },
     modules = {
         BuffsDebuffs = BD,
     },
@@ -154,6 +161,14 @@ do
         "custom After choice disabled")
     assertTrue(buffsPolicy.constructionOwnedStyle,
         "custom button styling is construction-owned")
+    assertTrue(buffsPolicy.positionOwnedByBlizzard,
+        "Blizzard DebuffFrame owns the custom Buff location")
+    assertFalse(buffsPolicy.arrangementControls,
+        "follower arrangement is fixed")
+    assertEqual(buffsPolicy.fixedArrangement,
+        "right_to_left_then_up", "follower arrangement value")
+    assertTrue(buffsPolicy.layoutControls,
+        "remaining custom layout controls stay available")
     assertTrue(buffsPolicy.retiredDurationControls,
         "retired duration controls are declared")
 end
@@ -221,11 +236,16 @@ do
 
     dispatchPendingByPane.buffs = nil
     stateByPane.buffs = {}
-    assertNil(BD.GetBuffsDebuffsOptionsStatus("buffs"),
-        "ready custom backend has no status")
+    status = BD.GetBuffsDebuffsOptionsStatus("buffs")
+    assertEqual(status.code, "BLIZZARD_EDIT_MODE_LOCATION",
+        "ready custom backend explains its location owner")
     local debuffsStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
     assertEqual(debuffsStatus.code, "BLIZZARD_DEBUFF_STYLE",
-        "Debuffs explains its bounded styling mode")
+        "inactive custom Buffs do not claim linked movement")
+    stateByPane.buffs.active = true
+    debuffsStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(debuffsStatus.code, "BLIZZARD_DEBUFF_STYLE_LINKED",
+        "active custom Buffs expose linked movement")
     dispatchPendingByPane.debuffs = true
     debuffsStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
     assertEqual(debuffsStatus.code, "PENDING_SAFE_UPDATE",
@@ -432,9 +452,21 @@ local function NewOptionsUIHarness(customBackend, afVersion)
 
     local uiEnvironment = setmetatable({}, {__index = _G})
     uiEnvironment._G = uiEnvironment
+    uiEnvironment.InCombatLockdown = function()
+        return false
+    end
+    uiEnvironment.ShowUIPanel = function(frame)
+        records.shownUIPanel = frame
+    end
     uiEnvironment.ReloadUI = function()
         records.reloadCalls = (records.reloadCalls or 0) + 1
     end
+    uiEnvironment.EditModeManagerFrame = {
+        CanEnterEditMode = function()
+            return true
+        end,
+    }
+    records.editModeManagerFrame = uiEnvironment.EditModeManagerFrame
 
     local uiAF = {
         versionNum = afVersion,
@@ -538,9 +570,11 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     end
     function uiAF.SetFrameLevel() end
     function uiAF.ApplyCombatProtectionToFrame() end
+    function uiAF.ApplyCombatProtectionToWidget() end
     function uiAF.ClearPoints() end
 
     uiEnvironment.BFIOptionsFrame_ContentPane = NewWidget("content")
+    uiEnvironment.BFIOptionsFrame = NewWidget("optionsFrame")
 
     local uiBD = {
         SECURE_AURA_HEADER_BACKEND = "secureAuraHeader",
@@ -584,6 +618,11 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     })
     local uiBFI = {
         L = uiL,
+        funcs = {
+            isValueNonSecret = function(value)
+                return type(value) == "boolean"
+            end,
+        },
         modules = {
             BuffsDebuffs = uiBD,
         },
@@ -627,6 +666,20 @@ do
         "status action text does not run under button")
     assertTrue(custom.statusText.wordWrap,
         "status explanations wrap inside their row")
+    assertFalse(custom.dropdownsByLabel.Arrangement.enabled,
+        "custom Buff arrangement is fixed for the follower")
+    assertEqual(custom.dropdownsByLabel.Arrangement.selected,
+        "right_to_left_then_up", "fixed follower arrangement is visible")
+    assertTrue(custom.dropdownsByLabel["Sort Method"].enabled,
+        "custom Buff sorting remains editable")
+    assertEqual(custom.statusText.textValue,
+        "Move the Debuff Frame in Blizzard Edit Mode. BFInfinite Buffs stay aligned directly above it.",
+        "custom Buff location guidance")
+    assertEqual(custom.statusButton.textValue,
+        "Open Blizzard Edit Mode", "custom Buff location action")
+    custom.statusButton.onClick()
+    assertEqual(custom.shownUIPanel,
+        custom.editModeManagerFrame, "Blizzard Edit Mode action completes")
 
     local width = custom.slidersByLabel.Width
     width.onValueChanged(40)
@@ -665,8 +718,10 @@ do
         "recovery changes only Separate Own")
     assertEqual(custom.separateOwn.selected, 0,
         "recovery refreshes dropdown selection")
-    assertFalse(custom.statusButton.shown,
-        "recovery refresh clears stale status")
+    assertTrue(custom.statusButton.shown,
+        "recovery refresh restores location guidance")
+    assertEqual(custom.statusButton.textValue, "Open Blizzard Edit Mode",
+        "recovery refresh restores Edit Mode action")
     assertEqual(#custom.events, 1,
         "recovery fires one module update")
 
@@ -678,6 +733,7 @@ do
     assertTrue(custom.durationHint.wordWrap,
         "duration hint wraps inside the pane")
 
+    custom.controllerState.active = true
     custom.topSwitch:SetSelectedValue("debuffs")
     local debuffsConfig = custom.BD.config.debuffs
     assertFalse(custom.dropdownsByLabel.Arrangement.enabled,
@@ -695,8 +751,10 @@ do
     assertEqual(custom.slidersByLabel.Height.maximum, 30,
         "Debuff icon height uses the native-cell ceiling")
     assertEqual(custom.statusText.textValue,
-        "BFInfinite styles ordinary Debuffs only. Blizzard controls their layout and duration text; private and deadly debuffs are unchanged.",
+        "Move both rows with the Debuff Frame in Blizzard Edit Mode. Private and deadly auras stay separate.",
         "Debuffs ownership explanation")
+    assertEqual(custom.statusButton.textValue,
+        "Open Blizzard Edit Mode", "Debuffs location action")
     assertTrue(custom.statusText.shown,
         "Debuffs ownership explanation is visible")
     assertEqual(custom.durationHint.textValue,

@@ -89,6 +89,9 @@ function gameTooltip:IsShown()
     return self.shown
 end
 
+function gameTooltip:GetLeftLine()
+end
+
 function gameTooltip:SetOwner(owner, anchorType, x, y)
     if owner.forbidden then
         error("addon attempted to use a forbidden tooltip owner", 2)
@@ -222,8 +225,9 @@ local environment = {
     Enum = {
         TooltipDataLineType = {
             None = 0,
+            UnitName = 2,
             UnitLevel = 1,
-            UnitType = 2,
+            UnitType = 3,
         },
         TooltipDataType = {
             Unit = 1,
@@ -311,16 +315,21 @@ local defaultAnchorHook = hooks.named.GameTooltip_SetDefaultAnchor
 local worldCursorHook = hooks.methods.SetWorldCursor
 assertTrue(defaultAnchorHook, "missing GameTooltip_SetDefaultAnchor hook")
 assertTrue(worldCursorHook, "missing GameTooltip:SetWorldCursor hook")
-assertTrue(tooltipCallbacks.line, "missing unit-level color callback")
+assertEqual(tooltipCallbacks.line, nil,
+    "unit colors are resolved from the complete native tooltip payload")
 assertTrue(tooltipCallbacks.post, "missing unit tooltip post-call")
 
-local function newForbiddenOwner(forbiddenResult)
+local function newForbiddenOwner(accessResult)
     local owner = {
         forbidden = true,
     }
 
+    function owner:CanBeAccessedInContext()
+        return accessResult
+    end
+
     function owner:IsForbidden()
-        return forbiddenResult
+        error("12.1 access-capability path unexpectedly used IsForbidden", 2)
     end
 
     return setmetatable(owner, {
@@ -354,7 +363,7 @@ assertNoAnchoring("protected default anchor")
 assertEqual(gameTooltip.owner, forbiddenOwner, "protected native owner")
 assertEqual(gameTooltip.point, nativePoint, "protected native point")
 
-local explicitlyForbiddenOwner = newForbiddenOwner(true)
+local explicitlyForbiddenOwner = newForbiddenOwner(false)
 nativePoint = {"NATIVE_TRUE_FORBIDDEN", explicitlyForbiddenOwner}
 resetAnchoring(gameTooltip, nativePoint, explicitlyForbiddenOwner)
 defaultAnchorHook(gameTooltip, explicitlyForbiddenOwner)
@@ -475,6 +484,15 @@ tooltipModule.config.hideUnitTooltipsInCombat = false
 tooltipModule.config.itemLevel.enabled = true
 tooltipModule.config.itemLevel.showOnAlt = true
 tooltipCallbacks.pre(gameTooltip)
+tooltipCallbacks.post(gameTooltip, {
+    lines = {
+        {
+            lineIndex = 1,
+            type = environment.Enum.TooltipDataLineType.UnitName,
+            unitToken = "mouseover",
+        },
+    },
+})
 gameTooltip.shown = secretValue
 gameTooltip.setUnit = nil
 moduleEvents.MODIFIER_STATE_CHANGED(nil, nil, "LALT")

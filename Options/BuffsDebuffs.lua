@@ -4,6 +4,10 @@ local L = BFI.L
 local BD = BFI.modules.BuffsDebuffs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
+local IsValueNonSecret = BFI.funcs.isValueNonSecret
+local InCombatLockdown = InCombatLockdown
+local ShowUIPanel = ShowUIPanel
+local type = type
 
 local LoadOptions, UpdateStatus
 local selected, currentConfig, currentTextConfig, currentTextKind
@@ -20,10 +24,25 @@ local function IsBlizzardDebuffStyleBackend(which)
             == BD.BLIZZARD_DEBUFF_STYLE_BACKEND
 end
 
+local function IsCustomBuffFollowerActive()
+    if not IsCustomBuffsBackend("buffs")
+        or not BD.config
+        or not BD.config.buffs
+        or BD.config.buffs.enabled ~= true
+        or type(BD.GetCustomAuraContainerState) ~= "function"
+    then
+        return false
+    end
+
+    local state = BD.GetCustomAuraContainerState("buffs")
+    return state and state.active == true
+end
+
 function BD.GetBuffsDebuffsOptionsPolicy(which)
     local backend = BD.GetAuraBackend(which)
     local custom = IsCustomBuffsBackend(which)
     local blizzardDebuffStyle = IsBlizzardDebuffStyleBackend(which)
+    local positionOwnedByBlizzard = custom and which == "buffs"
     return {
         available = backend ~= nil,
         backend = backend,
@@ -46,6 +65,12 @@ function BD.GetBuffsDebuffsOptionsPolicy(which)
             },
         },
         constructionOwnedStyle = custom,
+        fixedArrangement = positionOwnedByBlizzard
+            and "right_to_left_then_up"
+            or nil,
+        arrangementControls = not blizzardDebuffStyle
+            and not positionOwnedByBlizzard,
+        positionOwnedByBlizzard = positionOwnedByBlizzard,
         layoutControls = not blizzardDebuffStyle,
         iconSizeControls = true,
         maximumIconSize = blizzardDebuffStyle and 30 or 100,
@@ -67,7 +92,9 @@ function BD.GetBuffsDebuffsOptionsStatus(which)
             }
         end
         return {
-            code = "BLIZZARD_DEBUFF_STYLE",
+            code = IsCustomBuffFollowerActive()
+                and "BLIZZARD_DEBUFF_STYLE_LINKED"
+                or "BLIZZARD_DEBUFF_STYLE",
         }
     elseif not policy.custom then
         return nil
@@ -98,6 +125,13 @@ function BD.GetBuffsDebuffsOptionsStatus(which)
     elseif dispatcherPending or (state and state.pending) then
         return {
             code = "PENDING_SAFE_UPDATE",
+        }
+    elseif policy.positionOwnedByBlizzard
+        and config
+        and config.enabled == true
+    then
+        return {
+            code = "BLIZZARD_EDIT_MODE_LOCATION",
         }
     end
 end
@@ -300,6 +334,7 @@ local function CreateNormalPane()
     )
     normalPane.statusButton = statusButton
     AF.SetPoint(statusButton, "BOTTOMRIGHT", -10, 5)
+    AF.ApplyCombatProtectionToWidget(statusButton)
     statusButton:Hide()
 
     --------------------------------------------------
@@ -522,8 +557,11 @@ local function CreateNormalPane()
         local layoutEnabled = currentConfig.enabled
             and policy.layoutControls
         AF.SetEnabled(
+            layoutEnabled and policy.arrangementControls,
+            arrangement
+        )
+        AF.SetEnabled(
             layoutEnabled,
-            arrangement,
             sortMethod,
             sortDirection,
             spacingX,
@@ -544,7 +582,9 @@ local function CreateNormalPane()
         width:SetMinMaxValues(10, policy.maximumIconSize)
         height:SetMinMaxValues(10, policy.maximumIconSize)
         separateOwn:SetItems(policy.separateOwnItems)
-        arrangement:SetSelectedValue(currentConfig.orientation)
+        arrangement:SetSelectedValue(
+            policy.fixedArrangement or currentConfig.orientation
+        )
         sortMethod:SetSelectedValue(currentConfig.sortMethod)
         sortDirection:SetSelectedValue(currentConfig.sortDirection)
         separateOwn:SetSelectedValue(currentConfig.separateOwn)
@@ -564,12 +604,32 @@ local function CreateNormalPane()
     end
 end
 
+local function OpenBlizzardEditMode()
+    if InCombatLockdown() or type(ShowUIPanel) ~= "function" then return end
+    local editMode = _G.EditModeManagerFrame
+    if not editMode or type(editMode.CanEnterEditMode) ~= "function" then
+        return
+    end
+
+    local canEnter = editMode:CanEnterEditMode()
+    if not IsValueNonSecret(canEnter)
+        or canEnter ~= true
+    then
+        return
+    end
+
+    local optionsFrame = _G.BFIOptionsFrame
+    ShowUIPanel(editMode)
+    if optionsFrame then optionsFrame:Hide() end
+end
+
 UpdateStatus = function()
     if not normalPane then return end
     local status = BD.GetBuffsDebuffsOptionsStatus(selected)
     local statusText = normalPane.statusText
     local statusButton = normalPane.statusButton
     statusButton:SetOnClick(nil)
+    statusText:SetTextColor(AF.GetColorRGB("firebrick"))
 
     if not status then
         statusText:Hide()
@@ -609,12 +669,33 @@ UpdateStatus = function()
                 ]
         )
         statusButton:Hide()
-    elseif status.code == "BLIZZARD_DEBUFF_STYLE" then
-        AF.SetWidth(statusText, 530)
+    elseif status.code == "BLIZZARD_EDIT_MODE_LOCATION" then
+        AF.SetWidth(statusText, 350)
+        statusText:SetTextColor(AF.GetColorRGB("gray"))
         statusText:SetText(L[
-            "BFInfinite styles ordinary Debuffs only. Blizzard controls their layout and duration text; private and deadly debuffs are unchanged."
+            "Move the Debuff Frame in Blizzard Edit Mode. BFInfinite Buffs stay aligned directly above it."
         ])
-        statusButton:Hide()
+        statusButton:SetText(L["Open Blizzard Edit Mode"])
+        statusButton:SetOnClick(OpenBlizzardEditMode)
+        statusButton:Show()
+    elseif status.code == "BLIZZARD_DEBUFF_STYLE_LINKED" then
+        AF.SetWidth(statusText, 350)
+        statusText:SetTextColor(AF.GetColorRGB("gray"))
+        statusText:SetText(L[
+            "Move both rows with the Debuff Frame in Blizzard Edit Mode. Private and deadly auras stay separate."
+        ])
+        statusButton:SetText(L["Open Blizzard Edit Mode"])
+        statusButton:SetOnClick(OpenBlizzardEditMode)
+        statusButton:Show()
+    elseif status.code == "BLIZZARD_DEBUFF_STYLE" then
+        AF.SetWidth(statusText, 350)
+        statusText:SetTextColor(AF.GetColorRGB("gray"))
+        statusText:SetText(L[
+            "Move Debuffs with the Debuff Frame in Blizzard Edit Mode. Private and deadly auras stay separate."
+        ])
+        statusButton:SetText(L["Open Blizzard Edit Mode"])
+        statusButton:SetOnClick(OpenBlizzardEditMode)
+        statusButton:Show()
     else
         AF.SetWidth(statusText, 530)
         statusText:SetText(L[

@@ -5,10 +5,12 @@ local L = BFI.L
 local BD = BFI.modules.BuffsDebuffs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
+local IsValueNonSecret = BFI.funcs.isValueNonSecret
 
 local C_Timer = C_Timer
 local CreateFrame = CreateFrame
 local InCombatLockdown = InCombatLockdown
+local rawget = rawget
 
 -- Retail 12.1.0.68914 (wow-ui-source d3915c78) makes aura groups and
 -- item-enchantment sources add-only. Their buttons receive conditional access
@@ -17,6 +19,9 @@ local InCombatLockdown = InCombatLockdown
 -- and native container shells; it never reads aura data, restricted buttons,
 -- or native container geometry.
 local NATIVE_GROUP_INITIAL_RESERVATIONS = 10
+local ALLOWED_HOLDER_ANCHOR_GLOBALS = {
+    DebuffFrame = true,
+}
 
 local registrations = {}
 local pendingControllers = {}
@@ -161,6 +166,31 @@ local function AssertDescriptor(descriptor)
     assert(descriptor.positionSave == nil
         or type(descriptor.positionSave) == "table",
         "custom aura descriptor positionSave must be a table or nil")
+    assert(descriptor.holderAnchor == nil
+        or (
+            type(descriptor.holderAnchor) == "table"
+            and type(descriptor.holderAnchor.point) == "string"
+            and type(descriptor.holderAnchor.relativeGlobal) == "string"
+            and ALLOWED_HOLDER_ANCHOR_GLOBALS[
+                descriptor.holderAnchor.relativeGlobal
+            ] == true
+            and type(descriptor.holderAnchor.relativePoint) == "string"
+            and type(descriptor.holderAnchor.x) == "number"
+            and type(descriptor.holderAnchor.y) == "number"
+        ),
+        "custom aura descriptor requires an allowed holder anchor")
+    assert(descriptor.holderRolesets == nil
+        or type(descriptor.holderRolesets) == "string",
+        "custom aura descriptor holderRolesets must be a string or nil")
+    assert(
+        (descriptor.position ~= nil)
+            ~= (descriptor.holderAnchor ~= nil),
+        "custom aura descriptor requires one holder position owner"
+    )
+    assert(descriptor.position ~= nil or descriptor.positionSave == nil,
+        "custom aura follower cannot own a mover save")
+    assert(descriptor.holderAnchor == nil or descriptor.moverText == nil,
+        "custom aura follower cannot create a mover")
 end
 
 local function CopyDescriptor(descriptor)
@@ -172,11 +202,48 @@ local function CopyDescriptor(descriptor)
     return copy
 end
 
-local function ApplyHolder(controller, descriptor)
+local function ResolveHolderAnchor(descriptor)
+    local anchor = descriptor.holderAnchor
+    if not anchor then return end
+    if not ALLOWED_HOLDER_ANCHOR_GLOBALS[anchor.relativeGlobal] then
+        return
+    end
+    local target = rawget(_G, anchor.relativeGlobal)
+    if not target or type(IsValueNonSecret) ~= "function" then return end
+
+    if type(target.CanBeAccessedInContext) ~= "function" then return end
+
+    -- This documented ObjectSecurity result is the only value read from the
+    -- native location owner. Geometry, visibility, protection state, and aura
+    -- state remain completely opaque.
+    local canAccess = target:CanBeAccessedInContext()
+    if not IsValueNonSecret(canAccess) or canAccess ~= true then
+        return
+    end
+    return target
+end
+
+local function ApplyHolder(controller, descriptor, anchorTarget)
     local holder = controller.holder
     AF.SetSize(holder, descriptor.holder.width, descriptor.holder.height)
 
-    if descriptor.position then
+    if descriptor.holderAnchor then
+        if not controller.holderAnchorApplied then
+            anchorTarget = anchorTarget or ResolveHolderAnchor(descriptor)
+            if not anchorTarget then return false end
+
+            local anchor = descriptor.holderAnchor
+            holder:ClearAllPoints()
+            holder:SetPoint(
+                anchor.point,
+                anchorTarget,
+                anchor.relativePoint,
+                anchor.x,
+                anchor.y
+            )
+            controller.holderAnchorApplied = true
+        end
+    elseif descriptor.position then
         if holder.mover then
             AF.UpdateMoverSave(
                 holder,
@@ -187,6 +254,7 @@ local function ApplyHolder(controller, descriptor)
     end
 
     holder.enabled = descriptor.enabled
+    return true
 end
 
 local function PositionContainer(controller, descriptor)
@@ -203,7 +271,7 @@ end
 
 local function ApplyNativeTuning(controller, descriptor)
     local container = controller.container
-    ApplyHolder(controller, descriptor)
+    if not ApplyHolder(controller, descriptor) then return false end
     PositionContainer(controller, descriptor)
     AF.SetCustomAuraContainerFlowLayout(container, descriptor.flowLayout)
     AF.SetCustomAuraContainerProcessingPolicy(
@@ -257,6 +325,7 @@ local function ApplyNativeTuning(controller, descriptor)
         controller.unit = unit
     end
     AF.UpdateCustomAuraContainer(container)
+    return true
 end
 
 local function RestoreNative(controller)
@@ -311,11 +380,13 @@ local function Activate(controller)
 end
 
 local function CreateHolder(controller, descriptor)
-    if controller.holder then return end
+    if controller.holder then return true end
 
     local holder = CreateFrame("Frame", nil, AF.UIParent)
-    controller.holder = holder
     holder:Hide()
+    if descriptor.holderRolesets then
+        holder:SetRolesets(descriptor.holderRolesets)
+    end
     AF.SetSize(holder, descriptor.holder.width, descriptor.holder.height)
 
     if descriptor.moverText then
@@ -326,6 +397,39 @@ local function CreateHolder(controller, descriptor)
             descriptor.positionSave or descriptor.position
         )
     end
+    controller.holder = holder
+    return true
+end
+
+local function QueueBuildRetry(controller, descriptor)
+    if controller.buildRetryUsed then return end
+
+    controller.descriptor = descriptor
+    controller.buildRetryDescriptor = descriptor
+    controller.buildRetryGeneration = controller.requestGeneration
+    if controller.buildRetryQueued then return end
+
+    controller.buildRetryQueued = true
+    C_Timer.After(0, function()
+        controller.buildRetryQueued = nil
+        local retryDescriptor = controller.buildRetryDescriptor
+        local retryGeneration = controller.buildRetryGeneration
+        controller.buildRetryDescriptor = nil
+        controller.buildRetryGeneration = nil
+        if controller.buildCompleted
+            or controller.buildAttempted
+            or controller.requestGeneration ~= retryGeneration
+            or not retryDescriptor
+            or not retryDescriptor.enabled
+        then
+            return
+        end
+
+        controller.buildRetryUsed = true
+        controller.pendingOperation = "update"
+        controller.pendingDescriptor = CopyDescriptor(retryDescriptor)
+        controller:_ApplyPending()
+    end)
 end
 
 local function RecordExpectedConstruction(descriptor)
@@ -353,14 +457,26 @@ local function Build(controller, descriptor)
         return false
     end
 
+    local anchorTarget = ResolveHolderAnchor(descriptor)
+    if descriptor.holderAnchor and not anchorTarget then
+        controller.state = "NATIVE_UNAVAILABLE"
+        controller.diagnostic = "HOLDER_ANCHOR_UNAVAILABLE"
+        QueueBuildRetry(controller, descriptor)
+        return false
+    end
+
+    CreateHolder(controller, descriptor)
+    if not ApplyHolder(controller, descriptor, anchorTarget) then
+        controller.state = "NATIVE_UNAVAILABLE"
+        controller.diagnostic = "HOLDER_ANCHOR_UNAVAILABLE"
+        return false
+    end
+
     controller.buildAttempted = true
     controller.state = "BUILDING"
     constructionStats.buildAttempts = constructionStats.buildAttempts + 1
     local expectedReservations = RecordExpectedConstruction(descriptor)
     controller.expectedInitialReservations = expectedReservations
-
-    CreateHolder(controller, descriptor)
-    ApplyHolder(controller, descriptor)
 
     local container = AF.CreateCustomAuraContainer(controller.holder)
     controller.container = container
@@ -533,8 +649,17 @@ function ControllerMixin:_ApplyPending()
     else
         self.reloadRequired = nil
         self.descriptor = descriptor
-        ApplyNativeTuning(self, descriptor)
-        Activate(self)
+        if not ApplyNativeTuning(self, descriptor) then
+            if not Deactivate(self, "NATIVE_UNAVAILABLE") then
+                self.pendingOperation = operation
+                self.pendingDescriptor = descriptor
+                QueueController(self)
+                return
+            end
+            self.diagnostic = "HOLDER_ANCHOR_UNAVAILABLE"
+        else
+            Activate(self)
+        end
     end
 
     if self.pendingUnit then
@@ -545,6 +670,7 @@ function ControllerMixin:_ApplyPending()
 end
 
 function ControllerMixin:Update(config)
+    self.requestGeneration = (self.requestGeneration or 0) + 1
     local descriptor, diagnostic = self.compiler(config)
     if descriptor == nil then
         self.pendingOperation = "unsupported"
@@ -559,6 +685,7 @@ function ControllerMixin:Update(config)
 end
 
 function ControllerMixin:Disable()
+    self.requestGeneration = (self.requestGeneration or 0) + 1
     self.pendingOperation = "disable"
     self.pendingDescriptor = nil
     self.pendingDiagnostic = nil

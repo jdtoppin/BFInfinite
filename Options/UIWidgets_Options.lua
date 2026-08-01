@@ -11,6 +11,20 @@ local created = {}
 local builder = {}
 local options = {}
 
+local function AlignSliderLabelLeft(slider)
+    if not slider or not slider.label then return end
+    AF.ClearPoints(slider.label)
+    AF.SetPoint(
+        slider.label,
+        "BOTTOMLEFT",
+        slider,
+        "TOPLEFT",
+        2,
+        2
+    )
+    slider.label:SetJustifyH("LEFT")
+end
+
 ---------------------------------------------------------------------
 -- settings
 ---------------------------------------------------------------------
@@ -54,6 +68,14 @@ local settings = {
         "markerSpacing",
     },
     objectiveTracker = {
+        "font",
+    },
+    mythicPlus = {
+        "mythicPlusDisplay",
+        "mythicPlusWidth",
+        "mythicPlusExtendedRun",
+        "mythicPlusPreview",
+        "mythicPlusHistory",
         "font",
     },
 }
@@ -112,6 +134,9 @@ builder["enabled"] = function(parent)
         UpdateColor(checked)
         AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
         pane.t:SetTextColor(checked and "white" or "disabled")
+        if pane.t.id == "mythicPlus" then
+            AF.Fire("BFI_RefreshOptions", "uiWidgets")
+        end
     end)
 
     function pane.Load(t)
@@ -251,6 +276,286 @@ builder["width,height"] = function(parent)
         height:SetValue(t.cfg.height)
     end
 
+    return pane
+end
+
+-- mythicPlusDisplay
+---------------------------------------------------------------------
+builder["mythicPlusDisplay"] = function(parent)
+    if created["mythicPlusDisplay"] then
+        return created["mythicPlusDisplay"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_MythicPlusDisplay",
+        nil,
+        118
+    )
+    created["mythicPlusDisplay"] = pane
+
+    local definitions = {
+        {"hideObjectiveTracker", L["Hide Objective Tracker"]},
+        {"showThresholds", L["Show +2 / +3 Thresholds"]},
+        {"showAffixes", L["Show Affixes"]},
+        {"showObjectives", L["Show Objectives"]},
+        {"showSplits", L["Show Split Comparisons"]},
+        {"showPullCount", L["Show Pull Counter"]},
+        {"showExecution", L["Show Execution Data"]},
+        {"showDebrief", L["Show End-of-Run Debrief"]},
+        {"showPlayerBreakdown", L["Show Player Breakdown"]},
+    }
+    local controls = {}
+
+    local function UpdateDependencies()
+        if controls.showSplits then
+            controls.showSplits:SetEnabled(
+                pane.t.cfg.showObjectives ~= false
+            )
+        end
+        if controls.showPlayerBreakdown then
+            controls.showPlayerBreakdown:SetEnabled(
+                pane.t.cfg.showDebrief ~= false
+            )
+        end
+    end
+
+    local function CreateToggle(key, label, x, y)
+        local control = AF.CreateCheckButton(pane, label)
+        AF.SetPoint(control, "TOPLEFT", x, y)
+        control:SetOnCheck(function(checked)
+            pane.t.cfg[key] = checked
+            UpdateDependencies()
+            AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
+        end)
+        controls[key] = control
+    end
+
+    for index, definition in ipairs(definitions) do
+        local column = (index - 1) % 2
+        local row = math.floor((index - 1) / 2)
+        CreateToggle(
+            definition[1],
+            definition[2],
+            15 + column * 185,
+            -8 - row * 22
+        )
+    end
+
+    function pane.Load(t)
+        pane.t = t
+        for key, control in pairs(controls) do
+            control:SetChecked(t.cfg[key] ~= false)
+        end
+        UpdateDependencies()
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- mythicPlusWidth
+---------------------------------------------------------------------
+builder["mythicPlusWidth"] = function(parent)
+    if created["mythicPlusWidth"] then return created["mythicPlusWidth"] end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_MythicPlusWidth",
+        nil,
+        120
+    )
+    created["mythicPlusWidth"] = pane
+
+    local width = AF.CreateSlider(pane, L["Width"], 150, 260, 500, 1, nil, true)
+    AF.SetPoint(width, "TOPLEFT", 15, -25)
+    AlignSliderLabelLeft(width)
+    width:SetOnValueChanged(function(value)
+        pane.t.cfg.width = value
+        AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
+    end)
+
+    local xOffset = AF.CreateSlider(
+        pane,
+        L["X Offset"],
+        150,
+        -500,
+        500,
+        1,
+        nil,
+        true
+    )
+    AF.SetPoint(xOffset, "TOPLEFT", width, 185, 0)
+    AlignSliderLabelLeft(xOffset)
+    xOffset:SetAfterValueChanged(function(value)
+        pane.t.cfg.position[2] = value
+        AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
+    end)
+
+    local yOffset = AF.CreateSlider(
+        pane,
+        L["Y Offset"],
+        150,
+        -500,
+        500,
+        1,
+        nil,
+        true
+    )
+    AF.SetPoint(yOffset, "TOPLEFT", width, "BOTTOMLEFT", 0, -40)
+    AlignSliderLabelLeft(yOffset)
+    yOffset:SetAfterValueChanged(function(value)
+        pane.t.cfg.position[3] = value
+        AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
+    end)
+
+    function pane.Load(t)
+        pane.t = t
+        width:SetValue(t.cfg.width)
+        xOffset:SetValue(t.cfg.position[2])
+        yOffset:SetValue(t.cfg.position[3])
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- mythicPlusExtendedRun
+---------------------------------------------------------------------
+builder["mythicPlusExtendedRun"] = function(parent)
+    if created["mythicPlusExtendedRun"] then
+        return created["mythicPlusExtendedRun"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_MythicPlusExtendedRun",
+        nil,
+        55
+    )
+    created["mythicPlusExtendedRun"] = pane
+
+    local cutoff = AF.CreateSlider(
+        pane,
+        L["Extended-run Baseline Cutoff"],
+        150,
+        1.25,
+        3,
+        0.05,
+        nil,
+        true
+    )
+    AF.SetPoint(cutoff, "TOPLEFT", 15, -25)
+    AlignSliderLabelLeft(cutoff)
+    cutoff:SetOnValueChanged(function(value)
+        pane.t.cfg.extendedRunMultiplier = value
+        AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
+    end)
+    cutoff:SetTooltip(
+        L["Extended-run Baseline Cutoff"],
+        L["Runs at or above this multiple of the dungeon timer are kept, but excluded from baselines."],
+        L["The default is 1.50× the dungeon timer."]
+    )
+
+    function pane.Load(t)
+        pane.t = t
+        cutoff:SetValue(t.cfg.extendedRunMultiplier)
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- mythicPlusPreview
+---------------------------------------------------------------------
+builder["mythicPlusPreview"] = function(parent)
+    if created["mythicPlusPreview"] then
+        return created["mythicPlusPreview"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_MythicPlusPreview",
+        nil,
+        30
+    )
+    created["mythicPlusPreview"] = pane
+
+    local previewShown = false
+    local preview = AF.CreateCheckButton(pane, L["Show Preview"])
+    AF.SetPoint(preview, "LEFT", 15, 0)
+    local function HidePreview()
+        if not previewShown then return end
+        previewShown = false
+        preview:SetChecked(false)
+        local module = W.MythicPlus
+        if module and type(module.SetPreview) == "function" then
+            module.SetPreview(false)
+        end
+    end
+    preview:SetOnCheck(function(checked)
+        previewShown = checked
+        local module = W.MythicPlus
+        if module and type(module.SetPreview) == "function" then
+            module.SetPreview(checked)
+        end
+    end)
+    AF.RegisterCallback("BFI_HideMythicPlusPreview", HidePreview)
+
+    function pane.Load(t)
+        pane.t = t
+        if not t.cfg.enabled then
+            HidePreview()
+        end
+        preview:SetEnabled(t.cfg.enabled == true)
+        preview:SetChecked(previewShown)
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- mythicPlusHistory
+---------------------------------------------------------------------
+builder["mythicPlusHistory"] = function(parent)
+    if created["mythicPlusHistory"] then
+        return created["mythicPlusHistory"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_MythicPlusHistory",
+        nil,
+        40
+    )
+    created["mythicPlusHistory"] = pane
+
+    local clear = AF.CreateButton(
+        pane,
+        L["Clear Mythic+ History"],
+        "red_hover",
+        160,
+        20
+    )
+    AF.SetPoint(clear, "LEFT", 15, 0)
+    clear:SetOnClick(function()
+        local dialog = AF.GetDialog(
+            BFIOptionsFrame_UIWidgetsPanel,
+            AF.WrapTextInColor(L["Clear Mythic+ history?"], "BFI")
+                .. "\n"
+                .. L["This permanently deletes this character's stored runs and baselines."],
+            300
+        )
+        dialog:SetPoint("TOP", pane, "BOTTOM")
+        dialog:SetOnConfirm(function()
+            local module = W.MythicPlus
+            if module and type(module.ClearHistory) == "function" then
+                module.ClearHistory()
+            end
+        end)
+    end)
+
+    pane.Load = AF.noop
     return pane
 end
 
@@ -562,69 +867,6 @@ builder["markerOptions"] = function(parent)
         worldMarkers:SetChecked(t.cfg.worldMarkers)
         showIfSolo:SetChecked(t.cfg.showIfSolo)
         showIfSolo:SetEnabled(t.cfg.targetMarkers)
-    end
-
-    return pane
-end
-
----------------------------------------------------------------------
--- trackerOrder
----------------------------------------------------------------------
-builder["trackerOrder"] = function(parent)
-    if created["trackerOrder"] then return created["trackerOrder"] end
-
-    local pane = AF.CreateBorderedFrame(parent, "BFI_UIWidgetOption_TrackerOrder")
-    created["trackerOrder"] = pane
-
-    local sorter = AF.CreateDragSorter(pane, nil, 5, 200, 20, "VERTICAL")
-    AF.SetPoint(sorter, "TOPLEFT", 15, -35)
-    sorter:SetCallback(function()
-        AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
-    end)
-
-    local tip = AF.CreateFontString(pane, AF.GetGradientText(L["Drag to reorder"], "BFI", "white"))
-    AF.SetPoint(tip, "BOTTOMLEFT", sorter, "TOPLEFT", 0, 10)
-
-    local trackers = {
-        {"ScenarioObjectiveTracker", _G.TRACKER_HEADER_DUNGEON},
-        {"UIWidgetObjectiveTracker", _G.TRACKER_HEADER_SCENARIO},
-        {"CampaignQuestObjectiveTracker", _G.TRACKER_HEADER_CAMPAIGN_QUESTS},
-        {"QuestObjectiveTracker", _G.TRACKER_HEADER_QUESTS},
-        {"AdventureObjectiveTracker", _G.ADVENTURE_TRACKING_MODULE_HEADER_TEXT},
-        {"AchievementObjectiveTracker", _G.TRACKER_HEADER_ACHIEVEMENTS},
-        {"MonthlyActivitiesObjectiveTracker", _G.TRACKER_HEADER_MONTHLY_ACTIVITIES},
-        {"InitiativeTasksObjectiveTracker", _G.TRACKER_HEADER_INITIATIVE_TASKS},
-        {"ProfessionsRecipeTracker", _G.PROFESSIONS_TRACKER_HEADER_PROFESSION},
-        {"BonusObjectiveTracker", _G.TRACKER_HEADER_BONUS_OBJECTIVES},
-        {"WorldQuestObjectiveTracker", _G.TRACKER_HEADER_WORLD_QUESTS},
-    }
-
-    local widgets = {}
-
-    for _, info in ipairs(trackers) do
-        local button = AF.CreateButton(sorter, info[2], "BFI_hover")
-        tinsert(widgets, button)
-        button.value = info[1]
-        button.tipText = info[2]
-        button:SetTextJustifyH("LEFT")
-        function button:update(index)
-            self:SetText(AF.WrapTextInColor(index, "darkgray") .. " " .. self.tipText)
-        end
-    end
-    sorter:SetWidgets(widgets, true)
-
-    RunNextFrame(function()
-        pane:SetHeight(sorter:GetHeight() + 45)
-
-        if parent._contentHeights then
-            parent._contentHeights[pane.index] = tostring(pane:GetHeight()) -- update height
-            AF.ReSize(parent) -- call AF.SetScrollContentHeight
-        end
-    end)
-
-    function pane.Load(t)
-        pane.t = t
-        sorter:SetConfigTable(t.cfg.order)
     end
 
     return pane

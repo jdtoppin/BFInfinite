@@ -203,68 +203,20 @@ assertEqual(
 local compile = harness.state.registrations[1].compiler
 
 local orientationCases = {
-    {
-        key = "left_to_right_then_down",
-        axis = "HORIZONTAL",
-        anchor = "TOPLEFT",
-        horizontal = "RIGHT",
-        vertical = "DOWN",
-    },
-    {
-        key = "left_to_right_then_up",
-        axis = "HORIZONTAL",
-        anchor = "BOTTOMLEFT",
-        horizontal = "RIGHT",
-        vertical = "UP",
-    },
-    {
-        key = "right_to_left_then_down",
-        axis = "HORIZONTAL",
-        anchor = "TOPRIGHT",
-        horizontal = "LEFT",
-        vertical = "DOWN",
-    },
-    {
-        key = "right_to_left_then_up",
-        axis = "HORIZONTAL",
-        anchor = "BOTTOMRIGHT",
-        horizontal = "LEFT",
-        vertical = "UP",
-    },
-    {
-        key = "top_to_bottom_then_left",
-        axis = "VERTICAL",
-        anchor = "TOPRIGHT",
-        horizontal = "LEFT",
-        vertical = "DOWN",
-    },
-    {
-        key = "top_to_bottom_then_right",
-        axis = "VERTICAL",
-        anchor = "TOPLEFT",
-        horizontal = "RIGHT",
-        vertical = "DOWN",
-    },
-    {
-        key = "bottom_to_top_then_left",
-        axis = "VERTICAL",
-        anchor = "BOTTOMRIGHT",
-        horizontal = "LEFT",
-        vertical = "UP",
-    },
-    {
-        key = "bottom_to_top_then_right",
-        axis = "VERTICAL",
-        anchor = "BOTTOMLEFT",
-        horizontal = "RIGHT",
-        vertical = "UP",
-    },
+    "left_to_right_then_down",
+    "left_to_right_then_up",
+    "right_to_left_then_down",
+    "right_to_left_then_up",
+    "top_to_bottom_then_left",
+    "top_to_bottom_then_right",
+    "bottom_to_top_then_left",
+    "bottom_to_top_then_right",
 }
 
-for _, expected in ipairs(orientationCases) do
+for _, savedOrientation in ipairs(orientationCases) do
     local config = NewConfig()
     config.enabled = true
-    config.orientation = expected.key
+    config.orientation = savedOrientation
     config.width = 20
     config.height = 30
     config.spacingX = 2
@@ -274,85 +226,84 @@ for _, expected in ipairs(orientationCases) do
 
     local descriptor = assert(compile(config))
     local flow = descriptor.flowLayout
-    assertEqual(flow.axis, expected.axis, expected.key .. " axis")
+    assertEqual(flow.axis, "HORIZONTAL", savedOrientation .. " fixed axis")
     assertEqual(
         flow.anchorPoint,
-        expected.anchor,
-        expected.key .. " flow anchor"
+        "BOTTOMRIGHT",
+        savedOrientation .. " fixed flow anchor"
     )
     assertEqual(
         flow.horizontalGrowthDirection,
-        expected.horizontal,
-        expected.key .. " horizontal growth"
+        "LEFT",
+        savedOrientation .. " fixed horizontal growth"
     )
     assertEqual(
         flow.verticalGrowthDirection,
-        expected.vertical,
-        expected.key .. " vertical growth"
+        "UP",
+        savedOrientation .. " fixed vertical growth"
     )
     assertEqual(
         descriptor.containerPoint.point,
-        expected.anchor,
-        expected.key .. " container point"
+        "BOTTOMRIGHT",
+        savedOrientation .. " fixed container point"
     )
     assertEqual(
         descriptor.containerPoint.relativePoint,
-        expected.anchor,
-        expected.key .. " container relative point"
+        "BOTTOMRIGHT",
+        savedOrientation .. " fixed container relative point"
     )
 
-    local horizontal = expected.axis == "HORIZONTAL"
     assertEqual(
         flow.maximumLineSize,
-        horizontal and 86 or 129,
-        expected.key .. " maximum line"
+        86,
+        savedOrientation .. " maximum line"
     )
     assertEqual(
         descriptor.holder.width,
-        horizontal and 86 or 64,
-        expected.key .. " holder width"
+        86,
+        savedOrientation .. " holder width"
     )
     assertEqual(
         descriptor.holder.height,
-        horizontal and 96 or 129,
-        expected.key .. " holder height"
+        96,
+        savedOrientation .. " holder height"
     )
 
     local groupLayout = descriptor.groups[1].layout
     assertEqual(
         groupLayout.elementSpacing,
-        horizontal and 2 or 3,
-        expected.key .. " primary spacing"
+        2,
+        savedOrientation .. " primary spacing"
     )
     assertEqual(
         groupLayout.lineSpacing,
-        horizontal and 3 or 2,
-        expected.key .. " cross spacing"
+        3,
+        savedOrientation .. " cross spacing"
     )
     assertEqual(groupLayout.groupSpacing, 0,
-        expected.key .. " group spacing")
+        savedOrientation .. " group spacing")
     assertEqual(
         groupLayout.groupLineSpacing,
-        horizontal and 3 or 2,
-        expected.key .. " group line spacing"
+        3,
+        savedOrientation .. " group line spacing"
     )
     assertEqual(groupLayout.elementWidth, 20,
-        expected.key .. " element width")
+        savedOrientation .. " element width")
     assertEqual(groupLayout.elementHeight, 30,
-        expected.key .. " element height")
+        savedOrientation .. " element height")
     assertTablesEqual(
         descriptor.itemEnchantmentLayout,
         {
-            elementSpacing = horizontal and 2 or 3,
-            lineSpacing = horizontal and 3 or 2,
+            elementSpacing = 2,
+            lineSpacing = 3,
             groupSpacing = 0,
-            groupLineSpacing = horizontal and 3 or 2,
+            groupLineSpacing = 3,
             forceNewLine = false,
             elementWidth = 20,
             elementHeight = 30,
             placement = "BEFORE",
         },
-        expected.key .. " enchantment layout"
+        savedOrientation .. " enchantment layout"
     )
 end
 
@@ -406,7 +357,6 @@ end
 
 do
     local config = NewConfig()
-    local profilePosition = config.position
     config.width = 20
     config.height = 30
     config.wrapAfter = 1
@@ -416,9 +366,21 @@ do
     config.duration.color.seconds.value = 99
 
     local descriptor = assert(compile(config))
-    assertEqual(descriptor.positionSave, profilePosition,
-        "mover save keeps profile identity")
-    assertEqual(descriptor.moverText, "Buff Frame", "native mover label")
+    assertNil(descriptor.position, "saved BFI position is dormant")
+    assertNil(descriptor.positionSave, "follower owns no mover save")
+    assertNil(descriptor.moverText, "follower creates no BFI mover")
+    assertEqual(descriptor.holderRolesets, "buffs", "Buff roleset")
+    assertTablesEqual(
+        descriptor.holderAnchor,
+        {
+            point = "BOTTOMRIGHT",
+            relativeGlobal = "DebuffFrame",
+            relativePoint = "TOPRIGHT",
+            x = 0,
+            y = 5,
+        },
+        "native DebuffFrame follower anchor"
+    )
     assertEqual(descriptor.processing.policy, "NONE", "processing policy")
     assertNil(descriptor.processing.options, "None policy has no options")
 
@@ -513,9 +475,9 @@ do
         "construction key contains schema and style only"
     )
     assertNil(descriptor.constructionKey.orientation,
-        "orientation remains live")
+        "dormant saved orientation is not construction input")
     assertNil(descriptor.constructionKey.position,
-        "position remains live")
+        "dormant saved position is not construction input")
     assertNil(descriptor.constructionKey.wrapAfter,
         "wrapping remains live")
 
@@ -603,8 +565,8 @@ do
         "normalized integer cap")
     assertEqual(descriptor.groups[1].sortMethod, "EXPIRATION",
         "invalid sort falls back")
-    assertEqual(descriptor.flowLayout.anchorPoint, "TOPRIGHT",
-        "invalid orientation falls back")
+    assertEqual(descriptor.flowLayout.anchorPoint, "BOTTOMRIGHT",
+        "invalid orientation uses fixed follower flow")
     assertEqual(descriptor.groups[1].buttonStyle.width, 26,
         "invalid width falls back")
     assertEqual(descriptor.groups[1].buttonStyle.height, 10,
