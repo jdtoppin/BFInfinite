@@ -11,6 +11,7 @@ local LIST_WIDTH = 170
 local HEADER_HEIGHT = 35
 
 local optionsFrame
+local optionButtons = {}
 local buffsDebuffsAvailable = type(BFI.modules.BuffsDebuffs.HasAuraBackend) == "function"
     and BFI.modules.BuffsDebuffs.HasAuraBackend()
 
@@ -34,6 +35,7 @@ local list = {
     "tooltip",
     "uiWidgets",
     "dataBars",
+    "damageMeter",
     -- "dataBroker",
     "maps",
     "chat",
@@ -114,12 +116,13 @@ local function BuildList()
         else
             item = CreateButton(name)
             tinsert(buttons, item)
+            optionButtons[item.id] = item
             if not first then first = item end
         end
 
         if last then
-            AF.SetPoint(item, "TOPLEFT", last, "BOTTOMLEFT", 0, -5)
-            AF.SetPoint(item, "TOPRIGHT", last, "BOTTOMRIGHT", 0, -5)
+            AF.SetPoint(item, "TOPLEFT", last, "BOTTOMLEFT", 0, -4)
+            AF.SetPoint(item, "TOPRIGHT", last, "BOTTOMRIGHT", 0, -4)
         else
             AF.SetPoint(item, "TOPLEFT", 7, -15)
             AF.SetPoint(item, "TOPRIGHT", -7, -15)
@@ -156,6 +159,9 @@ local function CreateOptionsFrame()
     AF.CreateGlow(optionsFrame, "shadow")
 
     optionsFrame:SetOnShow(ReAnchor)
+    optionsFrame:SetOnHide(function()
+        AF.Fire("BFI_HideMythicPlusPreview")
+    end)
 
     --------------------------------------------------
     -- header pane
@@ -271,11 +277,32 @@ end
 ---------------------------------------------------------------------
 -- show
 ---------------------------------------------------------------------
-function F.ToggleOptionsFrame()
+local function EnsureOptionsFrame()
     if not optionsFrame then
         CreateOptionsFrame()
         BuildList()
         ShowAlphaNotice()
     end
+end
+
+function F.ToggleOptionsFrame()
+    EnsureOptionsFrame()
     optionsFrame:Toggle()
+end
+
+function F.OpenOptionsFrame(id)
+    EnsureOptionsFrame()
+
+    local button = optionButtons[id]
+    if button and button:IsEnabled() then
+        if button.isSelected then
+            ShowOptionsPanel(button, id)
+        else
+            button:SilentClick()
+        end
+    end
+
+    optionsFrame:Show()
+    optionsFrame:Raise()
+    return button ~= nil and button:IsEnabled()
 end
