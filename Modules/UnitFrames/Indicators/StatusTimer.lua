@@ -97,19 +97,40 @@ local function UpdateStatus(self)
         return
     end
 
-    if not UnitIsConnected(unit) then
+    local isConnected = UnitIsConnected(unit)
+    if not F.isValueNonSecret(isConnected) then
+        SetStatus(self)
+        return
+    end
+    if not isConnected then
         SetStatus(self, "OFFLINE")
-    elseif UnitIsAFK(unit) then
+        return
+    end
+
+    local isAFK = UnitIsAFK(unit)
+    if F.isValueNonSecret(isAFK) and isAFK then
         SetStatus(self, "AFK")
-    elseif UnitIsDeadOrGhost(unit) then
-        if UnitIsGhost(unit) then
+        return
+    end
+
+    local isDeadOrGhost = UnitIsDeadOrGhost(unit)
+    if not F.isValueNonSecret(isDeadOrGhost) then
+        SetStatus(self)
+        return
+    end
+    if isDeadOrGhost then
+        local isGhost = UnitIsGhost(unit)
+        if not F.isValueNonSecret(isGhost) then
+            SetStatus(self)
+        elseif isGhost then
             SetStatus(self, "GHOST")
         else
             SetStatus(self, "DEAD")
         end
-    else
-        SetStatus(self)
+        return
     end
+
+    SetStatus(self)
 end
 
 ---------------------------------------------------------------------

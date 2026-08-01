@@ -15,7 +15,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Lua checks
+      - name: Install Lua tools
         run: |
           sudo apt-get update
           sudo apt-get install --yes lua-check lua5.1 luajit ripgrep
@@ -48,11 +48,21 @@ jobs:
           luajit tests/damage_meter_renderer_test.lua
           luajit tests/damage_meter_renderer_policy_test.lua
 
-      - name: Test Retail compatibility and idle lifecycles
+      - name: Test Mythic+ timer, seasonal analysis, and tracker integration
+        run: |
+          for test_file in tests/abstract_framework_version_guard_test.lua tests/mythic_plus_*_test.lua tests/objective_tracker_taint_boundary_test.lua; do
+            luajit "$test_file"
+          done
+
+      - name: Test Retail 12.1 fixes
+        run: |
+          for test_file in tests/challenges_keystone_frame_skin_test.lua tests/experience_bar_disabled_texture_test.lua tests/queue_status_frame_native_ownership_test.lua tests/style_pixel_updater_secret_geometry_test.lua tests/unit_frame_status_timer_secret_test.lua; do
+            lua5.1 "$test_file"
+          done
+
+      - name: Test idle rendering lifecycles and unit-frame defaults
         run: |
           lua5.1 tests/bags_item_level_test.lua
-          lua5.1 tests/objective_tracker_12_1_compat_test.lua
-          lua5.1 tests/experience_bar_disabled_texture_test.lua
           lua5.1 tests/action_bar_idle_flash_test.lua
           lua5.1 tests/action_bar_lightweight_backdrop_test.lua
           lua5.1 tests/cooldown_manager_idle_test.lua

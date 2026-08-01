@@ -1513,7 +1513,23 @@ end
 ---------------------------------------------------------------------
 local start
 
+local function HasPublicPixelGeometry(region)
+    local width, height = region:GetSize()
+    if not F.isValueNonSecret(width)
+        or not F.isValueNonSecret(height)
+        or type(width) ~= "number"
+        or type(height) ~= "number"
+    then
+        return false
+    end
+
+    local scale = region:GetEffectiveScale()
+    return F.isValueNonSecret(scale)
+        and type(scale) == "number" and scale > 0
+end
+
 local function UpdatePixels(_, region, remaining, total)
+    if not HasPublicPixelGeometry(region) then return end
     region:UpdatePixels()
     -- print("BFIStyled: ", AF.RoundToDecimal((total - remaining) / total, 2))
 end

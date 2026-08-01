@@ -579,6 +579,13 @@ assertEqual(
     345,
     "per-window height writes live"
 )
+DM.config.windowHeights[1] = 301
+DM.config.windowHeights[2] = 302
+DM.config.windowHeights[3] = 303
+refreshPanel(nil, "damageMeter")
+assertEqual(firstMeterHeight.value, 301, "external first height refreshes")
+assertEqual(secondMeterHeight.value, 302, "external second height refreshes")
+assertEqual(thirdMeterHeight.value, 303, "external third height refreshes")
 lockMeters.onCheck(false)
 assertEqual(DM.config.locked, false, "lock setting writes live")
 alwaysShowPlayer.onCheck(true)
