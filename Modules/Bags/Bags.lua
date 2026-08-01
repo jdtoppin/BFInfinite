@@ -15,6 +15,10 @@ local band = _G.bit.band
 local GetCVarBool = _G.GetCVarBool
 local GetInventoryItemTexture = _G.GetInventoryItemTexture
 local SetCVar = _G.SetCVar
+local GetCurrentItemLevel = _G.C_Item.GetCurrentItemLevel
+local GetItemQualityColor = _G.C_Item.GetItemQualityColor
+local IsEquippableItem = _G.C_Item.IsEquippableItem
+local ItemLocation = _G.ItemLocation
 
 local ITEM_CLASS = _G.Enum.ItemClass
 local BAG_TOP_WITH_SLOTS = 100
@@ -92,6 +96,7 @@ local bagSlotsButton
 local categoryButtonShowsCombinedView
 local initialized
 local moduleEnabled
+local itemLevelDisplayActive
 local refreshPending
 local layoutInProgress
 local layoutScale = 1
@@ -137,6 +142,7 @@ local emptyStates = {
     [EMPTY_KIND_REAGENT] = {},
 }
 local styledItemButtons = setmetatable({}, {__mode = "k"})
+local itemLevelButtons = setmetatable({}, {__mode = "k"})
 local layoutObjects = {}
 local layoutObjectX = {}
 local layoutObjectY = {}
@@ -157,6 +163,12 @@ local cleanupTooltipState = {}
 -- Blizzard_MainMenuBarBagButtons/Shared/BagsBar.lua and
 -- Blizzard_FrameXMLBase/Mainline/FrameLocks.lua show that BagsBar separately
 -- owns the persistent HUD buttons and may have a lock-managed logical state.
+-- Item-level evidence: Retail 12.0.7.68887 source commit
+-- 4383ced30106d51b27e3e86d1987f1552f0d259d and Retail 12.1.0.68914
+-- source commit d3915c78aba77a7a9be76acbfa35c674bbb6abe9.
+-- ItemDocumentation.lua documents IsEquippableItem, GetCurrentItemLevel, and
+-- GetItemQualityColor; ContainerFrame.lua waits on ContinuableContainer
+-- before UpdateItems.
 
 local function IsEnabled()
     return moduleEnabled and B.config and B.config.enabled
@@ -318,6 +330,77 @@ end
 local function ItemButtonOnEnter(button)
     if UpdateEmptyRepresentativeForCursor then
         UpdateEmptyRepresentativeForCursor(button)
+    end
+end
+
+local function ClearItemLevelText(button)
+    local text = button.BFIItemLevel
+    if not text then return end
+    text:SetText("")
+    text:Hide()
+end
+
+local function GetItemLevelText(button)
+    local text = button.BFIItemLevel
+    if text then return text end
+
+    text = AF.CreateFontString(button, nil, "white", "AF_FONT_OUTLINE")
+    text:SetPoint("BOTTOMLEFT", 2, 2)
+    text:SetJustifyH("LEFT")
+    button.BFIItemLevel = text
+    itemLevelButtons[button] = true
+    return text
+end
+
+local function UpdateItemLevelText(button)
+    local bagID = button:GetBagID()
+    local slotID = button:GetID()
+    local info = _G.C_Container.GetContainerItemInfo(
+        bagID,
+        slotID
+    )
+    local itemLink = info and info.hyperlink
+    if not itemLink or not IsEquippableItem(itemLink) then
+        ClearItemLevelText(button)
+        return
+    end
+
+    local itemLocation = ItemLocation:CreateFromBagAndSlot(bagID, slotID)
+    local itemLevel = GetCurrentItemLevel(itemLocation)
+    if not itemLevel then
+        ClearItemLevelText(button)
+        return
+    end
+
+    local text = GetItemLevelText(button)
+    text:SetText(itemLevel)
+    if info.quality ~= nil then
+        local r, g, b = GetItemQualityColor(info.quality)
+        text:SetTextColor(r, g, b)
+    else
+        text:SetTextColor(AF.GetColorRGB("white"))
+    end
+    text:Show()
+end
+
+local function HideItemLevelTexts()
+    if not itemLevelDisplayActive then return end
+    itemLevelDisplayActive = nil
+    for button in next, itemLevelButtons do
+        ClearItemLevelText(button)
+    end
+end
+
+local function RefreshItemLevelTexts()
+    if not B.config.showItemLevel then
+        HideItemLevelTexts()
+        return
+    end
+    if not combinedFrame or not combinedFrame.Items then return end
+
+    itemLevelDisplayActive = true
+    for _, button in ipairs(combinedFrame.Items) do
+        UpdateItemLevelText(button)
     end
 end
 
@@ -1257,6 +1340,7 @@ end
 
 local function OnCombinedFrameHide()
     B.Cleanup:Cancel(false)
+    HideItemLevelTexts()
     B:UnregisterEvent("BAG_UPDATE")
     B:UnregisterEvent("ITEM_LOCK_CHANGED")
     B:UnregisterEvent("DISPLAY_SIZE_CHANGED")
@@ -1466,6 +1550,7 @@ local function Initialize()
     end)
     hooksecurefunc(combinedFrame, "UpdateItems", function()
         if IsEnabled() then
+            RefreshItemLevelTexts()
             LayoutItems(false)
         end
     end)
@@ -1541,6 +1626,7 @@ end
 
 local function DisableModule()
     moduleEnabled = nil
+    HideItemLevelTexts()
     RestoreBlizzardBagBar()
     B.Cleanup:Restore()
     B:UnregisterAllEvents()
@@ -1618,7 +1704,11 @@ end
 
 function B.Refresh()
     UpdateBlizzardBagBarVisibility()
+    if IsEnabled() and not B.config.showItemLevel then
+        HideItemLevelTexts()
+    end
     if IsEnabled() and combinedFrame and combinedFrame:IsShown() then
+        RefreshItemLevelTexts()
         LayoutItems(true)
     end
 end

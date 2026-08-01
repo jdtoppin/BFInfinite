@@ -11,6 +11,7 @@ local defaults = {
     categories = false,
     showBagSlots = true,
     showBlizzardBagBar = false,
+    showItemLevel = false,
     columns = 12,
     spacing = 4,
 }
@@ -21,6 +22,9 @@ local function NormalizeConfig(config)
     if type(config.showBagSlots) ~= "boolean" then config.showBagSlots = defaults.showBagSlots end
     if type(config.showBlizzardBagBar) ~= "boolean" then
         config.showBlizzardBagBar = defaults.showBlizzardBagBar
+    end
+    if type(config.showItemLevel) ~= "boolean" then
+        config.showItemLevel = defaults.showItemLevel
     end
 
     local columns = tonumber(config.columns)

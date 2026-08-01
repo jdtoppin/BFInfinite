@@ -64,8 +64,15 @@ local function CreateAppearancePane()
         B.Refresh()
     end)
 
+    local showItemLevel = AF.CreateCheckButton(appearancePane, L["Show Item Level"])
+    AF.SetPoint(showItemLevel, "TOPLEFT", categories, "BOTTOMLEFT", 0, -18)
+    showItemLevel:SetOnCheck(function(checked)
+        B.config.showItemLevel = checked
+        B.Refresh()
+    end)
+
     local columns = AF.CreateSlider(appearancePane, L["Preferred Columns"], 150, 10, 16, 1, nil, true)
-    AF.SetPoint(columns, "TOPLEFT", categories, "BOTTOMLEFT", 0, -45)
+    AF.SetPoint(columns, "TOPLEFT", showItemLevel, "BOTTOMLEFT", 0, -45)
     columns:SetAfterValueChanged(function(value)
         B.config.columns = value
         B.Refresh()
@@ -85,12 +92,14 @@ local function CreateAppearancePane()
         showBagSlots:SetChecked(config.showBagSlots)
         showBlizzardBagBar:SetChecked(config.showBlizzardBagBar)
         categories:SetChecked(config.categories)
+        showItemLevel:SetChecked(config.showItemLevel)
         columns:SetValue(config.columns)
         spacing:SetValue(config.spacing)
 
         showBagSlots:SetEnabled(config.enabled)
         showBlizzardBagBar:SetEnabled(config.enabled)
         categories:SetEnabled(config.enabled)
+        showItemLevel:SetEnabled(config.enabled)
         columns:SetEnabled(config.enabled)
         spacing:SetEnabled(config.enabled)
     end
