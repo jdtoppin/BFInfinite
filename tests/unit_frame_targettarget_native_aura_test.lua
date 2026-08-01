@@ -634,6 +634,9 @@ local function makeEventRuntimeHarness()
             end,
         },
         CreateFrame = CreateFrame,
+        GetBuildInfo = function()
+            return nil, nil, nil, 120100
+        end,
         GameTooltip = {},
         GameTooltip_SetDefaultAnchor = function()
         end,

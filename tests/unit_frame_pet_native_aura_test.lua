@@ -568,6 +568,12 @@ local function makeDisabledRuntimeHarness()
                 callback()
             end,
         },
+        CreateFrame = function()
+            error("disabled Pet runtime created an unavailable frame", 2)
+        end,
+        GetBuildInfo = function()
+            return nil, nil, nil, 120100
+        end,
         InCombatLockdown = function()
             return false
         end,
@@ -586,6 +592,7 @@ local function makeDisabledRuntimeHarness()
         pairs = pairs,
         select = select,
         setmetatable = setmetatable,
+        tonumber = tonumber,
         type = type,
     }
     environment._G = environment

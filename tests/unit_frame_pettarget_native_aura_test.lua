@@ -400,11 +400,13 @@ end
 
 local function makeEventRuntimeHarness(
     configEnabled,
-    hasNativeBackend
+    hasNativeBackend,
+    interfaceVersion
 )
     if hasNativeBackend == nil then
         hasNativeBackend = true
     end
+    interfaceVersion = interfaceVersion or 120100
 
     local harness = {
         compiles = {},
@@ -679,6 +681,9 @@ local function makeEventRuntimeHarness(
             end,
         },
         CreateFrame = CreateFrame,
+        GetBuildInfo = function()
+            return nil, nil, nil, interfaceVersion
+        end,
         GameTooltip = {},
         GameTooltip_SetDefaultAnchor = function()
         end,
@@ -1433,7 +1438,7 @@ local function testPetTargetRuntimeLifecycleHasNoGrowth()
 end
 
 local function testPetTargetLegacyFallbackUsesBothAuraBuilders()
-    local harness = makeEventRuntimeHarness(true, false)
+    local harness = makeEventRuntimeHarness(true, false, 120007)
     local buffs = harness.buffs
     local debuffs = harness.debuffs
 

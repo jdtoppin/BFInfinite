@@ -484,6 +484,9 @@ local function makeHarness()
             assertEqual(frameType, "Frame", "aura holder frame type")
             return newFrame(harness, name, parent)
         end,
+        GetBuildInfo = function()
+            return nil, nil, nil, 120100
+        end,
         InCombatLockdown = function()
             return harness.inCombat
         end,

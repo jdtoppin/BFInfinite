@@ -21,6 +21,14 @@ aggregate only after the isolated leaves pass.
 
 Use this clean isolated-install sequence:
 
+Before the supported pairs, run one deliberate dependency-mismatch preflight:
+install AF #23/r35 at
+`43f79cf2e9e91c47c9142c3546c900baf8fe092f` with the exact checked-out
+head of BFInfinite #91. A dependency warning is acceptable. Every BFI-owned
+unit-frame and nameplate aura row must remain hidden, and the error log must
+contain no `GetUnitAuraInstanceIDs`, `UNIT_AURA`, Lua, or taint error. Then
+delete both addon folders before installing the supported AF #25/r36 pair.
+
 1. AF #19 at `d6858f3997a1014a7ab9ce05ddaaf53efe4df9c6` with BFInfinite
    #90 at `d9c5a23246a01572e1fb75d470a250032f802b33`.
 2. AF #19 at `d6858f3997a1014a7ab9ce05ddaaf53efe4df9c6` with BFInfinite
@@ -32,27 +40,27 @@ Use this clean isolated-install sequence:
 4. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
    #102 at `9fedb173cc7da9a4152ca3bd077fd2c3bf203df7`.
 5. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #120 at `512a89ec4c20744fa3f9ad99782f6f6f522f9cc5`, then #110 at
-   `3f7815ce7166ae16707e4e527fd43908fb7e5acb`.
+   #120 at `e205ec51605b3ceee2687d1339b428057d921277`, then #110 at
+   `b10ffbf7b5e1a4f8970a448c8fad0d0a9aa64742`.
 6. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #112 at `091d174ee745f95e662b4d9f3227b7d6cfdae3f1`.
+   #112 at `ab05284aae32d9478ac7181ea9db92b8c2c7f947`.
 7. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
    #103 at `dc0546639fec885ced82bdf1399d998f2c2f03bd`. Verify the
    ordinary upper-right Debuffs use BFI's neutral square outline while
    Blizzard continues to own their data and layout.
 8. Validation-only AF #25 at
-   `64fb9b7830f0fcafe3fb02043771e22cc0d67d51` with BFInfinite #110
-   at `3f7815ce7166ae16707e4e527fd43908fb7e5acb`. This is the clean
+   `d5a0984f5dc7f14b0b75314a0cae6d190bf61b88` with BFInfinite #110
+   at `b10ffbf7b5e1a4f8970a448c8fad0d0a9aa64742`. This is the clean
    combined check for AF #26's square border and AF #27's required r36
    runtime. Verify Target Debuffs use a square border while Blizzard's native
    dispel type still controls its colour and visibility. Target Buffs must
    remain unchanged.
 9. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #110 at `3f7815ce7166ae16707e4e527fd43908fb7e5acb`. On Target Buffs
+   #110 at `b10ffbf7b5e1a4f8970a448c8fad0d0a9aa64742`. On Target Buffs
    and Debuffs, test every cooldown choice after its required reload and
    require exactly one graphical timer.
 10. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-    #112 at `091d174ee745f95e662b4d9f3227b7d6cfdae3f1`. Repeat every
+    #112 at `ab05284aae32d9478ac7181ea9db92b8c2c7f947`. Repeat every
     cooldown choice on hostile nameplate Debuffs.
 11. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
     #121 at `d1a5fe741fc703458b5d0830e620cd6ac6f070b9`, then #103 at
@@ -82,7 +90,7 @@ Use this clean isolated-install sequence:
     Achievements for the first time. Require no nil edit-box error, protected
     action, or taint.
 16. Validation-only AF #25 at
-    `64fb9b7830f0fcafe3fb02043771e22cc0d67d51` with the exact
+    `d5a0984f5dc7f14b0b75314a0cae6d190bf61b88` with the exact
     checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
     validation SHA. Record that full branch-head SHA immediately before
     installation.
@@ -94,10 +102,10 @@ be merged. Closed PR #98 is superseded and is not an install input.
 
 For the final stack, use validation-only AbstractFramework PR #25, branch
 `codex/aura-full-stack-test`, exact head
-`64fb9b7830f0fcafe3fb02043771e22cc0d67d51`. It combines AF #23/r35,
-AF #26, and AF #27/r36 with current AF `main`
-`d95ae87f4538d6d3f40be8534ec220eace42f265`, including #24's Retail 12.1
-max-level fix. Never merge AF #25.
+`d5a0984f5dc7f14b0b75314a0cae6d190bf61b88`. It combines AF #23/r35,
+AF #26, AF #27/r36, and AF #28's legacy fail-closed boundary with current AF
+`main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`, including #24's Retail
+12.1 max-level fix. Never merge AF #25.
 
 The aggregate must contain these exact BFInfinite terminal heads:
 
@@ -116,9 +124,9 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | FocusTarget | `codex/unitframe-aura-focustarget` | `58a60e011cb2dbd2d3b54d62cdb6ffc6b8df2df9` |
 | PetTarget | `codex/unitframe-aura-pettarget` | `02a75fd22f8f04e21e7f139df214697e6350e567` |
 | Pet | `codex/unitframe-aura-pet` | `8e91a8c7616b3000d5e607a2063bf528dd8c4f59` |
-| Unit/nameplate AF r36 gate (#120) | `codex/native-aura-r36-unitframe-gate` | `512a89ec4c20744fa3f9ad99782f6f6f522f9cc5` |
-| Target partition (#110) | `codex/unitframe-aura-target-final` | `3f7815ce7166ae16707e4e527fd43908fb7e5acb` |
-| Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `091d174ee745f95e662b4d9f3227b7d6cfdae3f1` |
+| Unit/nameplate AF r36 gate (#120) | `codex/native-aura-r36-unitframe-gate` | `e205ec51605b3ceee2687d1339b428057d921277` |
+| Target partition (#110) | `codex/unitframe-aura-target-final` | `b10ffbf7b5e1a4f8970a448c8fad0d0a9aa64742` |
+| Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `ab05284aae32d9478ac7181ea9db92b8c2c7f947` |
 | Party | `codex/unitframe-aura-party` | `2cfcbca80d0b2b45b9a9abb657907511152ae6b9` |
 | Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
 | Upper-right AF r36 gate (#121) | `codex/native-aura-r36-upper-right-gate` | `d1a5fe741fc703458b5d0830e620cd6ac6f070b9` |
