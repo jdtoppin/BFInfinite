@@ -163,6 +163,8 @@ L["Hide At Full Durability"] = "满耐久时隐藏"
 L["Show Missing Enchantment and Gems"] = "显示缺失的附魔和宝石"
 L["Quality Color"] = "品质颜色"
 L["Glow Below"] = "低于此值时发光"
+L["Auto Insert Matching Keystone"] = "自动插入匹配的钥石"
+L["Automatically inserts your usable Mythic Keystone when the dungeon pedestal opens. It never starts the key."] = "打开地下城钥石底座时，自动插入你可用的史诗钥石。不会自动开始钥石。"
 L["Show Teleport Buttons on Mythic+ Tab"] = "在史诗钥石地下城页面显示传送按钮"
 
 ---------------------------------------------------------------------
