@@ -69,6 +69,7 @@ local renderedUnit = "nameplate7"
 local renderedUnitGUID = "Player-1-00000001"
 local playerResult = true
 local playerInGuildResult = true
+local unitPVPResult = false
 local classFilename = "MAGE"
 local accessibleResult = true
 local forbiddenResult = false
@@ -293,6 +294,10 @@ local environment = {
         assertEqual(unit, renderedUnit, "faction unit token")
         return "Alliance"
     end,
+    UnitIsPVP = function(unit)
+        assertEqual(unit, renderedUnit, "PvP unit token")
+        return unitPVPResult
+    end,
     UnitIsPlayer = function(unit)
         assertEqual(unit, renderedUnit, "player unit token")
         return playerResult
@@ -404,6 +409,65 @@ assertColor(fontStrings[4], 0.77, 0.12, 0.23, "12.1 Death Knight class/specifica
 assertColor(fontStrings[5], 0.4, 0.5, 0.6, "12.1 same-faction Alliance")
 assertColor(fontStrings[2], 0, 1, 0, "12.1 Death Knight guild")
 classFilename = "MAGE"
+
+-- Reported PTR layout: an unguilded PvP player adds a trailing generic PvP
+-- status after the level, class/specification, and faction rows.
+clearColors()
+classFilename = "DEATHKNIGHT"
+playerInGuildResult = false
+unitPVPResult = true
+local priorPvPGuildLookupCalls = guildLookupCalls
+postCall(gameTooltip, {
+    guid = renderedUnitGUID,
+    lines = fourGenericPlayerLines,
+})
+assertEqual(guildLookupCalls, priorPvPGuildLookupCalls + 1,
+    "unguilded PvP shape queries public guild state")
+assertColor(fontStrings[1], 0.77, 0.12, 0.23, "unguilded PvP Death Knight name")
+assertColor(fontStrings[2], 1, 0.82, 0, "unguilded PvP level")
+assertColor(fontStrings[3], 0.77, 0.12, 0.23, "unguilded PvP class/specification")
+assertColor(fontStrings[4], 0.4, 0.5, 0.6, "unguilded PvP same-faction Alliance")
+assertEqual(fontStrings[5].color, nil, "unguilded PvP status remains native")
+
+local fiveGenericPlayerLines = {
+    {lineIndex = 1, type = unitLineType.UnitName, unitToken = renderedUnit},
+    {lineIndex = 2, type = unitLineType.None},
+    {lineIndex = 3, type = unitLineType.None},
+    {lineIndex = 4, type = unitLineType.None},
+    {lineIndex = 5, type = unitLineType.None},
+    {lineIndex = 6, type = unitLineType.None},
+}
+clearColors()
+playerInGuildResult = true
+priorPvPGuildLookupCalls = guildLookupCalls
+postCall(gameTooltip, {
+    guid = renderedUnitGUID,
+    lines = fiveGenericPlayerLines,
+})
+assertEqual(guildLookupCalls, priorPvPGuildLookupCalls + 1,
+    "guilded PvP shape queries public guild state")
+assertColor(fontStrings[1], 0.77, 0.12, 0.23, "guilded PvP Death Knight name")
+assertColor(fontStrings[2], 0, 1, 0, "guilded PvP guild")
+assertColor(fontStrings[3], 1, 0.82, 0, "guilded PvP level")
+assertColor(fontStrings[4], 0.77, 0.12, 0.23, "guilded PvP class/specification")
+assertColor(fontStrings[5], 0.4, 0.5, 0.6, "guilded PvP same-faction Alliance")
+assertEqual(fontStrings[6].color, nil, "guilded PvP status remains native")
+
+-- Secret PvP state must not select the unguilded four-row interpretation.
+clearColors()
+playerInGuildResult = false
+unitPVPResult = secretValue
+postCall(gameTooltip, {
+    guid = renderedUnitGUID,
+    lines = fourGenericPlayerLines,
+})
+for index = 2, 5 do
+    assertEqual(fontStrings[index].color, nil, "secret PvP row " .. index)
+end
+
+classFilename = "MAGE"
+playerInGuildResult = true
+unitPVPResult = false
 
 -- Secret guild state must not select a row layout.
 clearColors()

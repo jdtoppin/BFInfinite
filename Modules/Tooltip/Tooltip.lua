@@ -24,6 +24,7 @@ local NORMAL_FONT_COLOR = _G.NORMAL_FONT_COLOR
 local UnitClassBase = _G.UnitClassBase
 local UnitExists = _G.UnitExists
 local UnitFactionGroup = _G.UnitFactionGroup
+local UnitIsPVP = _G.UnitIsPVP
 local UnitIsPlayer = _G.UnitIsPlayer
 
 local NATIVE_STATUS_BAR_HEIGHT = 8
@@ -229,15 +230,27 @@ local function GetUnitTooltipLineInfo(data)
         noneLineIndices
 end
 
-local function IsTooltipPlayerInGuild(data)
+local function GetTooltipPlayerGuildState(data)
     local guid = data.guid
-    if not F.isValueNonSecret(guid) or type(guid) ~= "string" then return false end
+    if not F.isValueNonSecret(guid) or type(guid) ~= "string" then return end
 
     -- Retail 12.0.7 and 12.1.0.68914 document this GUID query as returning
     -- an ordinary boolean. Sanitize it defensively before using it to resolve
-    -- the otherwise ambiguous four-row generic player identity block.
+    -- the otherwise ambiguous four/five-row generic player identity block.
     local isInGuild = IsPlayerInGuildFromGUID(guid)
-    return F.isValueNonSecret(isInGuild) and isInGuild or false
+    if F.isValueNonSecret(isInGuild) and type(isInGuild) == "boolean" then
+        return isInGuild
+    end
+end
+
+local function GetUnitPVPState(unit)
+    -- Retail 12.1.0.68914 makes UnitIsPVP secret with restricted unit
+    -- identity. Preserve public true and false as distinct layout facts and
+    -- return nil for a secret or unavailable result.
+    local isPVP = UnitIsPVP(unit)
+    if F.isValueNonSecret(isPVP) and type(isPVP) == "boolean" then
+        return isPVP
+    end
 end
 
 local function GetPlayerIdentityLineIndices(
@@ -246,7 +259,8 @@ local function GetPlayerIdentityLineIndices(
     unitTypeLineIndex,
     lineTypesByIndex,
     noneLineIndices,
-    isPlayerInGuild
+    playerInGuildState,
+    unitPVPState
 )
     local levelLineIndex = unitLevelLineIndex
     local classLineIndex = unitTypeLineIndex
@@ -266,18 +280,40 @@ local function GetPlayerIdentityLineIndices(
         if classLineIndex and lineTypesByIndex[classLineIndex + 1] == NONE_LINE then
             factionLineIndex = classLineIndex + 1
         end
-    elseif (#noneLineIndices == 3
-            or (#noneLineIndices == 4 and isPlayerInGuild))
-        and unitNameLineIndex
-        and noneLineIndices[1] == unitNameLineIndex + 1
-        and noneLineIndices[2] == unitNameLineIndex + 2
-        and noneLineIndices[3] == unitNameLineIndex + 3
-        and (#noneLineIndices == 3 or noneLineIndices[4] == unitNameLineIndex + 4)
-    then
+    else
         local count = #noneLineIndices
-        levelLineIndex = noneLineIndices[count - 2]
-        classLineIndex = noneLineIndices[count - 1]
-        factionLineIndex = noneLineIndices[count]
+        local identityRowCount
+        if count == 3 then
+            identityRowCount = 3
+        elseif count == 4 then
+            if playerInGuildState == true and unitPVPState == false then
+                identityRowCount = 4
+            elseif playerInGuildState == false and unitPVPState == true then
+                identityRowCount = 3
+            end
+        elseif count == 5
+            and playerInGuildState == true
+            and unitPVPState == true
+        then
+            identityRowCount = 4
+        end
+
+        local rowsAreContiguous = identityRowCount and unitNameLineIndex ~= nil
+        if rowsAreContiguous then
+            for index, lineIndex in ipairs(noneLineIndices) do
+                if lineIndex ~= unitNameLineIndex + index then
+                    rowsAreContiguous = false
+                    break
+                end
+            end
+        end
+
+        if rowsAreContiguous then
+            local guildOffset = identityRowCount == 4 and 1 or 0
+            levelLineIndex = noneLineIndices[1 + guildOffset]
+            classLineIndex = noneLineIndices[2 + guildOffset]
+            factionLineIndex = noneLineIndices[3 + guildOffset]
+        end
     end
 
     local guildLineIndex
@@ -290,9 +326,8 @@ local function GetPlayerIdentityLineIndices(
 
     -- Retail 12.1.0.68914 (wow-ui-source d3915c78) adds UnitLevel and UnitType
     -- enum values, but the native producer can still emit a generic identity
-    -- block. Accept the exact three-row no-guild shape. The four-row shape is
-    -- ambiguous, so accept it only when the documented GUID query positively
-    -- identifies a guilded player.
+    -- block. Exact public guild and PvP state disambiguate the reported
+    -- four/five-row variants; their trailing PvP status row remains native.
     return levelLineIndex, classLineIndex, factionLineIndex, guildLineIndex
 end
 
@@ -573,10 +608,17 @@ local function OnUnitTooltipPostCall(tooltip, data)
         local classLineIndex
         local factionLineIndex
         local guildLineIndex
-        local isPlayerInGuild = not unitLevelLineIndex
+        local playerInGuildState
+        local unitPVPState
+        local genericLineCount = #noneLineIndices
+        if not unitLevelLineIndex
             and not unitTypeLineIndex
-            and #noneLineIndices == 4
-            and IsTooltipPlayerInGuild(data)
+            and genericLineCount >= 4
+            and genericLineCount <= 5
+        then
+            playerInGuildState = GetTooltipPlayerGuildState(data)
+            unitPVPState = GetUnitPVPState(unit)
+        end
         levelLineIndex,
             classLineIndex,
             factionLineIndex,
@@ -586,7 +628,8 @@ local function OnUnitTooltipPostCall(tooltip, data)
             unitTypeLineIndex,
             lineTypesByIndex,
             noneLineIndices,
-            isPlayerInGuild
+            playerInGuildState,
+            unitPVPState
         )
         ApplyPlayerIdentityColors(
             tooltip,
