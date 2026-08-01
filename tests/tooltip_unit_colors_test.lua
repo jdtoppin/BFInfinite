@@ -66,11 +66,14 @@ end
 
 local secretValue = {}
 local renderedUnit = "nameplate7"
+local renderedUnitGUID = "Player-1-00000001"
 local playerResult = true
+local playerInGuildResult = true
 local classFilename = "MAGE"
 local accessibleResult = true
 local forbiddenResult = false
 local classColorCalls = 0
+local guildLookupCalls = 0
 local mythicPlusUnit
 local itemLevelUnit
 local fontStrings = {}
@@ -195,6 +198,7 @@ local BFI = {
 }
 
 local classColor = makeColor(0.1, 0.2, 0.3)
+local deathKnightColor = makeColor(0.77, 0.12, 0.23)
 local factionColor = makeColor(0.4, 0.5, 0.6)
 local difficultyColor = makeColor(1, 0.82, 0)
 local greenColor = makeColor(0, 1, 0)
@@ -218,8 +222,8 @@ local environment = {
     C_ClassColor = {
         GetClassColor = function(requestedClassFilename)
             classColorCalls = classColorCalls + 1
-            assertEqual(requestedClassFilename, "MAGE", "rendered unit class")
-            return classColor
+            assertEqual(requestedClassFilename, classFilename, "rendered unit class")
+            return requestedClassFilename == "DEATHKNIGHT" and deathKnightColor or classColor
         end,
     },
     C_MythicPlus = {
@@ -264,6 +268,11 @@ local environment = {
     end,
     IsAltKeyDown = function()
         return false
+    end,
+    IsPlayerInGuildFromGUID = function(guid)
+        guildLookupCalls = guildLookupCalls + 1
+        assertEqual(guid, renderedUnitGUID, "rendered unit guild GUID")
+        return playerInGuildResult
     end,
     IsShiftKeyDown = function()
         return false
@@ -357,22 +366,79 @@ runPlayerFixture({
     {lineIndex = 5, type = unitLineType.None},
 }, 1, 3, 4, 5, 2)
 
--- Four generic rows can mean guild/level/class/faction or a no-guild identity
--- block followed by a status. Leave the ambiguous rows native.
-clearColors()
-playerResult = true
-postCall(gameTooltip, {lines = {
+local fourGenericPlayerLines = {
     {lineIndex = 1, type = unitLineType.UnitName, unitToken = renderedUnit},
     {lineIndex = 2, type = unitLineType.None},
     {lineIndex = 3, type = unitLineType.None},
     {lineIndex = 4, type = unitLineType.None},
     {lineIndex = 5, type = unitLineType.None},
-}})
+}
+
+-- Four generic rows can mean guild/level/class/faction or a no-guild identity
+-- block followed by a status. Without a public positive guild discriminator,
+-- leave the ambiguous rows native.
+clearColors()
+playerResult = true
+local priorGuildLookupCalls = guildLookupCalls
+postCall(gameTooltip, {lines = fourGenericPlayerLines})
+assertEqual(guildLookupCalls, priorGuildLookupCalls, "missing guild GUID is not queried")
 assertColor(fontStrings[1], 0.1, 0.2, 0.3, "ambiguous generic player name")
 assertColor(statusBar, 0.1, 0.2, 0.3, "ambiguous generic health bar")
 for index = 2, 5 do
     assertEqual(fontStrings[index].color, nil, "ambiguous generic row " .. index)
 end
+
+-- Model the reported 12.1 symptom: a same-faction guilded Death Knight can
+-- expose guild, level, class/specification, and faction as four generic rows
+-- even though UnitLevel and UnitType exist in the enum table. A documented
+-- positive guild GUID query disambiguates these rows.
+clearColors()
+classFilename = "DEATHKNIGHT"
+postCall(gameTooltip, {
+    guid = renderedUnitGUID,
+    lines = fourGenericPlayerLines,
+})
+assertColor(fontStrings[1], 0.77, 0.12, 0.23, "12.1 Death Knight name")
+assertColor(fontStrings[3], 1, 0.82, 0, "12.1 Death Knight level")
+assertColor(fontStrings[4], 0.77, 0.12, 0.23, "12.1 Death Knight class/specification")
+assertColor(fontStrings[5], 0.4, 0.5, 0.6, "12.1 same-faction Alliance")
+assertColor(fontStrings[2], 0, 1, 0, "12.1 Death Knight guild")
+classFilename = "MAGE"
+
+-- Secret guild state must not select a row layout.
+clearColors()
+playerInGuildResult = secretValue
+postCall(gameTooltip, {
+    guid = renderedUnitGUID,
+    lines = fourGenericPlayerLines,
+})
+for index = 2, 5 do
+    assertEqual(fontStrings[index].color, nil, "secret guild row " .. index)
+end
+
+-- A public negative guild result also leaves the ambiguous block native.
+clearColors()
+playerInGuildResult = false
+postCall(gameTooltip, {
+    guid = renderedUnitGUID,
+    lines = fourGenericPlayerLines,
+})
+for index = 2, 5 do
+    assertEqual(fontStrings[index].color, nil, "non-guild row " .. index)
+end
+
+-- A secret GUID never reaches the guild predicate.
+clearColors()
+priorGuildLookupCalls = guildLookupCalls
+postCall(gameTooltip, {
+    guid = secretValue,
+    lines = fourGenericPlayerLines,
+})
+assertEqual(guildLookupCalls, priorGuildLookupCalls, "secret guild GUID is not queried")
+for index = 2, 5 do
+    assertEqual(fontStrings[index].color, nil, "secret guild GUID row " .. index)
+end
+playerInGuildResult = true
 
 -- The exact three-row no-guild legacy identity block is unambiguous.
 runPlayerFixture({
@@ -537,13 +603,10 @@ postCall(gameTooltip, {lines = {
 assertColor(fontStrings[2], 1, 0.82, 0, "12.0.7 generic level difficulty")
 
 clearColors()
-postCall(gameTooltip, {lines = {
-    {lineIndex = 1, type = unitLineType.UnitName, unitToken = renderedUnit},
-    {lineIndex = 2, type = unitLineType.None},
-    {lineIndex = 3, type = unitLineType.None},
-    {lineIndex = 4, type = unitLineType.None},
-    {lineIndex = 5, type = unitLineType.None},
-}})
+postCall(gameTooltip, {
+    guid = renderedUnitGUID,
+    lines = fourGenericPlayerLines,
+})
 assertColor(fontStrings[2], 0, 1, 0, "12.0.7 generic guild")
 assertColor(fontStrings[3], 1, 0.82, 0, "12.0.7 guilded level difficulty")
 assertColor(fontStrings[4], 0.1, 0.2, 0.3, "12.0.7 guilded class")

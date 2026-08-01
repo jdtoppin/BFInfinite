@@ -18,6 +18,7 @@ local GREEN_FONT_COLOR = _G.GREEN_FONT_COLOR
 local IsAltKeyDown = _G.IsAltKeyDown
 local HIGHLIGHT_FONT_COLOR = _G.HIGHLIGHT_FONT_COLOR
 local InCombatLockdown = _G.InCombatLockdown
+local IsPlayerInGuildFromGUID = _G.IsPlayerInGuildFromGUID
 local IsShiftKeyDown = _G.IsShiftKeyDown
 local NORMAL_FONT_COLOR = _G.NORMAL_FONT_COLOR
 local UnitClassBase = _G.UnitClassBase
@@ -225,8 +226,18 @@ local function GetUnitTooltipLineInfo(data)
         unitLevelLineIndex,
         unitTypeLineIndex,
         lineTypesByIndex,
-        noneLineIndices,
-        not UNIT_LEVEL_LINE and not UNIT_TYPE_LINE
+        noneLineIndices
+end
+
+local function IsTooltipPlayerInGuild(data)
+    local guid = data.guid
+    if not F.isValueNonSecret(guid) or type(guid) ~= "string" then return false end
+
+    -- Retail 12.0.7 and 12.1.0.68914 document this GUID query as returning
+    -- an ordinary boolean. Sanitize it defensively before using it to resolve
+    -- the otherwise ambiguous four-row generic player identity block.
+    local isInGuild = IsPlayerInGuildFromGUID(guid)
+    return F.isValueNonSecret(isInGuild) and isInGuild or false
 end
 
 local function GetPlayerIdentityLineIndices(
@@ -235,7 +246,7 @@ local function GetPlayerIdentityLineIndices(
     unitTypeLineIndex,
     lineTypesByIndex,
     noneLineIndices,
-    usesLegacyIdentityLayout
+    isPlayerInGuild
 )
     local levelLineIndex = unitLevelLineIndex
     local classLineIndex = unitTypeLineIndex
@@ -256,7 +267,7 @@ local function GetPlayerIdentityLineIndices(
             factionLineIndex = classLineIndex + 1
         end
     elseif (#noneLineIndices == 3
-            or (usesLegacyIdentityLayout and #noneLineIndices == 4))
+            or (#noneLineIndices == 4 and isPlayerInGuild))
         and unitNameLineIndex
         and noneLineIndices[1] == unitNameLineIndex + 1
         and noneLineIndices[2] == unitNameLineIndex + 2
@@ -277,12 +288,11 @@ local function GetPlayerIdentityLineIndices(
         guildLineIndex = unitNameLineIndex + 1
     end
 
-    -- Retail 12.0.7 uses a generic identity block. Retail 12.1.0.68914
-    -- (wow-ui-source d3915c78) adds UnitLevel and UnitType enum values, but
-    -- does not document producer topology. Treat all adjacency as a heuristic:
-    -- validate generic neighbors against typed anchors, accept the exact
-    -- three-row no-guild shape on either client, and allow the four-row guild
-    -- shape only on the legacy client where typed identity enums are absent.
+    -- Retail 12.1.0.68914 (wow-ui-source d3915c78) adds UnitLevel and UnitType
+    -- enum values, but the native producer can still emit a generic identity
+    -- block. Accept the exact three-row no-guild shape. The four-row shape is
+    -- ambiguous, so accept it only when the documented GUID query positively
+    -- identifies a guilded player.
     return levelLineIndex, classLineIndex, factionLineIndex, guildLineIndex
 end
 
@@ -323,8 +333,9 @@ local function ApplyPlayerIdentityColors(
         GameTooltipStatusBar:SetStatusBarColor(color.r, color.g, color.b)
     end
 
-    -- A guild is only inferred from the exact public name/guild/level
-    -- topology, avoiding undocumented GetGuildInfo return behavior.
+    -- A guild line is accepted only after the documented GUID query and the
+    -- exact public name/guild/level topology agree, avoiding undocumented
+    -- GetGuildInfo return behavior.
     if guildLineIndex then
         local guildLine = tooltip:GetLeftLine(guildLineIndex)
         if guildLine then
@@ -550,8 +561,7 @@ local function OnUnitTooltipPostCall(tooltip, data)
         unitLevelLineIndex,
         unitTypeLineIndex,
         lineTypesByIndex,
-        noneLineIndices,
-        usesLegacyIdentityLayout = GetUnitTooltipLineInfo(data)
+        noneLineIndices = GetUnitTooltipLineInfo(data)
     if not unit or not UnitExists(unit) then return end
     unitTooltipUnit = unit
 
@@ -563,6 +573,10 @@ local function OnUnitTooltipPostCall(tooltip, data)
         local classLineIndex
         local factionLineIndex
         local guildLineIndex
+        local isPlayerInGuild = not unitLevelLineIndex
+            and not unitTypeLineIndex
+            and #noneLineIndices == 4
+            and IsTooltipPlayerInGuild(data)
         levelLineIndex,
             classLineIndex,
             factionLineIndex,
@@ -572,7 +586,7 @@ local function OnUnitTooltipPostCall(tooltip, data)
             unitTypeLineIndex,
             lineTypesByIndex,
             noneLineIndices,
-            usesLegacyIdentityLayout
+            isPlayerInGuild
         )
         ApplyPlayerIdentityColors(
             tooltip,
