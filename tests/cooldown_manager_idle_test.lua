@@ -793,6 +793,21 @@ assertContains(moduleSource,
     'RegisterEvent("PLAYER_TARGET_CHANGED")',
     "12.1 target wake")
 assertContains(moduleSource,
+    "UPDATE_SHAPESHIFT_FORM = true",
+    "12.1 active-form watch wake")
+assertContains(moduleSource,
+    "UPDATE_SHAPESHIFT_FORMS = true",
+    "12.1 form-list watch wake")
+assertContains(moduleSource,
+    "PresentationMethods.BeginTargetTransition(false, true)",
+    "target changes arm without pre-curtaining")
+assertContains(moduleSource,
+    "PresentationMethods.BeginTargetTransition(true, true)",
+    "druid forms observe player and target full-aura rebuilds")
+assertContains(moduleSource,
+    "PresentationMethods.CurtainTargetTransition()",
+    "native layout barriers use the bounded curtain")
+assertContains(moduleSource,
     "PLAYER_REGEN_ENABLED = true",
     "combat-denied regeneration wake")
 assertEqual(
@@ -820,6 +835,9 @@ assertEqual(
 assertContains(moduleSource,
     '"CooldownViewerSettings.OnDataChanged"',
     "viewer assignment wake")
+assertContains(moduleSource,
+    "PresentationMethods.OnCooldownDataChanged",
+    "viewer assignment rebuild curtain")
 assertContains(moduleSource,
     '"AssistedCombatManager.OnAssistedHighlightSpellChange"',
     "assisted recommendation wake")

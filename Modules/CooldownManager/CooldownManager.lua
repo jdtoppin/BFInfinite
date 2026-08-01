@@ -3222,14 +3222,17 @@ local function InitializeViewers()
     end
 end
 
--- A full target UNIT_AURA makes Retail 12.1 release every pooled item, clear
--- its anchors, and run the native GridLayout against the Blizzard viewer.
--- Event-handler order and LayoutFrame OnUpdate order are not an ownership
--- boundary, so keep the native parent visually curtained until BFI has
--- corrected that rewrite and then observed two complete stable passes.
--- SetAlpha accepts tainted execution in the audited client; GetAlpha can be a
--- secret aspect, so only a guarded native value is retained for restoration.
-function PresentationMethods.BeginTargetTransition()
+-- Retail 12.1.0.68914 (wow-ui-source d3915c78aba7)
+-- PLAYER_TARGET_CHANGED only refreshes target-sensitive item data; it does
+-- not run the native GridLayout. A later full UNIT_AURA for
+-- either player or target, or CooldownViewerSettings.OnDataChanged when the
+-- category count changes, can release the pool and reclaim every item anchor.
+-- Keep a short observer window separate from the visual curtain so an ordinary
+-- target change never creates a blank flash. The payload-opaque observer
+-- curtains only at a possible native layout barrier, and the first complete
+-- reconciliation restores the exact captured alpha while observation remains
+-- armed for a late druid form update.
+function PresentationMethods.BeginTargetTransition(observePlayer, observeTarget)
     local config = CM.config
     local locked = InCombatLockdown()
     if not config
@@ -3242,13 +3245,60 @@ function PresentationMethods.BeginTargetTransition()
         return false
     end
 
-    InitializeViewers()
     local transition = presentationController.targetTransition
     if not transition then
         transition = {viewerAlphas = {}}
         presentationController.targetTransition = transition
     end
 
+    -- A stale combat latch can remain set for one event turn after lockdown
+    -- ends. The guarded check above proves this layout watch can make
+    -- progress, so release that BFI-owned latch before arming observation.
+    presentationController.combatBlocked = nil
+    presentationController.disabledRestored = nil
+
+    local wasActive = transition.active
+    transition.active = true
+    transition.elapsed = wasActive and transition.elapsed or 0
+    transition.observePlayer = observePlayer or transition.observePlayer
+    transition.observeTarget = observeTarget or transition.observeTarget
+
+    if transition.registeredPlayer ~= transition.observePlayer
+        or transition.registeredTarget ~= transition.observeTarget
+    then
+        presentationController.targetObserver:UnregisterEvent("UNIT_AURA")
+        if transition.observePlayer and transition.observeTarget then
+            presentationController.targetObserver:RegisterUnitEvent(
+                "UNIT_AURA",
+                "player",
+                "target"
+            )
+        elseif transition.observePlayer then
+            presentationController.targetObserver:RegisterUnitEvent(
+                "UNIT_AURA",
+                "player"
+            )
+        elseif transition.observeTarget then
+            presentationController.targetObserver:RegisterUnitEvent(
+                "UNIT_AURA",
+                "target"
+            )
+        end
+        transition.registeredPlayer = transition.observePlayer
+        transition.registeredTarget = transition.observeTarget
+    end
+    QueuePresentationUpdate()
+    return true
+end
+
+-- SetAlpha accepts tainted execution in the audited client; GetAlpha can be a
+-- secret aspect, so capture only guarded native values and never recapture the
+-- zero applied by an earlier barrier in the same bounded transaction.
+function PresentationMethods.CurtainTargetTransition()
+    if not PresentationMethods.BeginTargetTransition() then return false end
+
+    local transition = presentationController.targetTransition
+    InitializeViewers()
     local curtained = false
     for _, state in ipairs(viewerStates) do
         local viewer = state.viewer
@@ -3264,43 +3314,24 @@ function PresentationMethods.BeginTargetTransition()
             curtained = true
         end
     end
-    if not curtained then
-        return false
-    end
+    if not curtained then return false end
 
-    -- A stale combat latch can remain set for one event turn after lockdown
-    -- ends. The guarded check above proves this target transition can make
-    -- progress, so release that BFI-owned latch before arming the curtain.
-    presentationController.combatBlocked = nil
-    presentationController.disabledRestored = nil
-
-    local wasActive = transition.active
-    transition.active = true
+    transition.curtained = true
     transition.geometryCorrected = false
-    transition.stablePasses = 0
-    transition.elapsed = wasActive and transition.elapsed or 0
-    presentationController.targetObserver:RegisterUnitEvent(
-        "UNIT_AURA",
-        "target"
-    )
-    QueuePresentationUpdate()
     return true
 end
 
 function PresentationMethods.NoteTargetTransitionBarrier()
     local transition = presentationController.targetTransition
     if not transition or not transition.active then return false end
-    transition.stablePasses = 0
-    return true
+    return PresentationMethods.CurtainTargetTransition()
 end
 
--- Keep the target-only transaction observer separate from the presentation
+-- Keep the temporary transaction observer separate from the presentation
 -- controller's normal player/target aura wakes. This callback deliberately
--- binds no payload, so secret aura data never enters addon logic.
+-- binds no event or payload, so secret aura data never enters addon logic.
 presentationController.targetObserver:SetScript("OnEvent", function()
-    if PresentationMethods.NoteTargetTransitionBarrier() then
-        QueuePresentationUpdate()
-    end
+    PresentationMethods.NoteTargetTransitionBarrier()
 end)
 
 function PresentationMethods.AdvanceTargetTransition(
@@ -3316,11 +3347,6 @@ function PresentationMethods.AdvanceTargetTransition(
 
     if anyGeometryChanged then
         transition.geometryCorrected = true
-        transition.stablePasses = 0
-    elseif allComplete and transition.geometryCorrected then
-        transition.stablePasses = transition.stablePasses + 1
-    else
-        transition.stablePasses = 0
     end
 
     local config = CM.config
@@ -3331,22 +3357,38 @@ function PresentationMethods.AdvanceTargetTransition(
         or locked
         or IsBlizzardEditModeActive()
         or transition.elapsed >= 0.25
-    if not forceRestore and transition.stablePasses < 2 then
+    if not forceRestore and transition.curtained and not allComplete then
         return false
     end
 
-    for viewer, alpha in next, transition.viewerAlphas do
-        if IsValueNonSecret(viewer)
-            and viewer
-            and IsSafeNumber(alpha)
-        then
-            FrameSetAlpha(viewer, alpha)
+    if forceRestore or transition.curtained then
+        for viewer, alpha in next, transition.viewerAlphas do
+            if IsValueNonSecret(viewer)
+                and viewer
+                and IsSafeNumber(alpha)
+            then
+                FrameSetAlpha(viewer, alpha)
+            end
         end
+        transition.curtained = nil
+        transition.geometryCorrected = false
     end
+
+    -- A completed barrier can uncover immediately, but an armed player/target
+    -- observer stays alive until the original hard deadline so a later full
+    -- aura update can safely re-curtain before the next reconciliation pass.
+    if not forceRestore
+        and (transition.observePlayer or transition.observeTarget)
+    then
+        return false
+    end
+
     transition.active = false
-    transition.geometryCorrected = false
-    transition.stablePasses = 0
     transition.elapsed = 0
+    transition.observePlayer = nil
+    transition.observeTarget = nil
+    transition.registeredPlayer = nil
+    transition.registeredTarget = nil
     transition.viewerAlphas = {}
     presentationController.targetObserver:UnregisterEvent("UNIT_AURA")
     return true
@@ -3545,9 +3587,9 @@ local function ProcessPresentationUpdate(_, elapsed)
     local transition = presentationController.targetTransition
     local targetActive = transition and transition.active
     if targetActive then
-        -- The native target relayout can occur on either an event handler or
-        -- LayoutFrame's next update. Reconcile at frame cadence only while the
-        -- viewer parents are curtained; normal work retains the 0.15s gate.
+        -- A late full aura or form-driven data rebuild can land anywhere in
+        -- the bounded watch window. Reconcile at frame cadence only while that
+        -- window is active; ordinary work retains the 0.15s gate.
         presentationController.updateTimeLeft = 0
     else
         presentationController.updateTimeLeft =
@@ -3609,8 +3651,8 @@ local function ProcessPresentationUpdate(_, elapsed)
     end
 
     if targetActive then
-        -- The target transaction owns its 0.25s hard deadline. Do not consume
-        -- the ordinary construction retry budget or sleep while alpha is 0.
+        -- The layout watch owns its 0.25s hard deadline. Do not consume the
+        -- ordinary construction retry budget or sleep before it expires.
         return
     end
 
@@ -3691,6 +3733,7 @@ local hotkeyRefreshEvents = {
     UPDATE_VEHICLE_ACTIONBAR = true,
     UPDATE_POSSESS_BAR = true,
     UPDATE_SHAPESHIFT_FORM = true,
+    UPDATE_SHAPESHIFT_FORMS = true,
     SPELLS_CHANGED = true,
     PLAYER_SPECIALIZATION_CHANGED = true,
     COOLDOWN_VIEWER_DATA_LOADED = true,
@@ -3710,7 +3753,15 @@ local function OnPresentationEvent(_, event)
         presentationController:ReleaseCombatBlock()
     end
     if event == "PLAYER_TARGET_CHANGED" then
-        PresentationMethods.BeginTargetTransition()
+        PresentationMethods.BeginTargetTransition(false, true)
+    elseif event == "UPDATE_SHAPESHIFT_FORM"
+        or event == "UPDATE_SHAPESHIFT_FORMS"
+    then
+        -- A form change can be followed by both a player full-aura rebuild
+        -- and an end-of-frame SPELLS_CHANGED category rebuild. Native CDM
+        -- treats a full aura from either registered unit identically, so keep
+        -- both payload-opaque observers armed during this short form window.
+        PresentationMethods.BeginTargetTransition(true, true)
     end
     if hotkeyRefreshEvents[event] then
         hotkeyGeneration = hotkeyGeneration + 1
@@ -3765,9 +3816,18 @@ presentationController:RegisterEvent("COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED")
 -- do. Waking here would rescan, sort, and reconcile all four viewers each time.
 presentationController:SetScript("OnEvent", OnPresentationEvent)
 
+function PresentationMethods.OnCooldownDataChanged()
+    -- Listener order is intentionally unspecified by CallbackRegistry. Hide
+    -- in the callback turn whether BFI runs before or after the native viewers,
+    -- then reconcile after every listener has completed. Equal-count updates
+    -- are harmless and uncover on that first complete pass.
+    PresentationMethods.CurtainTargetTransition()
+    MarkPresentationDirty()
+end
+
 EventRegistry:RegisterCallback(
     "CooldownViewerSettings.OnDataChanged",
-    MarkPresentationDirty,
+    PresentationMethods.OnCooldownDataChanged,
     presentationController
 )
 EventRegistry:RegisterCallback(

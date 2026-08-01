@@ -169,8 +169,8 @@ local presentationController = {
         Update = function() end,
     },
     targetObserver = {
-        RegisterUnitEvent = function(_, event, unit)
-            targetRegisteredEvents[event] = unit
+        RegisterUnitEvent = function(_, event, ...)
+            targetRegisteredEvents[event] = table.concat({...}, ",")
         end,
         UnregisterEvent = function(_, event)
             targetRegisteredEvents[event] = nil
@@ -238,16 +238,7 @@ LUA
         '/^local function GetLayoutBounds(/,/^local function GetHolderScaleRatio(/p' \
         "$module" | sed '$d'
     sed -n \
-        '/^function PresentationMethods.BeginTargetTransition/,/^function PresentationMethods.NoteTargetTransitionBarrier/p' \
-        "$module" | sed '$d'
-    sed -n \
-        '/^function PresentationMethods.NoteTargetTransitionBarrier/,/^function PresentationMethods.AdvanceTargetTransition/p' \
-        "$module" | sed '$d'
-    sed -n \
-        '/^presentationController.targetObserver:SetScript/,/^function PresentationMethods.AdvanceTargetTransition/p' \
-        "$module" | sed '$d'
-    sed -n \
-        '/^function PresentationMethods.AdvanceTargetTransition/,/^presentationController.buffVisibility.weakKeys/p' \
+        '/^function PresentationMethods.BeginTargetTransition/,/^presentationController.buffVisibility.weakKeys/p' \
         "$module" | sed '$d'
     sed -n \
         '/^function presentationController:ReleaseCombatBlock/,/^local function ProcessPresentationUpdate/p' \
@@ -260,6 +251,9 @@ LUA
         "$module" | sed '$d'
     sed -n \
         '/^local function OnPresentationEvent(/,/^for event in next, hotkeyRefreshEvents/p' \
+        "$module" | sed '$d'
+    sed -n \
+        '/^function PresentationMethods.OnCooldownDataChanged/,/^EventRegistry:RegisterCallback/p' \
         "$module" | sed '$d'
 
     cat <<'LUA'
@@ -544,11 +538,10 @@ check(not PrepareItemGeometry(guardedEntry, geometryViewerState, desired),
 check(geometryState.applied == true and geometryState.expected == desired,
     "secret geometry invalidated the last known BFI state")
 
--- Model the render-order race seen on 12.1. BFI receives the target event and
--- reconciles once before Blizzard's later target-aura refresh rewrites native
--- anchors. The viewer curtain must be in place before that rewrite, an early
--- apparently stable pass must not uncover it, the correction pass must reset
--- stability, and only two subsequent stable passes may restore native alpha.
+-- Model the two form-sensitive native layout paths from pinned Retail 12.1:
+-- full player/target UNIT_AURA and a count-changing
+-- CooldownViewerSettings.OnDataChanged. PLAYER_TARGET_CHANGED itself does not
+-- run GridLayout, so it must arm observation without creating a blank flash.
 local transitionViewerA = {alpha = 0.7}
 local transitionViewerB = {alpha = 1}
 viewerStates = {
@@ -561,7 +554,7 @@ viewerStates = {
 inCombat = true
 OnPresentationEvent(nil, "PLAYER_TARGET_CHANGED")
 check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
-    "combat target event curtained viewers")
+    "combat target event changed viewer alpha")
 check(targetRegisteredEvents.UNIT_AURA == nil,
     "combat target event armed target aura observation")
 check(not presentationController.targetTransition
@@ -574,67 +567,77 @@ presentationUpdateSchedules = 0
 presentationDirtyMarks = 0
 
 OnPresentationEvent(nil, "PLAYER_TARGET_CHANGED")
-check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
-    "target event did not curtain viewers before native refresh")
+check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
+    "target event created a blank viewer flash")
 check(targetRegisteredEvents.UNIT_AURA == "target",
     "target transition did not arm target aura observation")
 check(presentationController.combatBlocked == nil,
     "safe target transition remained stranded behind a stale combat latch")
 check(presentationOnUpdate == ProcessPresentationUpdate
-    and presentationUpdateSchedules == 2
+    and presentationUpdateSchedules >= 2
     and presentationDirtyMarks == 1,
     "target transition did not wake and invalidate presentation")
 
-PresentationMethods.AdvanceTargetTransition(true, false)
-check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
-    "stable pre-barrier pass uncovered the target transition")
-
-DispatchTargetAura()
-check(targetRegisteredEvents.UNIT_AURA == "target",
-    "incremental target aura update disarmed transition observation")
-check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
-    "incremental target aura update uncovered viewers before reconciliation")
-
-PresentationMethods.AdvanceTargetTransition(true, false)
-check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
-    "stable pass after incremental target aura update uncovered viewers")
-check(presentationController.targetTransition.stablePasses == 0,
-    "incremental target aura update was treated as the layout barrier")
-
--- The payload is opaque, so only the later geometry rewrite proves that the
--- native layout transition has happened. Keep observing target auras until
--- the entire transition completes.
-DispatchTargetAura()
-check(targetRegisteredEvents.UNIT_AURA == "target",
-    "target aura observation stopped before native geometry rewrite")
-
--- Blizzard rewrites anchors after the early BFI pass. The correction itself
--- does not count as a stable pass.
-PresentationMethods.AdvanceTargetTransition(true, true)
-check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
-    "geometry correction uncovered the target transition")
-check(presentationController.targetTransition.stablePasses == 0,
-    "geometry correction did not reset transition stability")
-
-PresentationMethods.AdvanceTargetTransition(true, false)
-check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
-    "first post-correction stable pass uncovered viewers")
-check(presentationController.targetTransition.stablePasses == 1,
-    "first post-correction stable pass was not recorded")
-
-PresentationMethods.AdvanceTargetTransition(true, false)
+local elapsedBeforeTargetAura =
+    presentationController.targetTransition.elapsed
+PresentationMethods.AdvanceTargetTransition(true, false, 1 / 60)
 check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
-    "second post-correction stable pass did not restore viewer alpha")
-check(presentationController.targetTransition.active == false,
-    "completed target transition remained active")
-check(targetRegisteredEvents.UNIT_AURA == nil,
-    "completed target transition kept target aura observation armed")
+    "untriggered target watch changed viewer alpha")
+check(presentationController.targetTransition.active,
+    "target watch ended before a possible late aura update")
+
+DispatchTargetAura()
+check(targetRegisteredEvents.UNIT_AURA == "target",
+    "target aura update disarmed transition observation")
+check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
+    "target aura barrier was not curtained before reconciliation")
+check(presentationController.targetTransition.viewerAlphas[transitionViewerA]
+    == 0.7,
+    "target aura barrier did not capture the original viewer alpha")
+check(presentationController.targetTransition.elapsed
+    == elapsedBeforeTargetAura + 1 / 60,
+    "target aura barrier reset the hard deadline")
+
+PresentationMethods.AdvanceTargetTransition(false, false, 1 / 60)
+check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
+    "incomplete target reconciliation uncovered viewers")
+
+-- Native RefreshLayout is synchronous in the audited build. Once the first
+-- complete BFI pass has corrected the reclaimed anchors, uncover immediately
+-- instead of manufacturing two extra blank rendered frames. Keep the watch
+-- alive so another late full update can re-curtain.
+PresentationMethods.AdvanceTargetTransition(true, true, 1 / 60)
+check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
+    "complete correction did not immediately restore viewer alpha")
+check(presentationController.targetTransition.active,
+    "correction pass closed the late-aura watch")
+check(targetRegisteredEvents.UNIT_AURA == "target",
+    "correction pass disarmed target aura observation")
+
+DispatchTargetAura()
+check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
+    "late target aura did not re-curtain viewers")
+check(presentationController.targetTransition.viewerAlphas[transitionViewerA]
+    == 0.7,
+    "late target aura recaptured the temporary zero alpha")
+PresentationMethods.AdvanceTargetTransition(true, false, 1 / 60)
+check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
+    "late target aura did not restore exact viewer alpha")
+
+-- A repeated precursor merges into the existing watch without hiding or
+-- extending its absolute deadline.
+local elapsedBeforeRepeatedTarget =
+    presentationController.targetTransition.elapsed
+OnPresentationEvent(nil, "PLAYER_TARGET_CHANGED")
+check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
+    "repeated target event curtained viewers")
+check(presentationController.targetTransition.elapsed
+    == elapsedBeforeRepeatedTarget,
+    "repeated target event extended the transition hard deadline")
 
 -- If combat begins after a safe out-of-combat curtain was installed, the next
--- transition advance must fail open immediately and restore exact alphas.
-OnPresentationEvent(nil, "PLAYER_TARGET_CHANGED")
-check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
-    "out-of-combat transition did not curtain before combat fixture")
+-- advance must fail open immediately and restore exact alphas.
+DispatchTargetAura()
 inCombat = true
 PresentationMethods.AdvanceTargetTransition(true, false, 1 / 60)
 check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
@@ -645,60 +648,69 @@ check(targetRegisteredEvents.UNIT_AURA == nil,
     "entering combat kept target aura observation armed")
 inCombat = false
 
--- A native geometry rewrite is itself the authoritative transition proof. It
--- can be observed on the target-event pass before any target UNIT_AURA, so it
--- must reset stability and allow two following clean passes without waiting
--- for the timeout fallback.
-OnPresentationEvent(nil, "PLAYER_TARGET_CHANGED")
-PresentationMethods.AdvanceTargetTransition(true, true)
-check(presentationController.targetTransition.geometryCorrected == true,
-    "pre-aura geometry correction was ignored")
-check(presentationController.targetTransition.stablePasses == 0,
-    "pre-aura geometry correction counted as a stable pass")
-PresentationMethods.AdvanceTargetTransition(true, false)
-check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
-    "first stable pass after pre-aura correction uncovered viewers")
-PresentationMethods.AdvanceTargetTransition(true, false)
+-- Druid form changes arm both units without immediately hiding. The native
+-- data callback is the actual late barrier and may refresh in place when the
+-- category count is unchanged, so a complete pass restores even with no
+-- geometry delta while the player/target observer window remains active.
+OnPresentationEvent(nil, "UPDATE_SHAPESHIFT_FORM")
 check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
-    "pre-aura geometry correction did not complete after two stable passes")
-
--- A failed pass is not stable and must leave the curtain closed.
-OnPresentationEvent(nil, "PLAYER_TARGET_CHANGED")
-PresentationMethods.NoteTargetTransitionBarrier()
-PresentationMethods.AdvanceTargetTransition(true, false)
-PresentationMethods.AdvanceTargetTransition(false, false)
+    "druid form precursor created a blank viewer flash")
+check(targetRegisteredEvents.UNIT_AURA == "player,target",
+    "druid form watch did not cover player and target auras")
+PresentationMethods.OnCooldownDataChanged()
 check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
-    "failed reconciliation uncovered the target transition")
-check(presentationController.targetTransition.stablePasses == 0,
-    "failed reconciliation did not reset transition stability")
+    "form-driven data rebuild was not curtained")
+PresentationMethods.AdvanceTargetTransition(true, false, 1 / 60)
+check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
+    "equal-count form rebuild did not uncover after a complete pass")
+check(presentationController.targetTransition.active
+    and targetRegisteredEvents.UNIT_AURA == "player,target",
+    "form rebuild closed its late-aura watch")
 
--- A second target change while the curtain is already closed must not capture
--- zero as the new native alpha. If reconciliation never succeeds (combat or a
--- target with no relevant full aura update), the bounded fail-safe must still
--- restore the original alpha and disarm observation.
-local elapsedBeforeRepeatedTarget =
+DispatchTargetAura()
+check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
+    "late form aura did not re-curtain viewers")
+PresentationMethods.AdvanceTargetTransition(true, true, 1 / 60)
+check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
+    "late form aura correction did not restore exact alpha")
+
+local elapsedBeforePluralForm =
     presentationController.targetTransition.elapsed
-OnPresentationEvent(nil, "PLAYER_TARGET_CHANGED")
-check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
-    "repeated target event unexpectedly opened the curtain")
+OnPresentationEvent(nil, "UPDATE_SHAPESHIFT_FORMS")
 check(presentationController.targetTransition.elapsed
-    == elapsedBeforeRepeatedTarget,
-    "repeated target event extended the transition hard deadline")
+    == elapsedBeforePluralForm,
+    "plural form event extended the hard deadline")
+check(targetRegisteredEvents.UNIT_AURA == "player,target",
+    "plural form event narrowed aura observation")
+
 local timeoutPasses = 0
 while presentationController.targetTransition.active and timeoutPasses < 120 do
     timeoutPasses = timeoutPasses + 1
-    PresentationMethods.AdvanceTargetTransition(false, false)
+    PresentationMethods.AdvanceTargetTransition(true, false, 1 / 60)
 end
 check(timeoutPasses < 120,
-    "target transition fail-safe did not complete within its bound")
+    "form watch fail-safe did not complete within its bound")
 check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
-    "target transition fail-safe lost the original viewer alpha")
+    "form watch fail-safe lost the original viewer alpha")
 check(targetRegisteredEvents.UNIT_AURA == nil,
-    "target transition fail-safe kept target aura observation armed")
+    "form watch fail-safe kept aura observation armed")
 
--- Incremental target aura churn may continuously reset stability, but it must
--- not reset the elapsed fail-safe and leave the Cooldown Manager invisible.
-OnPresentationEvent(nil, "PLAYER_TARGET_CHANGED")
+-- A data rebuild outside a target/form watch is still a possible synchronous
+-- native relayout, but it can close completely after one successful pass.
+PresentationMethods.OnCooldownDataChanged()
+check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
+    "standalone data rebuild was not curtained")
+check(targetRegisteredEvents.UNIT_AURA == nil,
+    "standalone data rebuild armed an unrelated aura observer")
+PresentationMethods.AdvanceTargetTransition(true, false, 1 / 60)
+check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
+    "standalone data rebuild did not restore exact alpha")
+check(not presentationController.targetTransition.active,
+    "standalone data rebuild left a transaction active")
+
+-- Repeated opaque aura barriers cannot reset the fixed hard deadline or leave
+-- the viewer invisible indefinitely when native construction never completes.
+OnPresentationEvent(nil, "UPDATE_SHAPESHIFT_FORM")
 local auraChurnPasses = 0
 while presentationController.targetTransition.active
     and auraChurnPasses < 120
@@ -708,16 +720,15 @@ do
     PresentationMethods.AdvanceTargetTransition(false, false, 1 / 60)
 end
 check(auraChurnPasses < 120,
-    "incremental target aura churn defeated the transition fail-safe")
+    "form aura churn defeated the transition fail-safe")
 check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
-    "aura-churn fail-safe did not restore original viewer alpha")
+    "form aura churn did not restore original viewer alpha")
 check(targetRegisteredEvents.UNIT_AURA == nil,
-    "aura-churn fail-safe kept target aura observation armed")
+    "form aura churn kept observation armed")
 
 -- Update aggregation is global across all initialized viewers: one viewer's
--- geometry rewrite must reset the shared transition, and every viewer must be
--- complete on each of the two following stable passes. A clean viewer cannot
--- mask another viewer's correction or failure.
+-- incomplete construction must keep every viewer curtained. The first fully
+-- complete aggregate pass restores all exact alphas together.
 local aggregateViewerA = {alpha = 0.6}
 local aggregateViewerB = {alpha = 0.9}
 viewerStates = {
@@ -743,39 +754,49 @@ PresentationMethods.NoteTargetTransitionBarrier()
 presentationController.updateTimeLeft = 99
 presentationController.retryPassesRemaining = 1
 ProcessPresentationUpdate(nil, 1 / 60)
-check(presentationController.targetTransition.geometryCorrected == true,
-    "one viewer's geometry correction was lost during aggregation")
-check(presentationController.targetTransition.stablePasses == 0,
-    "aggregated correction pass counted as stable")
-check(aggregateViewerA.alpha == 0 and aggregateViewerB.alpha == 0,
-    "aggregated correction uncovered a viewer")
+check(aggregateViewerA.alpha == 0.6 and aggregateViewerB.alpha == 0.9,
+    "complete aggregate correction did not restore all viewers")
+check(presentationController.targetTransition.active,
+    "aggregate correction closed the target watch")
 check(presentationController.updateTimeLeft == 0,
-    "target transition was delayed by the ordinary debounce")
+    "layout watch was delayed by the ordinary debounce")
 check(presentationController.retryPassesRemaining == 1,
-    "target transition consumed the ordinary construction retry budget")
+    "layout watch consumed the ordinary construction retry budget")
 check(presentationOnUpdate == ProcessPresentationUpdate,
-    "target transition stopped its update worker before completion")
+    "layout watch stopped its update worker before its deadline")
 
 viewerStates[2].geometryChanged = false
-ProcessPresentationUpdate(nil, 1 / 60)
-check(presentationController.targetTransition.stablePasses == 1,
-    "first aggregated stable pass was not recorded")
 viewerStates[1].complete = false
+DispatchTargetAura()
 ProcessPresentationUpdate(nil, 1 / 60)
-check(presentationController.targetTransition.stablePasses == 0,
-    "one incomplete viewer was masked by a complete viewer")
 check(aggregateViewerA.alpha == 0 and aggregateViewerB.alpha == 0,
     "incomplete aggregated pass uncovered viewers")
 
 viewerStates[1].complete = true
 ProcessPresentationUpdate(nil, 1 / 60)
-check(presentationController.targetTransition.stablePasses == 1,
-    "aggregated stability did not restart after failure")
-ProcessPresentationUpdate(nil, 1 / 60)
 check(aggregateViewerA.alpha == 0.6 and aggregateViewerB.alpha == 0.9,
-    "two aggregated stable passes did not restore all viewers")
-check(presentationController.targetTransition.active == false,
-    "aggregated transition remained active after completion")
+    "complete aggregate retry did not restore all viewers")
+
+-- Let the remaining watch expire through the real worker. Completion must
+-- remove OnUpdate and preserve normal post-transition dormancy.
+local workerPasses = 0
+while presentationController.targetTransition.active and workerPasses < 120 do
+    workerPasses = workerPasses + 1
+    ProcessPresentationUpdate(nil, 1 / 60)
+end
+check(workerPasses < 120,
+    "aggregate watch did not reach its bounded deadline")
+check(presentationOnUpdate == nil,
+    "completed aggregate watch left the update worker installed")
+
+presentationController.updateTimeLeft = 0
+presentationController.retryPassesRemaining = nil
+OnPresentationEvent(nil, "UPDATE_BINDINGS")
+check(not presentationController.targetTransition.active,
+    "ordinary binding update started a layout watch")
+ProcessPresentationUpdate(nil, 0.15)
+check(presentationOnUpdate == nil,
+    "ordinary complete update failed to return to dormancy")
 
 print("Cooldown Manager presentation regression checks passed")
 LUA
