@@ -118,6 +118,11 @@ local function makeFontString(name, initiallyShown)
         return self.alpha
     end
 
+    function fontString:ClearAllPoints()
+        self.clearPointCalls = (self.clearPointCalls or 0) + 1
+        self.point = nil
+    end
+
     function fontString:Hide()
         self.shown = false
     end
@@ -132,6 +137,11 @@ local function makeFontString(name, initiallyShown)
 
     function fontString:SetAlpha(alpha)
         self.alpha = alpha
+    end
+
+    function fontString:SetPoint(...)
+        self.setPointCalls = (self.setPointCalls or 0) + 1
+        self.point = {...}
     end
 
     function fontString:SetShown(shown)
@@ -188,6 +198,7 @@ local function makeAffix(name)
         Border = makeTexture(name .. "Border", "ChallengeMode-AffixRing-Lg"),
         CircleMask = makeTexture(name .. "Mask"),
         name = name,
+        Percent = makeFontString(name .. "Percent"),
         Portrait = makeTexture(name .. "Portrait"),
         shown = true,
     }
@@ -623,6 +634,18 @@ assertEqual(initialIconCall.createBackdrop, true,
     "initial affix icon backdrop")
 assertEqual(initialAffix.Border.shown, false,
     "initial affix border removed")
+assertEqual(initialAffix.Percent.clearPointCalls, 1,
+    "initial affix percentage clears native anchor")
+assertEqual(initialAffix.Percent.point[1], "BOTTOM",
+    "initial affix percentage anchor")
+assertEqual(initialAffix.Percent.point[2], initialAffix.Portrait,
+    "initial affix percentage relative frame")
+assertEqual(initialAffix.Percent.point[3], "BOTTOM",
+    "initial affix percentage relative anchor")
+assertEqual(initialAffix.Percent.point[4], 0,
+    "initial affix percentage x offset")
+assertEqual(initialAffix.Percent.point[5], 3,
+    "initial affix percentage y offset")
 
 assertEqual(#secureHooks, 1, "one lifecycle post-hook")
 assertEqual(secureHooks[1].target, frame, "affix hook target")
@@ -686,6 +709,18 @@ assertEqual(dynamicIconCall.createBackdrop, true,
     "dynamic affix icon backdrop")
 assertEqual(dynamicAffix.Border.shown, false,
     "dynamic affix border removed")
+assertEqual(dynamicAffix.Percent.clearPointCalls, 1,
+    "dynamic affix percentage clears native anchor")
+assertEqual(dynamicAffix.Percent.point[1], "BOTTOM",
+    "dynamic affix percentage anchor")
+assertEqual(dynamicAffix.Percent.point[2], dynamicAffix.Portrait,
+    "dynamic affix percentage relative frame")
+assertEqual(dynamicAffix.Percent.point[3], "BOTTOM",
+    "dynamic affix percentage relative anchor")
+assertEqual(dynamicAffix.Percent.point[4], 0,
+    "dynamic affix percentage x offset")
+assertEqual(dynamicAffix.Percent.point[5], 3,
+    "dynamic affix percentage y offset")
 
 frame:CreateAndPositionAffixes(2)
 assertEqual(frame.nativeCreateAffixCalls, 2,
@@ -696,6 +731,10 @@ assertEqual(dynamicIconCount, 1,
 initialIconCount = countIconStyles(initialAffix.Portrait)
 assertEqual(initialIconCount, 1,
     "repeat layout does not restyle initial affix")
+assertEqual(dynamicAffix.Percent.setPointCalls, 1,
+    "repeat layout does not move dynamic percentage again")
+assertEqual(initialAffix.Percent.setPointCalls, 1,
+    "repeat layout does not move initial percentage again")
 
 assertEqual(startButton:GetScript("OnShow"), originalStartOnShow,
     "native StartButton OnShow")

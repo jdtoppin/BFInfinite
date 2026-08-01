@@ -140,6 +140,12 @@ local function StyleKeystoneAffix(affix)
 
     affix.Border:Hide()
     S.StyleSquareIcon(affix.Portrait, affix.CircleMask, true)
+
+    -- Blizzard's circular artwork deliberately overlays this label on the
+    -- icon's lower edge. Inset it above BFI's square outline so the border
+    -- cannot cover the glyphs; native SetUp still owns text and font size.
+    affix.Percent:ClearAllPoints()
+    affix.Percent:SetPoint("BOTTOM", affix.Portrait, "BOTTOM", 0, 3)
 end
 
 local function StyleKeystoneAffixes(frame)
