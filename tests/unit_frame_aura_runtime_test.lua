@@ -175,6 +175,7 @@ local function makeHarness(options)
         controllers = {},
         legacyFrames = {},
         unavailableFrames = {},
+        unavailableFrameBudget = options.unavailableFrameBudget or 0,
         compiles = {},
         registered = {},
         afCallbacks = {},
@@ -647,6 +648,11 @@ local function makeHarness(options)
             end,
         }),
         CreateFrame = function(objectType, name, parent)
+            assertTrue(
+                #harness.unavailableFrames
+                    < harness.unavailableFrameBudget,
+                "unexpected unavailable aura frame allocation"
+            )
             assertEqual(objectType, "Frame", "unavailable frame type")
             local frame = {
                 name = name,
@@ -782,14 +788,17 @@ local function createPartitionRuntime(harness, root)
 end
 
 local function testDormancyAndFallback()
-    local harness = makeHarness()
+    local harness = makeHarness({unavailableFrameBudget = 1})
     assertEqual(#harness.controllers, 0, "dormant controller count")
     assertEqual(#harness.legacyFrames, 0, "dormant legacy count")
     assertEqual(#harness.compiles, 0, "dormant compile count")
     assertProviderObserverOnly(harness, "dormant provider observer")
     assertEqual(countEvents(harness, "af.pixel-add"), 0, "dormant pixel updater")
 
-    local unavailable = makeHarness({backend = false})
+    local unavailable = makeHarness({
+        backend = false,
+        unavailableFrameBudget = 2,
+    })
     assertEqual(next(unavailable.registered), nil,
         "12.1 unavailable provider observer")
     local unavailableStats = unavailable.UF.GetNativeAuraRuntimeStats()
@@ -2445,6 +2454,7 @@ end
 local function testGroupRuntimeSelectionAndFallback()
     local unavailable = makeHarness({
         backend = false,
+        unavailableFrameBudget = 1,
     })
     local fallbackRoot = setmetatable({
         name = "GroupFallback",
