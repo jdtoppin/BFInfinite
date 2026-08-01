@@ -56,3 +56,8 @@ jobs:
           lua5.1 tests/action_bar_lightweight_backdrop_test.lua
           lua5.1 tests/cooldown_manager_idle_test.lua
           lua5.1 tests/unit_frame_portrait_defaults_test.lua
+
+      - name: Test unit frame option pane lifecycle
+        run: |
+          lua5.1 tests/unit_frame_options_selection_lifecycle_test.lua
+          luajit tests/unit_frame_options_selection_lifecycle_test.lua
