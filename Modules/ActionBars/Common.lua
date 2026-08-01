@@ -9,6 +9,64 @@ local AB = BFI.modules.ActionBars
 local GetBindingKey = GetBindingKey
 local LAB = BFI.libs.LAB
 
+-- Retail 12.1.0.68914 (d3915c78aba7)'s PetActionButtonTemplate installs one
+-- OnUpdate per button even though its body only animates the attack flash.
+-- Keep those scripts dormant at idle and share one visibility-gated updater
+-- while a pet attack is actually flashing.
+local petFlashingButtons = {}
+local petFlashController = CreateFrame("Frame")
+petFlashController:Hide()
+
+local function UpdatePetFlashController()
+    if next(petFlashingButtons) then
+        petFlashController:Show()
+    else
+        petFlashController:Hide()
+    end
+end
+
+local function UpdatePetFlashRegistration(button)
+    if button.flashing and button:IsVisible() then
+        petFlashingButtons[button] = true
+    else
+        petFlashingButtons[button] = nil
+    end
+    UpdatePetFlashController()
+end
+
+local function StartPetFlash(button)
+    button.flashing = true
+    button.flashtime = 0
+    UpdatePetFlashRegistration(button)
+end
+
+local function StopPetFlash(button)
+    button.flashing = false
+    petFlashingButtons[button] = nil
+    button.Flash:Hide()
+    UpdatePetFlashController()
+end
+
+petFlashController:SetScript("OnUpdate", function(_, elapsed)
+    for button in next, petFlashingButtons do
+        if button.flashing and button:IsVisible() then
+            local flashTime = (button.flashtime or 0) - elapsed
+            if flashTime <= 0 then
+                local overtime = -flashTime
+                if overtime >= ATTACK_BUTTON_FLASH_TIME then
+                    overtime = 0
+                end
+                flashTime = ATTACK_BUTTON_FLASH_TIME - overtime
+                button.Flash:SetShown(not button.Flash:IsShown())
+            end
+            button.flashtime = flashTime
+        else
+            petFlashingButtons[button] = nil
+        end
+    end
+    UpdatePetFlashController()
+end)
+
 ---------------------------------------------------------------------
 -- hotkey
 ---------------------------------------------------------------------
@@ -113,6 +171,85 @@ local function OnSizeChanged(self, width, height)
     end
 end
 
+local function SetButtonBackdropColor(self, r, g, b, a)
+    self.BFIBackdropBackground:SetVertexColor(r, g, b, a or 1)
+end
+
+local function SetButtonBackdropBorderColor(self, r, g, b, a)
+    for _, border in ipairs(self.BFIBackdropBorders) do
+        border:SetVertexColor(r, g, b, a or 1)
+    end
+end
+
+local function UpdateButtonPixels(self)
+    AF.DefaultUpdatePixels(self)
+
+    if self.BFIBackdropBackground then
+        AF.RePoint(self.BFIBackdropBackground)
+    end
+
+    if self.BFIBackdropBorders then
+        for _, border in ipairs(self.BFIBackdropBorders) do
+            AF.ReSize(border)
+            AF.RePoint(border)
+        end
+    end
+end
+
+local function CreateSolidTexture(b, layer, subLevel)
+    local texture = b:CreateTexture(nil, layer, nil, subLevel)
+    texture:SetColorTexture(1, 1, 1, 1)
+    return texture
+end
+
+-- Retail 12.1.0.68914 (d3915c78aba7)'s BackdropTemplate expands this solid
+-- skin into nine regions. Match its layers with one fill and four edge strips.
+local function ApplyLightweightBackdrop(b)
+    local created
+    if not b.BFIBackdropBackground then
+        created = true
+        if b.ClearBackdrop then
+            b:ClearBackdrop()
+        end
+
+        local background = CreateSolidTexture(b, "BACKGROUND", 0)
+        AF.SetOnePixelInside(background, b)
+
+        local top = CreateSolidTexture(b, "BORDER", 0)
+        AF.SetPoint(top, "TOPLEFT", b, "TOPLEFT")
+        AF.SetPoint(top, "TOPRIGHT", b, "TOPRIGHT")
+        AF.SetHeight(top, 1)
+
+        local bottom = CreateSolidTexture(b, "BORDER", 0)
+        AF.SetPoint(bottom, "BOTTOMLEFT", b, "BOTTOMLEFT")
+        AF.SetPoint(bottom, "BOTTOMRIGHT", b, "BOTTOMRIGHT")
+        AF.SetHeight(bottom, 1)
+
+        local left = CreateSolidTexture(b, "BORDER", 0)
+        AF.SetPoint(left, "TOPLEFT", top, "BOTTOMLEFT")
+        AF.SetPoint(left, "BOTTOMLEFT", bottom, "TOPLEFT")
+        AF.SetWidth(left, 1)
+
+        local right = CreateSolidTexture(b, "BORDER", 0)
+        AF.SetPoint(right, "TOPRIGHT", top, "BOTTOMRIGHT")
+        AF.SetPoint(right, "BOTTOMRIGHT", bottom, "TOPRIGHT")
+        AF.SetWidth(right, 1)
+
+        b.BFIBackdropBackground = background
+        b.BFIBackdropBorders = {top, bottom, left, right}
+    end
+
+    -- LibActionButton uses this method to show equipped and macro borders.
+    b.SetBackdropColor = SetButtonBackdropColor
+    b.SetBackdropBorderColor = SetButtonBackdropBorderColor
+    b.UpdatePixels = UpdateButtonPixels
+
+    if created then
+        b:SetBackdropColor(AF.GetColorRGB("background"))
+        b:SetBackdropBorderColor(AF.GetColorRGB("border"))
+    end
+end
+
 function AB.StylizeButton(b)
     b.MasqueSkinned = true
 
@@ -144,6 +281,7 @@ function AB.StylizeButton(b)
     if b.NewActionTexture then b.NewActionTexture:SetAlpha(0) end
     if b.HighlightTexture then b.HighlightTexture:SetAlpha(0) end
     if b.SlotBackground then b.SlotBackground:Hide() end
+    if b.SlotArt then b.SlotArt:Hide() end
     if b.IconMask then b.IconMask:Hide() end
 
     -- texts ----------------------------------------------------------------- --
@@ -221,9 +359,7 @@ function AB.StylizeButton(b)
     end
 
     -- backdrop -------------------------------------------------------------- --
-    Mixin(b, BackdropTemplateMixin)
-    AF.ApplyDefaultBackdrop(b)
-    AF.ApplyDefaultBackdropColors(b)
+    ApplyLightweightBackdrop(b)
 end
 
 ---------------------------------------------------------------------
@@ -402,6 +538,12 @@ end
 
 function AB.CreatePetButton(parent, id)
     local b = CreateFrame("CheckButton", "BFI_PetBarButton" .. id, parent, "PetActionButtonTemplate")
+
+    b:SetScript("OnUpdate", nil)
+    b.StartFlash = StartPetFlash
+    b.StopFlash = StopPetFlash
+    b:HookScript("OnShow", UpdatePetFlashRegistration)
+    b:HookScript("OnHide", UpdatePetFlashRegistration)
 
     b:SetID(id)
     b.index = id
