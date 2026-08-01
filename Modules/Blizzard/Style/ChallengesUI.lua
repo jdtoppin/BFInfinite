@@ -126,7 +126,115 @@ local function StyleSeasonChangeNoticeFrame()
     UpdateText(SeasonChangeNoticeFrame.SeasonDescription3, "white")
 end
 
-AF.RegisterAddonLoaded("Blizzard_ChallengesUI", function()
+---------------------------------------------------------------------
+-- ChallengesKeystoneFrame
+---------------------------------------------------------------------
+local function StyleKeystoneText(text, color)
+    text:SetTextColor(AF.GetColorRGB(color))
+    AF.SetFontShadow(text)
+end
+
+local function StyleKeystoneAffix(affix)
+    if affix._BFIKeystoneStyled then return end
+    affix._BFIKeystoneStyled = true
+
+    affix.Border:Hide()
+    S.StyleSquareIcon(affix.Portrait, affix.CircleMask, true)
+end
+
+local function StyleKeystoneAffixes(frame)
+    for _, affix in ipairs(frame.Affixes) do
+        StyleKeystoneAffix(affix)
+    end
+end
+
+local function StyleKeystoneOuterBackground(frame)
+    for _, region in next, {frame:GetRegions()} do
+        if region:IsObjectType("Texture") then
+            local atlas = region:GetAtlas()
+            if F.isValueNonSecret(atlas)
+                and atlas == "ChallengeMode-KeystoneFrame"
+            then
+                region:SetColorTexture(AF.GetColorRGB("background", 0.95))
+                return
+            end
+        end
+    end
+end
+
+local function StyleChallengesKeystoneFrame()
+    local frame = _G.ChallengesKeystoneFrame
+    if not frame or frame._BFIKeystoneStyled then return end
+    frame._BFIKeystoneStyled = true
+
+    -- Retail 12.1.0.68914, jdtoppin/wow-ui-source
+    -- d3915c78aba77a7a9be76acbfa35c674bbb6abe9. Reset restores the
+    -- shown/alpha state of every direct region. Replace only the anonymous
+    -- outer atlas so Blizzard's named rune, glow, and insertion animations
+    -- remain fully owned and functional.
+    StyleKeystoneOuterBackground(frame)
+    S.CreateBackdrop(frame, true, nil, 1)
+
+    frame.InstructionBackground:SetColorTexture(
+        AF.GetColorRGB("widget", 0.95)
+    )
+    frame.Divider:SetVertexColor(AF.GetColorRGB("BFI"))
+
+    S.StyleCloseButton(frame.CloseButton)
+    S.StyleButton(frame.StartButton, "BFI", nil, true)
+    S.StyleSquareIcon(
+        frame.KeystoneSlot.Texture,
+        frame.KeystoneSlot.CircleMask,
+        true
+    )
+
+    StyleKeystoneText(frame.DungeonName, "BFI")
+    StyleKeystoneText(frame.PowerLevel, "yellow_text")
+    StyleKeystoneText(frame.TimeLimit, "white")
+    StyleKeystoneText(frame.Instructions, "white")
+
+    StyleKeystoneAffixes(frame)
+    hooksecurefunc(frame, "CreateAndPositionAffixes", StyleKeystoneAffixes)
+end
+
+local function InitializeChallengesUI()
     StyleChallengesFrame()
     StyleSeasonChangeNoticeFrame()
+    StyleChallengesKeystoneFrame()
+end
+
+local challengesUILoaded = _G.C_AddOns.IsAddOnLoaded(
+    "Blizzard_ChallengesUI"
+)
+local blizzardStyleReady
+local challengesUIInitialized
+
+local function TryInitializeChallengesUI()
+    if challengesUIInitialized
+        or not challengesUILoaded
+        or not blizzardStyleReady
+    then
+        return
+    end
+
+    challengesUIInitialized = true
+    InitializeChallengesUI()
+end
+
+AF.RegisterCallback("BFI_StyleBlizzard", function()
+    blizzardStyleReady = true
+    TryInitializeChallengesUI()
 end)
+
+if not challengesUILoaded then
+    AF.RegisterAddonLoaded("Blizzard_ChallengesUI", function()
+        challengesUILoaded = true
+        StyleChallengesKeystoneFrame()
+        TryInitializeChallengesUI()
+    end)
+else
+    -- This popup has no dependency on the PVE shell and can be styled as
+    -- soon as its load-on-demand addon is available. The main panels still
+    -- wait for BFI_StyleBlizzard so their BFI header anchors already exist.
+    StyleChallengesKeystoneFrame()
+end
