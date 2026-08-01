@@ -160,19 +160,37 @@ local itemStates = setmetatable({}, {__mode = "k"})
 local fallbackOrder = 0
 local GetActiveItems = function(viewer) return viewer.items end
 local viewerStates = {}
-local registeredEvents = {}
+local targetRegisteredEvents = {}
+local targetObserverOnEvent
+local presentationOnUpdate
+local presentationUpdateSchedules = 0
 local presentationController = {
-    RegisterUnitEvent = function(_, event, unit)
-        registeredEvents[event] = unit
+    buffVisibility = {
+        Update = function() end,
+    },
+    targetObserver = {
+        RegisterUnitEvent = function(_, event, unit)
+            targetRegisteredEvents[event] = unit
+        end,
+        UnregisterEvent = function(_, event)
+            targetRegisteredEvents[event] = nil
+        end,
+        SetScript = function(_, script, handler)
+            if script == "OnEvent" then
+                targetObserverOnEvent = handler
+            end
+        end,
+    },
+    SetScript = function(_, script, handler)
+        if script == "OnUpdate" then
+            presentationOnUpdate = handler
+            if handler then
+                presentationUpdateSchedules = presentationUpdateSchedules + 1
+            end
+        end
     end,
-    UnregisterEvent = function(_, event)
-        registeredEvents[event] = nil
-    end,
-    SetScript = function() end,
 }
-local presentationPollStarts = 0
 local presentationDirtyMarks = 0
-local presentationUpdateTimeLeft = 0
 local InitializeViewers = function() end
 local IsBlizzardEditModeActive = function() return false end
 local inCombat = false
@@ -183,14 +201,16 @@ end
 local RestoreViewer = function(state)
     return state.restored ~= false
 end
-local StartPresentationPolling = function()
-    presentationPollStarts = presentationPollStarts + 1
-end
-local MarkPresentationDirty = function()
-    presentationDirtyMarks = presentationDirtyMarks + 1
-end
+local RefreshAssistedHighlightState = function() end
+local QueuePresentationUpdate
 local hotkeyRefreshEvents = {}
 local hotkeyGeneration = 1
+local MarkPresentationDirty = function()
+    presentationDirtyMarks = presentationDirtyMarks + 1
+    presentationGeneration = presentationGeneration + 1
+    hotkeyGeneration = hotkeyGeneration + 1
+    QueuePresentationUpdate()
+end
 LUA
 
     sed -n \
@@ -224,10 +244,19 @@ LUA
         '/^function PresentationMethods.NoteTargetTransitionBarrier/,/^function PresentationMethods.AdvanceTargetTransition/p' \
         "$module" | sed '$d'
     sed -n \
-        '/^function PresentationMethods.AdvanceTargetTransition/,/^local function PollPresentation(/p' \
+        '/^presentationController.targetObserver:SetScript/,/^function PresentationMethods.AdvanceTargetTransition/p' \
         "$module" | sed '$d'
     sed -n \
-        '/^local function PollPresentation(/,/^local function StartPresentationPolling(/p' \
+        '/^function PresentationMethods.AdvanceTargetTransition/,/^presentationController.buffVisibility.weakKeys/p' \
+        "$module" | sed '$d'
+    sed -n \
+        '/^function presentationController:ReleaseCombatBlock/,/^local function ProcessPresentationUpdate/p' \
+        "$module" | sed '$d'
+    sed -n \
+        '/^local function ProcessPresentationUpdate/,/^QueuePresentationUpdate = function/p' \
+        "$module" | sed '$d'
+    sed -n \
+        '/^QueuePresentationUpdate = function/,/^local function UpdateCooldownManager/p' \
         "$module" | sed '$d'
     sed -n \
         '/^local function OnPresentationEvent(/,/^for event in next, hotkeyRefreshEvents/p' \
@@ -238,6 +267,18 @@ local function check(condition, message)
     if not condition then
         error(message, 2)
     end
+end
+
+local function DispatchTargetAura()
+    check(targetObserverOnEvent ~= nil,
+        "target aura observer callback was not installed")
+    -- The observer deliberately binds no event payload. Passing a secret
+    -- sentinel here proves the transaction wake does not inspect it.
+    targetObserverOnEvent(
+        presentationController.targetObserver,
+        "UNIT_AURA",
+        SECRET
+    )
 end
 
 -- A viewer can exist before all of its child regions are initialized. A
@@ -521,29 +562,35 @@ inCombat = true
 OnPresentationEvent(nil, "PLAYER_TARGET_CHANGED")
 check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
     "combat target event curtained viewers")
-check(registeredEvents.UNIT_AURA == nil,
+check(targetRegisteredEvents.UNIT_AURA == nil,
     "combat target event armed target aura observation")
 check(not presentationController.targetTransition
     or not presentationController.targetTransition.active,
     "combat target event activated a transition")
 inCombat = false
-presentationPollStarts = 0
+presentationController.combatBlocked = true
+presentationOnUpdate = nil
+presentationUpdateSchedules = 0
 presentationDirtyMarks = 0
 
 OnPresentationEvent(nil, "PLAYER_TARGET_CHANGED")
 check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
     "target event did not curtain viewers before native refresh")
-check(registeredEvents.UNIT_AURA == "target",
+check(targetRegisteredEvents.UNIT_AURA == "target",
     "target transition did not arm target aura observation")
-check(presentationPollStarts == 1 and presentationDirtyMarks == 1,
+check(presentationController.combatBlocked == nil,
+    "safe target transition remained stranded behind a stale combat latch")
+check(presentationOnUpdate == ProcessPresentationUpdate
+    and presentationUpdateSchedules == 2
+    and presentationDirtyMarks == 1,
     "target transition did not wake and invalidate presentation")
 
 PresentationMethods.AdvanceTargetTransition(true, false)
 check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
     "stable pre-barrier pass uncovered the target transition")
 
-OnPresentationEvent(nil, "UNIT_AURA")
-check(registeredEvents.UNIT_AURA == "target",
+DispatchTargetAura()
+check(targetRegisteredEvents.UNIT_AURA == "target",
     "incremental target aura update disarmed transition observation")
 check(transitionViewerA.alpha == 0 and transitionViewerB.alpha == 0,
     "incremental target aura update uncovered viewers before reconciliation")
@@ -557,8 +604,8 @@ check(presentationController.targetTransition.stablePasses == 0,
 -- The payload is opaque, so only the later geometry rewrite proves that the
 -- native layout transition has happened. Keep observing target auras until
 -- the entire transition completes.
-OnPresentationEvent(nil, "UNIT_AURA")
-check(registeredEvents.UNIT_AURA == "target",
+DispatchTargetAura()
+check(targetRegisteredEvents.UNIT_AURA == "target",
     "target aura observation stopped before native geometry rewrite")
 
 -- Blizzard rewrites anchors after the early BFI pass. The correction itself
@@ -580,7 +627,7 @@ check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
     "second post-correction stable pass did not restore viewer alpha")
 check(presentationController.targetTransition.active == false,
     "completed target transition remained active")
-check(registeredEvents.UNIT_AURA == nil,
+check(targetRegisteredEvents.UNIT_AURA == nil,
     "completed target transition kept target aura observation armed")
 
 -- If combat begins after a safe out-of-combat curtain was installed, the next
@@ -594,7 +641,7 @@ check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
     "entering combat did not restore exact viewer alpha")
 check(presentationController.targetTransition.active == false,
     "entering combat left the transition active")
-check(registeredEvents.UNIT_AURA == nil,
+check(targetRegisteredEvents.UNIT_AURA == nil,
     "entering combat kept target aura observation armed")
 inCombat = false
 
@@ -646,7 +693,7 @@ check(timeoutPasses < 120,
     "target transition fail-safe did not complete within its bound")
 check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
     "target transition fail-safe lost the original viewer alpha")
-check(registeredEvents.UNIT_AURA == nil,
+check(targetRegisteredEvents.UNIT_AURA == nil,
     "target transition fail-safe kept target aura observation armed")
 
 -- Incremental target aura churn may continuously reset stability, but it must
@@ -657,17 +704,17 @@ while presentationController.targetTransition.active
     and auraChurnPasses < 120
 do
     auraChurnPasses = auraChurnPasses + 1
-    OnPresentationEvent(nil, "UNIT_AURA")
+    DispatchTargetAura()
     PresentationMethods.AdvanceTargetTransition(false, false, 1 / 60)
 end
 check(auraChurnPasses < 120,
     "incremental target aura churn defeated the transition fail-safe")
 check(transitionViewerA.alpha == 0.7 and transitionViewerB.alpha == 1,
     "aura-churn fail-safe did not restore original viewer alpha")
-check(registeredEvents.UNIT_AURA == nil,
+check(targetRegisteredEvents.UNIT_AURA == nil,
     "aura-churn fail-safe kept target aura observation armed")
 
--- Poll aggregation is global across all initialized viewers: one viewer's
+-- Update aggregation is global across all initialized viewers: one viewer's
 -- geometry rewrite must reset the shared transition, and every viewer must be
 -- complete on each of the two following stable passes. A clean viewer cannot
 -- mask another viewer's correction or failure.
@@ -690,30 +737,41 @@ viewerStates = {
 CM.config.viewers = {first = {}, second = {}}
 OnPresentationEvent(nil, "PLAYER_TARGET_CHANGED")
 PresentationMethods.NoteTargetTransitionBarrier()
-PollPresentation(nil, 1 / 60)
+-- A target transaction is urgent: even an existing ordinary debounce and a
+-- nearly exhausted construction retry budget must not delay or consume its
+-- curtained reconciliation window.
+presentationController.updateTimeLeft = 99
+presentationController.retryPassesRemaining = 1
+ProcessPresentationUpdate(nil, 1 / 60)
 check(presentationController.targetTransition.geometryCorrected == true,
     "one viewer's geometry correction was lost during aggregation")
 check(presentationController.targetTransition.stablePasses == 0,
     "aggregated correction pass counted as stable")
 check(aggregateViewerA.alpha == 0 and aggregateViewerB.alpha == 0,
     "aggregated correction uncovered a viewer")
+check(presentationController.updateTimeLeft == 0,
+    "target transition was delayed by the ordinary debounce")
+check(presentationController.retryPassesRemaining == 1,
+    "target transition consumed the ordinary construction retry budget")
+check(presentationOnUpdate == ProcessPresentationUpdate,
+    "target transition stopped its update worker before completion")
 
 viewerStates[2].geometryChanged = false
-PollPresentation(nil, 1 / 60)
+ProcessPresentationUpdate(nil, 1 / 60)
 check(presentationController.targetTransition.stablePasses == 1,
     "first aggregated stable pass was not recorded")
 viewerStates[1].complete = false
-PollPresentation(nil, 1 / 60)
+ProcessPresentationUpdate(nil, 1 / 60)
 check(presentationController.targetTransition.stablePasses == 0,
     "one incomplete viewer was masked by a complete viewer")
 check(aggregateViewerA.alpha == 0 and aggregateViewerB.alpha == 0,
     "incomplete aggregated pass uncovered viewers")
 
 viewerStates[1].complete = true
-PollPresentation(nil, 1 / 60)
+ProcessPresentationUpdate(nil, 1 / 60)
 check(presentationController.targetTransition.stablePasses == 1,
     "aggregated stability did not restart after failure")
-PollPresentation(nil, 1 / 60)
+ProcessPresentationUpdate(nil, 1 / 60)
 check(aggregateViewerA.alpha == 0.6 and aggregateViewerB.alpha == 0.9,
     "two aggregated stable passes did not restore all viewers")
 check(presentationController.targetTransition.active == false,
