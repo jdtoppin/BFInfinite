@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import importlib.util
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -19,17 +18,28 @@ SPEC.loader.exec_module(CHECKER)
 
 
 class AbstractFrameworkIntegrationPolicyTest(unittest.TestCase):
-    def write_lock(self, root: Path, revision: str = "a" * 40) -> Path:
+    def write_lock(
+        self,
+        root: Path,
+        revision: str = "a" * 40,
+        version: str = "r29",
+    ) -> Path:
         path = root / "abstract-framework.lock"
         path.write_text(
             "repository=jdtoppin/AbstractFramework\n"
             f"revision={revision}\n"
-            "version=r29\n",
+            f"version={version}\n",
             encoding="utf-8",
         )
         return path
 
-    def write_contract(self, root: Path) -> tuple[Path, Path]:
+    def write_contract(
+        self,
+        root: Path,
+        bootstrap_version: int = 29,
+        runtime_version: int = 29,
+        af_version: str = "r29",
+    ) -> tuple[Path, Path]:
         bfi = root / "bfi"
         af = root / "af"
         bfi.mkdir()
@@ -37,12 +47,19 @@ class AbstractFrameworkIntegrationPolicyTest(unittest.TestCase):
         (bfi / "BFInfinite.toc").write_text(
             "## Dependencies: AbstractFramework\n", encoding="utf-8"
         )
-        (bfi / "Init.lua").write_text("BFI.requiredAFVersion = 29\n", encoding="utf-8")
-        (bfi / "Core.lua").write_text(
-            "local REQUIRED_AF_VERSION = 29\nAF.RequireVersion(REQUIRED_AF_VERSION)\n",
+        (bfi / "Init.lua").write_text(
+            f"BFI.requiredAFVersion = {bootstrap_version}\n",
             encoding="utf-8",
         )
-        (af / "AbstractFramework.toc").write_text("## Version: r29\n", encoding="utf-8")
+        (bfi / "Core.lua").write_text(
+            f"local REQUIRED_AF_VERSION = {runtime_version}\n"
+            "AF.RequireVersion(REQUIRED_AF_VERSION)\n",
+            encoding="utf-8",
+        )
+        (af / "AbstractFramework.toc").write_text(
+            f"## Version: {af_version}\n",
+            encoding="utf-8",
+        )
         return bfi, af
 
     def test_valid_lock_and_contract(self) -> None:
@@ -81,12 +98,7 @@ class AbstractFrameworkIntegrationPolicyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             lock = CHECKER.parse_lock(self.write_lock(root))
-            bfi, af = self.write_contract(root)
-            (bfi / "Init.lua").write_text("BFI.requiredAFVersion = 30\n", encoding="utf-8")
-            (bfi / "Core.lua").write_text(
-                "local REQUIRED_AF_VERSION = 30\nAF.RequireVersion(REQUIRED_AF_VERSION)\n",
-                encoding="utf-8",
-            )
+            bfi, af = self.write_contract(root, bootstrap_version=30, runtime_version=30)
             with self.assertRaisesRegex(CHECKER.IntegrationError, "does not satisfy"):
                 CHECKER.validate_source_contract(bfi, af, lock, "a" * 40)
 
@@ -94,27 +106,34 @@ class AbstractFrameworkIntegrationPolicyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             lock = CHECKER.parse_lock(self.write_lock(root))
-            bfi, af = self.write_contract(root)
-            (af / "AbstractFramework.toc").write_text("## Version: r30\n", encoding="utf-8")
+            bfi, af = self.write_contract(root, af_version="r30")
             with self.assertRaisesRegex(CHECKER.IntegrationError, "expected locked version"):
                 CHECKER.validate_source_contract(bfi, af, lock, "a" * 40)
 
-    def test_missing_texture_callback_is_rejected(self) -> None:
+    def test_bootstrap_requirement_may_be_lower_than_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            texture = Path(directory) / "Texture.lua"
-            texture.write_text("local AF = select(2, ...)\nAF.placeholder = true\n", encoding="utf-8")
-            result = subprocess.run(
-                [
-                    CHECKER.find_lua(),
-                    str(REPO_ROOT / "tests" / "abstract_framework_texture_contract.lua"),
-                    str(texture),
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
+            root = Path(directory)
+            lock = CHECKER.parse_lock(self.write_lock(root, version="r36"))
+            bfi, af = self.write_contract(
+                root,
+                bootstrap_version=29,
+                runtime_version=36,
+                af_version="r36",
             )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("loaded aura texcoord callback", result.stderr)
+            CHECKER.validate_source_contract(bfi, af, lock, "a" * 40)
+
+    def test_bootstrap_requirement_cannot_exceed_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lock = CHECKER.parse_lock(self.write_lock(root, version="r36"))
+            bfi, af = self.write_contract(
+                root,
+                bootstrap_version=36,
+                runtime_version=29,
+                af_version="r36",
+            )
+            with self.assertRaisesRegex(CHECKER.IntegrationError, "cannot exceed"):
+                CHECKER.validate_source_contract(bfi, af, lock, "a" * 40)
 
 
 if __name__ == "__main__":

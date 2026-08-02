@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import re
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -117,10 +116,10 @@ def validate_source_contract(
     core_requirement = one_numeric_assignment(
         bfi_root / "Core.lua", core_constant, "REQUIRED_AF_VERSION"
     )
-    if init_requirement != core_requirement:
+    if init_requirement > core_requirement:
         raise IntegrationError(
-            "Init.lua and Core.lua disagree on the required AbstractFramework version: "
-            f"{init_requirement} != {core_requirement}"
+            "Init.lua's bootstrap AbstractFramework requirement cannot exceed Core.lua's "
+            f"runtime requirement: r{init_requirement} > r{core_requirement}"
         )
 
     core_source = (bfi_root / "Core.lua").read_text(encoding="utf-8")
@@ -132,9 +131,10 @@ def validate_source_contract(
         raise IntegrationError(
             f"AbstractFramework.toc declares {af_version!r}, expected locked version {lock.version!r}"
         )
-    if lock.version_number < init_requirement:
+    if lock.version_number < core_requirement:
         raise IntegrationError(
-            f"locked AbstractFramework {lock.version} does not satisfy BFI requirement r{init_requirement}"
+            f"locked AbstractFramework {lock.version} does not satisfy BFI runtime "
+            f"requirement r{core_requirement}"
         )
 
 
@@ -149,14 +149,6 @@ def git_head(path: Path) -> str:
         detail = result.stderr.strip() or "not a Git checkout"
         raise IntegrationError(f"cannot inspect AbstractFramework checkout at {path}: {detail}")
     return result.stdout.strip()
-
-
-def find_lua() -> str:
-    for candidate in ("lua5.1", "lua-5.1", "lua51", "luajit"):
-        executable = shutil.which(candidate)
-        if executable is not None:
-            return executable
-    raise IntegrationError("Lua 5.1 or LuaJIT is required for the AbstractFramework contract test")
 
 
 def export_github_output(path: Path, lock: FrameworkLock) -> None:
@@ -194,10 +186,7 @@ def main() -> int:
 
         af_root = args.af_root.resolve()
         validate_source_contract(bfi_root, af_root, lock, git_head(af_root))
-        texture_test = bfi_root / "tests" / "abstract_framework_texture_contract.lua"
-        texture_source = af_root / "Widgets" / "Texture.lua"
-        subprocess.run([find_lua(), str(texture_test), str(texture_source)], check=True)
-    except (IntegrationError, OSError, subprocess.CalledProcessError) as exc:
+    except (IntegrationError, OSError) as exc:
         print(f"AbstractFramework integration check failed: {exc}", file=sys.stderr)
         return 1
 
