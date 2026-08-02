@@ -443,6 +443,12 @@ end
 function AB.CreateButton(parent, id, name)
     local b = LAB:CreateButton(id, name, parent)
 
+    -- Retail 12.1.0.68914, Gethe/wow-ui-source d3915c78aba7:
+    -- SecureTemplates.lua requires this per-button opt-in as well as the
+    -- native CVar. Keep the button opted in and let the active BFI profile's
+    -- mirrored CVar decide whether mouseover casting is enabled.
+    b:SetAttribute("checkmouseovercast", true)
+
     AB.StylizeButton(b)
 
     b.GetHotKeys = Button_GetHotKeys
