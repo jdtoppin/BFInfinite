@@ -215,6 +215,7 @@ local function makeHarness()
         ipairs = ipairs,
         next = next,
         pairs = pairs,
+        rawget = rawget,
         ReloadUI = ReloadUI,
         select = select,
         string = string,

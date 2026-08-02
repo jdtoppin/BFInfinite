@@ -6,6 +6,7 @@ local L = BFI.L
 local UF = BFI.modules.UnitFrames
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
+local rawget = rawget
 
 local created = {}
 local builder = {}
@@ -3930,6 +3931,75 @@ end
 ---------------------------------------------------------------------
 -- auraBlackListWhitelist
 ---------------------------------------------------------------------
+local function IsCurrentSpecializationHealer()
+    local getSpecialization = rawget(_G, "GetSpecialization")
+    local getSpecializationRole =
+        rawget(_G, "GetSpecializationRole")
+    if type(getSpecialization) ~= "function"
+        or type(getSpecializationRole) ~= "function"
+    then
+        return false
+    end
+
+    local specialization = getSpecialization()
+    return specialization ~= nil
+        and getSpecializationRole(specialization) == "HEALER"
+end
+
+-- Retail 12.1.0.68914, wow-ui-source d3915c78:
+-- Blizzard's Group Buff filter uses these spell IDs as aura IDs. Availability
+-- reads are non-mutating; only an explicit user click writes the snapshot.
+local function GetGroupBuffImportAPI()
+    local cooldownViewer = rawget(_G, "C_CooldownViewer")
+    local enum = rawget(_G, "Enum")
+    local bitLibrary = rawget(_G, "bit")
+    local getItems = cooldownViewer
+        and cooldownViewer.GetGroupBuffItems
+    local hideByDefault = enum
+        and enum.GroupBuffItemFlags
+        and enum.GroupBuffItemFlags.HideByDefault
+    local band = bitLibrary and bitLibrary.band
+
+    if type(getItems) ~= "function"
+        or type(hideByDefault) ~= "number"
+        or type(band) ~= "function"
+    then
+        return
+    end
+
+    return getItems, band, hideByDefault
+end
+
+local function GetImportableGroupBuffSpellIDs()
+    local getItems, band, hideByDefault =
+        GetGroupBuffImportAPI()
+    if not getItems then return end
+
+    local items = getItems()
+    if type(items) ~= "table" or #items == 0 then return end
+
+    local imported = {}
+    local importedSet = {}
+    for _, item in ipairs(items) do
+        local spellID = type(item) == "table"
+            and item.spellID
+        local flags = type(item) == "table"
+            and item.flags
+        if type(spellID) == "number"
+            and spellID > 0
+            and spellID % 1 == 0
+            and type(flags) == "number"
+            and band(flags, hideByDefault) == 0
+            and not importedSet[spellID]
+        then
+            importedSet[spellID] = true
+            tinsert(imported, spellID)
+        end
+    end
+    if #imported == 0 then return end
+    return imported
+end
+
 builder["auraBlackListWhitelist"] = function(parent)
     if created["auraBlackListWhitelist"] then return created["auraBlackListWhitelist"] end
 
@@ -4040,6 +4110,55 @@ builder["auraBlackListWhitelist"] = function(parent)
         GetEditBox(addButton)
     end)
 
+    local importButton = AF.CreateButton(
+        pane,
+        L["Import Healer Spells"],
+        "BFI_hover",
+        150,
+        20
+    )
+    importButton:EnablePushEffect(false)
+    importButton:SetTooltip(
+        L["Import Healer Spells"],
+        L["Adds Blizzard's default group-buff spells for your current healing specialization. Existing entries are kept"]
+    )
+
+    local function CanImportHealerSpells(t)
+        return AF.isRetail
+            and t.id == "buffs"
+            and t.cfg.mode == "whitelist"
+            and UsesNativeAuraContainer(t)
+            and IsCurrentSpecializationHealer()
+    end
+
+    local function ImportHealerSpells()
+        local t = pane.t
+        if not t or not CanImportHealerSpells(t) then return end
+
+        local imported = GetImportableGroupBuffSpellIDs()
+        if not imported then return end
+
+        local list = t.cfg.whitelist
+        local seen = {}
+        local changed = false
+        for _, spellID in ipairs(list) do
+            seen[spellID] = true
+        end
+        for _, spellID in ipairs(imported) do
+            if not seen[spellID] then
+                seen[spellID] = true
+                tinsert(list, spellID)
+                changed = true
+            end
+        end
+        if not changed then return end
+
+        pane.Load(t)
+        LoadIndicatorConfig(t)
+    end
+
+    importButton:SetOnClick(ImportHealerSpells)
+
     local pool = AF.CreateObjectPool(function()
         local b = AF.CreateButton(pane, nil, "BFI_hover", 150, 20)
         b:SetTexture(AF.GetIcon("QuestionMark"), nil, {"LEFT", 2, 0}, nil, "black")
@@ -4080,9 +4199,11 @@ builder["auraBlackListWhitelist"] = function(parent)
     function pane.Load(t)
         pane.t = t
         local canEdit = not AF.isRetail
+        local usesNative = false
         if AF.isRetail then
             HideEditBox()
-            if UsesNativeAuraContainer(t) then
+            usesNative = UsesNativeAuraContainer(t)
+            if usesNative then
                 canEdit = true
                 mode:SetItems(retailModeItems)
                 tip:SetText(
@@ -4109,6 +4230,22 @@ builder["auraBlackListWhitelist"] = function(parent)
         mode:SetEnabled(canEdit)
         addButton:SetEnabled(canEdit)
 
+        local canImport = canEdit
+            and usesNative
+            and t.id == "buffs"
+            and t.cfg.mode == "whitelist"
+            and IsCurrentSpecializationHealer()
+        if canImport then
+            importButton:Show()
+        else
+            importButton:Hide()
+        end
+        local importable = canImport
+            and GetImportableGroupBuffSpellIDs()
+        importButton:SetEnabled(
+            canImport and importable ~= nil
+        )
+
         pane.list = t.cfg.mode == "blacklist" and t.cfg.blacklist or t.cfg.whitelist
 
         pool:ReleaseAll()
@@ -4116,20 +4253,15 @@ builder["auraBlackListWhitelist"] = function(parent)
 
         local num = #pane.list
 
-        for i = 1, num + 1 do
+        for i = 1, num do
             local spell = pane.list[i]
 
-            local b
-            if i <= num then
-                b = pool:Acquire()
-                local name, icon = AF.GetSpellInfo(spell, true)
-                b:SetText(name)
-                b:SetTexture(icon, nil, nil, nil, "black")
-                b.spell = spell
-                b.index = i
-            else
-                b = addButton
-            end
+            local b = pool:Acquire()
+            local name, icon = AF.GetSpellInfo(spell, true)
+            b:SetText(name)
+            b:SetTexture(icon, nil, nil, nil, "black")
+            b.spell = spell
+            b.index = i
 
             buttons[i] = b
             b:SetEnabled(canEdit)
@@ -4162,7 +4294,60 @@ builder["auraBlackListWhitelist"] = function(parent)
             end
         end
 
-        local rows = ceil((num + 1) / 2)
+        AF.ClearPoints(addButton)
+        AF.ClearPoints(importButton)
+        local firstControlAnchor = AF.isRetail and tip or mode
+        if num == 0 then
+            AF.SetPoint(
+                addButton,
+                "TOPLEFT",
+                firstControlAnchor,
+                "BOTTOMLEFT",
+                0,
+                -8
+            )
+        elseif canImport then
+            local leftButton = buttons[num % 2 == 0 and num - 1 or num]
+            AF.SetPoint(
+                addButton,
+                "TOPLEFT",
+                leftButton,
+                "BOTTOMLEFT",
+                0,
+                -5
+            )
+        elseif num % 2 == 0 then
+            AF.SetPoint(
+                addButton,
+                "TOPLEFT",
+                buttons[num - 1],
+                "BOTTOMLEFT",
+                0,
+                -5
+            )
+        else
+            AF.SetPoint(
+                addButton,
+                "TOPLEFT",
+                buttons[num],
+                "TOPRIGHT",
+                5,
+                0
+            )
+        end
+        addButton:Show()
+        AF.SetPoint(
+            importButton,
+            "TOPLEFT",
+            addButton,
+            "TOPRIGHT",
+            5,
+            0
+        )
+
+        local rows = canImport
+            and ceil(num / 2) + 1
+            or ceil((num + 1) / 2)
         if AF.isRetail then
             RunNextFrame(function()
                 AF.SetListHeight(
