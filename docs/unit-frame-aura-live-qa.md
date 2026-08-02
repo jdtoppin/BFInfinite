@@ -37,35 +37,37 @@ installing the supported AF #25/r36 pair.
 1. AF #19 at `d6858f3997a1014a7ab9ce05ddaaf53efe4df9c6` with BFInfinite
    #90 at `d9c5a23246a01572e1fb75d470a250032f802b33`.
 2. AF #19 at `d6858f3997a1014a7ab9ce05ddaaf53efe4df9c6` with BFInfinite
-   #123 at `6840357a27c4473672227b8d4d9b25a73cc53596`. Verify the
-   Buff/Debuff control labels are plain while the Unit Frame Presets heading
-   and semantic enabled/disabled colours remain unchanged.
+   #123 at `dcac8ca227734ee0132c3362ef7208f774e050c6`. Verify the
+   Buff/Debuff control labels are plain, editable spell-list rows show the
+   Edit/Delete mouse hints, and read-only rows do not advertise those actions.
+   The Unit Frame Presets heading and semantic enabled/disabled colours remain
+   unchanged.
 3. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
-   #101 at `32ea029e6b605559f67314829e9359679aee4d8c`.
+   #101 at `fb2c4fa7b1334d825347647dcc5b2943d1ef6308`.
 4. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
-   #102 at `9fedb173cc7da9a4152ca3bd077fd2c3bf203df7`.
+   #102 at `040b556bb7fbbcd6758f3e18a261e46a119824b2`.
 5. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #120 at `6061a987bb14cae2ad0c2bba03275b885bee7d00`, then #110 at
-   `31492ff69acfee27f371b746a0f4eb4d75a8f674`.
+   #120 at `f80ac5b2863921fe90aa2796d857b72e82f6605f`, then #110 at
+   `6066c61280f669b0f16b83234c88342a7208f987`.
 6. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #112 at `6f6027e81efbe021f3c73c5fb6ec3912ebb31605`.
+   #112 at `f3e1ec48496bf42f0ab82f975512166f326981d7`.
 7. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
    #103 at `ab6a3fd8e2d0c18416717a0c59e3c675fc203bac`. Verify the
    ordinary upper-right Debuffs use BFI's neutral square outline while
    Blizzard continues to own their data and layout.
 8. Validation-only AF #25 at
    `b885864a221a83334f65dc6cfaa8514a953cb40f` with BFInfinite #110
-   at `31492ff69acfee27f371b746a0f4eb4d75a8f674`. This is the clean
+   at `6066c61280f669b0f16b83234c88342a7208f987`. This is the clean
    combined check for AF #26's square border and AF #27's required r36
    runtime. Verify Target Debuffs use a square border while Blizzard's native
    dispel type still controls its colour and visibility. Target Buffs must
    remain unchanged.
 9. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #110 at `31492ff69acfee27f371b746a0f4eb4d75a8f674`. On Target Buffs
+   #110 at `6066c61280f669b0f16b83234c88342a7208f987`. On Target Buffs
    and Debuffs, test every cooldown choice after its required reload and
    require exactly one graphical timer.
 10. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-    #112 at `6f6027e81efbe021f3c73c5fb6ec3912ebb31605`. Repeat every
+    #112 at `f3e1ec48496bf42f0ab82f975512166f326981d7`. Repeat every
     cooldown choice on hostile nameplate Debuffs.
 11. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
     #121 at `d1a5fe741fc703458b5d0830e620cd6ac6f070b9`, then #103 at
@@ -128,9 +130,9 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Current BFInfinite master compatibility | `master` | `5f771c7fc93e1380823a988615ae509af927d5c5` |
 | Achievement UI 12.1 search topology (#124) | `codex/achievement-ui-12-1-search-path` | `5b01b20408e3044b18e8fc12a574f8c70befa6bf` |
 | Unit Frame pane-switch lifecycle (#122) | `codex/unitframe-aura-settings-switch` | `7334f0ba2b6ec8434d94f79050642a99c8ef37a5` |
-| Plain aura control labels (#123) | `codex/unitframe-aura-plain-option-labels` | `6840357a27c4473672227b8d4d9b25a73cc53596` |
-| Global exact spell colors (#101) | `codex/unitframe-aura-spell-colors` | `32ea029e6b605559f67314829e9359679aee4d8c` |
-| Presentation hardening (#102) | `codex/unitframe-aura-presentation-hardening` | `9fedb173cc7da9a4152ca3bd077fd2c3bf203df7` |
+| Aura settings presentation (#123) | `codex/unitframe-aura-plain-option-labels` | `dcac8ca227734ee0132c3362ef7208f774e050c6` |
+| Global exact spell colors (#101) | `codex/unitframe-aura-spell-colors` | `fb2c4fa7b1334d825347647dcc5b2943d1ef6308` |
+| Presentation hardening (#102) | `codex/unitframe-aura-presentation-hardening` | `040b556bb7fbbcd6758f3e18a261e46a119824b2` |
 | Player | `codex/unitframe-aura-player` | `673838dc5dea739617155bf6806d4bb42fcaea97` |
 | Boss | `codex/unitframe-aura-boss` | `9f01f432289b6b2457c5bb9cc6f023582ad85b5c` |
 | Focus | `codex/unitframe-aura-focus` | `03b75af042fd84b93a3e3eaeb09ac68b1ff46440` |
@@ -138,9 +140,9 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | FocusTarget | `codex/unitframe-aura-focustarget` | `58a60e011cb2dbd2d3b54d62cdb6ffc6b8df2df9` |
 | PetTarget | `codex/unitframe-aura-pettarget` | `02a75fd22f8f04e21e7f139df214697e6350e567` |
 | Pet | `codex/unitframe-aura-pet` | `8e91a8c7616b3000d5e607a2063bf528dd8c4f59` |
-| Unit/nameplate AF r36 gate (#120) | `codex/native-aura-r36-unitframe-gate` | `6061a987bb14cae2ad0c2bba03275b885bee7d00` |
-| Target partition (#110) | `codex/unitframe-aura-target-final` | `31492ff69acfee27f371b746a0f4eb4d75a8f674` |
-| Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `6f6027e81efbe021f3c73c5fb6ec3912ebb31605` |
+| Unit/nameplate AF r36 gate (#120) | `codex/native-aura-r36-unitframe-gate` | `f80ac5b2863921fe90aa2796d857b72e82f6605f` |
+| Target partition (#110) | `codex/unitframe-aura-target-final` | `6066c61280f669b0f16b83234c88342a7208f987` |
+| Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `f3e1ec48496bf42f0ab82f975512166f326981d7` |
 | Party | `codex/unitframe-aura-party` | `2cfcbca80d0b2b45b9a9abb657907511152ae6b9` |
 | Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
 | Upper-right AF r36 gate (#121) | `codex/native-aura-r36-upper-right-gate` | `d1a5fe741fc703458b5d0830e620cd6ac6f070b9` |
@@ -163,8 +165,9 @@ Test in this order:
    visibly different values and verify both slow and rapid selection changes
    bind the chosen pane immediately.
 3. Test the policy, spec, lifecycle/controller, provider/counter, and #90
-   supported-filter PRs in isolation. Test #123 next for plain aura labels,
-   then test refreshed #101 spell colours and #102 presentation hardening.
+   supported-filter PRs in isolation. Test #123 next for plain aura labels and
+   spell-list action hints, then test refreshed #101 spell colours and #102
+   presentation hardening.
 4. Test each of the ten unit-frame integration leaves independently.
 5. Test #112's enemy nameplate Debuffs migration independently after #110.
 6. Test the upper-right foundation, controller, Buffs, options, and
