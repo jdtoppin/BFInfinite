@@ -265,8 +265,8 @@ for _, savedOrientation in ipairs(orientationCases) do
     )
     assertEqual(
         descriptor.holder.height,
-        96,
-        savedOrientation .. " holder height"
+        30,
+        savedOrientation .. " one-row holder height"
     )
 
     local groupLayout = descriptor.groups[1].layout
@@ -361,26 +361,41 @@ do
     config.height = 30
     config.wrapAfter = 1
     config.maxWraps = 2
+    config.position = {"TOPRIGHT", "TOPRIGHT", -12, -16}
     config.duration.showSecondsUnit = false
     config.duration.color.percent.enabled = true
     config.duration.color.seconds.value = 99
 
     local descriptor = assert(compile(config))
-    assertNil(descriptor.position, "saved BFI position is dormant")
-    assertNil(descriptor.positionSave, "follower owns no mover save")
-    assertNil(descriptor.moverText, "follower creates no BFI mover")
+    assertTablesEqual(
+        descriptor.position,
+        config.position,
+        "saved BFI position remains the holder location"
+    )
+    assertEqual(type(descriptor.positionSave), "function",
+        "mover uses a profile position save callback")
+    descriptor.positionSave("BOTTOMLEFT", 14, 18)
+    assertTablesEqual(
+        config.position,
+        {"BOTTOMLEFT", 14, 18},
+        "mover callback canonicalizes the profile position"
+    )
+    assertNil(config.position[4],
+        "mover callback removes a stale legacy relative anchor field")
+    assertEqual(descriptor.moverText, "Buff Frame", "BFI mover label")
     assertEqual(descriptor.holderRolesets, "buffs", "Buff roleset")
     assertTablesEqual(
-        descriptor.holderAnchor,
+        descriptor.nativeFollower,
         {
-            point = "BOTTOMRIGHT",
-            relativeGlobal = "DebuffFrame",
-            relativePoint = "TOPRIGHT",
+            globalName = "DebuffFrame",
+            point = "TOPRIGHT",
+            relativePoint = "BOTTOMRIGHT",
             x = 0,
-            y = 5,
+            y = -5,
         },
-        "native DebuffFrame follower anchor"
+        "native DebuffFrame follows the BFI holder seam"
     )
+    assertNil(descriptor.holderAnchor, "holder is not owned by DebuffFrame")
     assertEqual(descriptor.processing.policy, "NONE", "processing policy")
     assertNil(descriptor.processing.options, "None policy has no options")
 
@@ -481,13 +496,12 @@ do
     assertNil(descriptor.constructionKey.wrapAfter,
         "wrapping remains live")
 
-    -- Two aura slots plus two enchantments at one icon per line need four
-    -- lines; this proves holder sizing does not mistake maxFrameCount for a
-    -- strict global cap.
+    -- The mover owns only the first-row seam. Extra Buff and enchantment rows
+    -- grow upward outside it so Debuffs remain immediately below the mover.
     assertEqual(descriptor.holder.width, 20,
         "single-column holder width")
-    assertEqual(descriptor.holder.height, 138,
-        "holder includes two enchantment lines")
+    assertEqual(descriptor.holder.height, 30,
+        "holder reserves exactly one icon row")
 end
 
 do

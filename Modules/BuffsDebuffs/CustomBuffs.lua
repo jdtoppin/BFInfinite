@@ -1,10 +1,11 @@
 ---@type BFI
 local BFI = select(2, ...)
+local L = BFI.L
 ---@class BuffsDebuffs
 local BD = BFI.modules.BuffsDebuffs
 
--- Retail 12.0.7 continues to use the legacy SecureAuraHeader backend. On
--- 12.1, register only the public Buffs replacement: CustomAuraContainer
+-- On Retail 12.1, register only the public Buffs replacement:
+-- CustomAuraContainer
 -- always receives public and private sources, so a harmful group would
 -- duplicate DebuffFrame's private-aura anchors.
 if type(BD.RegisterCustomAuraContainerPane) ~= "function"
@@ -13,7 +14,6 @@ then
     return
 end
 
-local ceil = math.ceil
 local floor = math.floor
 local max = math.max
 local tonumber = tonumber
@@ -32,6 +32,7 @@ local enchantmentPlacement =
 local defaults = BD.GetDefaults().buffs
 local CONSTRUCTION_SCHEMA = 2
 local FOLLOWER_GAP = 5
+local MAX_POSITION_OFFSET = 10000
 
 local VALID_ANCHORS = {
     BOTTOM = true,
@@ -180,6 +181,51 @@ local function NormalizeTextPosition(value, fallback)
     }
 end
 
+local function NormalizeHolderPosition(value)
+    local fallback = defaults.position
+    if type(value) ~= "table" then value = {} end
+
+    local point = NormalizeAnchor(value[1], fallback[1])
+    if type(value[2]) == "string" then
+        return {
+            point,
+            NormalizeAnchor(value[2], point),
+            NormalizeNumber(
+                value[3],
+                fallback[2],
+                -MAX_POSITION_OFFSET,
+                MAX_POSITION_OFFSET,
+                false
+            ),
+            NormalizeNumber(
+                value[4],
+                fallback[3],
+                -MAX_POSITION_OFFSET,
+                MAX_POSITION_OFFSET,
+                false
+            ),
+        }
+    end
+
+    return {
+        point,
+        NormalizeNumber(
+            value[2],
+            fallback[2],
+            -MAX_POSITION_OFFSET,
+            MAX_POSITION_OFFSET,
+            false
+        ),
+        NormalizeNumber(
+            value[3],
+            fallback[3],
+            -MAX_POSITION_OFFSET,
+            MAX_POSITION_OFFSET,
+            false
+        ),
+    }
+end
+
 local function NormalizeStackText(config)
     if type(config) ~= "table" then config = {} end
     return {
@@ -280,9 +326,9 @@ local function CompileBuffs(config)
         true
     )
 
-    -- Blizzard's DebuffFrame is the 12.1 location owner. Keep the custom
-    -- Buff container's bottom-right edge fixed above it and grow left/up so
-    -- neither live aura count nor secret geometry is needed for alignment.
+    -- The BFI mover owns one fixed bottom-right seam. Buffs grow left/up from
+    -- it and Blizzard's ordinary DebuffFrame is linked directly below it, so
+    -- alignment never depends on live aura count or restricted geometry.
     local orientation = ORIENTATIONS.right_to_left_then_up
     local nativeSortMethod = SORT_METHODS[config.sortMethod]
         or SORT_METHODS[defaults.sortMethod]
@@ -291,7 +337,6 @@ local function CompileBuffs(config)
 
     local isHorizontal = orientation.axis == flowAxis.Horizontal
     local primarySize = isHorizontal and width or height
-    local crossSize = isHorizontal and height or width
     local primarySpacing = isHorizontal and spacingX or spacingY
     local crossSpacing = isHorizontal and spacingY or spacingX
     local auraCap = wrapAfter * maxWraps
@@ -300,17 +345,10 @@ local function CompileBuffs(config)
         wrapAfter * primarySize + (wrapAfter - 1) * primarySpacing
     )
 
-    -- maxFrameCount applies to the HELPFUL group only. Main-hand and off-hand
-    -- enchantments can add two more frames, so size the hover/mover holder for
-    -- their worst-case extra lines without claiming a strict global cap.
-    local worstLineCount = ceil((auraCap + 2) / wrapAfter)
-    local crossExtent = max(
-        1,
-        worstLineCount * crossSize
-            + (worstLineCount - 1) * crossSpacing
-    )
-    local holderWidth = isHorizontal and maximumLineSize or crossExtent
-    local holderHeight = isHorizontal and crossExtent or maximumLineSize
+    -- The holder represents only the seam row. Additional native rows grow
+    -- upward without reserving empty space between Buffs and Debuffs.
+    local holderWidth = maximumLineSize
+    local holderHeight = height
 
     local groupLayout = CreateGroupLayout(
         width,
@@ -346,6 +384,22 @@ local function CompileBuffs(config)
         cancelAuraButtons = "RightButtonUp",
     }
 
+    local moverText = _G.HUD_EDIT_MODE_BUFF_FRAME_LABEL
+    if type(moverText) ~= "string" or moverText == "" then
+        moverText = L["Buffs & Debuffs"]
+    end
+
+    local positionSave
+    if type(config.position) == "table" then
+        local profilePosition = config.position
+        positionSave = function(point, x, y)
+            profilePosition[1] = point
+            profilePosition[2] = x
+            profilePosition[3] = y
+            profilePosition[4] = nil
+        end
+    end
+
     return {
         enabled = config.enabled == true,
         constructionKey = {
@@ -357,12 +411,12 @@ local function CompileBuffs(config)
             height = holderHeight,
         },
         holderRolesets = "buffs",
-        holderAnchor = {
-            point = "BOTTOMRIGHT",
-            relativeGlobal = "DebuffFrame",
-            relativePoint = "TOPRIGHT",
+        nativeFollower = {
+            globalName = "DebuffFrame",
+            point = "TOPRIGHT",
+            relativePoint = "BOTTOMRIGHT",
             x = 0,
-            y = FOLLOWER_GAP,
+            y = -FOLLOWER_GAP,
         },
         containerPoint = {
             point = orientation.anchorPoint,
@@ -414,6 +468,9 @@ local function CompileBuffs(config)
             direction = sortDirection.Normal,
         },
         itemEnchantmentLayout = itemEnchantmentLayout,
+        position = NormalizeHolderPosition(config.position),
+        positionSave = positionSave,
+        moverText = moverText,
     }
 end
 
