@@ -26,6 +26,12 @@ AF.RegisterCallback("BFI_UpdateConfig", function(_, module)
 
     if not BFIConfig.auras then
         BFIConfig.auras = AF.Copy(defaults)
+    else
+        for key, value in next, defaults do
+            if type(BFIConfig.auras[key]) ~= "table" then
+                BFIConfig.auras[key] = AF.Copy(value)
+            end
+        end
     end
     A.config = BFIConfig.auras
 end, "high")
@@ -38,13 +44,9 @@ function A.GetDefaults(which)
 end
 
 function A.ResetToDefaults(which)
-    if not which then
-        for k, v in next, BFIConfig["auras"] do
-            wipe(BFIConfig["auras"][k])
-            AF.Merge(BFIConfig["auras"][k], defaults[k])
-        end
-    else
-        wipe(BFIConfig["auras"][which])
-        AF.Merge(BFIConfig["auras"][which], defaults[which])
-    end
+    -- Only Global Colors is a supported Auras surface. Preserve retired
+    -- blacklist/priority tables through resets and profile round-trips.
+    which = which or "colors"
+    wipe(BFIConfig["auras"][which])
+    AF.Merge(BFIConfig["auras"][which], defaults[which])
 end

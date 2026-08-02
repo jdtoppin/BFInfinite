@@ -13,6 +13,9 @@ local HEADER_HEIGHT = 35
 local optionsFrame
 local buffsDebuffsAvailable = type(BFI.modules.BuffsDebuffs.HasSecureAuraHeaderBackend) == "function"
     and BFI.modules.BuffsDebuffs.HasSecureAuraHeaderBackend()
+-- Keep the common map editable on 12.0.7 so it can be prepared and carried
+-- forward, while the panel itself explains that only 12.1 native rows apply it.
+local auraColorsAvailable = AF.isRetail
 
 ---------------------------------------------------------------------
 -- list
@@ -22,7 +25,7 @@ local list = {
     "SEPARATOR",
     "enhancements",
     "colors",
-    "-auras", -- global spell-ID lists are not consumed by the secret-safe aura widgets
+    auraColorsAvailable and "auras" or "-auras",
     -- "social",
     "SEPARATOR",
     "unitFrames",

@@ -3,7 +3,7 @@
     <Script file="General.lua"/>
     <Include file="Enhancements\Load.xml"/>
     <Include file="Colors\Load.xml"/>
-    <!-- <Include file="Auras\Load.xml"/> -->
+    <Include file="Auras\Load.xml"/>
     <Include file="Misc\Load.xml"/>
     <Include file="Style\Load.xml"/>
     <Include file="CooldownManager\Load.xml"/>
