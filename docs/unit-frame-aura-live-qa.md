@@ -47,27 +47,33 @@ installing the supported AF #25/r36 pair.
 4. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
    #102 at `040b556bb7fbbcd6758f3e18a261e46a119824b2`.
 5. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #120 at `f80ac5b2863921fe90aa2796d857b72e82f6605f`, then #110 at
-   `6066c61280f669b0f16b83234c88342a7208f987`.
+   #120 at `f80ac5b2863921fe90aa2796d857b72e82f6605f`, then #134 at
+   `00d254901eed2be99cb11326775c884ddfc1f4c1`, then #110 at
+   `639cac335a787423d5eb766c494c9b8aaaf30f469`. At #134, verify other
+   allied players use class-coloured names, friendly NPCs retain reaction
+   colours, and hostile-player custom-white defaults do not change. Reuse a
+   nameplate token across public, restricted, and public identities; require
+   a neutral restricted fallback, no stale class colour, and no Lua or taint
+   error.
 6. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #112 at `f3e1ec48496bf42f0ab82f975512166f326981d7`.
+   #112 at `9d1c0c72fca78b0911da5a77ef378364037a591e`.
 7. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
    #103 at `ab6a3fd8e2d0c18416717a0c59e3c675fc203bac`. Verify the
    ordinary upper-right Debuffs use BFI's neutral square outline while
    Blizzard continues to own their data and layout.
 8. Validation-only AF #25 at
    `b885864a221a83334f65dc6cfaa8514a953cb40f` with BFInfinite #110
-   at `6066c61280f669b0f16b83234c88342a7208f987`. This is the clean
+   at `639cac335a787423d5eb766c494c9b8aaaf30f469`. This is the clean
    combined check for AF #26's square border and AF #27's required r36
    runtime. Verify Target Debuffs use a square border while Blizzard's native
    dispel type still controls its colour and visibility. Target Buffs must
    remain unchanged.
 9. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #110 at `6066c61280f669b0f16b83234c88342a7208f987`. On Target Buffs
+   #110 at `639cac335a787423d5eb766c494c9b8aaaf30f469`. On Target Buffs
    and Debuffs, test every cooldown choice after its required reload and
    require exactly one graphical timer.
 10. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-    #112 at `f3e1ec48496bf42f0ab82f975512166f326981d7`. Repeat every
+    #112 at `9d1c0c72fca78b0911da5a77ef378364037a591e`. Repeat every
     cooldown choice on hostile nameplate Debuffs.
 11. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
     #121 at `d1a5fe741fc703458b5d0830e620cd6ac6f070b9`, then #103 at
@@ -141,8 +147,9 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | PetTarget | `codex/unitframe-aura-pettarget` | `02a75fd22f8f04e21e7f139df214697e6350e567` |
 | Pet | `codex/unitframe-aura-pet` | `8e91a8c7616b3000d5e607a2063bf528dd8c4f59` |
 | Unit/nameplate AF r36 gate (#120) | `codex/native-aura-r36-unitframe-gate` | `f80ac5b2863921fe90aa2796d857b72e82f6605f` |
-| Target partition (#110) | `codex/unitframe-aura-target-final` | `6066c61280f669b0f16b83234c88342a7208f987` |
-| Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `f3e1ec48496bf42f0ab82f975512166f326981d7` |
+| Friendly-player name class colours (#134) | `codex/nameplate-player-class-name-colors` | `00d254901eed2be99cb11326775c884ddfc1f4c1` |
+| Target partition (#110) | `codex/unitframe-aura-target-final` | `639cac335a787423d5eb766c494c9b8aaaf30f469` |
+| Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `9d1c0c72fca78b0911da5a77ef378364037a591e` |
 | Party | `codex/unitframe-aura-party` | `2cfcbca80d0b2b45b9a9abb657907511152ae6b9` |
 | Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
 | Upper-right AF r36 gate (#121) | `codex/native-aura-r36-upper-right-gate` | `d1a5fe741fc703458b5d0830e620cd6ac6f070b9` |
@@ -169,7 +176,10 @@ Test in this order:
    spell-list action hints, then test refreshed #101 spell colours and #102
    presentation hardening.
 4. Test each of the ten unit-frame integration leaves independently.
-5. Test #112's enemy nameplate Debuffs migration independently after #110.
+5. Test #134 after #120 and before #110. Verify allied-player class colours,
+   non-player reaction colours, hostile-player custom-white defaults, and a
+   public-to-restricted-to-public pooled-nameplate transition. Then test
+   #112's enemy nameplate Debuffs migration independently after #110.
 6. Test the upper-right foundation, controller, Buffs, options, and
    forbidden-button branches in their PR order.
 7. Test #103's ordinary Debuff appearance controls with AF r33, including the
@@ -185,10 +195,10 @@ Test in this order:
    AF #25/BFI #110 combined pair because #110 now correctly requires AF r36.
    Repeat the square, native-dispel-colour check across every harmful
    unit-frame row on the final aggregate.
-10. Test AF #27 with #120/#110, #112, and #121/#103 as three clean paths. Run the
-   single-graphical-timer matrix below on unit-frame groups, nameplate groups,
-   and upper-right Buff groups/temporary enchants, then repeat it on the final
-   aggregate.
+10. Test AF #27 with #120/#134/#110, #112, and #121/#103 as three clean paths.
+   Run the single-graphical-timer matrix below on unit-frame groups, nameplate
+   groups, and upper-right Buff groups/temporary enchants, then repeat it on
+   the final aggregate.
 11. Test #85 and then #118 independently. For #118 alone, disable BFI Unit
    Frames and exercise Blizzard's native TargetFrame AuraButtons; the final
    aggregate carries both PRs for their combined restricted-context gate.
