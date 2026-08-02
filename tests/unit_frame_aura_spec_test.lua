@@ -1970,6 +1970,179 @@ local function testGlobalSpellColorGroupBudget()
     }, "over-budget diagnostics")
 end
 
+local function testPartitionColorBudgetUsesMaxActiveVariant()
+    local exact = baseConfig()
+    exact.cooldownStyle = "block_vertical"
+    exact.filters = {
+        player = true,
+    }
+    exact.spellColors = makeDistinctSpellColors(7)
+    exact.subFrame = {
+        enabled = true,
+        desaturated = true,
+        filter = "notCastByMe",
+        width = 8,
+        height = 7,
+    }
+
+    local exactDescriptor = compile("target", "HARMFUL", exact)
+    assertEqual(
+        exactDescriptor.metrics.requestedColorExpandedGroupCount,
+        8,
+        "partition exact requested max-active groups"
+    )
+    assertEqual(
+        exactDescriptor.metrics.colorGroupBudgetExceeded,
+        false,
+        "partition exact budget accepted"
+    )
+    assertEqual(
+        #exactDescriptor.completeSpec.groups,
+        8,
+        "partition exact friendly groups"
+    )
+
+    local inverse = copy(exact)
+    inverse.filters = {
+        notPlayer = true,
+    }
+    local inverseDescriptor =
+        compile("target", "HARMFUL", inverse)
+    assertEqual(
+        inverseDescriptor.metrics.requestedColorExpandedGroupCount,
+        8,
+        "not-player partition exact requested max-active groups"
+    )
+    assertEqual(
+        inverseDescriptor.metrics.colorGroupBudgetExceeded,
+        false,
+        "not-player partition exact budget accepted"
+    )
+    assertEqual(
+        #inverseDescriptor.completeSpec.groups,
+        8,
+        "not-player partition exact friendly groups"
+    )
+
+    local duplicated = copy(exact)
+    duplicated.filters = {
+        all = true,
+    }
+    local duplicatedDescriptor =
+        compile("target", "HARMFUL", duplicated)
+    assertEqual(
+        duplicatedDescriptor.metrics.requestedColorExpandedGroupCount,
+        16,
+        "any-scope hostile requested groups"
+    )
+    assertEqual(
+        duplicatedDescriptor.metrics.colorGroupBudgetExceeded,
+        true,
+        "any-scope hostile budget fallback"
+    )
+    assertEqual(
+        #duplicatedDescriptor.completeSpec.groups,
+        1,
+        "any-scope friendly gray group count"
+    )
+    assertEqual(
+        duplicatedDescriptor.completeSpec.groups[1]
+            .buttonStyle.blockColor,
+        nil,
+        "any-scope fallback has no partial color"
+    )
+    assertEqual(
+        duplicatedDescriptor.completeSpec.groups[1]
+            .candidateFilters,
+        nil,
+        "any-scope fallback has no identity map"
+    )
+    assertEqual(
+        duplicatedDescriptor.visibility
+            .spellIDFilterRequiresPublicAssist,
+        false,
+        "unused partition colors do not add assist gate"
+    )
+    assertEqual(
+        duplicatedDescriptor.visibility
+            .spellIDFilterRequiresPublicNonAssist,
+        false,
+        "unused partition colors do not add non-assist gate"
+    )
+end
+
+local function testPartitionColorBudgetPreservesLargeGrayBaseline()
+    local baseline = baseConfig()
+    baseline.cooldownStyle = "block_vertical"
+    baseline.filters = {
+        notPlayer = true,
+        raidInCombat = true,
+        raidPlayerDispellable = true,
+        bigDefensive = true,
+        externalDefensive = true,
+        important = true,
+        anyDispellable = true,
+    }
+    baseline.subFrame = {
+        enabled = true,
+        desaturated = true,
+        filter = "notCastByMe",
+        width = 8,
+        height = 7,
+    }
+
+    local baselineDescriptor =
+        compile("target", "HELPFUL", baseline)
+    assertEqual(
+        #baselineDescriptor.completeSpec.groups,
+        7,
+        "large gray friendly baseline groups"
+    )
+    assertEqual(
+        baselineDescriptor.metrics.colorGroupBudgetExceeded,
+        false,
+        "large gray baseline is not a color-budget failure"
+    )
+
+    local colored = copy(baseline)
+    colored.spellColors = {
+        [1001] = {0.1, 0.2, 0.3, 1},
+    }
+    local fallbackDescriptor =
+        compile("target", "HELPFUL", colored)
+    assertEqual(
+        fallbackDescriptor.metrics.requestedColorExpandedGroupCount,
+        14,
+        "large baseline requested color groups"
+    )
+    assertEqual(
+        fallbackDescriptor.metrics.colorGroupBudgetExceeded,
+        true,
+        "large baseline color fallback"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.completeSpec,
+        baselineDescriptor.completeSpec,
+        "large fallback keeps friendly baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.tuningSpec,
+        baselineDescriptor.tuningSpec,
+        "large fallback keeps tuning baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.constructionKey,
+        baselineDescriptor.constructionKey,
+        "large fallback keeps construction baseline"
+    )
+    assertEqual(
+        fallbackDescriptor.visibility
+            .spellIDFilterRequiresPublicAssist,
+        false,
+        "large fallback adds no reaction gate"
+    )
+end
+
 local function testGlobalSpellColorConstructionBoundary()
     local original = onePolicyBlockConfig()
     original.spellColors = {
@@ -2524,6 +2697,8 @@ testSpellIDCandidateFilters()
 testGlobalSpellColorFamiliesAndReactions()
 testGlobalSpellColorCandidateComposition()
 testGlobalSpellColorGroupBudget()
+testPartitionColorBudgetUsesMaxActiveVariant()
+testPartitionColorBudgetPreservesLargeGrayBaseline()
 testGlobalSpellColorConstructionBoundary()
 testInvalidInputs()
 testConstructionBoundary()
