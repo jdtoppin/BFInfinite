@@ -56,7 +56,7 @@ jobs:
 
       - name: Test Retail 12.1 fixes
         run: |
-          for test_file in tests/challenges_keystone_frame_skin_test.lua tests/experience_bar_disabled_texture_test.lua tests/queue_status_frame_native_ownership_test.lua tests/style_pixel_updater_secret_geometry_test.lua tests/tooltip_unit_colors_test.lua tests/unit_frame_status_timer_secret_test.lua; do
+          for test_file in tests/challenges_keystone_frame_skin_test.lua tests/experience_bar_disabled_texture_test.lua tests/general_cvar_tooltip_test.lua tests/queue_status_frame_native_ownership_test.lua tests/style_pixel_updater_secret_geometry_test.lua tests/tooltip_unit_colors_test.lua tests/unit_frame_status_timer_secret_test.lua; do
             lua5.1 "$test_file"
           done
 
