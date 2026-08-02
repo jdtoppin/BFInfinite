@@ -21,6 +21,19 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read AbstractFramework lock
+        id: abstract_framework
+        run: python3 ./scripts/check-af-integration.py --export-github-output "$GITHUB_OUTPUT"
+
+      - name: Check out locked AbstractFramework
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.abstract_framework.outputs.repository }}
+          ref: ${{ steps.abstract_framework.outputs.revision }}
+          path: .dependencies/AbstractFramework
+          persist-credentials: false
 
       - name: Validate release tag
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/r')
@@ -50,6 +63,11 @@ jobs:
 
       - name: Verify source
         run: bash ./scripts/verify.sh
+
+      - name: Check BFInfinite against AbstractFramework
+        run: >-
+          python3 ./scripts/check-af-integration.py
+          --af-root .dependencies/AbstractFramework
 
       - name: Build package without publishing
         uses: BigWigsMods/packager@6d50adb6e8517eefef63f4afb16a6518166a6b28 # v2.5.1

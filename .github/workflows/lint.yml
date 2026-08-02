@@ -21,6 +21,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read AbstractFramework lock
+        id: abstract_framework
+        run: python3 ./scripts/check-af-integration.py --export-github-output "$GITHUB_OUTPUT"
+
+      - name: Check out locked AbstractFramework
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.abstract_framework.outputs.repository }}
+          ref: ${{ steps.abstract_framework.outputs.revision }}
+          path: .dependencies/AbstractFramework
+          persist-credentials: false
 
       - name: Install Lua tools
         run: |
@@ -42,3 +55,8 @@ jobs:
             changed=()
           fi
           bash ./scripts/verify.sh "${changed[@]}"
+
+      - name: Check BFInfinite against AbstractFramework
+        run: >-
+          python3 ./scripts/check-af-integration.py
+          --af-root .dependencies/AbstractFramework

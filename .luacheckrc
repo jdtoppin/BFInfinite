@@ -15,6 +15,7 @@ ignore = {
 }
 
 exclude_files = {
+    ".dependencies/**",
     ".unused/**",
     "Libs/**",
 }

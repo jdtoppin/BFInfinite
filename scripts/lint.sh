@@ -38,6 +38,7 @@ while IFS= read -r -d '' file; do
     "$lua_compiler" -p "$file"
 done < <(
     find . -type f -name '*.lua' \
+        -not -path './.dependencies/*' \
         -not -path './.git/*' \
         -not -path './Libs/*' \
         -not -path './.unused/*' \
