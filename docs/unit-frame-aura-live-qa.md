@@ -49,7 +49,7 @@ installing the supported AF #25/r36 pair.
 5. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
    #120 at `f80ac5b2863921fe90aa2796d857b72e82f6605f`, then #134 at
    `00d254901eed2be99cb11326775c884ddfc1f4c1`, then #110 at
-   `639cac335a787423d5eb766c494c9b8aaaf30f469`. At #134, verify other
+   `639cac335a787423d5eb766c494c9b8aaaf30f46`. At #134, verify other
    allied players use class-coloured names, friendly NPCs retain reaction
    colours, and hostile-player custom-white defaults do not change. Reuse a
    nameplate token across public, restricted, and public identities; require
@@ -63,13 +63,13 @@ installing the supported AF #25/r36 pair.
    Blizzard continues to own their data and layout.
 8. Validation-only AF #25 at
    `b885864a221a83334f65dc6cfaa8514a953cb40f` with BFInfinite #110
-   at `639cac335a787423d5eb766c494c9b8aaaf30f469`. This is the clean
+   at `639cac335a787423d5eb766c494c9b8aaaf30f46`. This is the clean
    combined check for AF #26's square border and AF #27's required r36
    runtime. Verify Target Debuffs use a square border while Blizzard's native
    dispel type still controls its colour and visibility. Target Buffs must
    remain unchanged.
 9. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
-   #110 at `639cac335a787423d5eb766c494c9b8aaaf30f469`. On Target Buffs
+   #110 at `639cac335a787423d5eb766c494c9b8aaaf30f46`. On Target Buffs
    and Debuffs, test every cooldown choice after its required reload and
    require exactly one graphical timer.
 10. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
@@ -148,7 +148,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Pet | `codex/unitframe-aura-pet` | `8e91a8c7616b3000d5e607a2063bf528dd8c4f59` |
 | Unit/nameplate AF r36 gate (#120) | `codex/native-aura-r36-unitframe-gate` | `f80ac5b2863921fe90aa2796d857b72e82f6605f` |
 | Friendly-player name class colours (#134) | `codex/nameplate-player-class-name-colors` | `00d254901eed2be99cb11326775c884ddfc1f4c1` |
-| Target partition (#110) | `codex/unitframe-aura-target-final` | `639cac335a787423d5eb766c494c9b8aaaf30f469` |
+| Target partition (#110) | `codex/unitframe-aura-target-final` | `639cac335a787423d5eb766c494c9b8aaaf30f46` |
 | Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `9d1c0c72fca78b0911da5a77ef378364037a591e` |
 | Party | `codex/unitframe-aura-party` | `2cfcbca80d0b2b45b9a9abb657907511152ae6b9` |
 | Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
