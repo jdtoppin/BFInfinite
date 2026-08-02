@@ -6,6 +6,7 @@ local L = BFI.L
 local UF = BFI.modules.UnitFrames
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
+local rawget = rawget
 
 local created = {}
 local builder = {}
@@ -2549,6 +2550,9 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
 
     local colorPicker = AF.CreateColorPicker(pane)
     AF.SetPoint(colorPicker, "BOTTOMRIGHT", fontDropdown, "TOPRIGHT", 0, 2)
+    if extra == "duration" then
+        colorPicker:Hide()
+    end
     colorPicker:SetOnChange(function(r, g, b)
         AF.FillColorTable(pane.t.cfg[textType].color, r, g, b)
         LoadIndicatorConfig(pane.t)
@@ -2664,7 +2668,58 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
 
     --------------------------------------------------
     -- duration
-    local normalColorPicker, percentCheckButton, percentColorPicker, percentDropdown, secondsCheckButton, secondsColorPicker, secondsEditBox, sec
+    local normalColorPicker, thresholdModeDropdown, percentColorPicker,
+        percentDropdown, secondsColorPicker, secondsEditBox, sec
+    local UpdateWidgets
+
+    local function GetDurationThresholdMode(color)
+        if color.seconds.enabled == true then
+            return "seconds"
+        elseif color.percent.enabled == true then
+            return "percent"
+        end
+        return "off"
+    end
+
+    local function IsDurationThresholdValue(mode, value)
+        if type(value) ~= "number"
+            or value ~= value
+            or value <= 0
+            or value >= math.huge
+        then
+            return false
+        end
+        return mode ~= "percent" or value < 1
+    end
+
+    local function SetDurationThresholdMode(color, mode)
+        if mode ~= "off"
+            and mode ~= "seconds"
+            and mode ~= "percent"
+        then
+            return false
+        end
+
+        if mode == "seconds"
+            and not IsDurationThresholdValue(
+                "seconds",
+                color.seconds.value
+            )
+        then
+            color.seconds.value = 5
+        elseif mode == "percent"
+            and not IsDurationThresholdValue(
+                "percent",
+                color.percent.value
+            )
+        then
+            color.percent.value = 0.5
+        end
+
+        color.seconds.enabled = mode == "seconds"
+        color.percent.enabled = mode == "percent"
+        return true
+    end
 
     if extra == "duration" then
         normalColorPicker = AF.CreateColorPicker(pane, L["Normal"])
@@ -2674,11 +2729,54 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
             LoadIndicatorConfig(pane.t)
         end)
 
-        percentCheckButton = AF.CreateCheckButton(pane)
-        AF.SetPoint(percentCheckButton, "TOPLEFT", normalColorPicker, "BOTTOMLEFT", 0, -7)
+        thresholdModeDropdown = AF.CreateDropdown(pane, 150)
+        thresholdModeDropdown:SetLabel(L["Low-Time Color"])
+        AF.SetPoint(
+            thresholdModeDropdown,
+            "TOPLEFT",
+            normalColorPicker,
+            "BOTTOMLEFT",
+            0,
+            -25
+        )
+        thresholdModeDropdown:SetItems({
+            {text = L["Off"], value = "off"},
+            {text = L["Seconds"], value = "seconds"},
+            {text = L["Percent"], value = "percent"},
+        })
+        thresholdModeDropdown:SetTooltip(
+            L["Low-Time Color"],
+            L["Choose whether duration text changes color by seconds left or percent left"]
+        )
+        thresholdModeDropdown:SetOnSelect(function(value)
+            if not SetDurationThresholdMode(
+                pane.t.cfg[textType].color,
+                value
+            ) then
+                return
+            end
+            if value == "seconds" then
+                secondsEditBox:SetText(
+                    pane.t.cfg[textType].color.seconds.value
+                )
+            elseif value == "percent" then
+                percentDropdown:SetSelectedValue(
+                    pane.t.cfg[textType].color.percent.value
+                )
+            end
+            UpdateWidgets()
+            LoadIndicatorConfig(pane.t)
+        end)
 
         percentColorPicker = AF.CreateColorPicker(pane, L["Remaining Time"] .. " <")
-        AF.SetPoint(percentColorPicker, "TOPLEFT", percentCheckButton, "TOPRIGHT", 2, 0)
+        AF.SetPoint(
+            percentColorPicker,
+            "TOPLEFT",
+            thresholdModeDropdown,
+            "BOTTOMLEFT",
+            0,
+            -25
+        )
         percentColorPicker:SetOnChange(function(r, g, b)
             AF.FillColorTable(pane.t.cfg[textType].color.percent.rgb, r, g, b)
             LoadIndicatorConfig(pane.t)
@@ -2702,17 +2800,15 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
             LoadIndicatorConfig(pane.t)
         end)
 
-        percentCheckButton:SetOnCheck(function(checked)
-            pane.t.cfg[textType].color.percent.enabled = checked
-            AF.SetEnabled(checked, percentColorPicker, percentDropdown)
-            LoadIndicatorConfig(pane.t)
-        end)
-
-        secondsCheckButton = AF.CreateCheckButton(pane)
-        AF.SetPoint(secondsCheckButton, "TOPLEFT", percentCheckButton, "BOTTOMLEFT", 0, -7)
-
         secondsColorPicker = AF.CreateColorPicker(pane, L["Remaining Time"] .. " <")
-        AF.SetPoint(secondsColorPicker, "TOPLEFT", secondsCheckButton, "TOPRIGHT", 2, 0)
+        AF.SetPoint(
+            secondsColorPicker,
+            "TOPLEFT",
+            thresholdModeDropdown,
+            "BOTTOMLEFT",
+            0,
+            -25
+        )
         secondsColorPicker:SetOnChange(function(r, g, b)
             AF.FillColorTable(pane.t.cfg[textType].color.seconds.rgb, r, g, b)
             LoadIndicatorConfig(pane.t)
@@ -2722,22 +2818,22 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
         AF.SetPoint(secondsEditBox, "LEFT", secondsColorPicker.label, "RIGHT", 5, 0)
         secondsEditBox:SetMaxLetters(3)
         secondsEditBox:SetConfirmButton(function(value)
+            if not IsDurationThresholdValue("seconds", value) then
+                secondsEditBox:SetText(
+                    pane.t.cfg[textType].color.seconds.value
+                )
+                return
+            end
             pane.t.cfg[textType].color.seconds.value = value
             LoadIndicatorConfig(pane.t)
         end, nil, "RIGHT_OUTSIDE")
 
         sec = AF.CreateFontString(pane, L["sec"])
         AF.SetPoint(sec, "LEFT", secondsEditBox, "RIGHT", 5, 0)
-
-        secondsCheckButton:SetOnCheck(function(checked)
-            pane.t.cfg[textType].color.seconds.enabled = checked
-            AF.SetEnabled(checked, secondsColorPicker, secondsEditBox, sec)
-            LoadIndicatorConfig(pane.t)
-        end)
     end
     --------------------------------------------------
 
-    local function UpdateWidgets()
+    UpdateWidgets = function()
         AF.HideColorPicker()
         AF.SetEnabled(pane.t.cfg[textType].enabled, colorPicker,
             fontDropdown, fontOutlineDropdown, fontSizeSlider, shadowCheckButton,
@@ -2746,9 +2842,45 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
             AF.SetEnabled(pane.t.cfg[textType].enabled, numericFormatDropdown, percentFormatDropdown, delimiterEditBox, delimiterEditBox.label, percentSignCheckButton)
             useAsianUnitsCheckButton:SetEnabled(pane.t.cfg[textType].enabled and AF.isAsian)
         elseif extra == "duration" then
-            AF.SetEnabled(pane.t.cfg[textType].enabled, normalColorPicker, percentCheckButton, secondsCheckButton)
-            AF.SetEnabled(pane.t.cfg[textType].enabled and pane.t.cfg[textType].color.percent.enabled, percentColorPicker, percentDropdown)
-            AF.SetEnabled(pane.t.cfg[textType].enabled and pane.t.cfg[textType].color.seconds.enabled, secondsColorPicker, secondsEditBox, sec)
+            local mode = GetDurationThresholdMode(
+                pane.t.cfg[textType].color
+            )
+            local percentShown = mode == "percent"
+            local secondsShown = mode == "seconds"
+
+            if percentShown then
+                percentColorPicker:Show()
+                percentDropdown:Show()
+            else
+                percentColorPicker:Hide()
+                percentDropdown:Hide()
+            end
+            if secondsShown then
+                secondsColorPicker:Show()
+                secondsEditBox:Show()
+                sec:Show()
+            else
+                secondsColorPicker:Hide()
+                secondsEditBox:Hide()
+                sec:Hide()
+            end
+
+            AF.SetEnabled(
+                pane.t.cfg[textType].enabled,
+                normalColorPicker,
+                thresholdModeDropdown
+            )
+            AF.SetEnabled(
+                pane.t.cfg[textType].enabled and percentShown,
+                percentColorPicker,
+                percentDropdown
+            )
+            AF.SetEnabled(
+                pane.t.cfg[textType].enabled and secondsShown,
+                secondsColorPicker,
+                secondsEditBox,
+                sec
+            )
         end
     end
 
@@ -2760,6 +2892,15 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
 
     function pane.Load(t)
         pane.t = t
+        if extra == "duration"
+            and t.cfg[textType].color.seconds.enabled == true
+            and t.cfg[textType].color.percent.enabled == true
+        then
+            -- The native binding supports one threshold. Match the legacy
+            -- evaluation priority and persist a truthful settings state once
+            -- this pane is visited.
+            t.cfg[textType].color.percent.enabled = false
+        end
         UpdateWidgets()
 
         enabledCheckButton:SetChecked(t.cfg[textType].enabled)
@@ -2787,13 +2928,13 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
             percentSignCheckButton:SetChecked(t.cfg[textType].format.showPercentSign)
             useAsianUnitsCheckButton:SetChecked(t.cfg[textType].format.useAsianUnits)
         elseif extra == "duration" then
-            colorPicker:Hide()
             normalColorPicker:SetColor(pane.t.cfg[textType].color.normal)
             percentColorPicker:SetColor(pane.t.cfg[textType].color.percent.rgb)
             secondsColorPicker:SetColor(pane.t.cfg[textType].color.seconds.rgb)
-            percentCheckButton:SetChecked(pane.t.cfg[textType].color.percent.enabled)
+            thresholdModeDropdown:SetSelectedValue(
+                GetDurationThresholdMode(pane.t.cfg[textType].color)
+            )
             percentDropdown:SetSelectedValue(pane.t.cfg[textType].color.percent.value)
-            secondsCheckButton:SetChecked(pane.t.cfg[textType].color.seconds.enabled)
             secondsEditBox:SetText(t.cfg[textType].color.seconds.value)
         end
     end
@@ -3790,6 +3931,75 @@ end
 ---------------------------------------------------------------------
 -- auraBlackListWhitelist
 ---------------------------------------------------------------------
+local function IsCurrentSpecializationHealer()
+    local getSpecialization = rawget(_G, "GetSpecialization")
+    local getSpecializationRole =
+        rawget(_G, "GetSpecializationRole")
+    if type(getSpecialization) ~= "function"
+        or type(getSpecializationRole) ~= "function"
+    then
+        return false
+    end
+
+    local specialization = getSpecialization()
+    return specialization ~= nil
+        and getSpecializationRole(specialization) == "HEALER"
+end
+
+-- Retail 12.1.0.68914, wow-ui-source d3915c78:
+-- Blizzard's Group Buff filter uses these spell IDs as aura IDs. Availability
+-- reads are non-mutating; only an explicit user click writes the snapshot.
+local function GetGroupBuffImportAPI()
+    local cooldownViewer = rawget(_G, "C_CooldownViewer")
+    local enum = rawget(_G, "Enum")
+    local bitLibrary = rawget(_G, "bit")
+    local getItems = cooldownViewer
+        and cooldownViewer.GetGroupBuffItems
+    local hideByDefault = enum
+        and enum.GroupBuffItemFlags
+        and enum.GroupBuffItemFlags.HideByDefault
+    local band = bitLibrary and bitLibrary.band
+
+    if type(getItems) ~= "function"
+        or type(hideByDefault) ~= "number"
+        or type(band) ~= "function"
+    then
+        return
+    end
+
+    return getItems, band, hideByDefault
+end
+
+local function GetImportableGroupBuffSpellIDs()
+    local getItems, band, hideByDefault =
+        GetGroupBuffImportAPI()
+    if not getItems then return end
+
+    local items = getItems()
+    if type(items) ~= "table" or #items == 0 then return end
+
+    local imported = {}
+    local importedSet = {}
+    for _, item in ipairs(items) do
+        local spellID = type(item) == "table"
+            and item.spellID
+        local flags = type(item) == "table"
+            and item.flags
+        if type(spellID) == "number"
+            and spellID > 0
+            and spellID % 1 == 0
+            and type(flags) == "number"
+            and band(flags, hideByDefault) == 0
+            and not importedSet[spellID]
+        then
+            importedSet[spellID] = true
+            tinsert(imported, spellID)
+        end
+    end
+    if #imported == 0 then return end
+    return imported
+end
+
 builder["auraBlackListWhitelist"] = function(parent)
     if created["auraBlackListWhitelist"] then return created["auraBlackListWhitelist"] end
 
@@ -3900,6 +4110,55 @@ builder["auraBlackListWhitelist"] = function(parent)
         GetEditBox(addButton)
     end)
 
+    local importButton = AF.CreateButton(
+        pane,
+        L["Import Healer Spells"],
+        "BFI_hover",
+        150,
+        20
+    )
+    importButton:EnablePushEffect(false)
+    importButton:SetTooltip(
+        L["Import Healer Spells"],
+        L["Adds Blizzard's default group-buff spells for your current healing specialization. Existing entries are kept"]
+    )
+
+    local function CanImportHealerSpells(t)
+        return AF.isRetail
+            and t.id == "buffs"
+            and t.cfg.mode == "whitelist"
+            and UsesNativeAuraContainer(t)
+            and IsCurrentSpecializationHealer()
+    end
+
+    local function ImportHealerSpells()
+        local t = pane.t
+        if not t or not CanImportHealerSpells(t) then return end
+
+        local imported = GetImportableGroupBuffSpellIDs()
+        if not imported then return end
+
+        local list = t.cfg.whitelist
+        local seen = {}
+        local changed = false
+        for _, spellID in ipairs(list) do
+            seen[spellID] = true
+        end
+        for _, spellID in ipairs(imported) do
+            if not seen[spellID] then
+                seen[spellID] = true
+                tinsert(list, spellID)
+                changed = true
+            end
+        end
+        if not changed then return end
+
+        pane.Load(t)
+        LoadIndicatorConfig(t)
+    end
+
+    importButton:SetOnClick(ImportHealerSpells)
+
     local pool = AF.CreateObjectPool(function()
         local b = AF.CreateButton(pane, nil, "BFI_hover", 150, 20)
         b:SetTexture(AF.GetIcon("QuestionMark"), nil, {"LEFT", 2, 0}, nil, "black")
@@ -3940,9 +4199,11 @@ builder["auraBlackListWhitelist"] = function(parent)
     function pane.Load(t)
         pane.t = t
         local canEdit = not AF.isRetail
+        local usesNative = false
         if AF.isRetail then
             HideEditBox()
-            if UsesNativeAuraContainer(t) then
+            usesNative = UsesNativeAuraContainer(t)
+            if usesNative then
                 canEdit = true
                 mode:SetItems(retailModeItems)
                 tip:SetText(
@@ -3969,6 +4230,22 @@ builder["auraBlackListWhitelist"] = function(parent)
         mode:SetEnabled(canEdit)
         addButton:SetEnabled(canEdit)
 
+        local canImport = canEdit
+            and usesNative
+            and t.id == "buffs"
+            and t.cfg.mode == "whitelist"
+            and IsCurrentSpecializationHealer()
+        if canImport then
+            importButton:Show()
+        else
+            importButton:Hide()
+        end
+        local importable = canImport
+            and GetImportableGroupBuffSpellIDs()
+        importButton:SetEnabled(
+            canImport and importable ~= nil
+        )
+
         pane.list = t.cfg.mode == "blacklist" and t.cfg.blacklist or t.cfg.whitelist
 
         pool:ReleaseAll()
@@ -3976,20 +4253,15 @@ builder["auraBlackListWhitelist"] = function(parent)
 
         local num = #pane.list
 
-        for i = 1, num + 1 do
+        for i = 1, num do
             local spell = pane.list[i]
 
-            local b
-            if i <= num then
-                b = pool:Acquire()
-                local name, icon = AF.GetSpellInfo(spell, true)
-                b:SetText(name)
-                b:SetTexture(icon, nil, nil, nil, "black")
-                b.spell = spell
-                b.index = i
-            else
-                b = addButton
-            end
+            local b = pool:Acquire()
+            local name, icon = AF.GetSpellInfo(spell, true)
+            b:SetText(name)
+            b:SetTexture(icon, nil, nil, nil, "black")
+            b.spell = spell
+            b.index = i
 
             buttons[i] = b
             b:SetEnabled(canEdit)
@@ -4022,7 +4294,60 @@ builder["auraBlackListWhitelist"] = function(parent)
             end
         end
 
-        local rows = ceil((num + 1) / 2)
+        AF.ClearPoints(addButton)
+        AF.ClearPoints(importButton)
+        local firstControlAnchor = AF.isRetail and tip or mode
+        if num == 0 then
+            AF.SetPoint(
+                addButton,
+                "TOPLEFT",
+                firstControlAnchor,
+                "BOTTOMLEFT",
+                0,
+                -8
+            )
+        elseif canImport then
+            local leftButton = buttons[num % 2 == 0 and num - 1 or num]
+            AF.SetPoint(
+                addButton,
+                "TOPLEFT",
+                leftButton,
+                "BOTTOMLEFT",
+                0,
+                -5
+            )
+        elseif num % 2 == 0 then
+            AF.SetPoint(
+                addButton,
+                "TOPLEFT",
+                buttons[num - 1],
+                "BOTTOMLEFT",
+                0,
+                -5
+            )
+        else
+            AF.SetPoint(
+                addButton,
+                "TOPLEFT",
+                buttons[num],
+                "TOPRIGHT",
+                5,
+                0
+            )
+        end
+        addButton:Show()
+        AF.SetPoint(
+            importButton,
+            "TOPLEFT",
+            addButton,
+            "TOPRIGHT",
+            5,
+            0
+        )
+
+        local rows = canImport
+            and ceil(num / 2) + 1
+            or ceil((num + 1) / 2)
         if AF.isRetail then
             RunNextFrame(function()
                 AF.SetListHeight(

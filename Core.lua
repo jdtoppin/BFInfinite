@@ -5,9 +5,10 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF #27/r36 carries #23's native Block-color and secret UnitClass guards
--- and registers only the selected native aura duration carrier.
-local REQUIRED_AF_VERSION = 36
+-- AF r37 carries the native Block-color and secret UnitClass guards, registers
+-- only the selected native aura duration carrier, and adds duration-text color
+-- curves driven by Blizzard's opaque remaining-time binding.
+local REQUIRED_AF_VERSION = 37
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar
