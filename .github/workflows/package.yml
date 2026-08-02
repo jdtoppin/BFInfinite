@@ -56,6 +56,14 @@ jobs:
         with:
           args: -d
 
+      - name: Generate exact release notes
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/r')
+        shell: bash
+        run: >-
+          lua5.1 ./scripts/generate-changelog.lua
+          --version "$GITHUB_REF_NAME"
+          --release-notes .release/RELEASE_NOTES.md
+
       - name: Verify package
         run: bash ./scripts/check-package.sh
 
@@ -72,6 +80,7 @@ jobs:
           path: |
             .release/*.zip
             .release/SHA256SUMS
+            .release/RELEASE_NOTES.md
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 14
@@ -107,5 +116,5 @@ jobs:
             dist/*.zip dist/SHA256SUMS \
             --verify-tag \
             --title "$GITHUB_REF_NAME" \
-            --generate-notes \
+            --notes-file dist/RELEASE_NOTES.md \
             "${prerelease[@]}"

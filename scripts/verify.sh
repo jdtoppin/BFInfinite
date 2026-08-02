@@ -7,3 +7,4 @@ cd "$repo_root"
 bash ./scripts/lint.sh "$@"
 bash ./scripts/run-tests.sh
 bash ./scripts/check-manifest.sh
+bash ./scripts/check-changelog.sh
