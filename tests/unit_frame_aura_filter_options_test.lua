@@ -1506,18 +1506,28 @@ local function testRetailSpellLists(hasNativeBackend)
         )
         assertContains(
             tip.text,
-            "may ignore the list for protected auras",
+            "protected spells may bypass the list",
             version .. " spell-list limitation warning"
         )
         assertContains(
             tip.text,
-            "always makes available to addons",
+            "Spells Blizzard keeps available can still be filtered",
             version .. " spell-list exception warning"
         )
         assertContains(
             tip.text,
-            "hides the whole aura row",
+            "BFI hides that aura row",
             version .. " spell-list conservative holder behavior"
+        )
+        assertContains(
+            tip.text,
+            "<MouseLeftClick>Edit",
+            version .. " spell-list edit hint"
+        )
+        assertContains(
+            tip.text,
+            "<MouseRightClick>Delete",
+            version .. " spell-list delete hint"
         )
     else
         assertContains(
@@ -1529,6 +1539,16 @@ local function testRetailSpellLists(hasNativeBackend)
             tip.text,
             "saved list is kept",
             version .. " spell-list read-only warning"
+        )
+        assertNotContains(
+            tip.text,
+            "<MouseLeftClick>Edit",
+            version .. " inactive edit hint"
+        )
+        assertNotContains(
+            tip.text,
+            "<MouseRightClick>Delete",
+            version .. " inactive delete hint"
         )
     end
 end
@@ -1607,23 +1627,33 @@ local function testRetailIndicatorAwareNativeWording()
         )
         assertContains(
             tip.text,
-            "Spell lists work",
+            "Works for buffs on units you can help and debuffs on units you cannot help",
             label .. " native spell-list message"
         )
         assertContains(
             tip.text,
-            "may ignore the list for protected auras",
+            "protected spells may bypass the list",
             label .. " native limitation message"
         )
         assertContains(
             tip.text,
-            "always makes available to addons",
+            "Spells Blizzard keeps available can still be filtered",
             label .. " native exception message"
         )
         assertContains(
             tip.text,
-            "hides the whole aura row",
+            "BFI hides that aura row",
             label .. " native holder behavior"
+        )
+        assertContains(
+            tip.text,
+            "<MouseLeftClick>Edit",
+            label .. " native edit hint"
+        )
+        assertContains(
+            tip.text,
+            "<MouseRightClick>Delete",
+            label .. " native delete hint"
         )
         assertNotContains(
             tip.text,
@@ -1695,8 +1725,13 @@ local function testRetailIndicatorAwareNativeWording()
         )
         assertNotContains(
             tip.text,
-            "can apply saved spell-ID lists",
-            label .. " native spell-list message"
+            "<MouseLeftClick>Edit",
+            label .. " inactive edit hint"
+        )
+        assertNotContains(
+            tip.text,
+            "<MouseRightClick>Delete",
+            label .. " inactive delete hint"
         )
         assertTrue(
             spellPane.listTopPadding < nativeTopPadding,

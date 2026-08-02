@@ -3809,7 +3809,12 @@ builder["auraBlackListWhitelist"] = function(parent)
     }
     mode:SetItems(legacyModeItems)
 
-    local tip = AF.CreateFontString(pane, AF.GetIconString("MouseLeftClick") .. L["Edit"] .. "  " .. AF.GetIconString("MouseRightClick") .. L["Delete"])
+    local editDeleteTip = AF.GetIconString("MouseLeftClick")
+        .. L["Edit"]
+        .. "  "
+        .. AF.GetIconString("MouseRightClick")
+        .. L["Delete"]
+    local tip = AF.CreateFontString(pane, editDeleteTip)
     tip:SetColor("tip")
     tip:SetJustifyH("LEFT")
     tip:SetJustifyV("TOP")
@@ -3936,7 +3941,9 @@ builder["auraBlackListWhitelist"] = function(parent)
                 canEdit = true
                 mode:SetItems(retailModeItems)
                 tip:SetText(
-                    L["Spell lists work for buffs on units you can help and debuffs on units you cannot help. In other or unknown cases, WoW may ignore the list for protected auras, although auras Blizzard always makes available to addons can still be filtered. BFI cannot safely separate those exceptions from the rest, so it hides the whole aura row rather than show the wrong spells"]
+                    L["Works for buffs on units you can help and debuffs on units you cannot help. In other cases, protected spells may bypass the list, so BFI hides that aura row. Spells Blizzard keeps available can still be filtered"]
+                        .. "\n"
+                        .. editDeleteTip
                 )
             elseif HasNativeAuraContainerBackend() then
                 mode:SetItems(retailModeItems)
