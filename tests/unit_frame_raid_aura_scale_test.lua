@@ -227,7 +227,7 @@ local function makeHarness()
     }
     local AF = {
         isRetail = true,
-        versionNum = 36,
+        versionNum = 37,
     }
     local UF = {}
     local F = {}
@@ -612,6 +612,8 @@ local function newAuraConfig(auraFilter, revision, constructionRevision)
             position = {"CENTER", "CENTER", 0, 0},
             color = {
                 normal = {1, 1, 1, 1},
+                percent = {enabled = false},
+                seconds = {enabled = false},
             },
         },
         stackText = {
