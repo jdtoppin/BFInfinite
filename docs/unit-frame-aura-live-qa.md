@@ -50,11 +50,11 @@ installing the supported AF #25/r36 pair.
 6. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
    #112 at `6f6027e81efbe021f3c73c5fb6ec3912ebb31605`.
 7. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
-   #103 at `8125b2daf05acd25504d6321da4810b3e0fee856`. Verify the
+   #103 at `ab6a3fd8e2d0c18416717a0c59e3c675fc203bac`. Verify the
    ordinary upper-right Debuffs use BFI's neutral square outline while
    Blizzard continues to own their data and layout.
 8. Validation-only AF #25 at
-   `1b035d99156e099e9452447a7e8cefff8ca5926c` with BFInfinite #110
+   `b885864a221a83334f65dc6cfaa8514a953cb40f` with BFInfinite #110
    at `31492ff69acfee27f371b746a0f4eb4d75a8f674`. This is the clean
    combined check for AF #26's square border and AF #27's required r36
    runtime. Verify Target Debuffs use a square border while Blizzard's native
@@ -69,40 +69,41 @@ installing the supported AF #25/r36 pair.
     cooldown choice on hostile nameplate Debuffs.
 11. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
     #121 at `d1a5fe741fc703458b5d0830e620cd6ac6f070b9`, then #103 at
-    `8125b2daf05acd25504d6321da4810b3e0fee856`. Verify the
+    `ab6a3fd8e2d0c18416717a0c59e3c675fc203bac`. Verify the
     fixed-clock upper-right native Buff groups and temporary enchants have a
     circular swipe only, never a second vertical fill.
-12. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
+12. Current AF `main` at `4adfb283b03ce3055766c3a985302280687c624c`
    with BFInfinite #118 at
    `24c26df850ee0730982a1263e0770d5a5e7296c4`. Test the native tooltip
    shell on Blizzard's TargetFrame with BFI Unit Frames disabled, then on any
    upper-right native AuraButtons available to the fixture.
-13. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
+13. Current AF `main` at `4adfb283b03ce3055766c3a985302280687c624c`
    with BFInfinite #119 at
    `d555ad11c49cb8e598340e7d273778d33f285b39`. Reload before testing,
    then open the Character panel inside an active Challenge Mode both outside
    and during combat.
-14. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
+14. Current AF `main` at `4adfb283b03ce3055766c3a985302280687c624c`
     with BFInfinite #122 at
     `7334f0ba2b6ec8434d94f79050642a99c8ef37a5`. Give Target Buffs and
     Debuffs visibly different settings, then switch between them slowly and
     rapidly outside combat and during ordinary combat. No value from the
     previous row may render on the selected row.
-15. Current AF `main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`
+15. Current AF `main` at `4adfb283b03ce3055766c3a985302280687c624c`
     with BFInfinite #124 at
     `5b01b20408e3044b18e8fc12a574f8c70befa6bf`. Start after a reload
     without opening Achievements, enter Challenge Mode combat, and open
     Achievements for the first time. Require no nil edit-box error, protected
     action, or taint.
 16. Validation-only AF #25 at
-    `1b035d99156e099e9452447a7e8cefff8ca5926c` with BFInfinite
-    #127 at `72301c2d797369561ca5a44d8b1b1b61a81f9e57`. Use the default
-    Horizontal / Left / Down Blizzard Debuff Frame layout. Verify the custom
-    Buff row stays directly above and right-edge aligned with ordinary Debuffs
-    while the Debuff Frame is moved through Blizzard Edit Mode. No BFI Buff
-    mover may exist.
+    `b885864a221a83334f65dc6cfaa8514a953cb40f` with BFInfinite
+    #127 at `625144a3aab87c95005de6b1930caf9d765a3e59`. Use the default
+    Horizontal / Left / Down Blizzard Debuff Frame layout. Outside combat,
+    move the restored **BFI Buff Frame** mover and verify custom Buffs and
+    ordinary Debuffs travel together, remain right-edge aligned, and keep the
+    five-pixel gap. Attempting to open BFI Edit Mode in combat must show the
+    combat warning and perform no movement.
 17. Validation-only AF #25 at
-    `1b035d99156e099e9452447a7e8cefff8ca5926c` with the exact
+    `b885864a221a83334f65dc6cfaa8514a953cb40f` with the exact
     checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
     validation SHA. Record that full branch-head SHA immediately before
     installation.
@@ -114,9 +115,9 @@ be merged. Closed PR #98 is superseded and is not an install input.
 
 For the final stack, use validation-only AbstractFramework PR #25, branch
 `codex/aura-full-stack-test`, exact head
-`1b035d99156e099e9452447a7e8cefff8ca5926c`. It combines AF #23/r35,
+`b885864a221a83334f65dc6cfaa8514a953cb40f`. It combines AF #23/r35,
 AF #26, AF #27/r36, and AF #28's legacy fail-closed boundary with current AF
-`main` at `d95ae87f4538d6d3f40be8534ec220eace42f265`, including #24's Retail
+`main` at `4adfb283b03ce3055766c3a985302280687c624c`, including #24's Retail
 12.1 max-level fix, AF #29's saved-position shape fix, and AF #30's
 restricted-context mover guard. Never merge AF #25.
 
@@ -124,7 +125,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 
 | Coverage | Branch | Exact head |
 |---|---|---|
-| Current BFInfinite master compatibility | `master` | `d251af20993c68f36c785d6b7cadd94cda9a04b9` |
+| Current BFInfinite master compatibility | `master` | `5f771c7fc93e1380823a988615ae509af927d5c5` |
 | Achievement UI 12.1 search topology (#124) | `codex/achievement-ui-12-1-search-path` | `5b01b20408e3044b18e8fc12a574f8c70befa6bf` |
 | Unit Frame pane-switch lifecycle (#122) | `codex/unitframe-aura-settings-switch` | `7334f0ba2b6ec8434d94f79050642a99c8ef37a5` |
 | Plain aura control labels (#123) | `codex/unitframe-aura-plain-option-labels` | `6840357a27c4473672227b8d4d9b25a73cc53596` |
@@ -143,8 +144,8 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Party | `codex/unitframe-aura-party` | `2cfcbca80d0b2b45b9a9abb657907511152ae6b9` |
 | Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
 | Upper-right AF r36 gate (#121) | `codex/native-aura-r36-upper-right-gate` | `d1a5fe741fc703458b5d0830e620cd6ac6f070b9` |
-| Upper-right Debuff appearance (#103; includes #99 and #121) | `codex/buffs-debuffs-native-debuffs` | `8125b2daf05acd25504d6321da4810b3e0fee856` |
-| Upper-right shared location (#127; includes #103) | `codex/upper-aura-debuff-follower` | `72301c2d797369561ca5a44d8b1b1b61a81f9e57` |
+| Upper-right Debuff appearance (#103; includes #99 and #121) | `codex/buffs-debuffs-native-debuffs` | `ab6a3fd8e2d0c18416717a0c59e3c675fc203bac` |
+| Upper-right shared BFI mover (#127; includes #103) | `codex/upper-aura-debuff-follower` | `625144a3aab87c95005de6b1930caf9d765a3e59` |
 | Tooltip/status safety (#85) | `codex/combat-secret-tooltip-fixes` | `b13a19842e7db7c19a447a97c009a4c968757d18` |
 | Native AuraButton tooltip skin (#118) | `codex/native-aura-tooltip-skin` | `24c26df850ee0730982a1263e0770d5a5e7296c4` |
 | Secret identity (#100) | `codex/unitframe-secret-identity` | `b8e1671ed8a1c11657416357875f9c8277051654` |
@@ -172,9 +173,11 @@ Test in this order:
    neutral square outline and exact restoration of Blizzard's rounded border
    when styling is disabled.
 8. Test AF #30's mover guard independently in Challenge Mode, then test #127
-   with AF #25 after #103. Confirm Blizzard's Debuff Frame is the sole
-   upper-right location owner, the custom Buff row follows it without a BFI
-   mover, and private-aura anchors and `DeadlyDebuffFrame` remain untouched.
+   with AF #25 after #103. Confirm the restored BFI Buff Frame mover owns one
+   fixed seam, custom Buffs grow left/up, and ordinary `DebuffFrame` follows
+   directly beneath it. Test combat refusal, Blizzard Edit Mode release and
+   reattachment, native fallback, private-aura anchors, and
+   `DeadlyDebuffFrame` independently.
 9. Test AF #26's focused regression, then test its square border in the
    AF #25/BFI #110 combined pair because #110 now correctly requires AF r36.
    Repeat the square, native-dispel-colour check across every harmful
@@ -367,17 +370,21 @@ contaminate later evidence.
 #### BFI movers with unavailable Challenge geometry
 
 1. Install AF #30 at
-   `ac6bf8845ced64678268ff8d1873f6f90d822a77`, or the exact AF #25
+   `fa0a7b7e4be152da8f962bd74bc5b18238020976`, or the exact AF #25
    aggregate head that contains it.
 2. Reload in an active Challenge Mode dungeon while out of combat and open
-   BFI mover mode. Repeat during combat.
+   BFI mover mode. Repeat during combat; the movers must remain closed and a
+   localized combat warning must be printed.
 3. Require no `RoundToDecimal` nil arithmetic, secret-value arithmetic or
    comparison, Lua error, blocked action, or new taint.
 4. When a mover's point, dimensions, edges, center, or scale are unavailable,
    its mover or position editor must fail closed without changing frame points
    or SavedVariables. Ordinary movers whose required values remain public must
    continue to work.
-5. Leave the restricted context and verify ordinary movers can still be
+5. Open movers out of combat, begin dragging, and enter combat. The mover UI
+   must close immediately, stop its update script, avoid saving or restoring
+   protected owner points, and remain closed after combat until reopened.
+6. Leave the restricted context and verify ordinary movers can still be
    shown, moved, saved, and undone.
 
 #### First Spellbook load during ordinary combat
@@ -743,49 +750,72 @@ or expose private identity, spell, duration, count, or source.
   layout, updates, tooltips, and visibility. BFInfinite only applies static
   appearance settings to the fixed pool of 16 ordinary Blizzard Debuff
   buttons.
-- Blizzard's `DebuffFrame` is the sole upper-right location owner. BFInfinite
-  anchors its plain Buff holder once from the holder's `BOTTOMRIGHT` to
-  `DebuffFrame`'s `TOPRIGHT` at `(0, 5)`. The holder remains separately
-  parented, uses the `buffs` roleset, and grows left and upward. BFInfinite
-  must not read `DebuffFrame` geometry, visibility, protection, or aura state,
-  and must not reanchor or drive `DebuffFrame`.
-- BFInfinite must not create or show a Buff or Buff Frame mover and must not
-  update the dormant saved Buff position. Move both ordinary public rows with
-  Blizzard Edit Mode's **Debuff Frame** control.
-- Private-aura anchors remain separate Blizzard-owned objects within
-  Blizzard's Debuff Frame layout. `DeadlyDebuffFrame` remains a separate
-  Blizzard-owned frame. BFInfinite must not style, hide, inspect, reparent, or
-  independently move either presentation. Moving `DebuffFrame` through
-  Blizzard Edit Mode may naturally move Blizzard's own private anchors; that
-  is not BFI ownership. If Blizzard routes one of their tooltips through the
-  shared native AuraButton tooltip, only its global outer shell may use BFI's
-  static background and border; the anchor, button, contents, visibility, and
-  lifetime remain Blizzard-owned.
+- BFInfinite's plain one-row holder is the shared location seam. Custom Buffs
+  anchor at its bottom-right and grow left/up. Outside combat,
+  `DebuffFrame.TOPRIGHT` anchors to the holder's `BOTTOMRIGHT` at `(0, -5)`,
+  so ordinary Debuffs sit immediately below and share the same right edge.
+  Dragging the holder needs no per-drag native-frame call: the relative anchor
+  carries `DebuffFrame` with it.
+- The restored **BFI Buff Frame** mover saves the shared position. Its saver
+  must canonicalize a legacy `{ point, relativePoint, x, y }` value to
+  `{ point, x, y }` and clear index 4. Both Buff and Debuff settings panes
+  offer **Open BFI Edit Mode** while the shared controller is active.
+- BFI may attach or restore `DebuffFrame` only outside combat, after
+  `CanBeAccessedInContext()` and every captured anchor/scale value validate as
+  ordinary. The path may use the pinned source-visible `SetPointBase`,
+  `ClearAllPointsBase`, and `systemInfo.anchorInfo` implementation details,
+  but it must never read native geometry, visibility, hover, button state,
+  aura state, or call a Blizzard aura/Edit Mode update method.
+- On `EditMode.Enter`, BFI restores Blizzard's saved Debuff anchor. On the
+  next tick after `EditMode.Exit`, layout changes, specialization changes, or
+  world entry, BFI reattaches the follower. Work requested during combat must
+  remain pending until `PLAYER_REGEN_ENABLED`. Disabling custom Buffs or any
+  follower/suppression failure must restore Blizzard Buffs and the saved
+  Debuff anchor rather than leave either row missing.
+- Private-aura anchors remain Blizzard-owned children of `DebuffFrame`; they
+  naturally travel with its root but are never inspected or styled by BFI.
+  `DeadlyDebuffFrame` is a separate top-level Blizzard warning that selects one
+  critical harmful aura for a prominent center-screen icon/text alert and may
+  play its configured sound. It is not the ordinary upper-right Debuff row and
+  must remain untouched and independently positioned.
+- If Blizzard routes a private or deadly tooltip through the shared native
+  AuraButton tooltip, only its global outer shell may use BFI's static
+  background and border; the anchor, contents, visibility, and lifetime remain
+  Blizzard-owned.
 - Use Blizzard's default **Horizontal / Left / Down** Debuff Frame layout for
   the compact supported stack. BFInfinite Buffs should appear directly above
   ordinary Debuffs with the same right edge. Vertical layouts or upward
-  Debuff wrapping can overlap the fixed Buff follower or stop looking like a
-  compact two-row stack; BFInfinite must not rewrite Blizzard Edit Mode
-  settings to compensate.
+  Debuff wrapping can stop looking like a compact row; BFInfinite must not
+  rewrite Blizzard Edit Mode settings to compensate.
 - Open **BFInfinite → Buffs & Debuffs → Buffs**. Confirm Arrangement displays
   the fixed right-to-left, then upward flow and cannot be changed. Confirm the
-  panel says to move the Debuff Frame in Blizzard Edit Mode and offers
-  **Open Blizzard Edit Mode**.
+  panel says both rows move with the BFI Buff Frame mover and offers
+  **Open BFI Edit Mode**.
 - With the custom Buff controller active, open the Debuffs pane and confirm it
-  says both rows move with the Debuff Frame while private and deadly auras stay
-  separate.
-- Outside combat, use **Open Blizzard Edit Mode**, select **Debuff Frame**, and
-  move it through several screen positions. Visible custom Buffs must remain
-  directly above visible ordinary Debuffs, with matching right edges, after
-  every move and after leaving Edit Mode.
-- Open BFI mover mode separately and confirm no Buff or Buff Frame mover is
-  present.
+  offers the same BFI mover and explains that private auras and critical
+  warnings remain Blizzard-managed.
+- Outside combat, use **Open BFI Edit Mode** and move **BFI Buff Frame** through
+  several screen positions. Visible custom Buffs and ordinary Debuffs must move
+  together live, remain directly stacked and right-aligned, and save the new
+  position after closing mover mode and reloading.
+- While movers are open, begin a drag and enter combat. The overlay must close
+  immediately without saving, restoring, or further mutating protected owner
+  points. It must not reopen automatically after combat.
+- Attempt **Open BFI Edit Mode** during combat. The options panel must remain
+  usable, a localized combat warning must be printed, movers must stay closed,
+  and no protected action or SavedVariables change may occur.
+- Enter Blizzard Edit Mode outside combat. While it is active, confirm
+  `DebuffFrame` uses Blizzard's saved anchor. Move/save/revert the Blizzard
+  Debuff layout, then exit. On the next tick, ordinary Debuffs must reattach
+  beneath the unchanged BFI mover position. Repeat through specialization and
+  layout changes.
 - Reload in a city and in an active Challenge Mode dungeon, both outside and
   during combat. Repeat the alignment check with one and multiple Buff rows,
   both temporary-weapon-enchantment positions, and ordinary Debuffs. Require
   no mover, geometry, forbidden-access, Lua, or taint error.
-- Click **Open Blizzard Edit Mode** during combat. It must fail closed without
-  opening Edit Mode, causing a protected action, or changing either row.
+- While Blizzard Edit Mode owns the native anchor, change one BFI Buff setting.
+  Blizzard Buffs must appear as the fail-native fallback; after Edit Mode exits,
+  the existing custom container must reactivate without a second allocation.
 - Generate ordinary, private, and deadly debuffs together. Ordinary Debuffs
   receive BFI's selected appearance without duplication; private and deadly
   presentations retain Blizzard's appearance, anchors, contents, visibility,
@@ -896,14 +926,19 @@ Stop and file a failure with evidence for any of the following:
 - BFI replacing or hiding Blizzard's harmful container, touching private
   anchors or `DeadlyDebuffFrame`, hooking their scripts or update methods, or
   reading an ordinary Debuff button's aura, active, or visibility state;
-- any BFI Buff or Buff Frame mover, any write to the dormant Buff position,
-  or failure of the custom Buff row to follow Blizzard's Debuff Frame with a
-  shared right edge under the default Horizontal / Left / Down layout;
-- BFI reanchoring or driving `DebuffFrame`, repeatedly rewriting the follower
-  anchor, or reading the frame's geometry, visibility, protection, or aura
-  state;
-- a mover `RoundToDecimal` nil error, secret-geometry arithmetic, or mutation
-  of a mover owner whose required geometry is unavailable;
+- a missing/non-saving BFI Buff Frame mover, a saved four-field position that
+  is not canonicalized, or Buffs and ordinary Debuffs losing their shared
+  right edge and five-pixel seam under the default Horizontal / Left / Down
+  layout;
+- any `DebuffFrame` anchor mutation in combat, failure to release its anchor
+  to Blizzard Edit Mode, failure to reattach after exit, failure to restore
+  Blizzard's saved anchors/native Buff fallback, repeated native allocation,
+  or calls into Blizzard aura/Edit Mode update methods;
+- any read of `DebuffFrame` geometry, visibility, hover, protection, button,
+  or aura state; any private-aura or `DeadlyDebuffFrame` styling/positioning;
+- a mover `RoundToDecimal` nil error, secret-geometry arithmetic, mutation of
+  a mover owner whose required geometry is unavailable, a mover remaining
+  interactive in combat, or an absent combat warning when opening is blocked;
 - failure to restore the original ordinary Debuff appearance when its BFI
   styling is disabled;
 - any unsupported ordinary Debuff control or upper-right Buff Arrangement
