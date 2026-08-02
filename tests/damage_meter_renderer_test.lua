@@ -40,7 +40,8 @@ end
 local function loadRenderer(
     initialNativeEnabled,
     savedRestoreEnabled,
-    availableSessionCount
+    availableSessionCount,
+    objectiveTrackerAvailable
 )
     local state = {
         ambiguousInputs = {},
@@ -394,6 +395,17 @@ local function loadRenderer(
     end
 
     local uiParent = newFrame("UIParent")
+    local objectiveTracker
+    if objectiveTrackerAvailable ~= false then
+        objectiveTracker = newFrame(
+            "ObjectiveTrackerFrame",
+            uiParent,
+            "ObjectiveTrackerFrame",
+            260,
+            805
+        )
+        objectiveTracker.isOnLeftSideOfScreen = false
+    end
 
     local AF = {}
 
@@ -580,6 +592,7 @@ local function loadRenderer(
         enabled = true,
         headerHeight = 22,
         height = 220,
+        dockToObjectiveTracker = true,
         locked = false,
         numberMode = "both",
         padding = 4,
@@ -841,6 +854,7 @@ local function loadRenderer(
             return "1:35"
         end,
         SETTINGS = "Settings",
+        ObjectiveTrackerFrame = objectiveTracker,
         UIParent = uiParent,
         ipairs = ipairs,
         math = math,
@@ -852,6 +866,7 @@ local function loadRenderer(
         type = type,
     }
     environment._G = environment
+    state.environment = environment
 
     local sources = {}
     local sessions = {}
@@ -924,10 +939,16 @@ local function loadRenderer(
     setfenv(chunk, environment)
     chunk("BFInfinite", BFI)
 
-    return DM.Renderer, DM, state, sources, sessions, uiParent
+    return DM.Renderer,
+        DM,
+        state,
+        sources,
+        sessions,
+        uiParent,
+        objectiveTracker
 end
 
-local Renderer, DM, state, sources, sessions, uiParent =
+local Renderer, DM, state, sources, sessions, uiParent, objectiveTracker =
     loadRenderer()
 
 assertEqual(Renderer.IsEnabled(), false, "renderer initially disabled")
@@ -994,11 +1015,16 @@ assertPoint(
     first,
     1,
     "BOTTOMRIGHT",
-    uiParent,
-    "BOTTOMRIGHT",
-    -4,
+    objectiveTracker,
+    "BOTTOMLEFT",
+    -38,
     4,
-    "first default anchor"
+    "first default anchor clears the Objective Tracker"
+)
+assertEqual(
+    DM.config.windowAnchors[1].relativeTo,
+    0,
+    "Objective Tracker frame is never persisted in the profile"
 )
 assertPoint(
     second,
@@ -1020,6 +1046,77 @@ assertPoint(
     4,
     "third default anchor"
 )
+
+local FallbackRenderer, _, fallbackState, _, _, fallbackUIParent =
+    loadRenderer(nil, nil, nil, false)
+assertEqual(
+    FallbackRenderer.SetEnabled(true),
+    true,
+    "renderer starts before the Objective Tracker addon"
+)
+local fallbackFirst = fallbackState.namedFrames.BFIDamageMeterWindow1
+assertPoint(
+    fallbackFirst,
+    1,
+    "BOTTOMRIGHT",
+    fallbackUIParent,
+    "BOTTOMRIGHT",
+    -4,
+    4,
+    "unloaded Objective Tracker uses the safe screen fallback"
+)
+local lateObjectiveTracker = {
+    isOnLeftSideOfScreen = false,
+}
+fallbackState.environment.ObjectiveTrackerFrame = lateObjectiveTracker
+local fallbackEventFrame
+for _, frame in ipairs(fallbackState.frames) do
+    if frame.events.ADDON_LOADED then
+        fallbackEventFrame = frame
+        break
+    end
+end
+assertEqual(
+    type(fallbackEventFrame),
+    "table",
+    "Objective Tracker load listener registered"
+)
+fallbackEventFrame:RunScript(
+    "OnEvent",
+    "ADDON_LOADED",
+    "Blizzard_ObjectiveTracker"
+)
+assertPoint(
+    fallbackFirst,
+    1,
+    "BOTTOMRIGHT",
+    lateObjectiveTracker,
+    "BOTTOMLEFT",
+    -38,
+    4,
+    "late Objective Tracker load reapplies the non-overlapping anchor"
+)
+FallbackRenderer.SetEnabled(false)
+
+local OptOutRenderer, optOutDM, optOutState, _, _, optOutUIParent =
+    loadRenderer()
+optOutDM.config.dockToObjectiveTracker = false
+assertEqual(
+    OptOutRenderer.SetEnabled(true),
+    true,
+    "renderer honors saved Objective Tracker docking opt-out"
+)
+assertPoint(
+    optOutState.namedFrames.BFIDamageMeterWindow1,
+    1,
+    "BOTTOMRIGHT",
+    optOutUIParent,
+    "BOTTOMRIGHT",
+    -4,
+    4,
+    "explicit opt-out retains the historical screen anchor"
+)
+OptOutRenderer.SetEnabled(false)
 
 assertEqual(#state.nativeSetCalls, 1, "native hidden once on enable")
 assertEqual(state.nativeSetCalls[1], false, "native hidden on enable")
@@ -1520,6 +1617,35 @@ assertEqual(
     "table",
     "Damage Meter event frame found"
 )
+assertEqual(
+    damageMeterEventFrame.events.EDIT_MODE_LAYOUTS_UPDATED,
+    true,
+    "Damage Meter follows Objective Tracker Edit Mode layouts"
+)
+objectiveTracker.isOnLeftSideOfScreen = true
+damageMeterEventFrame:RunScript("OnEvent", "EDIT_MODE_LAYOUTS_UPDATED")
+assertPoint(
+    first,
+    1,
+    "BOTTOMLEFT",
+    objectiveTracker,
+    "BOTTOMRIGHT",
+    13,
+    4,
+    "left-side Objective Tracker places meters on its inward edge"
+)
+objectiveTracker.isOnLeftSideOfScreen = false
+damageMeterEventFrame:RunScript("OnEvent", "EDIT_MODE_LAYOUTS_UPDATED")
+assertPoint(
+    first,
+    1,
+    "BOTTOMRIGHT",
+    objectiveTracker,
+    "BOTTOMLEFT",
+    -38,
+    4,
+    "right-side Objective Tracker restores left-side meter placement"
+)
 Renderer.SetWindowSession(1, "history", 91, {sync = false})
 first.body:RunScript("OnMouseWheel", -1)
 assertEqual(firstRow.rank.text, 2, "historical viewport has scroll state")
@@ -1939,6 +2065,21 @@ assertEqual(
     "cyclic anchor uses safe center fallback"
 )
 assertEqual(Renderer.ResetPosition(), true, "reset restores default stack")
+assertEqual(
+    DM.config.dockToObjectiveTracker,
+    true,
+    "reset restores Objective Tracker coexistence"
+)
+assertPoint(
+    first,
+    1,
+    "BOTTOMRIGHT",
+    objectiveTracker,
+    "BOTTOMLEFT",
+    -38,
+    4,
+    "reset places the stack beside the Objective Tracker"
+)
 assertPoint(
     second,
     1,
@@ -2018,6 +2159,16 @@ assertEqual(
     DM.config.windowAnchors[2].relativeTo,
     0,
     "old stack stays rooted independently after the move"
+)
+assertPoint(
+    second,
+    1,
+    "BOTTOMRIGHT",
+    objectiveTracker,
+    "BOTTOMLEFT",
+    -38,
+    4,
+    "moving the root transfers tracker-safe placement to its neighbor"
 )
 Renderer.ResetPosition()
 

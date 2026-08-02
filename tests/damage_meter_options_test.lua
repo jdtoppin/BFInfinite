@@ -142,6 +142,7 @@ local function createHarness()
         nativeReset = true,
         panes = {},
         repointed = {},
+        resetPositionCalls = 0,
         scrollFrames = {},
     }
     local root = newWidget(state, "root")
@@ -309,7 +310,9 @@ local function createHarness()
             end,
         },
         Renderer = {
-            ResetPosition = function() end,
+            ResetPosition = function()
+                state.resetPositionCalls = state.resetPositionCalls + 1
+            end,
         },
     }
     local L = setmetatable({}, {
@@ -411,6 +414,21 @@ assertEqual(status:IsShown(), false, "empty status hidden")
 assertEqual(meters.points[1][2], general, "Meters pane anchor parent")
 assertEqual(meters.points[1][3], "BOTTOMLEFT", "Meters pane anchor edge")
 assertEqual(meters.points[1][5], -12, "compact section gap")
+
+local placeMeters =
+    state.controls["Place Meters Beside Objective Tracker"]
+assertTrue(placeMeters ~= nil, "tracker-safe placement action")
+placeMeters.onClick()
+assertEqual(
+    state.resetPositionCalls,
+    1,
+    "tracker-safe placement action resets the meter stack"
+)
+assertEqual(
+    state.controls["Place Meters Bottom Right"],
+    nil,
+    "obsolete overlapping placement action removed"
+)
 
 local expectedTips = {
     ["BFI Damage Meter"] = "BFI Damage Meter Tip",

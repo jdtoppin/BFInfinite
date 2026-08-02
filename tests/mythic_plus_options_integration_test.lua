@@ -131,6 +131,9 @@ function AF.CreateCheckButton(_, label)
     function checkButton:SetEnabled(value)
         self.enabled = value
     end
+    function checkButton:SetTooltip(...)
+        self.tooltip = {...}
+    end
     checkButtons[#checkButtons + 1] = checkButton
     return checkButton
 end
@@ -289,6 +292,15 @@ assertEqual(defaults.hideObjectiveTracker, true,
     "default tracker replacement")
 assertEqual(defaults.showPlayerBreakdown, true,
     "default player breakdown display")
+local objectiveDefaults = freshProfile.uiWidgets.objectiveTracker
+assertEqual(objectiveDefaults.enabled, true,
+    "Objective Tracker styling defaults to enabled")
+assertEqual(objectiveDefaults.backgroundAlpha, 0.85,
+    "default Objective Tracker background opacity")
+assertEqual(objectiveDefaults.autoAcceptQuests, false,
+    "Objective Tracker auto-accept defaults to off")
+assertEqual(objectiveDefaults.autoTurnInQuests, false,
+    "Objective Tracker auto-turn-in defaults to off")
 
 local existingProfile = {
     uiWidgets = {
@@ -300,6 +312,10 @@ local existingProfile = {
 updateProfile(nil, existingProfile)
 assertEqual(existingProfile.uiWidgets.mythicPlus.enabled, false,
     "existing profile receives new module defaults")
+assertEqual(existingProfile.uiWidgets.objectiveTracker.backgroundAlpha, 0.85,
+    "existing profile receives Objective Tracker background defaults")
+assertEqual(existingProfile.uiWidgets.objectiveTracker.autoAcceptQuests, false,
+    "existing profile receives opt-in quest automation defaults")
 
 local partialProfile = {
     uiWidgets = {
@@ -313,6 +329,37 @@ assertEqual(partialProfile.uiWidgets.mythicPlus.enabled, true,
     "existing Mythic+ choice is preserved")
 assertEqual(partialProfile.uiWidgets.mythicPlus.width, 320,
     "partial Mythic+ config is filled")
+
+local partialObjectiveProfile = {
+    uiWidgets = {
+        objectiveTracker = {
+            enabled = true,
+            backgroundAlpha = 0.37,
+            autoAcceptQuests = true,
+        },
+    },
+}
+updateProfile(nil, partialObjectiveProfile)
+assertEqual(
+    partialObjectiveProfile.uiWidgets.objectiveTracker.backgroundAlpha,
+    0.37,
+    "existing Objective Tracker opacity is preserved"
+)
+assertEqual(
+    type(partialObjectiveProfile.uiWidgets.objectiveTracker.font),
+    "table",
+    "partial Objective Tracker config is filled"
+)
+assertEqual(
+    partialObjectiveProfile.uiWidgets.objectiveTracker.autoAcceptQuests,
+    true,
+    "existing Objective Tracker auto-accept choice is preserved"
+)
+assertEqual(
+    partialObjectiveProfile.uiWidgets.objectiveTracker.autoTurnInQuests,
+    false,
+    "missing Objective Tracker auto-turn-in choice is filled"
+)
 
 local optionsChunk, optionsLoadError =
     loadfile("Options/UIWidgets_Options.lua")
@@ -341,6 +388,50 @@ local function findByLabel(widgets, label)
         end
     end
 end
+
+local objectiveInfo = {
+    cfg = partialProfile.uiWidgets.objectiveTracker,
+    id = "objectiveTracker",
+    ownerName = "Objective Tracker",
+    SetTextColor = function()
+    end,
+}
+local objectiveOptionPanes = F.GetUIWidgetOptions({}, objectiveInfo)
+assertTrue(#objectiveOptionPanes >= 5, "Objective Tracker options panes")
+for _, pane in ipairs(objectiveOptionPanes) do
+    pane.Load(objectiveInfo)
+end
+
+local backgroundOpacity = findByLabel(sliders, "Background Opacity")
+assertTrue(backgroundOpacity, "Objective Tracker background opacity slider")
+assertEqual(backgroundOpacity.minimum, 0, "background opacity minimum")
+assertEqual(backgroundOpacity.maximum, 1, "background opacity maximum")
+assertEqual(backgroundOpacity.value, 0.85,
+    "background opacity loads the profile value")
+backgroundOpacity.onValueChanged(0.62)
+assertEqual(objectiveInfo.cfg.backgroundAlpha, 0.62,
+    "background opacity setting")
+assertEqual(fires[#fires][1], "BFI_UpdateModule",
+    "background opacity refreshes the Objective Tracker")
+assertEqual(fires[#fires][3], "objectiveTracker",
+    "background opacity refresh targets the Objective Tracker")
+
+local autoAcceptQuests = findByLabel(checkButtons, "Auto Accept Quests")
+local autoTurnInQuests = findByLabel(checkButtons, "Auto Turn In Quests")
+assertTrue(autoAcceptQuests and autoTurnInQuests,
+    "Objective Tracker quest automation toggles")
+assertEqual(autoAcceptQuests.checked, false,
+    "auto-accept loads the profile value")
+assertEqual(autoTurnInQuests.checked, false,
+    "auto-turn-in loads the profile value")
+assertTrue(autoAcceptQuests.tooltip and autoTurnInQuests.tooltip,
+    "quest automation safety guidance")
+autoAcceptQuests.onCheck(true)
+autoTurnInQuests.onCheck(true)
+assertEqual(objectiveInfo.cfg.autoAcceptQuests, true,
+    "auto-accept setting")
+assertEqual(objectiveInfo.cfg.autoTurnInQuests, true,
+    "auto-turn-in setting")
 
 local showAffixes = findByLabel(checkButtons, "Show Affixes")
 assertTrue(showAffixes, "affix display toggle")
