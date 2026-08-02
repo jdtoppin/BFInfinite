@@ -460,6 +460,14 @@ local function SetHolderShownSafe(controller, shown)
     if controller._holderShown == shown then
         return true
     end
+    if controller._alphaOnlyVisibility then
+        -- Nameplate aura holders remain ordinary shown addon frames and use
+        -- the write-only alpha curtain as their sole visibility gate. This
+        -- avoids protected Show/Hide/SetShown calls while a 12.1 container is
+        -- created or retargeted during combat.
+        controller._holderShown = shown
+        return true
+    end
     if InCombatLockdown() then
         return false
     end
@@ -507,6 +515,13 @@ local function SetControllerShownSafe(controller, shown)
     -- show it only after the holder is restored. No native visibility is
     -- read: _containerShown tracks only BFI's own successful writes.
     SetPresentationCurtained(controller, true)
+    if controller._alphaOnlyVisibility then
+        SetHolderShownSafe(controller, shown)
+        if shown then
+            SetPresentationCurtained(controller, false)
+        end
+        return true
+    end
     if InCombatLockdown() then
         if not IsControllerVisibilityApplied(controller, shown) then
             return false
@@ -626,6 +641,8 @@ function ControllerMixin:_Build()
 
     local spec = self._spec
     local holder = self.frame
+    local combatInitialBuild = self._allowCombatInitialBuild
+        and InCombatLockdown()
     constructionStats.buildAttempts = constructionStats.buildAttempts + 1
     constructionStats.expectedGroups =
         constructionStats.expectedGroups + #spec.groups
@@ -667,8 +684,12 @@ function ControllerMixin:_Build()
         self._containerAlpha = nil
         MarkBuildShellStranded(self)
     end
-    container:Hide()
-    AF.SetCustomAuraContainerEnabled(container, false)
+    if not self._alphaOnlyVisibility then
+        container:Hide()
+    end
+    if not combatInitialBuild then
+        AF.SetCustomAuraContainerEnabled(container, false)
+    end
     PositionContainer(container, holder, spec.containerPoint)
     if containerIsExternal then
         SyncExternalContainerLayer(self, container)
@@ -711,9 +732,13 @@ function ControllerMixin:_Build()
     -- anchor exists. Enabling remains the final native lifecycle transition.
     AF.SetCustomAuraContainerUnit(container, spec.unit)
     AF.UpdateCustomAuraContainer(container)
+    -- SetEnabled is a secure-delegated inbound AuraContainer method in the
+    -- pinned 12.1 build. Submit the final configured state explicitly even
+    -- for a combat-created container so event registration never depends on
+    -- template initialization details.
     AF.SetCustomAuraContainerEnabled(container, spec.enabled)
 
-    if not containerIsExternal then
+    if not containerIsExternal and not self._alphaOnlyVisibility then
         container:Show()
     end
 
@@ -773,6 +798,34 @@ function ControllerMixin:_ApplyPending()
     -- complete BFI-owned presentation before applying native mutations.
     local holderHidden = SetControllerShownSafe(self, false)
     if InCombatLockdown() then
+        if self._allowCombatInitialBuild and self._needsRebuild then
+            -- PTR 7 permits addon AuraContainers to be created during combat.
+            -- This opt-in path is used only by nameplates born after combat
+            -- starts. The complete presentation stays behind the plain
+            -- holder's alpha curtain, and native visibility methods are not
+            -- called while restricted.
+            if self._holderConfig then
+                local configure = self._holderConfig
+                self._holderConfig = nil
+                configure(self.frame)
+            end
+            self._needsClaimInitialization = nil
+            self:_Build()
+            self._needsRebuild = nil
+            self._needsTuning = nil
+            self._needsRetarget = nil
+            self._needsEnabled = nil
+            self._needsRefresh = nil
+            self._needsVisibility = true
+            if RestoreControllerVisibility(self) then
+                self._needsVisibility = nil
+                pendingControllers[self] = nil
+            else
+                QueueController(self)
+            end
+            return
+        end
+
         -- SetUnit/UpdateAllAuras are the only native operations explicitly
         -- supported live. The alpha curtain is already active; protected
         -- Show/Hide/SetShown calls are deferred until regen.
@@ -1087,6 +1140,10 @@ local function CreateController(parent, name, completeSpec, options)
     end
 
     local controller = setmetatable({}, ControllerMixin)
+    controller._alphaOnlyVisibility =
+        options.alphaOnlyVisibility == true
+    controller._allowCombatInitialBuild =
+        options.allowCombatInitialBuild == true
     controller.frame = CreateFrame(
         "Frame",
         name,
@@ -1095,14 +1152,19 @@ local function CreateController(parent, name, completeSpec, options)
     )
     controller.frame:SetAlpha(0)
     controller._holderAlpha = 0
-    if not InCombatLockdown() then
+    if controller._alphaOnlyVisibility then
+        -- CreateFrame returns a shown plain frame. Track the requested state
+        -- independently and keep it visually inert until a complete native
+        -- presentation has been committed.
+        controller._holderShown = false
+    elseif not InCombatLockdown() then
         controller.frame:Hide()
         controller._holderShown = false
     end
     controller._seedContainer = options.seedContainer
     controller._liveUnitChanges = options.liveUnitChanges == true
     constructionStats.controllersCreated = constructionStats.controllersCreated + 1
-    if InCombatLockdown() then
+    if InCombatLockdown() and not controller._allowCombatInitialBuild then
         controller._needsClaimInitialization = true
         QueueController(controller)
     end
@@ -1131,10 +1193,15 @@ function UF.CreateNativeAuraContainerController(
     parent,
     name,
     completeSpec,
-    frameTemplate
+    frameTemplate,
+    options
 )
+    options = options or {}
     return CreateController(parent, name, completeSpec, {
         frameTemplate = frameTemplate,
+        liveUnitChanges = options.liveUnitChanges,
+        allowCombatInitialBuild = options.allowCombatInitialBuild,
+        alphaOnlyVisibility = options.alphaOnlyVisibility,
     })
 end
 

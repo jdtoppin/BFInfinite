@@ -48,6 +48,9 @@ jobs:
       - name: Test Target unit-frame native aura integration
         run: luajit tests/unit_frame_target_native_aura_test.lua
 
+      - name: Test nameplate native aura integration
+        run: luajit tests/nameplate_native_aura_test.lua
+
       - name: Test unit-frame aura options
         run: luajit tests/unit_frame_aura_options_test.lua
 

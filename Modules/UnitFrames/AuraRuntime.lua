@@ -89,9 +89,10 @@ local function DeepEqual(left, right, seen)
     return true
 end
 
-local function CopyCompilerConfig(config)
+local function CopyCompilerConfig(runtime, config)
     local copied = AF.Copy(config)
-    if A
+    if runtime._includeSpellColors
+        and A
         and type(A.GetNativeSpellColorMap) == "function"
     then
         copied.spellColors = A.GetNativeSpellColorMap()
@@ -453,6 +454,15 @@ local function QuiesceForReload(runtime)
     runtime._controller:SetEnabled(false)
 end
 
+local function CanPrepareHiddenNative(runtime)
+    return runtime._keepNativeEnabledWhenHidden
+        and runtime._built
+        and runtime._config ~= nil
+        and runtime._config.enabled ~= false
+        and not runtime._configMode
+        and not runtime.root.inConfigMode
+end
+
 local function SyncLifecycle(runtime)
     if runtime._reloadRequired then
         QuiesceForReload(runtime)
@@ -466,11 +476,19 @@ local function SyncLifecycle(runtime)
 
     local enabled = runtime._state == STATE_READY
         and ShouldEnableNative(runtime)
+    local nativeEnabled = enabled
+        or (
+            runtime._keepNativeEnabledWhenHidden
+            and runtime._built
+            and runtime._state == STATE_READY
+            and runtime._config ~= nil
+            and runtime._config.enabled ~= false
+        )
     local shown = enabled and ShouldShowNative(runtime)
 
     if not shown then
         runtime._controller:SetShown(false)
-        runtime._controller:SetEnabled(enabled)
+        runtime._controller:SetEnabled(nativeEnabled)
         if runtime._partitionCapable then
             runtime._partitionVariant = nil
         end
@@ -570,7 +588,7 @@ local function CompileComparisonDescriptor(runtime, config)
     local descriptor = UF.CompileNativeAuraSpec(
         unit,
         runtime.auraFilter,
-        CopyCompilerConfig(config)
+        CopyCompilerConfig(runtime, config)
     )
     return descriptor
 end
@@ -613,6 +631,10 @@ local function ApplyPlacement(runtime, descriptor)
     local root = runtime.root
 
     runtime._controller:ApplyHolderConfig(function(holder)
+        if runtime._applyPlacement then
+            runtime._applyPlacement(holder, placement, root)
+            return
+        end
         AF.SetFrameLevel(holder, placement.frameLevel, root)
         UF.LoadIndicatorPosition(
             holder,
@@ -733,7 +755,9 @@ Commit = function(runtime)
         return
     end
 
-    if not ShouldEnableNative(runtime) then
+    if not ShouldEnableNative(runtime)
+        and not CanPrepareHiddenNative(runtime)
+    then
         RemoveCombatCommit(runtime)
         runtime._deferredCommit = true
         SyncLifecycle(runtime)
@@ -765,7 +789,13 @@ Commit = function(runtime)
     -- supersede the pending descriptor without allocating stale restricted
     -- button batches after combat. Holder visibility is owned by the
     -- controller's ordinary write ledger and must not be observed here.
-    if runtime._configDirty and InCombatLockdown() then
+    if runtime._configDirty
+        and InCombatLockdown()
+        and not (
+            runtime._allowCombatInitialBuild
+            and not runtime._built
+        )
+    then
         -- A group child's clean token can still change while an unrelated
         -- structural config edit waits for regen. Retarget the already-built
         -- container now; keep it hidden and leave the config commit queued.
@@ -1017,7 +1047,7 @@ local function NativeAuras_LoadConfig(self, config)
 
     local firstConfig = self._config == nil
     self._sourceConfig = AF.Copy(config)
-    self._config = CopyCompilerConfig(config)
+    self._config = CopyCompilerConfig(self, config)
     self._configDirty = true
 
     Compile(self, ResolveRuntimeUnit(self))
@@ -1046,7 +1076,9 @@ local function NativeAuras_LoadConfig(self, config)
 
     if self._built then
         self._controller:SetShown(false)
-        if not ShouldEnableNative(self) then
+        if not self._keepNativeEnabledWhenHidden
+            and not ShouldEnableNative(self)
+        then
             self._controller:SetEnabled(false)
         end
     end
@@ -1059,7 +1091,10 @@ local function NativeAuras_LoadConfig(self, config)
         return
     end
 
-    ScheduleCommit(self, firstConfig)
+    ScheduleCommit(
+        self,
+        firstConfig or self._immediateConfigCommit
+    )
 end
 
 local function NativeAuras_Enable(self)
@@ -1102,7 +1137,9 @@ local function NativeAuras_Disable(self)
         self._controller:SetShown(false)
         if self.root.inConfigMode or self._configMode then
             self._controller:SetEnabled(false)
-        elseif not ShouldEnableNative(self) then
+        elseif not self._keepNativeEnabledWhenHidden
+            and not ShouldEnableNative(self)
+        then
             self._controller:SetEnabled(false)
         end
     end
@@ -1288,7 +1325,10 @@ end
 function UF.RefreshNativeAuraSpellColors()
     local reloadRequired = false
     for runtime in pairs(providerRuntimes) do
-        if not runtime._destroyed and runtime._sourceConfig then
+        if not runtime._destroyed
+            and runtime._includeSpellColors
+            and runtime._sourceConfig
+        then
             NativeAuras_LoadConfig(
                 runtime,
                 runtime._sourceConfig
@@ -1378,8 +1418,10 @@ local function CreateNativeAuraRuntime(
     hasSubFrame,
     controller,
     groupManaged,
-    partitionCapable
+    partitionCapable,
+    options
 )
+    options = options or {}
     local frame = controller:GetFrame()
     frame.root = parent
     frame.auraFilter = auraFilter
@@ -1387,6 +1429,13 @@ local function CreateNativeAuraRuntime(
     frame._partitionCapable = partitionCapable == true
     frame._controller = controller
     frame._groupManaged = groupManaged == true
+    frame._includeSpellColors = options.includeSpellColors ~= false
+    frame._allowCombatInitialBuild =
+        options.allowCombatInitialBuild == true
+    frame._keepNativeEnabledWhenHidden =
+        options.keepNativeEnabledWhenHidden == true
+    frame._immediateConfigCommit = options.immediateConfigCommit == true
+    frame._applyPlacement = options.applyPlacement
     frame._state = STATE_NEW
     frame._commitGeneration = 0
     providerRuntimes[frame] = true
@@ -1408,12 +1457,25 @@ local function CreateNativeAuraRuntime(
     return frame
 end
 
-function UF.CreateNativeAuraIndicator(parent, name, auraFilter, hasSubFrame)
+function UF.CreateNativeAuraIndicator(
+    parent,
+    name,
+    auraFilter,
+    hasSubFrame,
+    options
+)
     if not UF.HasNativeAuraContainerBackend() then
         return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
     end
 
-    local controller = UF.CreateNativeAuraContainerController(parent, name)
+    options = options or {}
+    local controller = UF.CreateNativeAuraContainerController(
+        parent,
+        name,
+        nil,
+        nil,
+        options.controller
+    )
     if not controller then
         return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
     end
@@ -1423,7 +1485,8 @@ function UF.CreateNativeAuraIndicator(parent, name, auraFilter, hasSubFrame)
         hasSubFrame,
         controller,
         false,
-        false
+        false,
+        options
     )
 end
 
@@ -1451,7 +1514,8 @@ function UF.CreateNativeGroupAuraIndicator(
         false,
         controller,
         true,
-        false
+        false,
+        nil
     )
 end
 
@@ -1479,7 +1543,8 @@ function UF.CreateNativePartitionedAuraIndicator(
         hasSubFrame,
         controller,
         false,
-        true
+        true,
+        nil
     )
 end
 
