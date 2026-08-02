@@ -271,8 +271,10 @@ end
 local function makeHarness(
     isRetail,
     hasNativeBackend,
-    auraFilters
+    auraFilters,
+    runtime
 )
+    runtime = runtime or {}
     if auraFilters == nil then
         auraFilters = hasNativeBackend and {
             Important = "IMPORTANT",
@@ -283,6 +285,8 @@ local function makeHarness(
         configLoads = {},
         panes = {},
         setCalls = {},
+        groupBuffCalls = 0,
+        spellExistsCalls = 0,
         widgets = {},
         resizeCalls = 0,
     }
@@ -500,8 +504,8 @@ local function makeHarness(
         return pane
     end
 
-    function AF.CreateButton(parent, _, _, _, _)
-        return makeWidget("button", harness, parent)
+    function AF.CreateButton(parent, text)
+        return makeWidget("button", harness, parent, text)
     end
 
     function AF.CreateCheckButton(parent, text)
@@ -674,6 +678,8 @@ local function makeHarness(
     end
 
     function AF.SpellExists()
+        harness.spellExistsCalls =
+            harness.spellExistsCalls + 1
         return true
     end
 
@@ -730,6 +736,7 @@ local function makeHarness(
         math = math,
         next = next,
         pairs = pairs,
+        rawget = rawget,
         select = select,
         string = string,
         table = table,
@@ -745,6 +752,39 @@ local function makeHarness(
             end
         end,
     }
+    if runtime.specializationRole then
+        environment.GetSpecialization = function()
+            return runtime.specialization or 1
+        end
+        environment.GetSpecializationRole = function(
+            specialization
+        )
+            if specialization == nil then return end
+            return runtime.specializationRole
+        end
+    end
+    if runtime.groupBuffAPIAvailable then
+        environment.bit = {
+            band = function(value, flag)
+                if flag ~= 1 then
+                    error("unexpected group-buff flag")
+                end
+                return value % 2
+            end,
+        }
+        environment.C_CooldownViewer = {
+            GetGroupBuffItems = function()
+                harness.groupBuffCalls =
+                    harness.groupBuffCalls + 1
+                return runtime.groupBuffItems or {}
+            end,
+        }
+        environment.Enum = {
+            GroupBuffItemFlags = {
+                HideByDefault = 1,
+            },
+        }
+    end
     environment._G = environment
     setmetatable(environment, {
         __index = function(_, key)
@@ -886,6 +926,17 @@ local function assertItemValues(widget, expected, message)
     for index, value in ipairs(expected) do
         assertEqual(
             widget.items[index].value,
+            value,
+            message .. " item " .. index
+        )
+    end
+end
+
+local function assertValues(actual, expected, message)
+    assertEqual(#actual, #expected, message .. " count")
+    for index, value in ipairs(expected) do
+        assertEqual(
+            actual[index],
             value,
             message .. " item " .. index
         )
@@ -1596,6 +1647,292 @@ local function testRetailSpellLists(hasNativeBackend)
     end
 end
 
+local function testHealerSpellImporterGatingAndLayout()
+    local runtime = {
+        groupBuffAPIAvailable = true,
+        groupBuffItems = {
+            {spellID = 400, flags = 0, isKnown = true},
+        },
+        specializationRole = "HEALER",
+    }
+    local harness = makeHarness(true, true, nil, runtime)
+    local pane = harness.builders.auraBlackListWhitelist(
+        makeParent()
+    )
+    local info = newInfo("buffs", "target", nil, "native")
+    info.cfg.mode = "whitelist"
+    info.cfg.whitelist = {12345}
+
+    pane.Load(info)
+    local importButton = findWidget(
+        pane,
+        "button",
+        "initialText",
+        "Import Healer Spells"
+    )
+    local addButton = findWidget(
+        pane,
+        "button",
+        "initialText",
+        nil
+    )
+    assertTrue(importButton, "healer importer button")
+    assertEqual(importButton.text, "Import Healer Spells",
+        "healer importer label")
+    assertEqual(importButton.shown, true,
+        "native helpful whitelist healer importer visibility")
+    assertEqual(importButton.enabled, true,
+        "native helpful whitelist healer importer enabled state")
+    assertContains(
+        importButton.tooltipBody,
+        "current healing specialization",
+        "healer importer tooltip"
+    )
+    assertTrue(
+        hasPoint(
+            importButton,
+            "TOPLEFT",
+            addButton,
+            "TOPRIGHT"
+        ),
+        "healer importer sits next to add"
+    )
+    assertEqual(harness.groupBuffCalls, 1,
+        "healer importer validates Blizzard catalog on load")
+
+    info.cfg.mode = "blacklist"
+    pane.Load(info)
+    assertEqual(importButton.shown, false,
+        "healer importer hidden for blacklist")
+    assertEqual(importButton.enabled, false,
+        "healer importer disabled for blacklist")
+
+    local debuffs = newInfo("debuffs", "target", nil, "native")
+    debuffs.cfg.mode = "whitelist"
+    pane.Load(debuffs)
+    assertEqual(importButton.shown, false,
+        "healer importer hidden for harmful auras")
+    assertEqual(importButton.enabled, false,
+        "healer importer disabled for harmful auras")
+
+    local legacy = newInfo("buffs", "target", nil, "legacy")
+    legacy.cfg.mode = "whitelist"
+    pane.Load(legacy)
+    assertEqual(importButton.shown, false,
+        "healer importer hidden for legacy aura row")
+    assertEqual(importButton.enabled, false,
+        "healer importer disabled for legacy aura row")
+
+    runtime.specializationRole = "DAMAGER"
+    info.cfg.mode = "whitelist"
+    pane.Load(info)
+    assertEqual(importButton.shown, false,
+        "healer importer hidden outside healing specialization")
+    assertEqual(importButton.enabled, false,
+        "healer importer disabled outside healing specialization")
+    assertEqual(
+        harness.groupBuffCalls,
+        1,
+        "ineligible rows do not read Blizzard group buffs"
+    )
+end
+
+local function testHealerSpellImporterUnavailableAndEmpty()
+    local unavailableHarness = makeHarness(
+        true,
+        true,
+        nil,
+        {specializationRole = "HEALER"}
+    )
+    local unavailablePane =
+        unavailableHarness.builders.auraBlackListWhitelist(
+            makeParent()
+        )
+    local unavailableInfo =
+        newInfo("buffs", "target", nil, "native")
+    unavailableInfo.cfg.mode = "whitelist"
+    unavailableInfo.cfg.whitelist = {12345}
+    unavailablePane.Load(unavailableInfo)
+    local unavailableButton = findWidget(
+        unavailablePane,
+        "button",
+        "initialText",
+        "Import Healer Spells"
+    )
+    assertEqual(unavailableButton.shown, true,
+        "unavailable healer importer remains discoverable")
+    assertEqual(unavailableButton.enabled, false,
+        "unavailable healer importer disabled")
+    unavailableButton.onClick()
+    assertValues(
+        unavailableInfo.cfg.whitelist,
+        {12345},
+        "unavailable healer importer preserves list"
+    )
+    assertFanout(
+        unavailableHarness,
+        unavailableInfo,
+        0,
+        "unavailable healer importer update"
+    )
+
+    local runtime = {
+        groupBuffAPIAvailable = true,
+        groupBuffItems = {},
+        specializationRole = "HEALER",
+    }
+    local emptyHarness = makeHarness(true, true, nil, runtime)
+    local emptyPane =
+        emptyHarness.builders.auraBlackListWhitelist(
+            makeParent()
+        )
+    local emptyInfo = newInfo("buffs", "target", nil, "native")
+    emptyInfo.cfg.mode = "whitelist"
+    emptyInfo.cfg.whitelist = {12345}
+    emptyPane.Load(emptyInfo)
+    local emptyButton = findWidget(
+        emptyPane,
+        "button",
+        "initialText",
+        "Import Healer Spells"
+    )
+    assertEqual(emptyButton.shown, true,
+        "empty healer importer remains discoverable")
+    assertEqual(emptyButton.enabled, false,
+        "empty healer importer disabled")
+    emptyButton.onClick()
+    assertValues(
+        emptyInfo.cfg.whitelist,
+        {12345},
+        "empty healer importer preserves list"
+    )
+    assertEqual(emptyHarness.groupBuffCalls, 2,
+        "empty healer importer rechecks on click")
+    assertFanout(
+        emptyHarness,
+        emptyInfo,
+        0,
+        "empty healer importer update"
+    )
+
+    runtime.groupBuffItems = {
+        {spellID = 333, flags = 1, isKnown = true},
+    }
+    emptyPane.Load(emptyInfo)
+    assertEqual(emptyButton.enabled, false,
+        "HideByDefault-only healer importer disabled")
+    assertEqual(emptyHarness.groupBuffCalls, 3,
+        "HideByDefault-only healer importer catalog check")
+end
+
+local function testHealerSpellImporterMergeAndIdempotence()
+    local runtime = {
+        groupBuffAPIAvailable = true,
+        groupBuffItems = {
+            {spellID = 200, flags = 0, isKnown = true},
+            {spellID = 300, flags = 1, isKnown = true},
+            {spellID = 400, flags = 0, isKnown = false},
+            {spellID = 500, flags = 0, isKnown = true},
+            {spellID = 400, flags = 0, isKnown = false},
+            {spellID = 600, flags = 3, isKnown = true},
+        },
+        specializationRole = "HEALER",
+    }
+    local harness = makeHarness(true, true, nil, runtime)
+    local pane = harness.builders.auraBlackListWhitelist(
+        makeParent()
+    )
+    local info = newInfo("buffs", "target", nil, "native")
+    info.cfg.mode = "whitelist"
+    info.cfg.whitelist = {900, 200, 900, 700}
+    local originalList = info.cfg.whitelist
+
+    pane.Load(info)
+    local importButton = findWidget(
+        pane,
+        "button",
+        "initialText",
+        "Import Healer Spells"
+    )
+    local addButton = findWidget(
+        pane,
+        "button",
+        "initialText",
+        nil
+    )
+    local spellButtons = {}
+    for _, widget in ipairs(pane.widgets) do
+        if widget.kind == "button" and widget.spell then
+            spellButtons[#spellButtons + 1] = widget
+        end
+    end
+    assertTrue(
+        hasPoint(
+            addButton,
+            "TOPLEFT",
+            spellButtons[3],
+            "BOTTOMLEFT"
+        ),
+        "add row follows the final spell row"
+    )
+    assertTrue(
+        hasPoint(
+            importButton,
+            "TOPLEFT",
+            addButton,
+            "TOPRIGHT"
+        ),
+        "importer shares the add row"
+    )
+
+    local paneReloads = 0
+    local originalLoad = pane.Load
+    pane.Load = function(t)
+        paneReloads = paneReloads + 1
+        return originalLoad(t)
+    end
+    harness:ClearLoads()
+    importButton.onClick()
+
+    assertEqual(info.cfg.whitelist, originalList,
+        "healer importer preserves SavedVariables table")
+    assertValues(
+        info.cfg.whitelist,
+        {900, 200, 900, 700, 400, 500},
+        "healer importer merge order"
+    )
+    assertEqual(paneReloads, 1,
+        "healer importer pane reload count")
+    assertFanout(
+        harness,
+        info,
+        1,
+        "healer importer config fan-out"
+    )
+    assertEqual(harness.spellExistsCalls, 0,
+        "healer importer skips legacy spell existence lookup")
+    assertEqual(harness.groupBuffCalls, 3,
+        "healer importer reads catalog for enable, click, and reload")
+
+    harness:ClearLoads()
+    importButton.onClick()
+    assertValues(
+        info.cfg.whitelist,
+        {900, 200, 900, 700, 400, 500},
+        "healer importer second-click list"
+    )
+    assertEqual(paneReloads, 1,
+        "healer importer second-click reload count")
+    assertFanout(
+        harness,
+        info,
+        0,
+        "healer importer second-click fan-out"
+    )
+    assertEqual(harness.groupBuffCalls, 4,
+        "healer importer second-click catalog snapshot")
+end
+
 local ALL_AURA_OWNERS = {
     "player",
     "target",
@@ -2222,7 +2559,7 @@ local function testNonRetailSemantics()
     assertEqual(mode.items[2].text, "Whitelist",
         "non-Retail whitelist label")
     for _, widget in ipairs(spellPane.widgets) do
-        if widget.kind == "button" then
+        if widget.kind == "button" and widget.shown then
             assertEqual(widget.enabled, true,
                 "non-Retail spell-list button enabled state")
         end
@@ -2534,6 +2871,9 @@ for _, hasNativeBackend in ipairs({false, true}) do
 end
 testRetailIndicatorAwareNativeWording()
 testPtr7FilterTokenCapabilities()
+testHealerSpellImporterGatingAndLayout()
+testHealerSpellImporterUnavailableAndEmpty()
+testHealerSpellImporterMergeAndIdempotence()
 testNonRetailSemantics()
 testDurationTextThresholdMode()
 testPlainAuraControlLabels()
