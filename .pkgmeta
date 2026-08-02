@@ -14,6 +14,7 @@ ignore:
   - AGENTS.md
   - CONTRIBUTING.md
   - Modules/Blizzard/Style/WorldMapFrame_Test.lua
+  - RELEASE_NOTES.md
   - scripts
   - tests
 
