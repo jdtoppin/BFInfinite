@@ -46,9 +46,11 @@ local BD = {
     BLIZZARD_DEBUFF_STYLE_BACKEND = "blizzardDebuffStyle",
     config = {
         buffs = {
+            enabled = true,
             separateOwn = 0,
         },
         debuffs = {
+            enabled = true,
             separateOwn = 0,
         },
     },
@@ -68,6 +70,11 @@ end
 
 local BFI = {
     L = L,
+    funcs = {
+        isValueNonSecret = function(value)
+            return type(value) == "boolean"
+        end,
+    },
     modules = {
         BuffsDebuffs = BD,
     },
@@ -154,6 +161,14 @@ do
         "custom After choice disabled")
     assertTrue(buffsPolicy.constructionOwnedStyle,
         "custom button styling is construction-owned")
+    assertTrue(buffsPolicy.positionOwnedByBFI,
+        "BFI owns the shared Buff and Debuff location")
+    assertFalse(buffsPolicy.arrangementControls,
+        "follower arrangement is fixed")
+    assertEqual(buffsPolicy.fixedArrangement,
+        "right_to_left_then_up", "follower arrangement value")
+    assertTrue(buffsPolicy.layoutControls,
+        "remaining custom layout controls stay available")
     assertTrue(buffsPolicy.retiredDurationControls,
         "retired duration controls are declared")
 end
@@ -220,12 +235,21 @@ do
         "outer combat dispatcher pending status")
 
     dispatchPendingByPane.buffs = nil
-    stateByPane.buffs = {}
-    assertNil(BD.GetBuffsDebuffsOptionsStatus("buffs"),
-        "ready custom backend has no status")
+    stateByPane.buffs = {
+        active = true,
+        nativeFollowerActive = true,
+    }
+    status = BD.GetBuffsDebuffsOptionsStatus("buffs")
+    assertEqual(status.code, "BFI_SHARED_AURA_MOVER",
+        "ready custom backend explains its shared BFI mover")
+    stateByPane.buffs.nativeFollowerActive = false
     local debuffsStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
     assertEqual(debuffsStatus.code, "BLIZZARD_DEBUFF_STYLE",
-        "Debuffs explains its bounded styling mode")
+        "inactive custom Buffs do not claim linked movement")
+    stateByPane.buffs.nativeFollowerActive = true
+    debuffsStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(debuffsStatus.code, "BFI_SHARED_AURA_MOVER",
+        "active native follower exposes the shared BFI mover")
     dispatchPendingByPane.debuffs = true
     debuffsStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
     assertEqual(debuffsStatus.code, "PENDING_SAFE_UPDATE",
@@ -432,9 +456,21 @@ local function NewOptionsUIHarness(customBackend, afVersion)
 
     local uiEnvironment = setmetatable({}, {__index = _G})
     uiEnvironment._G = uiEnvironment
+    uiEnvironment.InCombatLockdown = function()
+        return false
+    end
+    uiEnvironment.ShowUIPanel = function(frame)
+        records.shownUIPanel = frame
+    end
     uiEnvironment.ReloadUI = function()
         records.reloadCalls = (records.reloadCalls or 0) + 1
     end
+    uiEnvironment.EditModeManagerFrame = {
+        CanEnterEditMode = function()
+            return true
+        end,
+    }
+    records.editModeManagerFrame = uiEnvironment.EditModeManagerFrame
 
     local uiAF = {
         versionNum = afVersion,
@@ -538,9 +574,14 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     end
     function uiAF.SetFrameLevel() end
     function uiAF.ApplyCombatProtectionToFrame() end
+    function uiAF.ApplyCombatProtectionToWidget() end
     function uiAF.ClearPoints() end
+    function uiAF.ShowMovers()
+        records.showMoversCalls = (records.showMoversCalls or 0) + 1
+    end
 
     uiEnvironment.BFIOptionsFrame_ContentPane = NewWidget("content")
+    uiEnvironment.BFIOptionsFrame = NewWidget("optionsFrame")
 
     local uiBD = {
         SECURE_AURA_HEADER_BACKEND = "secureAuraHeader",
@@ -552,7 +593,10 @@ local function NewOptionsUIHarness(customBackend, afVersion)
         },
     }
     records.BD = uiBD
-    records.controllerState = {}
+    records.controllerState = customBackend and {
+        active = true,
+        nativeFollowerActive = true,
+    } or {}
 
     function uiBD.GetAuraBackend(which)
         if customBackend then
@@ -584,6 +628,15 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     })
     local uiBFI = {
         L = uiL,
+        funcs = {
+            isValueNonSecret = function(value)
+                return type(value) == "boolean"
+            end,
+            PrepareEditModePositions = function()
+                records.prepareEditModeCalls =
+                    (records.prepareEditModeCalls or 0) + 1
+            end,
+        },
         modules = {
             BuffsDebuffs = uiBD,
         },
@@ -627,6 +680,24 @@ do
         "status action text does not run under button")
     assertTrue(custom.statusText.wordWrap,
         "status explanations wrap inside their row")
+    assertFalse(custom.dropdownsByLabel.Arrangement.enabled,
+        "custom Buff arrangement is fixed for the shared mover")
+    assertEqual(custom.dropdownsByLabel.Arrangement.selected,
+        "right_to_left_then_up", "fixed shared arrangement is visible")
+    assertTrue(custom.dropdownsByLabel["Sort Method"].enabled,
+        "custom Buff sorting remains editable")
+    assertEqual(custom.statusText.textValue,
+        "Both rows move together with the BFI Buff Frame mover. Movement is unavailable in combat.",
+        "custom shared-mover guidance")
+    assertEqual(custom.statusButton.textValue,
+        "Open BFI Edit Mode", "custom Buff mover action")
+    custom.statusButton.onClick()
+    assertEqual(custom.prepareEditModeCalls, 1,
+        "BFI positions are prepared before showing movers")
+    assertEqual(custom.showMoversCalls, 1,
+        "BFI Edit Mode action shows BFI movers")
+    assertFalse(custom.shownUIPanel == custom.editModeManagerFrame,
+        "shared mover action does not open Blizzard Edit Mode")
 
     local width = custom.slidersByLabel.Width
     width.onValueChanged(40)
@@ -665,8 +736,10 @@ do
         "recovery changes only Separate Own")
     assertEqual(custom.separateOwn.selected, 0,
         "recovery refreshes dropdown selection")
-    assertFalse(custom.statusButton.shown,
-        "recovery refresh clears stale status")
+    assertTrue(custom.statusButton.shown,
+        "recovery refresh restores shared-mover guidance")
+    assertEqual(custom.statusButton.textValue, "Open BFI Edit Mode",
+        "recovery refresh restores the BFI mover action")
     assertEqual(#custom.events, 1,
         "recovery fires one module update")
 
@@ -678,6 +751,8 @@ do
     assertTrue(custom.durationHint.wordWrap,
         "duration hint wraps inside the pane")
 
+    custom.controllerState.active = true
+    custom.controllerState.nativeFollowerActive = true
     custom.topSwitch:SetSelectedValue("debuffs")
     local debuffsConfig = custom.BD.config.debuffs
     assertFalse(custom.dropdownsByLabel.Arrangement.enabled,
@@ -695,8 +770,10 @@ do
     assertEqual(custom.slidersByLabel.Height.maximum, 30,
         "Debuff icon height uses the native-cell ceiling")
     assertEqual(custom.statusText.textValue,
-        "BFInfinite styles ordinary Debuffs only. Blizzard controls their layout and duration text; private and deadly debuffs are unchanged.",
-        "Debuffs ownership explanation")
+        "Both rows move together with the BFI Buff Frame mover. Movement is unavailable in combat.",
+        "Debuffs shared-mover explanation")
+    assertEqual(custom.statusButton.textValue,
+        "Open BFI Edit Mode", "Debuffs shared-mover action")
     assertTrue(custom.statusText.shown,
         "Debuffs ownership explanation is visible")
     assertEqual(custom.durationHint.textValue,

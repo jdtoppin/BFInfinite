@@ -4,6 +4,8 @@ local L = BFI.L
 local BD = BFI.modules.BuffsDebuffs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
+local InCombatLockdown = InCombatLockdown
+local type = type
 
 local LoadOptions, UpdateStatus
 local selected, currentConfig, currentTextConfig, currentTextKind
@@ -20,10 +22,27 @@ local function IsBlizzardDebuffStyleBackend(which)
             == BD.BLIZZARD_DEBUFF_STYLE_BACKEND
 end
 
+local function IsSharedAuraMoverActive()
+    if not IsCustomBuffsBackend("buffs")
+        or not BD.config
+        or not BD.config.buffs
+        or BD.config.buffs.enabled ~= true
+        or type(BD.GetCustomAuraContainerState) ~= "function"
+    then
+        return false
+    end
+
+    local state = BD.GetCustomAuraContainerState("buffs")
+    return state
+        and state.active == true
+        and state.nativeFollowerActive == true
+end
+
 function BD.GetBuffsDebuffsOptionsPolicy(which)
     local backend = BD.GetAuraBackend(which)
     local custom = IsCustomBuffsBackend(which)
     local blizzardDebuffStyle = IsBlizzardDebuffStyleBackend(which)
+    local positionOwnedByBFI = custom and which == "buffs"
     return {
         available = backend ~= nil,
         backend = backend,
@@ -46,6 +65,12 @@ function BD.GetBuffsDebuffsOptionsPolicy(which)
             },
         },
         constructionOwnedStyle = custom,
+        fixedArrangement = positionOwnedByBFI
+            and "right_to_left_then_up"
+            or nil,
+        arrangementControls = not blizzardDebuffStyle
+            and not positionOwnedByBFI,
+        positionOwnedByBFI = positionOwnedByBFI,
         layoutControls = not blizzardDebuffStyle,
         iconSizeControls = true,
         maximumIconSize = blizzardDebuffStyle and 30 or 100,
@@ -67,7 +92,9 @@ function BD.GetBuffsDebuffsOptionsStatus(which)
             }
         end
         return {
-            code = "BLIZZARD_DEBUFF_STYLE",
+            code = IsSharedAuraMoverActive()
+                and "BFI_SHARED_AURA_MOVER"
+                or "BLIZZARD_DEBUFF_STYLE",
         }
     elseif not policy.custom then
         return nil
@@ -98,6 +125,14 @@ function BD.GetBuffsDebuffsOptionsStatus(which)
     elseif dispatcherPending or (state and state.pending) then
         return {
             code = "PENDING_SAFE_UPDATE",
+        }
+    elseif policy.positionOwnedByBFI
+        and config
+        and config.enabled == true
+        and IsSharedAuraMoverActive()
+    then
+        return {
+            code = "BFI_SHARED_AURA_MOVER",
         }
     end
 end
@@ -300,6 +335,7 @@ local function CreateNormalPane()
     )
     normalPane.statusButton = statusButton
     AF.SetPoint(statusButton, "BOTTOMRIGHT", -10, 5)
+    AF.ApplyCombatProtectionToWidget(statusButton)
     statusButton:Hide()
 
     --------------------------------------------------
@@ -522,8 +558,11 @@ local function CreateNormalPane()
         local layoutEnabled = currentConfig.enabled
             and policy.layoutControls
         AF.SetEnabled(
+            layoutEnabled and policy.arrangementControls,
+            arrangement
+        )
+        AF.SetEnabled(
             layoutEnabled,
-            arrangement,
             sortMethod,
             sortDirection,
             spacingX,
@@ -544,7 +583,9 @@ local function CreateNormalPane()
         width:SetMinMaxValues(10, policy.maximumIconSize)
         height:SetMinMaxValues(10, policy.maximumIconSize)
         separateOwn:SetItems(policy.separateOwnItems)
-        arrangement:SetSelectedValue(currentConfig.orientation)
+        arrangement:SetSelectedValue(
+            policy.fixedArrangement or currentConfig.orientation
+        )
         sortMethod:SetSelectedValue(currentConfig.sortMethod)
         sortDirection:SetSelectedValue(currentConfig.sortDirection)
         separateOwn:SetSelectedValue(currentConfig.separateOwn)
@@ -564,12 +605,26 @@ local function CreateNormalPane()
     end
 end
 
+local function OpenBFIEditMode()
+    if InCombatLockdown() then
+        -- AF owns the localized combat warning and guarantees that no mover
+        -- remains interactive when this entry point is blocked.
+        AF.ShowMovers()
+        return
+    end
+    local optionsFrame = _G.BFIOptionsFrame
+    if optionsFrame then optionsFrame:Hide() end
+    BFI.funcs.PrepareEditModePositions()
+    AF.ShowMovers()
+end
+
 UpdateStatus = function()
     if not normalPane then return end
     local status = BD.GetBuffsDebuffsOptionsStatus(selected)
     local statusText = normalPane.statusText
     local statusButton = normalPane.statusButton
     statusButton:SetOnClick(nil)
+    statusText:SetTextColor(AF.GetColorRGB("firebrick"))
 
     if not status then
         statusText:Hide()
@@ -609,10 +664,20 @@ UpdateStatus = function()
                 ]
         )
         statusButton:Hide()
+    elseif status.code == "BFI_SHARED_AURA_MOVER" then
+        AF.SetWidth(statusText, 350)
+        statusText:SetTextColor(AF.GetColorRGB("gray"))
+        statusText:SetText(L[
+            "Both rows move together with the BFI Buff Frame mover. Movement is unavailable in combat."
+        ])
+        statusButton:SetText(L["Open BFI Edit Mode"])
+        statusButton:SetOnClick(OpenBFIEditMode)
+        statusButton:Show()
     elseif status.code == "BLIZZARD_DEBUFF_STYLE" then
         AF.SetWidth(statusText, 530)
+        statusText:SetTextColor(AF.GetColorRGB("gray"))
         statusText:SetText(L[
-            "BFInfinite styles ordinary Debuffs only. Blizzard controls their layout and duration text; private and deadly debuffs are unchanged."
+            "Enable Buffs to move both ordinary rows together. Private auras remain Blizzard-managed; critical warnings stay separate."
         ])
         statusButton:Hide()
     else

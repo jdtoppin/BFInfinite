@@ -37,6 +37,38 @@ local function findCall(calls, name, startIndex)
     end
 end
 
+local function findCallWhere(calls, name, predicate, startIndex)
+    for index = startIndex or 1, #calls do
+        local call = calls[index]
+        if call.name == name and predicate(call) then
+            return call, index
+        end
+    end
+end
+
+local function countEventCalls(calls, name, event)
+    local count = 0
+    for _, call in ipairs(calls) do
+        if call.name == name and call.args[1] == event then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+local function countEventCallbackCalls(calls, name, event, callback)
+    local count = 0
+    for _, call in ipairs(calls) do
+        if call.name == name
+            and call.args[1] == event
+            and call.args[2] == callback
+        then
+            count = count + 1
+        end
+    end
+    return count
+end
+
 local function countCalls(calls, name)
     local count = 0
     for _, call in ipairs(calls) do
@@ -70,8 +102,10 @@ local function NewHarness()
         suppressRestoreSucceeds = true,
         timers = {},
         events = {},
+        registryCallbacks = {},
         frames = {},
         playerUnit = "player",
+        nativeAccessResult = true,
     }
 
     local function record(name, ...)
@@ -112,6 +146,11 @@ local function NewHarness()
             record(label .. ".SetPoint", ...)
         end
 
+        function frame:SetRolesets(rolesets)
+            self.rolesets = rolesets
+            record(label .. ".SetRolesets", rolesets)
+        end
+
         return frame
     end
 
@@ -146,6 +185,26 @@ local function NewHarness()
             target[key] = value
         end
         return target
+    end
+    environment.EventRegistry = {}
+    function environment.EventRegistry:RegisterCallback(event, callback, owner)
+        state.registryCallbacks[event] = state.registryCallbacks[event] or {}
+        state.registryCallbacks[event][#state.registryCallbacks[event] + 1] = {
+            callback = callback,
+            owner = owner,
+        }
+        record("EventRegistry.RegisterCallback", event, callback, owner)
+    end
+    function environment.EventRegistry:UnregisterCallback(event, owner)
+        local callbacks = state.registryCallbacks[event]
+        if callbacks then
+            for index = #callbacks, 1, -1 do
+                if callbacks[index].owner == owner then
+                    table.remove(callbacks, index)
+                end
+            end
+        end
+        record("EventRegistry.UnregisterCallback", event, owner)
     end
 
     local AF = {
@@ -287,6 +346,9 @@ local function NewHarness()
     local BFI = {
         L = L,
         funcs = {
+            isValueNonSecret = function(value)
+                return value ~= state.secretValue
+            end,
             LoadPosition = function(frame, position)
                 record("BFI.LoadPosition", frame.label, position)
             end,
@@ -299,6 +361,63 @@ local function NewHarness()
     local chunk = assert(loadfile("Modules/BuffsDebuffs/CustomAuraContainer.lua"))
     setfenv(chunk, environment)
     chunk("BFInfinite", BFI)
+
+    function state.newDebuffFrame()
+        local nativeTarget = "UIParent"
+        local nativeTarget2 = "BuffFrame"
+        local frame = {
+            systemInfo = {
+                anchorInfo = {
+                    point = "TOPRIGHT",
+                    relativeTo = nativeTarget,
+                    relativePoint = "TOPRIGHT",
+                    offsetX = -31,
+                    offsetY = -42,
+                },
+                anchorInfo2 = {
+                    point = "BOTTOMRIGHT",
+                    relativeTo = nativeTarget2,
+                    relativePoint = "BOTTOMRIGHT",
+                    offsetX = -7,
+                    offsetY = 9,
+                },
+            },
+        }
+
+        function frame:CanBeAccessedInContext()
+            record("DebuffFrame.CanBeAccessedInContext")
+            return state.nativeAccessResult
+        end
+        function frame:GetScale()
+            record("DebuffFrame.GetScale")
+            return 2
+        end
+        function frame:ClearAllPointsBase()
+            record("DebuffFrame.ClearAllPointsBase")
+        end
+        function frame:SetPointBase(...)
+            record("DebuffFrame.SetPointBase", ...)
+        end
+        function frame:ClearAllPoints()
+            error("follower must use Blizzard's captured base clearer", 2)
+        end
+        function frame:SetPoint()
+            error("follower must use Blizzard's captured base setter", 2)
+        end
+        function frame:GetPoint()
+            error("follower must not read DebuffFrame geometry", 2)
+        end
+        function frame:GetSize()
+            error("follower must not read DebuffFrame size", 2)
+        end
+        function frame:IsShown()
+            error("follower must not read DebuffFrame visibility", 2)
+        end
+
+        frame.nativeTarget = nativeTarget
+        frame.nativeTarget2 = nativeTarget2
+        return frame
+    end
 
     function state.runTimers(delay)
         local remaining = {}
@@ -316,9 +435,31 @@ local function NewHarness()
         end
     end
 
+    function state.fireEvent(event, ...)
+        local callbacks = {}
+        for callback in pairs(state.events[event] or {}) do
+            callbacks[#callbacks + 1] = callback
+        end
+        for _, callback in ipairs(callbacks) do
+            callback(event, ...)
+        end
+    end
+
+    function state.fireRegistry(event, ...)
+        local callbacks = state.registryCallbacks[event] or {}
+        for _, registration in ipairs(callbacks) do
+            if registration.owner ~= nil then
+                registration.callback(registration.owner, ...)
+            else
+                registration.callback(...)
+            end
+        end
+    end
+
     return {
         AF = AF,
         BD = BD,
+        environment = environment,
         state = state,
     }
 end
@@ -392,6 +533,36 @@ local function CompileBuffs(config)
     }
 end
 
+local function CompileSharedMoverBuffs(config)
+    local descriptor, diagnostic = CompileBuffs(config)
+    if not descriptor then return nil, diagnostic end
+
+    descriptor.holderRolesets = "buffs"
+    descriptor.nativeFollower = {
+        globalName = "DebuffFrame",
+        point = "TOPRIGHT",
+        relativePoint = "BOTTOMRIGHT",
+        x = 0,
+        y = -5,
+    }
+    descriptor.containerPoint = {
+        point = "BOTTOMRIGHT",
+        relativePoint = "BOTTOMRIGHT",
+        x = 0,
+        y = 0,
+    }
+    return descriptor
+end
+
+local function NewPositionSave(position)
+    return function(point, x, y)
+        position[1] = point
+        position[2] = x
+        position[3] = y
+        position[4] = nil
+    end
+end
+
 do
     local harness = NewHarness()
     local BD = harness.BD
@@ -414,8 +585,13 @@ do
     assertTrue(BD.GetCustomAuraContainerState("debuffs").pending,
         "shared queue keeps debuffs pending")
     assertEqual(
-        countCalls(state.calls, "BD.RegisterEvent"),
-        4,
+        countEventCallbackCalls(
+            state.calls,
+            "BD.RegisterEvent",
+            "PLAYER_REGEN_ENABLED",
+            BD.FlushCustomAuraContainerUpdates
+        ),
+        1,
         "two controllers share one regen registration"
     )
     assertEqual(
@@ -463,6 +639,333 @@ end
 do
     local harness = NewHarness()
     local BD = harness.BD
+    local environment = harness.environment
+    local state = harness.state
+    environment.DebuffFrame = state.newDebuffFrame()
+    state.nativeAccessResult = state.secretValue
+    BD.RegisterCustomAuraContainerPane("buffs", CompileSharedMoverBuffs)
+
+    BD.UpdateCustomAuraContainer("buffs", {
+        enabled = true,
+        positionSave = NewPositionSave({"TOPRIGHT", -4, -4}),
+    })
+    local unavailable = BD.GetCustomAuraContainerState("buffs")
+    assertEqual(unavailable.state, "NATIVE_UNAVAILABLE",
+        "ambiguous native access fails closed")
+    assertFalse(unavailable.active,
+        "ambiguous native access keeps custom Buffs inactive")
+    assertFalse(unavailable.nativeFollowerActive,
+        "ambiguous native access never claims DebuffFrame")
+    for _, call in ipairs(state.calls) do
+        if call.name == "BD.SetNativePublicAurasSuppressed" then
+            assertFalse(call.args[2] == true,
+                "ambiguous native access never suppresses Blizzard Buffs")
+        end
+    end
+
+    local allocations = countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    )
+    state.nativeAccessResult = true
+    state.fireEvent("PLAYER_ENTERING_WORLD")
+    state.runTimers(0)
+    local retried = BD.GetCustomAuraContainerState("buffs")
+    assertTrue(retried.active,
+        "later lifecycle event retries an available native follower")
+    assertTrue(retried.nativeFollowerActive,
+        "retry links Debuffs after access becomes ordinary")
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        allocations,
+        "follower retry reuses the completed native container"
+    )
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local environment = harness.environment
+    local state = harness.state
+    local debuffFrame = state.newDebuffFrame()
+    environment.DebuffFrame = debuffFrame
+    BD.RegisterCustomAuraContainerPane("buffs", CompileSharedMoverBuffs)
+
+    local profilePosition = {"TOPRIGHT", "TOPRIGHT", -4, -4}
+    local savePosition = NewPositionSave(profilePosition)
+    local buildStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("buffs", {
+        enabled = true,
+        positionSave = savePosition,
+    })
+
+    local active = BD.GetCustomAuraContainerState("buffs")
+    assertEqual(active.state, "ACTIVE", "shared mover active state")
+    assertTrue(active.active, "shared mover activates Buffs")
+    assertTrue(active.nativeFollowerActive,
+        "Blizzard Debuffs follow the active BFI holder")
+
+    local rolesetCall, rolesetIndex = findCall(
+        state.calls,
+        "holder1.SetRolesets",
+        buildStart
+    )
+    assertEqual(rolesetCall.args[1], "buffs", "shared holder roleset")
+    local moverCall, moverIndex = findCall(
+        state.calls,
+        "AF.CreateMover",
+        buildStart
+    )
+    assertTrue(rolesetIndex < moverIndex,
+        "holder roleset is applied before mover publication")
+    assertEqual(moverCall.args[4], savePosition,
+        "BFI mover receives the profile save callback")
+    assertTrue(findCall(state.calls, "BFI.LoadPosition", buildStart) ~= nil,
+        "BFI holder restores its saved position")
+
+    moverCall.args[4]("BOTTOMLEFT", 14, 18)
+    assertEqual(profilePosition[1], "BOTTOMLEFT",
+        "mover callback saves the point")
+    assertEqual(profilePosition[2], 14, "mover callback saves X")
+    assertEqual(profilePosition[3], 18, "mover callback saves Y")
+    assertEqual(profilePosition[4], nil,
+        "mover callback clears the legacy relative-point field")
+
+    local attachCall, attachIndex = findCallWhere(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        function(call)
+            return call.args[2] == state.frames[1]
+        end,
+        buildStart
+    )
+    assertEqual(attachCall.args[1], "TOPRIGHT", "Debuff follower point")
+    assertEqual(attachCall.args[3], "BOTTOMRIGHT",
+        "Debuff follower relative point")
+    assertEqual(attachCall.args[4], 0, "Debuff follower X")
+    assertEqual(attachCall.args[5], -5, "Debuff follower Y")
+    local _, suppressIndex = findCallWhere(
+        state.calls,
+        "BD.SetNativePublicAurasSuppressed",
+        function(call)
+            return call.args[1] == "buffs" and call.args[2] == true
+        end,
+        buildStart
+    )
+    assertTrue(attachIndex < suppressIndex,
+        "Debuffs attach before Blizzard Buffs are suppressed")
+
+    local disableStart = #state.calls + 1
+    BD.DisableCustomAuraContainer("buffs")
+    local disabled = BD.GetCustomAuraContainerState("buffs")
+    assertFalse(disabled.active, "disable hides custom Buffs")
+    assertFalse(disabled.nativeFollowerActive,
+        "disable releases Blizzard Debuffs")
+    local restoreCall, restoreIndex = findCallWhere(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        function(call)
+            return call.args[2] == debuffFrame.nativeTarget
+        end,
+        disableStart
+    )
+    assertEqual(restoreCall.args[1], "TOPRIGHT", "native restore point")
+    assertEqual(restoreCall.args[3], "TOPRIGHT",
+        "native restore relative point")
+    assertEqual(restoreCall.args[4], -15.5, "scaled native restore X")
+    assertEqual(restoreCall.args[5], -21, "scaled native restore Y")
+    local restoreCall2 = findCallWhere(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        function(call)
+            return call.args[2] == debuffFrame.nativeTarget2
+        end,
+        restoreIndex + 1
+    )
+    assertTrue(restoreCall2 ~= nil,
+        "optional second native Edit Mode anchor is restored")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local environment = harness.environment
+    local state = harness.state
+    local debuffFrame = state.newDebuffFrame()
+    environment.DebuffFrame = debuffFrame
+    BD.RegisterCustomAuraContainerPane("buffs", CompileSharedMoverBuffs)
+    BD.UpdateCustomAuraContainer("buffs", {
+        enabled = true,
+        positionSave = NewPositionSave({"TOPRIGHT", -4, -4}),
+    })
+
+    assertEqual(
+        countCalls(state.calls, "EventRegistry.RegisterCallback"),
+        2,
+        "Edit Mode enter and exit callbacks are registered"
+    )
+    for _, registration in ipairs({
+        {"EDIT_MODE_LAYOUTS_UPDATED", 1},
+        {"PLAYER_ENTERING_WORLD", 2},
+        {"PLAYER_REGEN_ENABLED", 1},
+        {"PLAYER_SPECIALIZATION_CHANGED", 1},
+        {"ACTIVE_PLAYER_SPECIALIZATION_CHANGED", 1},
+    }) do
+        assertEqual(
+            countEventCalls(
+                state.calls,
+                "BD.RegisterEvent",
+                registration[1]
+            ),
+            registration[2],
+            registration[1] .. " follower lifecycle registration"
+        )
+    end
+    local enterStart = #state.calls + 1
+    state.fireRegistry("EditMode.Enter")
+    assertFalse(BD.GetCustomAuraContainerState("buffs").nativeFollowerActive,
+        "Edit Mode temporarily receives native Debuff ownership")
+    assertTrue(findCallWhere(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        function(call)
+            return call.args[2] == debuffFrame.nativeTarget
+        end,
+        enterStart
+    ) ~= nil, "Edit Mode entry restores the native anchor")
+
+    local editModeUpdateStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("buffs", {
+        enabled = true,
+        positionSave = NewPositionSave({"TOPRIGHT", -4, -4}),
+    })
+    local editModeUpdate = BD.GetCustomAuraContainerState("buffs")
+    assertFalse(editModeUpdate.active,
+        "settings update cannot reactivate the follower in Edit Mode")
+    assertEqual(editModeUpdate.state, "NATIVE_UNAVAILABLE",
+        "Edit Mode settings update waits on native ownership")
+    assertTrue(findCallWhere(
+        state.calls,
+        "BD.SetNativePublicAurasSuppressed",
+        function(call)
+            return call.args[1] == "buffs" and call.args[2] == false
+        end,
+        editModeUpdateStart
+    ) ~= nil, "Edit Mode settings update restores Blizzard Buffs")
+
+    local replacementTarget = "ReplacementNativeTarget"
+    debuffFrame.systemInfo.anchorInfo = {
+        point = "TOPLEFT",
+        relativeTo = replacementTarget,
+        relativePoint = "TOPLEFT",
+        offsetX = 27,
+        offsetY = -19,
+    }
+    debuffFrame.systemInfo.anchorInfo2 = nil
+
+    local exitStart = #state.calls + 1
+    state.fireRegistry("EditMode.Exit")
+    assertEqual(findCallWhere(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        function(call)
+            return call.args[2] == state.frames[1]
+        end,
+        exitStart
+    ), nil, "Edit Mode exit does not reattach synchronously")
+    state.runTimers(0)
+    assertTrue(findCallWhere(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        function(call)
+            return call.args[2] == state.frames[1]
+        end,
+        exitStart
+    ) ~= nil, "Edit Mode exit reattaches on the next tick")
+    assertTrue(BD.GetCustomAuraContainerState("buffs").nativeFollowerActive,
+        "next-tick Edit Mode reattach is reflected in state")
+
+    local layoutStart = #state.calls + 1
+    state.fireEvent("EDIT_MODE_LAYOUTS_UPDATED")
+    state.runTimers(0)
+    assertTrue(findCallWhere(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        function(call)
+            return call.args[2] == state.frames[1]
+        end,
+        layoutStart
+    ) ~= nil, "layout changes reapply the shared follower")
+
+    local specStart = #state.calls + 1
+    state.fireEvent("PLAYER_SPECIALIZATION_CHANGED", "player")
+    state.runTimers(0)
+    assertTrue(findCallWhere(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        function(call)
+            return call.args[2] == state.frames[1]
+        end,
+        specStart
+    ) ~= nil, "specialization layout changes reapply the follower")
+
+    state.combat = true
+    local combatStart = #state.calls + 1
+    state.fireEvent("EDIT_MODE_LAYOUTS_UPDATED")
+    state.runTimers(0)
+    assertEqual(findCall(
+        state.calls,
+        "DebuffFrame.ClearAllPointsBase",
+        combatStart
+    ), nil, "combat performs no native Debuff anchor mutation")
+    assertTrue(findCall(state.calls, "Timer.After", combatStart) ~= nil,
+        "combat follower refresh is coalesced without mutating anchors")
+    state.combat = false
+    state.fireEvent("PLAYER_REGEN_ENABLED")
+    state.runTimers(0)
+    assertTrue(findCallWhere(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        function(call)
+            return call.args[2] == state.frames[1]
+        end,
+        combatStart
+    ) ~= nil, "regen applies the deferred follower anchor")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local environment = harness.environment
+    local state = harness.state
+    local debuffFrame = state.newDebuffFrame()
+    environment.DebuffFrame = debuffFrame
+    state.suppressEnableSucceeds = false
+    BD.RegisterCustomAuraContainerPane("buffs", CompileSharedMoverBuffs)
+
+    local updateStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("buffs", {
+        enabled = true,
+        positionSave = NewPositionSave({"TOPRIGHT", -4, -4}),
+    })
+    local failed = BD.GetCustomAuraContainerState("buffs")
+    assertEqual(failed.state, "SUPPRESSION_FAILED",
+        "shared mover suppression failure state")
+    assertFalse(failed.nativeFollowerActive,
+        "suppression failure restores native Debuff ownership")
+    assertTrue(findCallWhere(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        function(call)
+            return call.args[2] == debuffFrame.nativeTarget
+        end,
+        updateStart
+    ) ~= nil, "suppression failure restores the native Debuff anchor")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
     local state = harness.state
 
     assertFalse(BD.IsCustomAuraContainerAvailable("buffs"),
@@ -495,11 +998,12 @@ do
     )
 
     local buildStart = #state.calls + 1
-    local profilePosition = {"TOPRIGHT", -4, -4}
+    local profilePosition = {"TOPRIGHT", "TOPRIGHT", -4, -4}
+    local profilePositionSave = NewPositionSave(profilePosition)
     BD.UpdateCustomAuraContainer("buffs", {
         enabled = true,
         tuning = 1,
-        positionSave = profilePosition,
+        positionSave = profilePositionSave,
     })
     local buildCalls = state.calls
     local _, restoreIndex = findCall(
@@ -580,8 +1084,17 @@ do
     assertTrue(suppressIndex < showContainerIndex, "suppression precedes container show")
     assertTrue(showContainerIndex < showHolderIndex, "container shows before holder")
     local moverCall = findCall(buildCalls, "AF.CreateMover", buildStart)
-    assertEqual(moverCall.args[4], profilePosition,
-        "mover retains profile position table identity")
+    assertEqual(moverCall.args[4], profilePositionSave,
+        "mover retains profile position save callback identity")
+    moverCall.args[4]("BOTTOMRIGHT", -12, 17)
+    assertEqual(profilePosition[1], "BOTTOMRIGHT",
+        "mover callback updates the profile point")
+    assertEqual(profilePosition[2], -12,
+        "mover callback updates the profile X")
+    assertEqual(profilePosition[3], 17,
+        "mover callback updates the profile Y")
+    assertEqual(profilePosition[4], nil,
+        "mover callback removes the stale relative point")
     assertEqual(
         countCalls(buildCalls, "AF.AddCustomItemEnchantment"),
         2,
@@ -629,11 +1142,12 @@ do
         countCalls(state.calls, "AF.AddCustomItemEnchantment")
     local tuningStart = #state.calls + 1
     local replacementPosition = {"TOPRIGHT", -8, -8}
+    local replacementPositionSave = NewPositionSave(replacementPosition)
     BD.UpdateCustomAuraContainer("buffs", {
         enabled = true,
         tuning = 2,
         maximum = 15,
-        positionSave = replacementPosition,
+        positionSave = replacementPositionSave,
     })
     assertEqual(
         countCalls(state.calls, "AF.CreateCustomAuraContainer"),
@@ -657,8 +1171,8 @@ do
         "AF.UpdateMoverSave",
         tuningStart
     )
-    assertEqual(updateMoverCall.args[2], replacementPosition,
-        "live tuning refreshes mover profile table identity")
+    assertEqual(updateMoverCall.args[2], replacementPositionSave,
+        "live tuning refreshes mover save callback identity")
 
     local disableStart = #state.calls + 1
     BD.DisableCustomAuraContainer("buffs")
@@ -744,9 +1258,14 @@ do
         "combat performs no tuning"
     )
     assertEqual(
-        countCalls(state.calls, "BD.RegisterEvent"),
-        4,
-        "unit events plus one regen registration"
+        countEventCallbackCalls(
+            state.calls,
+            "BD.RegisterEvent",
+            "PLAYER_REGEN_ENABLED",
+            BD.FlushCustomAuraContainerUpdates
+        ),
+        1,
+        "combat queue has one regen registration"
     )
 
     state.combat = false
