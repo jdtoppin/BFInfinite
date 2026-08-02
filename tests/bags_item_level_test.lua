@@ -80,6 +80,30 @@ end
 local defaultsBags, defaultsCallbacks = loadDefaults()
 assertEqual(defaultsBags.GetDefaults().showItemLevel, true,
     "item level default is enabled")
+assertEqual(defaultsBags.GetDefaults().viewMode, "combined",
+    "combined bag view is the default")
+
+local legacyCategoryProfile = {
+    bags = {
+        categories = true,
+        position = {"BOTTOMRIGHT", -35, 110},
+    },
+}
+defaultsCallbacks.BFI_UpdateProfile(nil, legacyCategoryProfile)
+assertEqual(legacyCategoryProfile.bags.viewMode, "categories",
+    "legacy category toggle migrates to category view")
+assertEqual(legacyCategoryProfile.bags.categories, nil,
+    "legacy category toggle is removed after migration")
+
+local individualProfile = {
+    bags = {
+        viewMode = "individual",
+        position = {"BOTTOMRIGHT", -35, 110},
+    },
+}
+defaultsCallbacks.BFI_UpdateProfile(nil, individualProfile)
+assertEqual(individualProfile.bags.viewMode, "individual",
+    "individual bag view is preserved")
 
 local profile = {
     bags = {

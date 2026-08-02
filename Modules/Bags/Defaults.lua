@@ -8,7 +8,7 @@ local AF = _G.AbstractFramework
 local defaults = {
     enabled = true,
     position = {"BOTTOMRIGHT", -35, 110},
-    categories = false,
+    viewMode = "combined",
     showBagSlots = true,
     showBlizzardBagBar = false,
     showItemLevel = true,
@@ -16,9 +16,20 @@ local defaults = {
     spacing = 4,
 }
 
+local validViewModes = {
+    combined = true,
+    categories = true,
+    individual = true,
+}
+
 local function NormalizeConfig(config)
     if type(config.enabled) ~= "boolean" then config.enabled = defaults.enabled end
-    if type(config.categories) ~= "boolean" then config.categories = defaults.categories end
+    if not validViewModes[config.viewMode] then
+        -- Migrate the previous two-state category toggle without changing the
+        -- user's chosen layout.
+        config.viewMode = config.categories == true and "categories" or defaults.viewMode
+    end
+    config.categories = nil
     if type(config.showBagSlots) ~= "boolean" then config.showBagSlots = defaults.showBagSlots end
     if type(config.showBlizzardBagBar) ~= "boolean" then
         config.showBlizzardBagBar = defaults.showBlizzardBagBar

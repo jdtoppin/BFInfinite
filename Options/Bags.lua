@@ -57,15 +57,21 @@ local function CreateAppearancePane()
         B.Refresh()
     end)
 
-    local categories = AF.CreateCheckButton(appearancePane, L["Group Items by Category"])
-    AF.SetPoint(categories, "TOPLEFT", showBlizzardBagBar, "BOTTOMLEFT", 0, -18)
-    categories:SetOnCheck(function(checked)
-        B.config.categories = checked
+    local viewMode = AF.CreateDropdown(appearancePane, 165)
+    viewMode:SetLabel(L["Bag View"])
+    AF.SetPoint(viewMode, "TOPLEFT", showBlizzardBagBar, "BOTTOMLEFT", 0, -35)
+    viewMode:SetItems({
+        {text = L["Combined View"], value = "combined"},
+        {text = L["Categories View"], value = "categories"},
+        {text = L["Individual Bags View"], value = "individual"},
+    })
+    viewMode:SetOnSelect(function(value)
+        B.config.viewMode = value
         B.Refresh()
     end)
 
     local showItemLevel = AF.CreateCheckButton(appearancePane, L["Show Item Level"])
-    AF.SetPoint(showItemLevel, "TOPLEFT", categories, "BOTTOMLEFT", 0, -18)
+    AF.SetPoint(showItemLevel, "TOPLEFT", viewMode, "BOTTOMLEFT", 0, -18)
     showItemLevel:SetOnCheck(function(checked)
         B.config.showItemLevel = checked
         B.Refresh()
@@ -91,14 +97,14 @@ local function CreateAppearancePane()
         enabled:SetChecked(config.enabled)
         showBagSlots:SetChecked(config.showBagSlots)
         showBlizzardBagBar:SetChecked(config.showBlizzardBagBar)
-        categories:SetChecked(config.categories)
+        viewMode:SetSelectedValue(config.viewMode)
         showItemLevel:SetChecked(config.showItemLevel)
         columns:SetValue(config.columns)
         spacing:SetValue(config.spacing)
 
         showBagSlots:SetEnabled(config.enabled)
         showBlizzardBagBar:SetEnabled(config.enabled)
-        categories:SetEnabled(config.enabled)
+        viewMode:SetEnabled(config.enabled)
         showItemLevel:SetEnabled(config.enabled)
         columns:SetEnabled(config.enabled)
         spacing:SetEnabled(config.enabled)

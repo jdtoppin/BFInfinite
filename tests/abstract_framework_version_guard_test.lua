@@ -45,7 +45,7 @@ local function loadInit(sharedFunction)
 end
 
 local unsupported = loadInit()
-assertEqual(unsupported.requiredAFVersion, 29,
+assertEqual(unsupported.requiredAFVersion, 30,
     "global AbstractFramework requirement")
 assertEqual(type(unsupported.funcs.isValueNonSecret), "function",
     "unsupported AF receives a conservative guard")
