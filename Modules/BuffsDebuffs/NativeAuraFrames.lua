@@ -102,10 +102,11 @@ local function ResolveNativePublicAuraFrame(which)
 end
 
 local function HidePublicAuraOverlays(frame, publicParent)
-    -- Retail 12.1 AuraButtons deny tainted access whenever aura data is
-    -- secret. Never enumerate or call methods on those children, including
-    -- from the UpdateAuraButtons hook below. Hiding the owning native
-    -- container uses Blizzard's PTR 7 hover-safe visibility path instead.
+    -- Retail 12.1's intrinsic AuraButton type denies tainted access whenever
+    -- aura data is secret. This shared suppression path does not assume which
+    -- child type a native container owns, so it never enumerates 12.1
+    -- children. BlizzardDebuffs.lua separately validates and styles only the
+    -- pinned Blizzard_BuffFrame ordinary Button pool, outside combat.
     if hasRestrictedAuraButtons then return end
 
     local auraFrames = frame.auraFrames

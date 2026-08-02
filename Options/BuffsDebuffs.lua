@@ -6,45 +6,76 @@ local BD = BFI.modules.BuffsDebuffs
 local AF = _G.AbstractFramework
 
 local LoadOptions, UpdateStatus
-local selected, currentConfig, currentTextConfig
+local selected, currentConfig, currentTextConfig, currentTextKind
 
 local function IsCustomBuffsBackend(which)
     return which == "buffs"
         and BD.GetAuraBackend(which) == BD.CUSTOM_AURA_CONTAINER_BACKEND
 end
 
+local function IsBlizzardDebuffStyleBackend(which)
+    return which == "debuffs"
+        and BD.BLIZZARD_DEBUFF_STYLE_BACKEND ~= nil
+        and BD.GetAuraBackend(which)
+            == BD.BLIZZARD_DEBUFF_STYLE_BACKEND
+end
+
 function BD.GetBuffsDebuffsOptionsPolicy(which)
     local backend = BD.GetAuraBackend(which)
     local custom = IsCustomBuffsBackend(which)
-    local customBuffsAvailable = IsCustomBuffsBackend("buffs")
+    local blizzardDebuffStyle = IsBlizzardDebuffStyleBackend(which)
     return {
         available = backend ~= nil,
         backend = backend,
         custom = custom,
-        label = which == "debuffs" and customBuffsAvailable
-            and L["Debuffs (Blizzard controlled)"]
+        blizzardDebuffStyle = blizzardDebuffStyle,
+        label = blizzardDebuffStyle
+            and L["Debuffs (appearance only)"]
             or L[which == "buffs" and "Buffs" or "Debuffs"],
         separateOwnItems = {
             {text = L["Disabled"], value = 0},
-            {text = L["Before"], value = 1, disabled = custom},
-            {text = L["After"], value = -1, disabled = custom},
+            {
+                text = L["Before"],
+                value = 1,
+                disabled = custom or blizzardDebuffStyle,
+            },
+            {
+                text = L["After"],
+                value = -1,
+                disabled = custom or blizzardDebuffStyle,
+            },
         },
         constructionOwnedStyle = custom,
+        layoutControls = not blizzardDebuffStyle,
+        iconSizeControls = true,
+        maximumIconSize = blizzardDebuffStyle and 30 or 100,
+        durationAppearanceControls = not blizzardDebuffStyle,
         retiredDurationControls = true,
     }
 end
 
 function BD.GetBuffsDebuffsOptionsStatus(which)
     local policy = BD.GetBuffsDebuffsOptionsPolicy(which)
-    if not policy.custom then return nil end
-
     local config = BD.config and BD.config[which]
-    local state = type(BD.GetCustomAuraContainerState) == "function"
-        and BD.GetCustomAuraContainerState(which)
-        or nil
     local dispatcherPending =
         type(BD.IsBuffsDebuffsUpdatePending) == "function"
         and BD.IsBuffsDebuffsUpdatePending(which)
+    if policy.blizzardDebuffStyle then
+        if dispatcherPending then
+            return {
+                code = "PENDING_SAFE_UPDATE",
+            }
+        end
+        return {
+            code = "BLIZZARD_DEBUFF_STYLE",
+        }
+    elseif not policy.custom then
+        return nil
+    end
+
+    local state = type(BD.GetCustomAuraContainerState) == "function"
+        and BD.GetCustomAuraContainerState(which)
+        or nil
     local diagnostic = state and state.diagnostic
     if (config and config.separateOwn ~= 0)
         or diagnostic == "UNSUPPORTED_SEPARATE_OWN"
@@ -257,7 +288,7 @@ local function CreateNormalPane()
     normalPane.statusText = statusText
     AF.SetPoint(statusText, "BOTTOMLEFT", 10, 7)
     AF.SetWidth(statusText, 350)
-    statusText:SetWordWrap(false)
+    statusText:SetWordWrap(true)
     statusText:Hide()
 
     local statusButton = AF.CreateButton(
@@ -423,12 +454,32 @@ local function CreateNormalPane()
     -- load
     --------------------------------------------------
     function textsPane.UpdateWidgets()
+        local policy = BD.GetBuffsDebuffsOptionsPolicy(selected)
+        local appearanceControls = currentConfig.enabled
+            and currentTextConfig.enabled
+            and (
+                currentTextKind ~= "duration"
+                or policy.durationAppearanceControls
+            )
         AF.SetEnabled(currentConfig.enabled, enabled)
-        AF.SetEnabled(currentConfig.enabled and currentTextConfig.enabled, font, size, outline, shadow, anchorPoint, relativePoint, xOffset, yOffset, normalColor)
+        AF.SetEnabled(
+            appearanceControls,
+            font,
+            size,
+            outline,
+            shadow,
+            anchorPoint,
+            relativePoint,
+            xOffset,
+            yOffset,
+            normalColor
+        )
     end
 
     function textsPane.Load(which)
+        currentTextKind = which
         currentTextConfig = BD.config[selected][which]
+        local policy = BD.GetBuffsDebuffsOptionsPolicy(selected)
 
         textsPane.UpdateWidgets()
         enabled:SetChecked(currentTextConfig.enabled)
@@ -447,10 +498,20 @@ local function CreateNormalPane()
         else
             normalColor:SetColor(currentTextConfig.color.normal)
         end
-        durationHint:SetShown(
-            which == "duration"
-                and (tonumber(AF.versionNum) or 0) >= 33
+        durationHint:SetText(
+            policy.blizzardDebuffStyle
+                and L[
+                    "Blizzard supplies and abbreviates Debuff durations. BFInfinite can only show or hide this text."
+                ]
+                or L[
+                    "Durations abbreviate automatically to seconds, minutes, hours, and days."
+                ]
         )
+        durationHint:SetShown(which == "duration"
+            and (
+                policy.blizzardDebuffStyle
+                or (tonumber(AF.versionNum) or 0) >= 33
+            ))
     end
 
     function normalPane.Load()
@@ -458,8 +519,30 @@ local function CreateNormalPane()
         local policy = BD.GetBuffsDebuffsOptionsPolicy(selected)
 
         -- icons
-        AF.SetEnabled(currentConfig.enabled, arrangement, sortMethod, sortDirection, width, height, spacingX, spacingY, maxWraps, wrapAfter)
-        AF.SetEnabled(policy.custom or currentConfig.enabled, separateOwn)
+        local layoutEnabled = currentConfig.enabled
+            and policy.layoutControls
+        AF.SetEnabled(
+            layoutEnabled,
+            arrangement,
+            sortMethod,
+            sortDirection,
+            spacingX,
+            spacingY,
+            maxWraps,
+            wrapAfter
+        )
+        AF.SetEnabled(
+            currentConfig.enabled and policy.iconSizeControls,
+            width,
+            height
+        )
+        AF.SetEnabled(
+            not policy.blizzardDebuffStyle
+                and (policy.custom or currentConfig.enabled),
+            separateOwn
+        )
+        width:SetMinMaxValues(10, policy.maximumIconSize)
+        height:SetMinMaxValues(10, policy.maximumIconSize)
         separateOwn:SetItems(policy.separateOwnItems)
         arrangement:SetSelectedValue(currentConfig.orientation)
         sortMethod:SetSelectedValue(currentConfig.sortMethod)
@@ -516,8 +599,20 @@ UpdateStatus = function()
         statusButton:Show()
     elseif status.code == "PENDING_SAFE_UPDATE" then
         AF.SetWidth(statusText, 530)
+        statusText:SetText(
+            selected == "debuffs"
+                and L[
+                    "Debuffs styling is waiting for combat to end."
+                ]
+                or L[
+                    "Buffs update is waiting for combat to end."
+                ]
+        )
+        statusButton:Hide()
+    elseif status.code == "BLIZZARD_DEBUFF_STYLE" then
+        AF.SetWidth(statusText, 530)
         statusText:SetText(L[
-            "Buffs update is waiting for combat to end."
+            "BFInfinite styles ordinary Debuffs only. Blizzard controls their layout and duration text; private and deadly debuffs are unchanged."
         ])
         statusButton:Hide()
     else

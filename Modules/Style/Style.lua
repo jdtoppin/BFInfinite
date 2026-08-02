@@ -473,6 +473,142 @@ function S.StyleIconButton(button, icon, iconSize, iconColor, color, hoverColor)
     SetupIconButton(button, icon, iconSize, iconColor, color, hoverColor)
 end
 
+---------------------------------------------------------------------
+-- navigation bar
+---------------------------------------------------------------------
+local styledNavBars = {}
+local navBarAddButtonHooked
+
+local function SetupNavBarTexture(texture, color, alpha, offset)
+    if not texture then return end
+
+    texture:SetTexture(AF.GetTexture("Gradient_Linear_Right"))
+    texture:SetTexCoord(0, 1, 0, 1)
+    texture:SetVertexColor(AF.GetColorRGB(color, alpha))
+
+    if offset then
+        texture:ClearAllPoints()
+        texture:SetPoint("TOPLEFT")
+        texture:SetPoint("BOTTOMRIGHT", offset, 0)
+    end
+end
+
+local function StyleNavBarMenuArrow(button)
+    if not button or button._BFINavBarArrowStyled then return end
+    button._BFINavBarArrowStyled = true
+
+    if not button.BFIIcon then
+        S.StyleIconButton(button, AF.GetIcon("ArrowDown2"), 16)
+    end
+    if not button.BFIIcon then return end
+
+    AF.SetSize(button.BFIIcon, 16, 16)
+    button.BFIIcon:SetTexture(AF.GetIcon("ArrowDown2"))
+    if button.BFIBackdrop then
+        AF.ClearBackdrop(button.BFIBackdrop)
+    end
+    if button.BFIBg then
+        button.BFIBg:Hide()
+    end
+
+    button.BFIIcon:SetVertexColor(AF.GetColorRGB("darkgray"))
+    button:HookScript("OnEnter", function(self)
+        self.BFIIcon:SetVertexColor(AF.GetColorRGB("white"))
+    end)
+    button:HookScript("OnLeave", function(self)
+        self.BFIIcon:SetVertexColor(AF.GetColorRGB("darkgray"))
+    end)
+end
+
+local function StyleNavBarButton(navBar, button)
+    if not button or button._BFINavBarStyled then return end
+    button._BFINavBarStyled = true
+
+    S.RemoveTextures(button)
+    button:SetPushedTextOffset(0, -1)
+
+    local offset = button == navBar.home and button.xoffset or nil
+    SetupNavBarTexture(button:GetNormalTexture(), "widget_highlight", 0.8, offset)
+    SetupNavBarTexture(button:GetPushedTexture(), "widget_highlight", 0.8, offset)
+    SetupNavBarTexture(button:GetHighlightTexture(), "widget_highlight", 0.2, offset)
+    SetupNavBarTexture(button.selected, "BFI", 0.2)
+    StyleNavBarMenuArrow(button.MenuArrowButton)
+end
+
+local function StyleNavBarButtons(navBar)
+    StyleNavBarButton(navBar, navBar.home)
+    if not navBar.navList then return end
+
+    for _, button in next, navBar.navList do
+        StyleNavBarButton(navBar, button)
+    end
+end
+
+local function StyleNavBarOverflow(navBar)
+    local overflow = navBar.overflow
+    if not overflow or overflow._BFINavBarStyled then return end
+    overflow._BFINavBarStyled = true
+
+    S.RemoveTextures(overflow)
+    SetupNavBarTexture(overflow:GetNormalTexture(), "widget_highlight", 0.8, overflow.xoffset)
+    SetupNavBarTexture(overflow:GetPushedTexture(), "widget_highlight", 0.8, overflow.xoffset)
+    SetupNavBarTexture(overflow:GetHighlightTexture(), "widget_highlight", 0.2, overflow.xoffset)
+
+    local icon = overflow:CreateTexture(nil, "ARTWORK", nil, 7)
+    overflow.BFINavBarIcon = icon
+    AF.SetPoint(icon, "CENTER", (overflow.xoffset or 0) / 2, 0)
+    AF.SetSize(icon, 16, 16)
+    icon:SetTexture(AF.GetIcon("ArrowLeft2"))
+    icon:SetVertexColor(AF.GetColorRGB("darkgray"))
+
+    overflow:HookScript("OnMouseDown", function(self)
+        self.BFINavBarIcon:AdjustPointsOffset(0, -AF.GetOnePixelForRegion(self))
+    end)
+    overflow:HookScript("OnMouseUp", function(self)
+        AF.RePoint(self.BFINavBarIcon)
+    end)
+    overflow:HookScript("OnShow", function(self)
+        AF.RePoint(self.BFINavBarIcon)
+    end)
+    overflow:HookScript("OnEnter", function(self)
+        self.BFINavBarIcon:SetVertexColor(AF.GetColorRGB("white"))
+    end)
+    overflow:HookScript("OnLeave", function(self)
+        self.BFINavBarIcon:SetVertexColor(AF.GetColorRGB("darkgray"))
+    end)
+end
+
+function S.StyleNavBar(navBar)
+    assert(navBar, "StyleNavBar: navBar is nil")
+    styledNavBars[navBar] = true
+
+    if not navBar._BFINavBarStyled then
+        navBar._BFINavBarStyled = true
+
+        S.RemoveTextures(navBar)
+        if navBar.overlay then
+            navBar.overlay:Hide()
+        end
+
+        S.CreateBackdrop(navBar)
+        AF.ClearPoints(navBar.BFIBackdrop)
+        AF.SetPoint(navBar.BFIBackdrop, "TOPLEFT", -1, -1)
+        AF.SetPoint(navBar.BFIBackdrop, "BOTTOMRIGHT")
+        StyleNavBarOverflow(navBar)
+    end
+
+    StyleNavBarButtons(navBar)
+
+    if not navBarAddButtonHooked then
+        navBarAddButtonHooked = true
+        hooksecurefunc("NavBar_AddButton", function(frame)
+            if styledNavBars[frame] then
+                StyleNavBarButtons(frame)
+            end
+        end)
+    end
+end
+
 function S.StyleCloseButton(button)
     assert(button, "StyleCloseButton: button is nil")
 
@@ -1377,7 +1513,23 @@ end
 ---------------------------------------------------------------------
 local start
 
+local function HasPublicPixelGeometry(region)
+    local width, height = region:GetSize()
+    if not F.isValueNonSecret(width)
+        or not F.isValueNonSecret(height)
+        or type(width) ~= "number"
+        or type(height) ~= "number"
+    then
+        return false
+    end
+
+    local scale = region:GetEffectiveScale()
+    return F.isValueNonSecret(scale)
+        and type(scale) == "number" and scale > 0
+end
+
 local function UpdatePixels(_, region, remaining, total)
+    if not HasPublicPixelGeometry(region) then return end
     region:UpdatePixels()
     -- print("BFIStyled: ", AF.RoundToDecimal((total - remaining) / total, 2))
 end
