@@ -302,6 +302,11 @@ local function expectedDurationText()
         position = {"TOP", "TOP", 1, 1},
         color = {
             normal = {0.1, 0.2, 0.3, 0.4},
+            threshold = {
+                mode = "seconds",
+                value = 5,
+                rgb = {0.9, 0.8, 0.7, 0.6},
+            },
         },
     }
 end
@@ -770,6 +775,15 @@ local function testStyleProjection()
         nil,
         "duration seconds color omitted"
     )
+    assertDeepEqual(
+        disabledStyle.durationText.color.threshold,
+        {
+            mode = "seconds",
+            value = 5,
+            rgb = {0.9, 0.8, 0.7, 0.6},
+        },
+        "disabled duration retains selected threshold"
+    )
 
     local helpful = baseConfig()
     helpful.filters.isBossAura = false
@@ -834,6 +848,57 @@ local function testStyleProjection()
         fractionalDescriptor.completeSpec.groups[1].buttonStyle
     assertEqual(fractionalStyle.width, 10.5, "fractional width")
     assertEqual(fractionalStyle.height, 6.25, "fractional height")
+end
+
+local function testDurationTextThresholdProjection()
+    local both = baseConfig()
+    both.filters.isBossAura = false
+    local bothThreshold = compile(
+        "target",
+        "HARMFUL",
+        both
+    ).completeSpec.groups[1].buttonStyle.durationText.color.threshold
+    assertDeepEqual(bothThreshold, {
+        mode = "seconds",
+        value = 5,
+        rgb = {0.9, 0.8, 0.7, 0.6},
+    }, "legacy both-enabled duration threshold")
+
+    local percent = baseConfig()
+    percent.filters.isBossAura = false
+    percent.durationText.color.seconds.enabled = false
+    local percentThreshold = compile(
+        "target",
+        "HARMFUL",
+        percent
+    ).completeSpec.groups[1].buttonStyle.durationText.color.threshold
+    assertDeepEqual(percentThreshold, {
+        mode = "percent",
+        value = 0.5,
+        rgb = {0.5, 0.6, 0.7, 0.8},
+    }, "percent duration threshold")
+
+    local off = baseConfig()
+    off.filters.isBossAura = false
+    off.durationText.color.percent.enabled = false
+    off.durationText.color.seconds.enabled = false
+    off.durationText.color.percent.value = 0
+    off.durationText.color.percent.rgb = nil
+    off.durationText.color.seconds.value = 0
+    off.durationText.color.seconds.rgb = nil
+    local offThreshold = compile(
+        "target",
+        "HARMFUL",
+        off
+    ).completeSpec.groups[1].buttonStyle.durationText.color.threshold
+    assertEqual(offThreshold, nil, "off duration threshold")
+
+    bothThreshold.rgb[1] = 0
+    assertEqual(
+        both.durationText.color.seconds.rgb[1],
+        0.9,
+        "duration threshold color alias"
+    )
 end
 
 local function testTooltipProjection()
@@ -2363,6 +2428,50 @@ local function testInvalidInputs()
         "INVALID_DURATION_TEXT"
     )
 
+    for index, mutation in ipairs({
+        function(value)
+            value.durationText.color.seconds.enabled = false
+            value.durationText.color.percent.value = 0
+        end,
+        function(value)
+            value.durationText.color.seconds.enabled = false
+            value.durationText.color.percent.value = 1
+        end,
+        function(value)
+            value.durationText.color.seconds.enabled = false
+            value.durationText.color.percent.value = 0 / 0
+        end,
+        function(value)
+            value.durationText.color.seconds.enabled = false
+            value.durationText.color.percent.rgb = "red"
+        end,
+        function(value)
+            value.durationText.color.percent.enabled = false
+            value.durationText.color.seconds.value = 0
+        end,
+        function(value)
+            value.durationText.color.percent.enabled = false
+            value.durationText.color.seconds.value = math.huge
+        end,
+        function(value)
+            value.durationText.color.percent.enabled = false
+            value.durationText.color.seconds.rgb = "red"
+        end,
+        function(value)
+            value.durationText.color.percent.enabled = nil
+        end,
+    }) do
+        invalid = baseConfig()
+        mutation(invalid)
+        assertCompileError(
+            "target",
+            "HARMFUL",
+            invalid,
+            "INVALID_DURATION_TEXT",
+            "invalid duration threshold " .. index
+        )
+    end
+
     invalid = baseConfig()
     invalid.stackText = nil
     assertCompileError(
@@ -2535,6 +2644,15 @@ local function testConstructionBoundary()
         function(config) config.cooldownStyle = "block_clock" end,
         function(config) config.durationText.enabled = false end,
         function(config) config.durationText.font[2] = 12 end,
+        function(config) config.durationText.color.seconds.value = 9 end,
+        function(config) config.durationText.color.seconds.rgb[1] = 0.2 end,
+        function(config)
+            config.durationText.color.seconds.enabled = false
+        end,
+        function(config)
+            config.durationText.color.seconds.enabled = false
+            config.durationText.color.percent.enabled = false
+        end,
         function(config) config.stackText.color[1] = 0.25 end,
         function(config) config.tooltip.enabled = false end,
         function(config) config.auraTypeColor.debuffType = false end,
@@ -2558,13 +2676,36 @@ local function testConstructionBoundary()
         shouldNotMatter = true,
     }
     ignored.durationText.color.percent.value = 0.1
-    ignored.durationText.color.seconds.value = 9
+    ignored.durationText.color.percent.rgb[1] = 0.25
     local ignoredDescriptor = compile("target", "HARMFUL", ignored)
     assertDeepEqual(
         ignoredDescriptor.constructionKey,
         originalKey,
         "ignored construction fields"
     )
+
+    local modeOnly = baseConfig()
+    modeOnly.durationText.color.seconds.value = 0.5
+    modeOnly.durationText.color.percent.rgb =
+        copy(modeOnly.durationText.color.seconds.rgb)
+    local secondsModeKey = compile(
+        "target",
+        "HARMFUL",
+        modeOnly
+    ).constructionKey
+    modeOnly.durationText.color.seconds.enabled = false
+    local percentModeKey = compile(
+        "target",
+        "HARMFUL",
+        modeOnly
+    ).constructionKey
+    local sameModeKey = pcall(
+        assertDeepEqual,
+        percentModeKey,
+        secondsModeKey,
+        "duration threshold mode-only change"
+    )
+    assertEqual(sameModeKey, false, "duration threshold mode is constructed")
 
     local approximate = baseConfig()
     approximate.tooltip.anchorTo = "root"
@@ -2623,6 +2764,11 @@ local function testFreshDeterministicOutput()
         "duration font alias"
     )
     assertTrue(
+        first.completeSpec.groups[1].buttonStyle.durationText.color.threshold.rgb
+            ~= config.durationText.color.seconds.rgb,
+        "duration threshold color alias"
+    )
+    assertTrue(
         first.completeSpec.groups[1].buttonStyle.stackText.color
             ~= config.stackText.color,
         "stack color alias"
@@ -2631,6 +2777,7 @@ local function testFreshDeterministicOutput()
     first.completeSpec.groups[1].filterString = "BROKEN"
     first.completeSpec.groups[1].layout.elementSpacing = 999
     first.completeSpec.groups[1].buttonStyle.durationText.font[1] = "BROKEN"
+    first.completeSpec.groups[1].buttonStyle.durationText.color.threshold.rgb[1] = 0
     first.tuningSpec.groups[1].layout.lineSpacing = 999
     first.constructionKey.groups[1].buttonStyle.tooltip.enabled = false
     first.placement.position[1] = "CENTER"
@@ -2689,6 +2836,7 @@ testLegacyLoadAndSchemaGate()
 testCompleteSpecContract()
 testOrientationAndGeometry()
 testStyleProjection()
+testDurationTextThresholdProjection()
 testTooltipProjection()
 testEmptyPolicies()
 testPartitionMetadata()
