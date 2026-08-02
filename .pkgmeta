@@ -1,6 +1,22 @@
 package-as: BFInfinite
 enable-nolib-creation: no
 
+ignore:
+  - .github
+  - .gitignore
+  - .kanban
+  - .lint
+  - .luacheckrc
+  - .pkgmeta
+  - .release
+  - .screenshots
+  - .unused
+  - AGENTS.md
+  - CONTRIBUTING.md
+  - Modules/Blizzard/Style/WorldMapFrame_Test.lua
+  - scripts
+  - tests
+
 manual-changelog:
   filename: CHANGELOG.md
   markup-type: markdown

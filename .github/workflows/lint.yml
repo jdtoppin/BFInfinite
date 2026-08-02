@@ -1,8 +1,11 @@
 name: Lua checks
 
 on:
+  merge_group:
   pull_request:
   push:
+    branches:
+      - '**'
 
 permissions:
   contents: read
@@ -11,7 +14,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
@@ -25,44 +28,13 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             mapfile -d '' changed < <(git diff --name-only -z --diff-filter=ACMR "$BASE_SHA...HEAD" -- '*.lua')
-            ./scripts/lint.sh "${changed[@]}"
+          elif [[ -n "$BEFORE_SHA" && ! "$BEFORE_SHA" =~ ^0+$ ]] && git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+            mapfile -d '' changed < <(git diff --name-only -z --diff-filter=ACMR "$BEFORE_SHA...HEAD" -- '*.lua')
           else
-            ./scripts/lint.sh
+            changed=()
           fi
-
-      - name: Test Damage Meter data adapter
-        run: luajit tests/damage_meter_data_test.lua
-
-      - name: Test Damage Meter native adapter
-        run: luajit tests/damage_meter_native_test.lua
-
-      - name: Test Damage Meter renderer, automation, defaults, lifecycle, and policy
-        run: |
-          luajit tests/damage_meter_automation_test.lua
-          luajit tests/damage_meter_defaults_test.lua
-          luajit tests/damage_meter_lifecycle_test.lua
-          luajit tests/damage_meter_options_test.lua
-          luajit tests/damage_meter_renderer_test.lua
-          luajit tests/damage_meter_renderer_policy_test.lua
-
-      - name: Test Mythic+ timer, seasonal analysis, and tracker integration
-        run: |
-          for test_file in tests/abstract_framework_version_guard_test.lua tests/mythic_plus_*_test.lua tests/objective_tracker_taint_boundary_test.lua; do
-            luajit "$test_file"
-          done
-
-      - name: Test Retail 12.1 fixes
-        run: |
-          for test_file in tests/challenges_keystone_frame_skin_test.lua tests/experience_bar_disabled_texture_test.lua tests/queue_status_frame_native_ownership_test.lua tests/style_pixel_updater_secret_geometry_test.lua tests/tooltip_unit_colors_test.lua tests/unit_frame_status_timer_secret_test.lua; do
-            lua5.1 "$test_file"
-          done
-
-      - name: Test idle rendering lifecycles and unit-frame defaults
-        run: |
-          lua5.1 tests/action_bar_idle_flash_test.lua
-          lua5.1 tests/action_bar_lightweight_backdrop_test.lua
-          lua5.1 tests/cooldown_manager_idle_test.lua
-          lua5.1 tests/unit_frame_portrait_defaults_test.lua
+          bash ./scripts/verify.sh "${changed[@]}"
