@@ -1,8 +1,15 @@
 name: Lua checks
 
 on:
+  merge_group:
   pull_request:
   push:
+    branches:
+      - master
+
+concurrency:
+  group: lua-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -11,7 +18,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -19,176 +26,19 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes lua-check lua5.1 luajit ripgrep
-      - name: Check Buffs & Debuffs backend selection
-        run: lua5.1 tests/buffs_debuffs_backend_selector_test.lua
-
-      - name: Check Buffs & Debuffs native aura frame suppression
-        run: lua5.1 tests/buffs_debuffs_native_aura_frames_test.lua
-
-      - name: Check Buffs & Debuffs Blizzard Debuff styling
-        run: lua5.1 tests/buffs_debuffs_blizzard_debuff_style_test.lua
-
-      - name: Check Buffs & Debuffs custom aura controller
-        run: lua5.1 tests/buffs_debuffs_custom_aura_controller_test.lua
-
-      - name: Check Buffs & Debuffs custom Buffs compiler
-        run: lua5.1 tests/buffs_debuffs_custom_buffs_spec_test.lua
-
-      - name: Check Buffs & Debuffs profile normalization
-        run: lua5.1 tests/buffs_debuffs_profile_normalization_test.lua
-
-      - name: Check Buffs & Debuffs options policy
-        run: lua5.1 tests/buffs_debuffs_options_policy_test.lua
 
       - name: Check Lua and policy
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             mapfile -d '' changed < <(git diff --name-only -z --diff-filter=ACMR "$BASE_SHA...HEAD" -- '*.lua')
-            ./scripts/lint.sh "${changed[@]}"
+          elif [[ -n "$BEFORE_SHA" && ! "$BEFORE_SHA" =~ ^0+$ ]] && git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+            mapfile -d '' changed < <(git diff --name-only -z --diff-filter=ACMR "$BEFORE_SHA...HEAD" -- '*.lua')
           else
-            ./scripts/lint.sh
+            changed=()
           fi
-
-      - name: Test Damage Meter data adapter
-        run: luajit tests/damage_meter_data_test.lua
-
-      - name: Test Damage Meter native adapter
-        run: luajit tests/damage_meter_native_test.lua
-
-      - name: Test Damage Meter renderer, automation, defaults, lifecycle, and policy
-        run: |
-          luajit tests/damage_meter_automation_test.lua
-          luajit tests/damage_meter_defaults_test.lua
-          luajit tests/damage_meter_lifecycle_test.lua
-          luajit tests/damage_meter_options_test.lua
-          luajit tests/damage_meter_renderer_test.lua
-          luajit tests/damage_meter_renderer_policy_test.lua
-
-      - name: Test Mythic+ timer, seasonal analysis, and tracker integration
-        run: |
-          for test_file in tests/abstract_framework_version_guard_test.lua tests/mythic_plus_*_test.lua tests/objective_tracker_taint_boundary_test.lua; do
-            luajit "$test_file"
-          done
-
-      - name: Test Retail 12.1 fixes
-        run: |
-          for test_file in tests/challenges_keystone_frame_skin_test.lua tests/experience_bar_disabled_texture_test.lua tests/queue_status_frame_native_ownership_test.lua tests/style_pixel_updater_secret_geometry_test.lua tests/tooltip_unit_colors_test.lua tests/unit_frame_status_timer_secret_test.lua; do
-            lua5.1 "$test_file"
-          done
-
-      - name: Test validation-only Retail safety leaves
-        run: |
-          lua5.1 tests/character_frame_unit_stats_safety_test.lua
-          luajit tests/character_frame_unit_stats_safety_test.lua
-          lua5.1 tests/objective_tracker_taint_boundary_test.lua
-          lua5.1 tests/achievement_frame_12_1_topology_test.lua
-          luajit tests/achievement_frame_12_1_topology_test.lua
-          lua5.1 tests/unit_frame_options_preview_aura_safety_test.lua
-          lua5.1 tests/player_spells_combat_style_test.lua
-          lua5.1 tests/native_aura_tooltip_skin_test.lua
-
-      - name: Test idle rendering lifecycles and unit-frame defaults
-        run: |
-          lua5.1 tests/action_bar_idle_flash_test.lua
-          lua5.1 tests/action_bar_lightweight_backdrop_test.lua
-          lua5.1 tests/cooldown_manager_idle_test.lua
-          lua5.1 tests/unit_frame_portrait_defaults_test.lua
-
-      - name: Test unit frame option pane lifecycle
-        run: |
-          lua5.1 tests/unit_frame_options_selection_lifecycle_test.lua
-          luajit tests/unit_frame_options_selection_lifecycle_test.lua
-
-      - name: Test 12.1 unit-frame aura controller
-        run: luajit tests/unit_frame_aura_controller_test.lua
-
-      - name: Test Party native-aura integration
-        run: luajit tests/unit_frame_party_native_aura_test.lua
-
-      - name: Test Party shipped aura contracts
-        run: luajit tests/unit_frame_party_aura_contract_test.lua
-
-      - name: Test Raid native-aura integration
-        run: luajit tests/unit_frame_raid_native_aura_test.lua
-
-      - name: Test Raid shipped aura contracts
-        run: luajit tests/unit_frame_raid_aura_contract_test.lua
-
-      - name: Test Raid aura-scale lockdown
-        run: luajit tests/unit_frame_raid_aura_scale_test.lua
-
-      - name: Test 12.1 unit-frame aura policy
-        run: luajit tests/unit_frame_aura_policy_test.lua
-
-      - name: Test 12.1 unit-frame aura spec
-        run: luajit tests/unit_frame_aura_spec_test.lua
-
-      - name: Test 12.1 unit-frame aura runtime
-        run: luajit tests/unit_frame_aura_runtime_test.lua
-
-      - name: Test Target unit-frame native aura integration
-        run: luajit tests/unit_frame_target_native_aura_test.lua
-
-      - name: Test nameplate native aura integration
-        run: luajit tests/nameplate_native_aura_test.lua
-
-      - name: Test unit-frame aura options
-        run: luajit tests/unit_frame_aura_options_test.lua
-
-      - name: Test unit-frame aura filter options
-        run: luajit tests/unit_frame_aura_filter_options_test.lua
-
-      - name: Test unit-frame aura Global Colors
-        run: luajit tests/unit_frame_aura_spell_colors_test.lua
-
-      - name: Test unit-frame aura Global Colors options
-        run: luajit tests/unit_frame_aura_colors_options_test.lua
-
-      - name: Test unit-frame config-mode lifecycle
-        run: luajit tests/unit_frame_config_mode_lifecycle_test.lua
-
-      - name: Test secure group-header unit routing
-        run: luajit tests/unit_frame_group_header_routing_test.lua
-
-      - name: Test 12.1 Player aura integration
-        run: luajit tests/unit_frame_player_native_aura_test.lua
-
-      - name: Test 12.1 Boss aura integration
-        run: luajit tests/unit_frame_boss_native_aura_test.lua
-
-      - name: Test 12.1 Focus aura integration
-        run: luajit tests/unit_frame_focus_native_aura_test.lua
-
-      - name: Test secret-safe unit-target routing
-        run: luajit tests/unit_frame_unit_target_routing_test.lua
-
-      - name: Test 12.1 TargetTarget aura integration
-        run: luajit tests/unit_frame_targettarget_native_aura_test.lua
-
-      - name: Test 12.1 FocusTarget aura integration
-        run: luajit tests/unit_frame_focustarget_native_aura_test.lua
-
-      - name: Test 12.1 PetTarget aura integration
-        run: luajit tests/unit_frame_pettarget_native_aura_test.lua
-
-      - name: Test secret-safe Pet owner routing
-        run: luajit tests/unit_frame_pet_owner_routing_test.lua
-
-      - name: Test 12.1 Pet aura integration
-        run: luajit tests/unit_frame_pet_native_aura_test.lua
-
-      - name: Test unit-frame status timer lockdown
-        run: luajit tests/unit_frame_status_timer_test.lua
-
-      - name: Test PTR 7 unit-frame identity secrecy
-        run: luajit tests/unit_frame_secret_identity_test.lua
-
-      - name: Test PTR 7 unit-button identity boundary
-        run: luajit tests/unit_frame_secret_identity_unit_button_test.lua
-
-      - name: Test protected tooltip-owner anchoring
-        run: luajit tests/tooltip_anchor_taint_test.lua
+          bash ./scripts/verify.sh "${changed[@]}"

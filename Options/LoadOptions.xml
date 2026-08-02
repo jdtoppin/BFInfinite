@@ -31,5 +31,6 @@
     <Script file="Profiles.lua"/>
     <Script file="About.lua"/>
     <Script file="CVarRestoreFrame.lua"/>
+    <Script file="ChangelogData.lua"/>
     <Script file="ChangelogsFrame.lua"/>
 </Ui>
