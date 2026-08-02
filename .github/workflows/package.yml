@@ -1,14 +1,16 @@
 name: Package
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
   push:
     tags:
       - 'r*'
 
 concurrency:
-  group: package-${{ github.ref }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -16,11 +18,15 @@ permissions:
 jobs:
   package:
     runs-on: ubuntu-latest
+    outputs:
+      artifact_url: ${{ steps.package_artifact.outputs.artifact-url }}
+      artifact_digest: ${{ steps.package_artifact.outputs.artifact-digest }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Validate release tag
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/r')
@@ -74,6 +80,7 @@ jobs:
           sha256sum -- *.zip > SHA256SUMS
 
       - name: Upload package artifact
+        id: package_artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: BFInfinite-${{ github.run_id }}
@@ -84,6 +91,83 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 14
+
+  pr-package-comment:
+    name: Link PR package
+    if: >-
+      ${{
+        always()
+        && github.event_name == 'pull_request'
+        && needs.package.result != 'cancelled'
+        && github.event.pull_request.head.repo.full_name == github.repository
+        && github.event.pull_request.user.login != 'dependabot[bot]'
+      }}
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Update package link
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+          ARTIFACT_URL: ${{ needs.package.outputs.artifact_url }}
+          ARTIFACT_DIGEST: ${{ needs.package.outputs.artifact_digest }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          marker='<!-- bfinfinite-pr-package -->'
+          short_sha="${PR_HEAD_SHA:0:7}"
+          commit_url="${GITHUB_SERVER_URL}/${GH_REPO}/commit/${PR_HEAD_SHA}"
+          body_file="$(mktemp)"
+          trap 'rm -f "$body_file"' EXIT
+
+          live_head_sha="$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER" --jq '.head.sha')"
+          if [[ "$live_head_sha" != "$PR_HEAD_SHA" ]]; then
+            echo "Skipping stale package comment for $PR_HEAD_SHA; current PR head is $live_head_sha."
+            exit 0
+          fi
+
+          if [[ "$PACKAGE_RESULT" == "success" && -n "$ARTIFACT_URL" ]]; then
+            {
+              echo "$marker"
+              echo "### Installable PR package"
+              echo
+              echo "Latest validated package for PR head [\`$short_sha\`]($commit_url):"
+              echo
+              echo "- [Download BFInfinite package and checksum]($ARTIFACT_URL)"
+              echo "- [View package workflow run]($RUN_URL)"
+              echo "- Artifact digest: \`$ARTIFACT_DIGEST\`"
+              echo
+              echo "The link updates after every pushed commit and expires after 14 days. GitHub sign-in is required."
+            } > "$body_file"
+          else
+            {
+              echo "$marker"
+              echo "### Installable PR package"
+              echo
+              echo "No package is available for PR head [\`$short_sha\`]($commit_url) because the latest package job finished with **$PACKAGE_RESULT**."
+              echo
+              echo "[View the package workflow run]($RUN_URL) for details."
+            } > "$body_file"
+          fi
+
+          comment_id="$(
+            gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments?per_page=100" \
+              --jq '[.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- bfinfinite-pr-package -->")))][0].id // empty'
+          )"
+          if [[ -n "$comment_id" ]]; then
+            gh api --method PATCH "repos/$GH_REPO/issues/comments/$comment_id" \
+              --raw-field body="$(<"$body_file")" >/dev/null
+            echo "Updated PR package comment $comment_id."
+          else
+            gh api --method POST "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
+              --raw-field body="$(<"$body_file")" >/dev/null
+            echo "Created PR package comment."
+          fi
 
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/r')
