@@ -650,6 +650,21 @@ assertNotContains(
     "config.nativeEnabledBeforeBFI",
     "renderer must never serialize native CVar state into a profile"
 )
+assertContains(
+    rendererCode,
+    "local tracker = _G.ObjectiveTrackerFrame",
+    "default meters must use the Objective Tracker as a read-only boundary"
+)
+assertNotContains(
+    rendererCode,
+    "_G.ObjectiveTrackerFrame:",
+    "Damage Meter coexistence must not call Objective Tracker methods"
+)
+assertNotContains(
+    rendererCode,
+    "SetParent(_G.ObjectiveTrackerFrame",
+    "Damage Meter windows must not become Objective Tracker children"
+)
 
 assertNotContains(
     rendererCode,

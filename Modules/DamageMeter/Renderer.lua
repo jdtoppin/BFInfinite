@@ -28,6 +28,14 @@ local Renderer = DM.Renderer
 local MAX_WINDOWS = 3
 local WINDOW_INSET = 4
 local WINDOW_GAP = 4
+-- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit d3915c78:
+-- Blizzard_ObjectiveTracker/Blizzard_ObjectiveTrackerContainer.xml defines
+-- ObjectiveTrackerContainerTemplate as 260 pixels wide, with its NineSlice
+-- starting 30 pixels left of the managed frame. Keep a visible gap beyond it
+-- without taking ownership of the Objective Tracker's position or height.
+local OBJECTIVE_TRACKER_LEFT_OVERHANG = 30
+local OBJECTIVE_TRACKER_RIGHT_OVERHANG = 5
+local OBJECTIVE_TRACKER_GAP = 8
 local REFRESH_DELAY = 0.1
 local NATIVE_RESTORE_KEY = "damageMeterNativeEnabledBeforeBFI"
 local MIN_WINDOW_WIDTH = 220
@@ -198,6 +206,15 @@ local function GetFallbackAnchor()
     }
 end
 
+local function IsDefaultRootAnchor(anchor)
+    local default = GetDefaultAnchor(1)
+    return anchor.relativeTo == default.relativeTo
+        and anchor.point == default.point
+        and anchor.relativePoint == default.relativePoint
+        and anchor.x == default.x
+        and anchor.y == default.y
+end
+
 local function SetAnchorRecord(config, index, anchor)
     if type(config.windowAnchors) ~= "table" then
         config.windowAnchors = {}
@@ -215,6 +232,9 @@ end
 local function EnsureInteractionConfig(config)
     if type(config.locked) ~= "boolean" then
         config.locked = false
+    end
+    if type(config.dockToObjectiveTracker) ~= "boolean" then
+        config.dockToObjectiveTracker = false
     end
     if type(config.windowHeights) ~= "table" then
         config.windowHeights = {}
@@ -1742,17 +1762,42 @@ local function ApplyAllAnchors(config)
 
     for index = 1, MAX_WINDOWS do
         local anchor = config.windowAnchors[index]
+        local point = anchor.point
         local relativeTo = anchor.relativeTo == 0
             and _G.UIParent
             or windows[anchor.relativeTo]
+        local relativePoint = anchor.relativePoint
+        local x = anchor.x
+        local y = anchor.y
+        if config.dockToObjectiveTracker
+            and IsDefaultRootAnchor(anchor)
+            and _G.ObjectiveTrackerFrame
+        then
+            local tracker = _G.ObjectiveTrackerFrame
+            relativeTo = tracker
+            -- The pinned Blizzard_MawBuffs.lua and
+            -- Blizzard_UIWidgetTemplateStatusBar.lua use this field to orient
+            -- tracker-adjacent UI. Put meters on the inward side of a custom
+            -- Edit Mode layout so clamping cannot push them back over it.
+            if tracker.isOnLeftSideOfScreen == true then
+                point = "BOTTOMLEFT"
+                relativePoint = "BOTTOMRIGHT"
+                x = OBJECTIVE_TRACKER_RIGHT_OVERHANG
+                    + OBJECTIVE_TRACKER_GAP
+            else
+                relativePoint = "BOTTOMLEFT"
+                x = -OBJECTIVE_TRACKER_LEFT_OVERHANG
+                    - OBJECTIVE_TRACKER_GAP
+            end
+        end
         local window = windows[index]
         window:ClearAllPoints()
         window:SetPoint(
-            anchor.point,
+            point,
             relativeTo,
-            anchor.relativePoint,
-            anchor.x,
-            anchor.y
+            relativePoint,
+            x,
+            y
         )
     end
 end
@@ -2835,6 +2880,7 @@ end
 function Renderer.ResetPosition()
     local config = GetConfig()
     EnsureInteractionConfig(config)
+    config.dockToObjectiveTracker = true
     for index = 1, MAX_WINDOWS do
         SetAnchorRecord(config, index, GetDefaultAnchor(index))
     end
@@ -2896,8 +2942,17 @@ local function EnsureEventFrame()
     if eventFrame then return end
 
     eventFrame = _G.CreateFrame("Frame")
-    eventFrame:SetScript("OnEvent", function(_, event)
-        if event == "PLAYER_LOGOUT" then
+    eventFrame:SetScript("OnEvent", function(_, event, ...)
+        if event == "ADDON_LOADED" then
+            local addonName = ...
+            if addonName == "Blizzard_ObjectiveTracker"
+                and GetConfig().dockToObjectiveTracker
+            then
+                ApplyAllAnchors(GetConfig())
+            end
+        elseif event == "EDIT_MODE_LAYOUTS_UPDATED" then
+            ApplyAllAnchors(GetConfig())
+        elseif event == "PLAYER_LOGOUT" then
             CloseAllWindowDetails()
             EndNativeOverride()
         elseif event == "PLAYER_REGEN_DISABLED" then
@@ -2935,6 +2990,8 @@ end
 
 local function RegisterEvents()
     EnsureEventFrame()
+    eventFrame:RegisterEvent("ADDON_LOADED")
+    eventFrame:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
     eventFrame:RegisterEvent("DAMAGE_METER_COMBAT_SESSION_UPDATED")
     eventFrame:RegisterEvent("DAMAGE_METER_CURRENT_SESSION_UPDATED")
     eventFrame:RegisterEvent("DAMAGE_METER_RESET")

@@ -73,6 +73,7 @@ local defaults = {
             y = 4,
         },
     },
+    dockToObjectiveTracker = true,
     locked = false,
     width = 300,
     headerHeight = 22,
@@ -252,6 +253,22 @@ local function NormalizeWindowAnchors(config)
     end
 end
 
+local function WindowAnchorsMatchDefaults(anchors)
+    for index = 1, 3 do
+        local anchor = anchors[index]
+        local default = defaults.windowAnchors[index]
+        if anchor.relativeTo ~= default.relativeTo
+            or anchor.point ~= default.point
+            or anchor.relativePoint ~= default.relativePoint
+            or anchor.x ~= default.x
+            or anchor.y ~= default.y
+        then
+            return false
+        end
+    end
+    return true
+end
+
 local function NormalizeWindowSessions(config)
     if type(config.windowSessions) ~= "table" then
         config.windowSessions = CopyWindowSessions(defaults.windowSessions)
@@ -368,7 +385,16 @@ local function NormalizeConfig(config)
             true
         )
     end
+    local hadTrackerDockSetting =
+        type(config.dockToObjectiveTracker) == "boolean"
     NormalizeWindowAnchors(config)
+    if not hadTrackerDockSetting then
+        -- Only migrate the untouched historical stack. Any user-positioned
+        -- anchor chain remains screen-relative until explicitly reset.
+        config.dockToObjectiveTracker = WindowAnchorsMatchDefaults(
+            config.windowAnchors
+        )
+    end
     if type(config.locked) ~= "boolean" then
         config.locked = defaults.locked
     end

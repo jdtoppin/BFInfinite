@@ -68,6 +68,8 @@ local settings = {
         "markerSpacing",
     },
     objectiveTracker = {
+        "objectiveTrackerBackground",
+        "objectiveTrackerQuestAutomation",
         "font",
     },
     mythicPlus = {
@@ -603,6 +605,99 @@ builder["alpha"] = function(parent)
     function pane.Load(t)
         pane.t = t
         alpha:SetValue(t.cfg.alpha)
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- objectiveTrackerBackground
+---------------------------------------------------------------------
+builder["objectiveTrackerBackground"] = function(parent)
+    if created["objectiveTrackerBackground"] then
+        return created["objectiveTrackerBackground"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_ObjectiveTrackerBackground",
+        nil,
+        55
+    )
+    created["objectiveTrackerBackground"] = pane
+
+    local alpha = AF.CreateSlider(
+        pane,
+        L["Background Opacity"],
+        150,
+        0,
+        1,
+        0.01,
+        true,
+        true
+    )
+    AF.SetPoint(alpha, "LEFT", 15, 0)
+    alpha:SetOnValueChanged(function(value)
+        pane.t.cfg.backgroundAlpha = value
+        AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
+    end)
+
+    function pane.Load(t)
+        pane.t = t
+        alpha:SetValue(t.cfg.backgroundAlpha)
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- objectiveTrackerQuestAutomation
+---------------------------------------------------------------------
+builder["objectiveTrackerQuestAutomation"] = function(parent)
+    if created["objectiveTrackerQuestAutomation"] then
+        return created["objectiveTrackerQuestAutomation"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_ObjectiveTrackerQuestAutomation",
+        nil,
+        34
+    )
+    created["objectiveTrackerQuestAutomation"] = pane
+
+    local tooltip = L[
+        "Hold Shift to pause quest automation. Item-started and remote completions, multiple reward choices, PvP confirmations, and payments stay manual."
+    ]
+    local definitions = {
+        {"autoAcceptQuests", L["Auto Accept Quests"]},
+        {"autoTurnInQuests", L["Auto Turn In Quests"]},
+    }
+    local controls = {}
+
+    local function CreateToggle(key, label, x)
+        local control = AF.CreateCheckButton(pane, label)
+        AF.SetPoint(control, "LEFT", x, 0)
+        control:SetTooltip(tooltip)
+        control:SetOnCheck(function(checked)
+            pane.t.cfg[key] = checked
+        end)
+        controls[key] = control
+    end
+
+    for index, definition in ipairs(definitions) do
+        CreateToggle(
+            definition[1],
+            definition[2],
+            15 + (index - 1) * 185
+        )
+    end
+
+    function pane.Load(t)
+        pane.t = t
+        for key, control in pairs(controls) do
+            control:SetChecked(t.cfg[key] == true)
+        end
     end
 
     return pane

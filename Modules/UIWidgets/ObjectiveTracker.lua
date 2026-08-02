@@ -13,8 +13,38 @@ local scenarioTracker = _G.ScenarioObjectiveTracker
 local rewardsFrame = _G.ScenarioRewardsFrame
 
 local trackerStyled
+local trackerBackgroundStyled
+local trackerBackground
 
 local GenerateClosure = GenerateClosure
+
+---------------------------------------------------------------------
+-- background
+---------------------------------------------------------------------
+local function SetupTrackerBackground()
+    if trackerBackgroundStyled or not tracker.NineSlice then return end
+
+    -- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit d3915c78:
+    -- Blizzard_ObjectiveTrackerContainer.xml anchors NineSlice around the
+    -- tracker contents, and Blizzard_ObjectiveTrackerContainer.lua updates
+    -- its bottom edge; Blizzard_ObjectiveTrackerManager.lua defaults its
+    -- opacity to zero. A child of NineSlice would therefore hide BFI's shared
+    -- surface. Anchor a BFI-owned sibling to those bounds instead; BFI's
+    -- background option owns the surface opacity, the ObjectiveTrackerFrame
+    -- parent owns overall visibility, and Blizzard retains all geometry.
+    trackerBackgroundStyled = true
+    S.RemoveTextures(tracker.NineSlice, true)
+    trackerBackground = AF.CreateBorderedFrame(
+        tracker,
+        nil,
+        nil,
+        nil,
+        "background",
+        "border"
+    )
+    trackerBackground:SetAllPoints(tracker.NineSlice)
+    AF.SetFrameLevel(trackerBackground, -1)
+end
 
 ---------------------------------------------------------------------
 -- setup
@@ -375,6 +405,16 @@ local function UpdateObjectiveTracker(_, module, which)
     if not config.enabled then
         -- do nothing here, since this requires a reload
         return
+    end
+
+    SetupTrackerBackground()
+    if trackerBackground then
+        trackerBackground:SetBackdropColor(
+            AF.GetColorRGB("background", config.backgroundAlpha)
+        )
+        trackerBackground:SetBackdropBorderColor(
+            AF.GetColorRGB("border", config.backgroundAlpha)
+        )
     end
 
     if not trackerStyled then
