@@ -1,0 +1,111 @@
+name: Package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'r*'
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/r')
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^r[1-9][0-9]*(-(alpha|beta))?$ ]]; then
+            echo "Unsupported release tag: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          toc_version="$(sed -n 's/^## Version:[[:space:]]*//p' BFInfinite.toc)"
+          if [[ "$toc_version" != "$GITHUB_REF_NAME" ]]; then
+            echo "BFInfinite.toc version '$toc_version' does not match tag '$GITHUB_REF_NAME'." >&2
+            exit 1
+          fi
+          git fetch --no-tags origin "$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
+            echo "Release tags must point to a commit on $DEFAULT_BRANCH." >&2
+            exit 1
+          fi
+
+      - name: Install verification tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes lua-check lua5.1 luajit ripgrep unzip
+
+      - name: Verify source
+        run: bash ./scripts/verify.sh
+
+      - name: Build package without publishing
+        uses: BigWigsMods/packager@6d50adb6e8517eefef63f4afb16a6518166a6b28 # v2.5.1
+        with:
+          args: -d
+
+      - name: Verify package
+        run: bash ./scripts/check-package.sh
+
+      - name: Create checksum
+        shell: bash
+        run: |
+          cd .release
+          sha256sum -- *.zip > SHA256SUMS
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: BFInfinite-${{ github.run_id }}
+          path: |
+            .release/*.zip
+            .release/SHA256SUMS
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/r')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: BFInfinite-${{ github.run_id }}
+          path: dist
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          prerelease=()
+          if [[ "$GITHUB_REF_NAME" == *-alpha* || "$GITHUB_REF_NAME" == *-beta* ]]; then
+            prerelease=(--prerelease)
+          fi
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; refusing to replace immutable assets." >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            dist/*.zip dist/SHA256SUMS \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            "${prerelease[@]}"
