@@ -276,7 +276,7 @@ local function makeHarness(options)
     }
     local AF = {
         isRetail = options.isRetail ~= false,
-        versionNum = options.versionNum or 36,
+        versionNum = options.versionNum or 37,
     }
     local UF = {}
     local afConstructionTotals = {
@@ -1088,18 +1088,18 @@ local function assertNoNativeMutation(harness, message)
 end
 
 local function testCapabilityGate()
-    local oldAF = makeHarness({versionNum = 35})
+    local oldAF = makeHarness({versionNum = 36})
     assertEqual(
         oldAF.UF.HasNativeAuraContainerBackend(),
         false,
-        "AF r35 single-duration-carrier gate"
+        "AF r36 duration-color gate"
     )
     assertEqual(
         oldAF.UF.CreateNativeAuraContainerController({}, "OldAF"),
         nil,
-        "AF r35 controller"
+        "AF r36 controller"
     )
-    assertEqual(#oldAF.holders, 0, "AF r35 holder count")
+    assertEqual(#oldAF.holders, 0, "AF r36 holder count")
 
     local missingMethod = makeHarness({
         missingMethod = "SetCustomAuraSlotSortMethod",
@@ -1164,12 +1164,12 @@ local function testGlobalFrameworkRequirement()
     assertTrue(chunk, loadError)
     setfenv(chunk, environment)
     chunk("BFInfinite", BFI)
-    assertEqual(BFI.requiredAFVersion, 36, "published global AF minimum")
+    assertEqual(BFI.requiredAFVersion, 37, "published global AF minimum")
 
     local ok, versionError = pcall(eventHandler.ADDON_LOADED, eventHandler, BFI.name)
     assertEqual(ok, false, "global AF version check stops harness")
     assertEqual(versionError, stopAfterVersionCheck, "global AF version check sentinel")
-    assertEqual(requiredVersion, 36, "global AF minimum")
+    assertEqual(requiredVersion, 37, "global AF minimum")
 end
 
 local function testBuildContract()
