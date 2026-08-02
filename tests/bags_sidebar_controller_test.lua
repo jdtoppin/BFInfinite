@@ -59,9 +59,11 @@ end
 
 for _, api in ipairs({
     "function Sidebar.Initialize(",
-    "function Sidebar.SetMode(",
-    "function Sidebar.SetEntries(",
+    "function Sidebar.SetModel(",
     "function Sidebar.SetSelection(",
+    "function Sidebar.SetExpanded(",
+    "function Sidebar.ToggleExpanded(",
+    "function Sidebar.SetShown(",
     "function Sidebar.SetOnSelected(",
     "function Sidebar.GetDesiredWidth(",
     "function Sidebar.GetContentInset(",
@@ -71,8 +73,8 @@ end
 
 assertContains(
     source,
-    'mode == "combined" and 0 or DESIRED_WIDTH + CONTENT_GAP',
-    "combined mode must not reserve hidden rail space"
+    "return DESIRED_WIDTH + CONTENT_GAP",
+    "every enabled bag view must reserve the persistent rail"
 )
 assertContains(
     source,
@@ -87,7 +89,47 @@ assertContains(
 assertContains(
     source,
     "local function AcquireRow(index)",
-    "category buttons must be pooled"
+    "hierarchical rows must be pooled"
+)
+assertContains(
+    source,
+    'source.kind == "heading"',
+    "the permanent model must support separate section headings"
+)
+assertContains(
+    source,
+    "entry.children",
+    "the permanent model must support nested category children"
+)
+assertContains(
+    source,
+    "expandedById[entry.id]",
+    "expanded parents must reveal their nested children"
+)
+assertContains(
+    source,
+    'row.toggle:SetScript("OnClick"',
+    "parent expansion must have an independent chevron target"
+)
+assertContains(
+    source,
+    "local function IsSelectedRow(row)",
+    "collapsed parents must surface an active child selection"
+)
+assertContains(
+    source,
+    "if selected.parentId == row.id then",
+    "active descendants must highlight their collapsed parent"
+)
+assertContains(
+    source,
+    'and "ArrowDown1" or "ArrowRight1"',
+    "chevrons must communicate expanded state"
+)
+assertContains(
+    source,
+    "row.highlight:SetColorTexture(1, 1, 1, 0.11)",
+    "selected rows must use a subtle neutral full-row treatment"
 )
 assertContains(
     source,
@@ -101,24 +143,26 @@ assertContains(
 )
 assertContains(
     source,
-    "row.icon:SetTexture(AF.GetIcon(FALLBACK_ICON_BY_MODE[mode]))",
+    'row.icon:SetTexture(AF.GetIcon("Menu4"))',
     "older AF versions must retain a safe generic icon"
 )
 assertContains(
     source,
-    "AF.SetWidth(row.indicator, 1)",
-    "idle rows must retain the options-style one-pixel class marker"
-)
-assertContains(
-    source,
-    "and not entriesById[selectionByMode[mode]] then",
+    "if selectionId ~= nil and not entriesById[selectionId] then",
     "removed entries must silently clear stale selection"
+)
+assertNotContains(
+    source,
+    "expandedById = nextExpandedById",
+    "temporarily absent category parents must retain expansion state"
 )
 
 for _, forbidden in ipairs({
     "BackdropTemplate",
     "NineSlice",
     "OnUpdate",
+    "CreateGradientTexture",
+    "row.indicator",
     "AF.CreateButton(",
     "AF.CreateButtonGroup(",
     "InCombatLockdown",
@@ -127,7 +171,7 @@ for _, forbidden in ipairs({
     assertNotContains(
         source,
         forbidden,
-        "sidebar must stay on the lightweight event-driven path"
+        "sidebar must stay on the lightweight neutral event-driven path"
     )
 end
 
@@ -142,6 +186,7 @@ local bags = {}
 local environment = {
     AbstractFramework = {},
     math = math,
+    pairs = pairs,
     select = select,
     type = type,
 }
@@ -158,28 +203,48 @@ chunk("BFInfinite", {
 })
 
 assertEqual(bags.Sidebar.GetDesiredWidth(), 170, "rail desired width")
-assertEqual(bags.Sidebar.GetContentInset(), 0, "combined content inset")
-assertEqual(bags.Sidebar.SetMode("invalid"), false, "invalid mode rejected")
-assertEqual(bags.Sidebar.SetMode("categories"), true, "category mode accepted")
-assertEqual(bags.Sidebar.GetContentInset(), 178, "category content inset")
+assertEqual(bags.Sidebar.GetContentInset(), 178, "persistent content inset")
+assertEqual(bags.Sidebar.SetShown("yes"), false, "non-boolean shown state rejected")
+assertEqual(bags.Sidebar.SetShown(false), true, "rail can be explicitly disabled")
+assertEqual(bags.Sidebar.SetShown(true), true, "rail can be explicitly enabled")
 
 local callbackCalls = 0
 assertEqual(bags.Sidebar.SetOnSelected(function()
     callbackCalls = callbackCalls + 1
 end), true, "selected callback accepted")
-bags.Sidebar.SetEntries({
-    {id = "equipment", label = "Equipment", icon = "Bag_Equipment"},
-})
+assertEqual(bags.Sidebar.SetModel({
+    {kind = "heading", label = "Views"},
+    {id = "combined", label = "Combined View", icon = "Bag_All"},
+    {id = "individual", label = "Individual Bags", icon = "Bag_IndividualBags"},
+    {kind = "heading", label = "Categories"},
+    {
+        id = "equipment",
+        label = "Equipment",
+        icon = "Bag_Equipment",
+        expanded = true,
+        children = {
+            {id = "equipment:chest", label = "Chest"},
+            {id = "equipment:gloves", label = "Gloves"},
+        },
+    },
+}), true, "hierarchical model accepted")
 assertEqual(bags.Sidebar.SetSelection("equipment"), true,
-    "known selection accepted")
+    "aggregate parent selection accepted")
+assertEqual(bags.Sidebar.SetSelection("equipment:chest"), true,
+    "nested short-label selection accepted")
 assertEqual(callbackCalls, 0, "programmatic selection is silent")
+assertEqual(bags.Sidebar.SetExpanded("equipment", false), true,
+    "known parent can collapse")
+assertEqual(bags.Sidebar.ToggleExpanded("equipment"), true,
+    "known parent can toggle")
+assertEqual(bags.Sidebar.SetExpanded("combined", false), false,
+    "leaf expansion rejected")
+assertEqual(bags.Sidebar.SetSelection("missing"), false,
+    "unknown selection rejected")
 
-bags.Sidebar.SetEntries({})
+assertEqual(bags.Sidebar.SetModel({}), true, "model can be cleared")
 assertEqual(bags.Sidebar.SetSelection("equipment"), false,
     "removed selection is no longer accepted")
 assertEqual(callbackCalls, 0, "entry removal is silent")
-assertEqual(bags.Sidebar.SetMode("individual"), true,
-    "individual mode accepted")
-assertEqual(bags.Sidebar.GetContentInset(), 178, "individual content inset")
 
 print("bags_sidebar_controller_test.lua: ok")

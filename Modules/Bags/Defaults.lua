@@ -18,16 +18,15 @@ local defaults = {
 
 local validViewModes = {
     combined = true,
-    categories = true,
     individual = true,
 }
 
 local function NormalizeConfig(config)
     if type(config.enabled) ~= "boolean" then config.enabled = defaults.enabled end
     if not validViewModes[config.viewMode] then
-        -- Migrate the previous two-state category toggle without changing the
-        -- user's chosen layout.
-        config.viewMode = config.categories == true and "categories" or defaults.viewMode
+        -- Category filtering now lives in the persistent sidebar rather than
+        -- being a saved main view. Legacy category profiles open Combined.
+        config.viewMode = defaults.viewMode
     end
     config.categories = nil
     if type(config.showBagSlots) ~= "boolean" then config.showBagSlots = defaults.showBagSlots end

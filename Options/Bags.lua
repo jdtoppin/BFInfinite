@@ -62,12 +62,10 @@ local function CreateAppearancePane()
     AF.SetPoint(viewMode, "TOPLEFT", showBlizzardBagBar, "BOTTOMLEFT", 0, -35)
     viewMode:SetItems({
         {text = L["Combined View"], value = "combined"},
-        {text = L["Categories View"], value = "categories"},
         {text = L["Individual Bags View"], value = "individual"},
     })
     viewMode:SetOnSelect(function(value)
-        B.config.viewMode = value
-        B.Refresh()
+        B.SetViewMode(value)
     end)
 
     local showItemLevel = AF.CreateCheckButton(appearancePane, L["Show Item Level"])

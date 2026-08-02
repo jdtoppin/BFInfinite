@@ -24,13 +24,14 @@ local BAG_TOP_WITH_SLOTS = 100
 local BAG_TOP_WITHOUT_SLOTS = 64
 local SIDEBAR_TOP = 58
 local SIDEBAR_MIN_HEIGHT = 180
+local SECTION_HEADER_HEIGHT = 18
+local SECTION_HEADER_GAP = 4
+local SECTION_SPACING = 7
 local ITEM_SIZE = 37
 local HORIZONTAL_PADDING = 12
 local FOOTER_PADDING = 12
 local MIN_FRAME_WIDTH = 320
 local SCREEN_EDGE_MARGIN = 16
-local CATEGORY_VIEW_ICON = AF.GetIcon("Layout")
-local COMBINED_VIEW_ICON = AF.GetIcon("Menu4")
 local SHOW_BAGS_ICON = AF.GetIcon("Layers")
 local REAGENT_SPACE_ICON = "bags-icon-reagents"
 local HEADER_ICON_COLOR = AF.player.class
@@ -81,14 +82,22 @@ local categoryOrderByClass = {
     [ITEM_CLASS.Recipe] = 500,
     [ITEM_CLASS.Questitem] = 800,
 }
+local categoryIconByClass = {
+    [ITEM_CLASS.Consumable] = "Bag_Consumables",
+    [ITEM_CLASS.Gem] = "Bag_TradeGoods",
+    [ITEM_CLASS.Tradegoods] = "Bag_TradeGoods",
+    [ITEM_CLASS.Reagent] = "Bag_TradeGoods",
+    [ITEM_CLASS.ItemEnhancement] = "Bag_TradeGoods",
+    [ITEM_CLASS.Profession] = "Bag_TradeGoods",
+    [ITEM_CLASS.Recipe] = "Bag_Recipes",
+    [ITEM_CLASS.Questitem] = "Bag_Quest",
+}
 
 local inventoryConstants = _G.Constants.InventoryConstants
 local REAGENT_BAG_ID = inventoryConstants.NumBagSlots + inventoryConstants.NumReagentBagSlots
 
 local combinedFrame
-local viewButton
 local bagSlotsButton
-local viewButtonMode
 local bagSidebar
 local initialized
 local moduleEnabled
@@ -102,6 +111,7 @@ local layoutAddSlotsTarget
 local layoutEpoch = 0
 local snapshotCount = 0
 local snapshotViewMode
+local snapshotCategoryKey
 local snapshotShowBagSlots
 local snapshotColumns
 local snapshotSpacing
@@ -110,7 +120,6 @@ local snapshotHeight
 local snapshotFooterHeight
 local hoveredBagID
 local activeCategoryKey
-local activeBagID = _G.Enum.BagIndex.Backpack
 local portraitWasShown
 local portraitMouseEnabled
 local portraitAlpha
@@ -121,10 +130,16 @@ local suppressedReagentFrame
 local suppressedReagentAlpha
 
 local bagButtons = {}
+local sectionHeaders = {}
 local categoryCache = {}
 local categoryGroups = {}
 local categoryGroupPool = {}
 local categoryGroupByKey = {}
+local categoryGroupPoolCount = 0
+local individualGroups = {}
+local individualGroupPool = {}
+local individualGroupByBag = {}
+local flatGroup = {items = {}}
 local reagentItemButtons = {}
 local suppressedMouseStates = {}
 local portraitProxyMouseStates = {}
@@ -151,26 +166,11 @@ local snapshotExtended = {}
 local blizzardBagBarWasShown
 local hasBlizzardBagBarState
 local cleanupTooltipState = {}
-local sidebarEntries = {}
+local sidebarModel = {}
 
 local VIEW_MODE_COMBINED = "combined"
 local VIEW_MODE_CATEGORIES = "categories"
 local VIEW_MODE_INDIVIDUAL = "individual"
-local nextViewMode = {
-    [VIEW_MODE_COMBINED] = VIEW_MODE_CATEGORIES,
-    [VIEW_MODE_CATEGORIES] = VIEW_MODE_INDIVIDUAL,
-    [VIEW_MODE_INDIVIDUAL] = VIEW_MODE_COMBINED,
-}
-local viewModeIcons = {
-    [VIEW_MODE_COMBINED] = "Bag_All",
-    [VIEW_MODE_CATEGORIES] = "Bag_Categories",
-    [VIEW_MODE_INDIVIDUAL] = "Bag_IndividualBags",
-}
-local viewModeLabels = {
-    [VIEW_MODE_COMBINED] = L["Combined View"],
-    [VIEW_MODE_CATEGORIES] = L["Categories View"],
-    [VIEW_MODE_INDIVIDUAL] = L["Individual Bags View"],
-}
 
 -- API and lifecycle evidence: Retail 12.0.7
 -- Blizzard_APIDocumentationGenerated/ContainerDocumentation.lua and
@@ -194,10 +194,17 @@ end
 
 local function GetViewMode()
     local mode = B.config and B.config.viewMode
-    if nextViewMode[mode] then
+    if mode == VIEW_MODE_COMBINED or mode == VIEW_MODE_INDIVIDUAL then
         return mode
     end
     return VIEW_MODE_COMBINED
+end
+
+local function GetDisplayMode()
+    if activeCategoryKey then
+        return VIEW_MODE_CATEGORIES
+    end
+    return GetViewMode()
 end
 
 local function IsBlizzardBagBarLogicallyShown(bagsBar)
@@ -258,88 +265,135 @@ local function ApplyPosition()
     BFI.funcs.LoadPosition(combinedFrame, B.config.position)
 end
 
-local function GetClassCategory(itemType, itemSubType, classID, subclassID)
-    if classID == ITEM_CLASS.Questitem then
-        return "quest", _G.BAG_FILTER_QUEST_ITEMS or itemType or "Quest Items", 800
-    end
-
-    local label = itemType
-    if not label or label == "" then
-        label = _G.MISCELLANEOUS or "Miscellaneous"
-    end
-    if itemSubType and itemSubType ~= "" and itemSubType ~= label then
-        label = label .. " - " .. itemSubType
-    end
-
-    local key = "class:" .. classID .. ":" .. (subclassID or -1)
-    return key, label, categoryOrderByClass[classID] or 600
-end
-
 local function GetCategory(itemID)
-    if not itemID then
-        return "empty", _G.EMPTY or "Empty", 1000
-    end
-
     local cached = categoryCache[itemID]
     if cached then
-        return cached[1], cached[2], cached[3]
+        return cached[1], cached[2], cached[3], cached[4], cached[5], cached[6], cached[7]
     end
 
     local _, itemType, itemSubType, itemEquipLoc, _, classID, subclassID =
         _G.C_Item.GetItemInfoInstant(itemID)
     if classID == nil then
-        return "uncategorized", _G.MISCELLANEOUS or "Miscellaneous", 600
+        classID = -1
+        subclassID = -1
     end
 
-    local key
-    local label
-    local order
+    local parentKey
+    local parentLabel
+    local parentOrder
+    local parentIcon
+    local childKey
+    local childLabel
+    local childOrder
 
     -- Retail 12.0.7 uses this non-empty sentinel for non-equippable items.
     if itemEquipLoc
         and itemEquipLoc ~= ""
         and itemEquipLoc ~= NON_EQUIPMENT_LOCATION then
         itemEquipLoc = equipmentSlotAliases[itemEquipLoc] or itemEquipLoc
-        key = "equipment:" .. itemEquipLoc
-        label = L["Equipment - %s"]:format(_G[itemEquipLoc] or itemEquipLoc)
-        order = 100 + (equipmentSlotOrder[itemEquipLoc] or 99)
+        parentKey = "parent:equipment"
+        parentLabel = L["Equipment"]
+        parentOrder = 100
+        parentIcon = "Bag_Equipment"
+        childKey = "equipment:" .. itemEquipLoc
+        childLabel = _G[itemEquipLoc] or itemEquipLoc
+        childOrder = equipmentSlotOrder[itemEquipLoc] or 99
     else
-        key, label, order = GetClassCategory(itemType, itemSubType, classID, subclassID)
+        parentKey = classID == ITEM_CLASS.Questitem
+            and "parent:quest"
+            or "parent:class:" .. classID
+        if classID == ITEM_CLASS.Questitem then
+            parentLabel = _G.BAG_FILTER_QUEST_ITEMS or itemType or L["Quest Items"]
+        else
+            parentLabel = itemType
+            if not parentLabel or parentLabel == "" then
+                parentLabel = L["Miscellaneous"]
+            end
+        end
+        parentOrder = categoryOrderByClass[classID] or 600
+        parentIcon = categoryIconByClass[classID] or "Bag_Misc"
+        childKey = "class:" .. classID .. ":" .. (subclassID or -1)
+        if itemSubType and itemSubType ~= "" and itemSubType ~= parentLabel then
+            childLabel = itemSubType
+        else
+            childLabel = L["Other"]
+        end
+        childOrder = subclassID or 0
     end
 
-    cached = {key, label, order}
+    cached = {
+        parentKey,
+        parentLabel,
+        parentOrder,
+        parentIcon,
+        childKey,
+        childLabel,
+        childOrder,
+    }
     categoryCache[itemID] = cached
-    return key, label, order
+    return parentKey, parentLabel, parentOrder, parentIcon, childKey, childLabel, childOrder
 end
 
 local function ResetCategoryGroups()
     wipe(categoryGroupByKey)
-    for index, group in ipairs(categoryGroups) do
+    for index = 1, categoryGroupPoolCount do
+        local group = categoryGroupPool[index]
         wipe(group.items)
+        wipe(group.children)
         group.key = nil
         group.label = nil
         group.order = nil
-        categoryGroupPool[index] = group
+        group.icon = nil
+        group.parentKey = nil
     end
+    categoryGroupPoolCount = 0
     wipe(categoryGroups)
 end
 
-local function AcquireCategoryGroup(key, label, order)
+local function AcquireCategoryGroup(key, label, order, icon, parent)
     local group = categoryGroupByKey[key]
     if group then return group end
 
-    local index = #categoryGroups + 1
-    group = categoryGroupPool[index]
+    categoryGroupPoolCount = categoryGroupPoolCount + 1
+    group = categoryGroupPool[categoryGroupPoolCount]
     if not group then
-        group = {items = {}}
+        group = {items = {}, children = {}}
+        categoryGroupPool[categoryGroupPoolCount] = group
     end
 
     group.key = key
     group.label = label
     group.order = order
-    categoryGroups[index] = group
+    group.icon = icon
+    group.parentKey = parent and parent.key
+    if parent then
+        parent.children[#parent.children + 1] = group
+    else
+        categoryGroups[#categoryGroups + 1] = group
+    end
     categoryGroupByKey[key] = group
     return group
+end
+
+local function AddItemToCategoryGroups(itemButton, itemID)
+    local parentKey, parentLabel, parentOrder, parentIcon,
+        childKey, childLabel, childOrder = GetCategory(itemID)
+    local parent = AcquireCategoryGroup(
+        parentKey,
+        parentLabel,
+        parentOrder,
+        parentIcon
+    )
+    parent.items[#parent.items + 1] = itemButton
+
+    local child = AcquireCategoryGroup(
+        childKey,
+        childLabel,
+        childOrder,
+        nil,
+        parent
+    )
+    child.items[#child.items + 1] = itemButton
 end
 
 local function CompareCategoryGroups(a, b)
@@ -347,6 +401,13 @@ local function CompareCategoryGroups(a, b)
         return a.order < b.order
     end
     return a.label < b.label
+end
+
+local function SortCategoryGroups()
+    sort(categoryGroups, CompareCategoryGroups)
+    for _, group in ipairs(categoryGroups) do
+        sort(group.children, CompareCategoryGroups)
+    end
 end
 
 local function ItemButtonOnEnter(button)
@@ -473,6 +534,23 @@ local function StyleItemButton(button)
 
         button.BFIBagHighlight = bagHighlight
         button.BagIndicator = bagHighlight
+    end
+end
+
+local function GetSectionHeader(index)
+    local header = sectionHeaders[index]
+    if header then return header end
+
+    header = AF.CreateFontString(combinedFrame, nil, "BFI")
+    header:SetJustifyH("LEFT")
+    header:SetWordWrap(false)
+    sectionHeaders[index] = header
+    return header
+end
+
+local function HideUnusedSectionHeaders(firstUnused)
+    for index = firstUnused, #sectionHeaders do
+        sectionHeaders[index]:Hide()
     end
 end
 
@@ -613,19 +691,6 @@ local function LayoutBagButtons(spacing, contentInset)
     end
 end
 
-local function UpdateViewButtonState()
-    local mode = GetViewMode()
-    if viewButtonMode == mode then return end
-    viewButtonMode = mode
-
-    local icon = AF.hasBagIcons
-        and AF.GetAdaptiveIcon(viewModeIcons[mode])
-        or (mode == VIEW_MODE_CATEGORIES and CATEGORY_VIEW_ICON or COMBINED_VIEW_ICON)
-    viewButton:SetTexture(icon, {16, 16}, {"CENTER", 0, 0})
-    viewButton:SetTextureColor(HEADER_ICON_COLOR)
-    viewButton:SetTooltip(viewModeLabels[mode])
-end
-
 local function LayoutControls(contentInset)
     contentInset = contentInset or (B.Sidebar and B.Sidebar.GetContentInset()) or 0
     local searchBox = _G.BagItemSearchBox
@@ -636,23 +701,12 @@ local function LayoutControls(contentInset)
         sortButton:SetPoint("TOPRIGHT", combinedFrame, "TOPRIGHT", -8, -27)
     end
 
-    viewButton:ClearAllPoints()
-    if sortIsAttached then
-        viewButton:SetPoint("RIGHT", sortButton, "LEFT", -3, 0)
-    else
-        viewButton:SetPoint("TOPRIGHT", combinedFrame, "TOPRIGHT", -8, -27)
-    end
-    viewButton:Show()
-    UpdateViewButtonState()
-    viewButton:SetTextureColor(HEADER_ICON_COLOR)
-    if GetViewMode() ~= VIEW_MODE_COMBINED then
-        viewButton:LockHighlight()
-    else
-        viewButton:UnlockHighlight()
-    end
-
     bagSlotsButton:ClearAllPoints()
-    bagSlotsButton:SetPoint("RIGHT", viewButton, "LEFT", -3, 0)
+    if sortIsAttached then
+        bagSlotsButton:SetPoint("RIGHT", sortButton, "LEFT", -3, 0)
+    else
+        bagSlotsButton:SetPoint("TOPRIGHT", combinedFrame, "TOPRIGHT", -8, -27)
+    end
     bagSlotsButton:Show()
     bagSlotsButton:SetTextureColor(HEADER_ICON_COLOR)
     if B.config.showBagSlots then
@@ -728,6 +782,7 @@ local function InvalidateLayoutSnapshot()
     wipe(snapshotExtended)
     snapshotCount = 0
     snapshotViewMode = nil
+    snapshotCategoryKey = nil
     snapshotShowBagSlots = nil
     snapshotColumns = nil
     snapshotSpacing = nil
@@ -761,7 +816,8 @@ local function CaptureLayoutSnapshot(force)
     local itemCount = #combinedFrame.Items
     local changed = force
         or itemCount ~= snapshotCount
-        or GetViewMode() ~= snapshotViewMode
+        or GetDisplayMode() ~= snapshotViewMode
+        or activeCategoryKey ~= snapshotCategoryKey
         or B.config.showBagSlots ~= snapshotShowBagSlots
         or B.config.columns ~= snapshotColumns
         or B.config.spacing ~= snapshotSpacing
@@ -799,7 +855,8 @@ local function CaptureLayoutSnapshot(force)
     end
 
     snapshotCount = itemCount
-    snapshotViewMode = GetViewMode()
+    snapshotViewMode = GetDisplayMode()
+    snapshotCategoryKey = activeCategoryKey
     snapshotShowBagSlots = B.config.showBagSlots
     snapshotColumns = B.config.columns
     snapshotSpacing = B.config.spacing
@@ -817,10 +874,11 @@ local function RenderLayout()
         SetShownIfChanged(object, true)
     end
 
+    local showAggregateEmpty = GetDisplayMode() ~= VIEW_MODE_INDIVIDUAL
     for kind = EMPTY_KIND_BAG, EMPTY_KIND_REAGENT do
         local state = emptyStates[kind]
         local representative = state.representative
-        if state.overlay and representative and representative:IsShown() then
+        if showAggregateEmpty and state.overlay and representative and representative:IsShown() then
             state.overlay:ClearAllPoints()
             state.overlay:SetAllPoints(representative)
             state.overlay:SetFrameLevel(representative:GetFrameLevel() + 3)
@@ -920,12 +978,29 @@ end
 
 -- WoW's Lua runtime limits each function to 60 captured upvalues, so keep the
 -- layout pipeline split into focused phases instead of merging these helpers.
+local function ResetIndividualGroups()
+    wipe(individualGroupByBag)
+    for index, group in ipairs(individualGroups) do
+        wipe(group.items)
+        group.bagID = nil
+        group.label = nil
+        group.order = nil
+        group.layoutY = nil
+        group.layoutColumns = nil
+        group.layoutWidth = nil
+        individualGroupPool[index] = group
+    end
+    wipe(individualGroups)
+end
+
 local function ResetLayoutModel()
     layoutEpoch = layoutEpoch + 1
     layoutAddSlotsTarget = nil
     ClearItemBagHighlights()
     ResetEmptyStates()
     ResetCategoryGroups()
+    ResetIndividualGroups()
+    wipe(flatGroup.items)
     ClearLayoutEntries()
     wipe(emptyCountsByBag)
     wipe(bagFamilies)
@@ -938,60 +1013,8 @@ local function ResetLayoutModel()
     emptyButtonCount = 0
 end
 
-local function SetSidebarEntry(index, id, label, icon)
-    local entry = sidebarEntries[index]
-    if not entry then
-        entry = {}
-        sidebarEntries[index] = entry
-    end
-    entry.id = id
-    entry.label = label
-    entry.icon = icon
-end
-
-local function TrimSidebarEntries(firstUnused)
-    for index = firstUnused, #sidebarEntries do
-        sidebarEntries[index] = nil
-    end
-end
-
-local function GetCategorySidebarIcon(group)
-    if group.key:find("^equipment:") then
-        return "Bag_Equipment"
-    elseif group.key == "empty" or group.key == "locked" then
-        return "Bag_Empty"
-    elseif group.order == 200 then
-        return "Bag_Consumables"
-    elseif group.order == 300 or group.order == 400 then
-        return "Bag_TradeGoods"
-    elseif group.order == 500 then
-        return "Bag_Recipes"
-    elseif group.order == 800 then
-        return "Bag_Quest"
-    end
-    return "Bag_Misc"
-end
-
-local function ResolveCategorySelection(groupCount)
-    for index = 1, groupCount do
-        local group = categoryGroups[index]
-        SetSidebarEntry(index, group.key, group.label, GetCategorySidebarIcon(group))
-    end
-    TrimSidebarEntries(groupCount + 1)
-    B.Sidebar.SetEntries(sidebarEntries)
-
-    if not categoryGroupByKey[activeCategoryKey] then
-        activeCategoryKey = categoryGroups[1] and categoryGroups[1].key
-    end
-    B.Sidebar.SetSelection(activeCategoryKey)
-    return activeCategoryKey and categoryGroupByKey[activeCategoryKey]
-end
-
-local function GetBagSidebarLabel(bagID)
-    local name = _G.C_Container.GetBagName(bagID)
-    if name and name ~= "" then
-        return name
-    elseif bagID == _G.Enum.BagIndex.Backpack then
+local function GetBagSectionLabel(bagID)
+    if bagID == _G.Enum.BagIndex.Backpack then
         return L["Backpack"]
     elseif bagID == REAGENT_BAG_ID then
         return L["Reagent Bag"]
@@ -999,34 +1022,67 @@ local function GetBagSidebarLabel(bagID)
     return L["Bag %d"]:format(bagID)
 end
 
-local function UpdateIndividualSidebar()
-    local firstBagID = _G.Enum.BagIndex.Backpack
-    local entryCount = 0
-    for bagID = firstBagID, REAGENT_BAG_ID do
-        entryCount = entryCount + 1
-        SetSidebarEntry(
-            entryCount,
-            bagID,
-            GetBagSidebarLabel(bagID),
-            bagID == REAGENT_BAG_ID and "Bag_Reagent" or "Bag_Backpack"
-        )
-    end
-    TrimSidebarEntries(entryCount + 1)
-    B.Sidebar.SetEntries(sidebarEntries)
+local function AcquireIndividualGroup(bagID)
+    local group = individualGroupByBag[bagID]
+    if group then return group end
 
-    if type(activeBagID) ~= "number" or activeBagID < firstBagID or activeBagID > REAGENT_BAG_ID then
-        activeBagID = firstBagID
+    local index = #individualGroups + 1
+    group = individualGroupPool[index]
+    if not group then
+        group = {items = {}}
     end
-    B.Sidebar.SetSelection(activeBagID)
+
+    group.bagID = bagID
+    group.label = GetBagSectionLabel(bagID)
+    group.order = bagID
+    individualGroups[index] = group
+    individualGroupByBag[bagID] = group
+    return group
 end
 
-local function BuildItemGroups(viewMode)
-    local showCategories = viewMode == VIEW_MODE_CATEGORIES
-    local flatGroup
-    if not showCategories then
-        flatGroup = AcquireCategoryGroup("all", "", 1)
+local function RegisterEmptyButton(itemButton, bagID)
+    local kind = bagID == REAGENT_BAG_ID and EMPTY_KIND_REAGENT or EMPTY_KIND_BAG
+    local state = emptyStates[kind]
+    state.count = state.count + 1
+    emptyCountsByBag[bagID] = (emptyCountsByBag[bagID] or 0) + 1
+    local bagFamily = GetBagFamily(bagID)
+    emptyButtonCount = emptyButtonCount + 1
+    emptyButtons[emptyButtonCount] = itemButton
+    emptyButtonBagIDs[emptyButtonCount] = bagID
+    emptyButtonFamilies[emptyButtonCount] = bagFamily
+    emptyButtonKinds[emptyButtonCount] = kind
+
+    local priority
+    if kind == EMPTY_KIND_REAGENT or bagID == _G.Enum.BagIndex.Backpack then
+        priority = 1
+    else
+        priority = bagFamily == 0 and 2 or 3
     end
 
+    if priority < (state.representativePriority or math.huge) then
+        state.representative = itemButton
+        state.representativePriority = priority
+    end
+end
+
+local function AddAggregateEmptyGroups()
+    local emptyGroup
+    for kind = EMPTY_KIND_BAG, EMPTY_KIND_REAGENT do
+        local representative = emptyStates[kind].representative
+        if representative then
+            flatGroup.items[#flatGroup.items + 1] = representative
+            emptyGroup = emptyGroup or AcquireCategoryGroup(
+                "empty",
+                _G.EMPTY or "Empty",
+                1000,
+                "Bag_Empty"
+            )
+            emptyGroup.items[#emptyGroup.items + 1] = representative
+        end
+    end
+end
+
+local function BuildItemGroups()
     for index, itemButton in ipairs(combinedFrame.Items) do
         StyleItemButton(itemButton)
 
@@ -1036,68 +1092,82 @@ local function BuildItemGroups(viewMode)
             itemID = nil
         end
 
-        local includeButton = viewMode ~= VIEW_MODE_INDIVIDUAL or bagID == activeBagID
+        local bagGroup = AcquireIndividualGroup(bagID)
+        bagGroup.items[#bagGroup.items + 1] = itemButton
 
-        -- Styling applies to every pooled button, while only the selected bag
-        -- participates in the visual individual-bag model.
-        if includeButton and itemID then
-            local group = flatGroup
-            if showCategories then
-                local key, label, order = GetCategory(itemID)
-                group = AcquireCategoryGroup(key, label, order)
-            end
-            group.items[#group.items + 1] = itemButton
-        elseif includeButton and snapshotExtended[index] then
+        if itemID then
+            AddItemToCategoryGroups(itemButton, itemID)
+            flatGroup.items[#flatGroup.items + 1] = itemButton
+        elseif snapshotExtended[index] then
             layoutAddSlotsTarget = layoutAddSlotsTarget or itemButton
-            local group = flatGroup
-            if showCategories then
-                group = AcquireCategoryGroup("locked", L["Bag Slots"], 900)
-            end
-            group.items[#group.items + 1] = itemButton
-        elseif includeButton then
-            local kind = bagID == REAGENT_BAG_ID and EMPTY_KIND_REAGENT or EMPTY_KIND_BAG
-            local state = emptyStates[kind]
-            state.count = state.count + 1
-            emptyCountsByBag[bagID] = (emptyCountsByBag[bagID] or 0) + 1
-            local bagFamily = GetBagFamily(bagID)
-            emptyButtonCount = emptyButtonCount + 1
-            emptyButtons[emptyButtonCount] = itemButton
-            emptyButtonBagIDs[emptyButtonCount] = bagID
-            emptyButtonFamilies[emptyButtonCount] = bagFamily
-            emptyButtonKinds[emptyButtonCount] = kind
-
-            local priority
-            if kind == EMPTY_KIND_REAGENT or bagID == _G.Enum.BagIndex.Backpack then
-                priority = 1
-            else
-                priority = bagFamily == 0 and 2 or 3
-            end
-
-            if priority < (state.representativePriority or math.huge) then
-                state.representative = itemButton
-                state.representativePriority = priority
-            end
+            flatGroup.items[#flatGroup.items + 1] = itemButton
+            local lockedGroup = AcquireCategoryGroup(
+                "locked",
+                L["Bag Slots"],
+                900,
+                "Bag_Empty"
+            )
+            lockedGroup.items[#lockedGroup.items + 1] = itemButton
+        else
+            RegisterEmptyButton(itemButton, bagID)
         end
     end
 
-    local emptyGroup
-    for kind = EMPTY_KIND_BAG, EMPTY_KIND_REAGENT do
-        local representative = emptyStates[kind].representative
-        if representative then
-            local group = flatGroup
-            if showCategories then
-                emptyGroup = emptyGroup or AcquireCategoryGroup("empty", _G.EMPTY or "Empty", 1000)
-                group = emptyGroup
+    AddAggregateEmptyGroups()
+    SortCategoryGroups()
+    sort(individualGroups, function(a, b) return a.order < b.order end)
+end
+
+local function BuildSidebarModel()
+    wipe(sidebarModel)
+    sidebarModel[1] = {kind = "heading", label = L["Views"]}
+    sidebarModel[2] = {
+        id = "view:" .. VIEW_MODE_COMBINED,
+        kind = "view",
+        viewMode = VIEW_MODE_COMBINED,
+        label = L["Combined View"],
+        icon = "Bag_All",
+    }
+    sidebarModel[3] = {
+        id = "view:" .. VIEW_MODE_INDIVIDUAL,
+        kind = "view",
+        viewMode = VIEW_MODE_INDIVIDUAL,
+        label = L["Individual Bags View"],
+        icon = "Bag_IndividualBags",
+    }
+    sidebarModel[4] = {kind = "heading", label = L["Categories"]}
+
+    for _, group in ipairs(categoryGroups) do
+        local node = {
+            id = "category:" .. group.key,
+            kind = "category",
+            categoryKey = group.key,
+            label = group.label,
+            icon = group.icon,
+        }
+        if #group.children > 0 then
+            node.children = {}
+            for _, child in ipairs(group.children) do
+                node.children[#node.children + 1] = {
+                    id = "category:" .. child.key,
+                    kind = "category",
+                    categoryKey = child.key,
+                    label = child.label,
+                }
             end
-            group.items[#group.items + 1] = representative
         end
+        sidebarModel[#sidebarModel + 1] = node
     end
 
-    local groupCount = #categoryGroups
-    if showCategories then
-        sort(categoryGroups, CompareCategoryGroups)
+    B.Sidebar.SetModel(sidebarModel)
+    if activeCategoryKey and categoryGroupByKey[activeCategoryKey] then
+        B.Sidebar.SetSelection("category:" .. activeCategoryKey)
+        return categoryGroupByKey[activeCategoryKey]
     end
-    return groupCount
+
+    activeCategoryKey = nil
+    B.Sidebar.SetSelection("view:" .. GetViewMode())
+    return flatGroup
 end
 
 local function GetGridWidth(columnCount, spacing)
@@ -1163,6 +1233,67 @@ local function CalculateFlatLayoutMetrics(
     return columns, width, height
 end
 
+local function MeasureIndividualGroups(columnCount, spacing)
+    local contentHeight = 0
+    local contentWidth = ITEM_SIZE
+
+    for index, group in ipairs(individualGroups) do
+        local itemCount = #group.items
+        local groupColumns = math.min(columnCount, math.max(1, itemCount))
+        local groupWidth = GetGridWidth(groupColumns, spacing)
+        local groupHeight = SECTION_HEADER_HEIGHT
+            + SECTION_HEADER_GAP
+            + GetGridHeight(itemCount, groupColumns, spacing)
+
+        group.layoutY = contentHeight
+        group.layoutColumns = groupColumns
+        group.layoutWidth = groupWidth
+        contentWidth = math.max(contentWidth, groupWidth)
+        contentHeight = contentHeight + groupHeight
+        if index < #individualGroups then
+            contentHeight = contentHeight + SECTION_SPACING
+        end
+    end
+
+    return contentWidth, contentHeight
+end
+
+local function CalculateIndividualLayoutMetrics(
+    requestedColumns,
+    spacing,
+    top,
+    footerHeight,
+    screenWidth,
+    screenHeight,
+    contentInset
+)
+    local maxColumns, maxFrameHeight, minFrameWidth = GetLayoutConstraints(
+        spacing,
+        screenWidth,
+        screenHeight,
+        contentInset
+    )
+    local columns = math.min(requestedColumns, maxColumns)
+    local contentWidth, contentHeight = MeasureIndividualGroups(columns, spacing)
+    local height = top + contentHeight + footerHeight
+
+    while height > maxFrameHeight and columns < maxColumns do
+        columns = columns + 1
+        contentWidth, contentHeight = MeasureIndividualGroups(columns, spacing)
+        height = top + contentHeight + footerHeight
+    end
+
+    height = math.max(
+        height,
+        math.min(maxFrameHeight, SIDEBAR_TOP + SIDEBAR_MIN_HEIGHT + footerHeight)
+    )
+    local width = math.max(
+        minFrameWidth,
+        (HORIZONTAL_PADDING * 2) + contentInset + contentWidth
+    )
+    return width, height
+end
+
 local function PrepareLayoutFrame(width, height)
     if hoveredBagID then
         combinedFrame:SetItemsMatchingBagHighlighted(hoveredBagID, true)
@@ -1199,13 +1330,38 @@ local function BuildFlatLayoutEntries(columns, spacing, top, contentInset, group
     end
 end
 
-local function FinalizeLayoutEntries(spacing, contentInset)
+local function BuildIndividualLayoutEntries(spacing, top, contentInset)
+    for groupIndex, group in ipairs(individualGroups) do
+        local groupX = HORIZONTAL_PADDING + contentInset
+        local headerY = -top - group.layoutY
+        local header = GetSectionHeader(groupIndex)
+        header:SetText(group.label)
+        header:SetSize(group.layoutWidth, SECTION_HEADER_HEIGHT)
+        AddLayoutEntry(header, true, groupX, headerY)
+
+        local itemTop = headerY - SECTION_HEADER_HEIGHT - SECTION_HEADER_GAP
+        for itemIndex, itemButton in ipairs(group.items) do
+            local row = floor((itemIndex - 1) / group.layoutColumns)
+            local column = (itemIndex - 1) % group.layoutColumns
+            AF.SetSize(itemButton, ITEM_SIZE, ITEM_SIZE)
+            AddLayoutEntry(
+                itemButton,
+                false,
+                groupX + (column * (ITEM_SIZE + spacing)),
+                itemTop - (row * (ITEM_SIZE + spacing))
+            )
+        end
+    end
+end
+
+local function FinalizeLayoutEntries(spacing, contentInset, sectionCount)
     for _, itemButton in ipairs(combinedFrame.Items) do
         if itemButton._BFIBagLayoutEpoch ~= layoutEpoch then
             SetShownIfChanged(itemButton, false)
         end
     end
 
+    HideUnusedSectionHeaders((sectionCount or 0) + 1)
     LayoutBagButtons(spacing, contentInset)
 end
 
@@ -1213,49 +1369,63 @@ local function LayoutItemsInternal(force)
     local changed, footerHeight, screenWidth, screenHeight = CaptureLayoutSnapshot(force)
     if not changed then return end
 
-    local viewMode = GetViewMode()
     local requestedColumns = B.config.columns
     local spacing = B.config.spacing
     local top = B.config.showBagSlots and BAG_TOP_WITH_SLOTS or BAG_TOP_WITHOUT_SLOTS
 
-    B.Sidebar.SetMode(viewMode)
+    B.Sidebar.SetShown(true)
     local contentInset = B.Sidebar.GetContentInset()
     if bagSidebar then
         bagSidebar:ClearAllPoints()
         bagSidebar:SetPoint("TOPLEFT", combinedFrame, "TOPLEFT", HORIZONTAL_PADDING, -SIDEBAR_TOP)
         bagSidebar:SetPoint("BOTTOMLEFT", combinedFrame, "BOTTOMLEFT", HORIZONTAL_PADDING, footerHeight)
     end
-    if viewMode == VIEW_MODE_INDIVIDUAL then
-        UpdateIndividualSidebar()
-    end
 
     ResetLayoutModel()
-    local groupCount = BuildItemGroups(viewMode)
-    local group = categoryGroups[1]
-    if viewMode == VIEW_MODE_CATEGORIES then
-        group = ResolveCategorySelection(groupCount)
-    end
+    BuildItemGroups()
+    local group = BuildSidebarModel()
+    local viewMode = GetDisplayMode()
     local width
     local height
-    local itemCount = group and #group.items or 0
     local columns
-    columns, width, height = CalculateFlatLayoutMetrics(
-        itemCount,
-        requestedColumns,
-        spacing,
-        top,
-        footerHeight,
-        screenWidth,
-        screenHeight,
-        contentInset
-    )
-    PrepareLayoutFrame(width, height)
-    BuildFlatLayoutEntries(columns, spacing, top, contentInset, group)
-    FinalizeLayoutEntries(spacing, contentInset)
+    if viewMode == VIEW_MODE_INDIVIDUAL then
+        width, height = CalculateIndividualLayoutMetrics(
+            requestedColumns,
+            spacing,
+            top,
+            footerHeight,
+            screenWidth,
+            screenHeight,
+            contentInset
+        )
+        PrepareLayoutFrame(width, height)
+        BuildIndividualLayoutEntries(spacing, top, contentInset)
+        FinalizeLayoutEntries(spacing, contentInset, #individualGroups)
+        layoutScale = math.min(
+            1,
+            (screenWidth - (SCREEN_EDGE_MARGIN * 2)) / width,
+            (screenHeight - (SCREEN_EDGE_MARGIN * 2)) / height
+        )
+    else
+        local itemCount = group and #group.items or 0
+        columns, width, height = CalculateFlatLayoutMetrics(
+            itemCount,
+            requestedColumns,
+            spacing,
+            top,
+            footerHeight,
+            screenWidth,
+            screenHeight,
+            contentInset
+        )
+        PrepareLayoutFrame(width, height)
+        BuildFlatLayoutEntries(columns, spacing, top, contentInset, group)
+        FinalizeLayoutEntries(spacing, contentInset, 0)
+        layoutScale = 1
+    end
 
-    -- All modes retain Blizzard's pooled buttons at full size. Category and
-    -- individual views change only the selected visual subset beside the rail.
-    layoutScale = 1
+    -- Individual Bags keeps every physical slot in its own labeled section;
+    -- Combined and category selections retain the compact aggregate-empty model.
     combinedFrame:SetScale(layoutScale)
     LayoutControls(contentInset)
     RenderLayout()
@@ -1374,6 +1544,8 @@ local function OnCombinedFrameHide()
     B:UnregisterEvent("DISPLAY_SIZE_CHANGED")
     wipe(categoryCache)
     ResetCategoryGroups()
+    ResetIndividualGroups()
+    HideUnusedSectionHeaders(1)
     ClearLayoutState()
     _G.C_Timer.After(0, function()
         if IsEnabled() and not combinedFrame:IsShown() then
@@ -1532,16 +1704,6 @@ local function StyleCombinedFrame()
     StyleBagSearchBox()
     StyleCleanupButton()
 
-    viewButton = AF.CreateButton(combinedFrame, nil, "gray", 24, 22)
-    UpdateViewButtonState()
-    viewButton:SetOnClick(function()
-        B.config.viewMode = nextViewMode[GetViewMode()]
-        viewButtonMode = nil
-        AF.HideTooltip()
-        LayoutItems(true)
-        AF.Fire("BFI_RefreshOptions", "bags")
-    end)
-
     bagSlotsButton = AF.CreateButton(combinedFrame, nil, "gray", 24, 22)
     bagSlotsButton:SetTexture(SHOW_BAGS_ICON, {16, 16}, {"CENTER", 0, 0})
     bagSlotsButton:SetTextureColor(HEADER_ICON_COLOR)
@@ -1556,13 +1718,13 @@ local function StyleCombinedFrame()
 
     CreateBagButtons()
 
-    bagSidebar = B.Sidebar.Initialize(combinedFrame, function(id, _, mode)
-        if mode == VIEW_MODE_CATEGORIES then
-            activeCategoryKey = id
-        elseif mode == VIEW_MODE_INDIVIDUAL then
-            activeBagID = id
-        else
-            return
+    bagSidebar = B.Sidebar.Initialize(combinedFrame, function(_, entry)
+        if entry.kind == "view" then
+            activeCategoryKey = nil
+            B.config.viewMode = entry.viewMode
+            AF.Fire("BFI_RefreshOptions", "bags")
+        elseif entry.kind == "category" then
+            activeCategoryKey = entry.categoryKey
         end
         LayoutItems(true)
     end)
@@ -1633,6 +1795,7 @@ local function EnableModule()
     UpdateBlizzardBagBarVisibility()
 
     if not Initialize() then return end
+    B.Sidebar.SetShown(true)
     SetupCleanupTooltip()
     B.Cleanup:Install(_G.BagItemAutoSortButton)
 
@@ -1678,14 +1841,15 @@ local function DisableModule()
     wipe(reagentItemButtons)
     wipe(categoryCache)
     ResetCategoryGroups()
+    ResetIndividualGroups()
+    HideUnusedSectionHeaders(1)
     ClearLayoutState()
     RestoreItemBagIndicators()
     layoutScale = 1
     combinedFrame:SetScale(1)
 
-    viewButton:Hide()
     bagSlotsButton:Hide()
-    B.Sidebar.SetMode(VIEW_MODE_COMBINED)
+    B.Sidebar.SetShown(false)
     for _, button in ipairs(bagButtons) do
         button:Hide()
     end
@@ -1742,6 +1906,14 @@ function B:DISPLAY_SIZE_CHANGED()
     LayoutItems(true)
 end
 
+function B.SetViewMode(mode)
+    if mode ~= VIEW_MODE_COMBINED and mode ~= VIEW_MODE_INDIVIDUAL then return false end
+    B.config.viewMode = mode
+    activeCategoryKey = nil
+    B.Refresh()
+    return true
+end
+
 function B.Refresh()
     UpdateBlizzardBagBarVisibility()
     if IsEnabled() and not B.config.showItemLevel then
@@ -1764,3 +1936,9 @@ local function UpdateBags(_, module)
     end
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateBags)
+
+AF.RegisterCallback("BFI_UpdateProfile", function()
+    -- Sidebar selection is transient navigation state. A newly selected
+    -- profile must open its own persisted Combined/Individual default.
+    activeCategoryKey = nil
+end)

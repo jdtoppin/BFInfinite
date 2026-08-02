@@ -90,10 +90,30 @@ local legacyCategoryProfile = {
     },
 }
 defaultsCallbacks.BFI_UpdateProfile(nil, legacyCategoryProfile)
-assertEqual(legacyCategoryProfile.bags.viewMode, "categories",
-    "legacy category toggle migrates to category view")
+assertEqual(legacyCategoryProfile.bags.viewMode, "combined",
+    "legacy category toggle migrates to persistent-sidebar Combined view")
 assertEqual(legacyCategoryProfile.bags.categories, nil,
     "legacy category toggle is removed after migration")
+
+local formerCategoryViewProfile = {
+    bags = {
+        viewMode = "categories",
+        position = {"BOTTOMRIGHT", -35, 110},
+    },
+}
+defaultsCallbacks.BFI_UpdateProfile(nil, formerCategoryViewProfile)
+assertEqual(formerCategoryViewProfile.bags.viewMode, "combined",
+    "former saved category mode migrates to Combined view")
+
+local invalidViewProfile = {
+    bags = {
+        viewMode = "unknown",
+        position = {"BOTTOMRIGHT", -35, 110},
+    },
+}
+defaultsCallbacks.BFI_UpdateProfile(nil, invalidViewProfile)
+assertEqual(invalidViewProfile.bags.viewMode, "combined",
+    "invalid saved view normalizes to Combined view")
 
 local individualProfile = {
     bags = {
