@@ -11,6 +11,7 @@ cd "$repo_root"
 
 rg -n \
     --glob '*.lua' \
+    --glob '!.dependencies/**' \
     --glob '!Libs/**' \
     --glob '!.unused/**' \
     '\bissecretvalue\b' \
