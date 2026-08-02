@@ -150,6 +150,23 @@ local function IsBlockCooldownStyle(style)
     return sub(style, 1, 5) == "block"
 end
 
+local function IsDurationThresholdOption(option, mode)
+    if type(option) ~= "table"
+        or type(option.enabled) ~= "boolean"
+    then
+        return false
+    end
+    if not option.enabled then return true end
+    if not IsFiniteNumber(option.value) or not IsColor(option.rgb) then
+        return false
+    end
+
+    if mode == "seconds" then
+        return option.value > 0
+    end
+    return option.value > 0 and option.value < 1
+end
+
 local function ValidateDurationText(config)
     return type(config) == "table"
         and type(config.enabled) == "boolean"
@@ -157,6 +174,8 @@ local function ValidateDurationText(config)
         and IsPosition(config.position)
         and type(config.color) == "table"
         and IsColor(config.color.normal)
+        and IsDurationThresholdOption(config.color.percent, "percent")
+        and IsDurationThresholdOption(config.color.seconds, "seconds")
 end
 
 local function ValidateStackText(config)
@@ -168,7 +187,7 @@ local function ValidateStackText(config)
 end
 
 local function NormalizeDurationText(config)
-    return {
+    local normalized = {
         enabled = config.enabled,
         font = CopyFont(config.font),
         position = CopyPosition(config.position),
@@ -176,6 +195,28 @@ local function NormalizeDurationText(config)
             normal = CopyColor(config.color.normal),
         },
     }
+
+    -- The native duration binding accepts one color curve against one
+    -- remaining-time property. Legacy BFI allowed both rules at once and
+    -- evaluated seconds first, so retain that priority when loading an
+    -- existing profile with both flags enabled.
+    local threshold
+    if config.color.seconds.enabled then
+        threshold = {
+            mode = "seconds",
+            value = config.color.seconds.value,
+            rgb = CopyColor(config.color.seconds.rgb),
+        }
+    elseif config.color.percent.enabled then
+        threshold = {
+            mode = "percent",
+            value = config.color.percent.value,
+            rgb = CopyColor(config.color.percent.rgb),
+        }
+    end
+    normalized.color.threshold = threshold
+
+    return normalized
 end
 
 local function NormalizeStackText(config)
