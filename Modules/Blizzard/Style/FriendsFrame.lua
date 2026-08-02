@@ -8,6 +8,7 @@ local legacyHooksInstalled
 local socialHooksInstalled
 local recentAlliesHooksInstalled
 local quickJoinHooksInstalled
+local statusMenuHooksInstalled
 
 -- Blizzard exposes the remote project ID, but ships only Retail and
 -- Classic-family logo atlases. WOW_PROJECT_MISTS_CLASSIC is 19.
@@ -33,6 +34,107 @@ local function StyleDropdown(dropdown)
     if dropdown then
         S.StyleDropdownButton(dropdown)
     end
+end
+
+local function GetStatusIcon(status)
+    if _G.FRIENDS_TEXTURE_ONLINE and status == _G.FRIENDS_TEXTURE_ONLINE then
+        return AF.GetIcon("Circle_Filled"), "lime"
+    elseif _G.FRIENDS_TEXTURE_AFK and status == _G.FRIENDS_TEXTURE_AFK then
+        return AF.GetIcon("Clock_Round"), "gold"
+    elseif _G.FRIENDS_TEXTURE_DND and status == _G.FRIENDS_TEXTURE_DND then
+        return AF.GetIcon("Minus"), "lightred"
+    end
+
+    -- Enum.SocialUIPresenceType and Appear Offline are new to the 12.1
+    -- Social UI. Keep the legacy string statuses above for the Who fallback.
+    local presenceTypes = _G.Enum and _G.Enum.SocialUIPresenceType
+    if not presenceTypes then return end
+
+    if presenceTypes.Online and status == presenceTypes.Online then
+        return AF.GetIcon("Circle_Filled"), "lime"
+    elseif presenceTypes.Away and status == presenceTypes.Away then
+        return AF.GetIcon("Clock_Round"), "gold"
+    elseif presenceTypes.Busy and status == presenceTypes.Busy then
+        return AF.GetIcon("Minus"), "lightred"
+    elseif (presenceTypes.AppearOffline and status == presenceTypes.AppearOffline)
+        or (presenceTypes.Offline and status == presenceTypes.Offline)
+        or (presenceTypes.Unknown and status == presenceTypes.Unknown)
+    then
+        return AF.GetIcon("Unavailable"), "disabled"
+    end
+end
+
+local function StyleStatusMenuItem(frame, description)
+    local iconPath, color = GetStatusIcon(description:GetData())
+    if not iconPath then return end
+
+    local icon = frame:AttachTexture()
+    icon:SetTexture(iconPath)
+    icon:SetVertexColor(AF.GetColorRGB(color))
+    AF.SetSize(icon, 16, 16)
+    AF.SetPoint(icon, "LEFT")
+
+    local fontString = frame.fontString
+    local text = _G.MenuUtil.GetElementText(description)
+    if fontString and type(text) == "string" then
+        -- Both status menus put their native texture or atlas markup before
+        -- the localized label. Retain the label while the AF texture replaces
+        -- only that leading artwork.
+        text = text:gsub("^|T.-|t%s*", "")
+        text = text:gsub("^|A.-|a%s*", "")
+        fontString:SetTextToFit(text)
+        AF.ClearPoints(fontString)
+        AF.SetPoint(fontString, "LEFT", icon, "RIGHT", 7, 1)
+    end
+end
+
+local function StyleStatusMenu(_, rootDescription)
+    for _, description in rootDescription:EnumerateElementDescriptions() do
+        if GetStatusIcon(description:GetData()) then
+            description:AddInitializer(StyleStatusMenuItem)
+        end
+    end
+end
+
+local function InstallStatusMenuHooks()
+    if statusMenuHooksInstalled or not (_G.Menu and _G.Menu.ModifyMenu) then return end
+    statusMenuHooksInstalled = true
+
+    _G.Menu.ModifyMenu("MENU_FRIENDS_STATUS", StyleStatusMenu)
+    _G.Menu.ModifyMenu("MENU_SOCIAL_UI_BATTLE_NET_PRESENCE", StyleStatusMenu)
+end
+
+local function RefreshStatusDropdownIcon(dropdown)
+    local owner = dropdown._BFIStatusOwner
+    local status = owner and owner.bnStatus or dropdown.presenceTypeSelf
+    local iconPath, color = GetStatusIcon(status)
+
+    dropdown.BFIStatusIcon:SetShown(iconPath ~= nil)
+    dropdown.Text:SetAlpha(iconPath and 0 or 1)
+    if iconPath then
+        dropdown.BFIStatusIcon:SetTexture(iconPath)
+        dropdown.BFIStatusIcon:SetVertexColor(AF.GetColorRGB(color))
+    end
+end
+
+local function StyleStatusDropdown(dropdown, owner)
+    if not dropdown then return end
+
+    StyleDropdown(dropdown)
+    InstallStatusMenuHooks()
+    dropdown._BFIStatusOwner = owner
+
+    if not dropdown._BFIStatusIconStyled then
+        dropdown._BFIStatusIconStyled = true
+        dropdown.BFIStatusIcon = AF.CreateTexture(dropdown)
+        AF.SetSize(dropdown.BFIStatusIcon, 16, 16)
+        AF.SetPoint(dropdown.BFIStatusIcon, "LEFT", dropdown, 7, 0)
+
+        hooksecurefunc(dropdown, "UpdateToMenuSelections", RefreshStatusDropdownIcon)
+        dropdown:HookScript("OnShow", RefreshStatusDropdownIcon)
+    end
+
+    RefreshStatusDropdownIcon(dropdown)
 end
 
 local function SetFlatTexture(texture, color, alpha, blendMode)
@@ -589,7 +691,7 @@ local function StyleLegacyFriendsFrame()
     StyleLegacyTabs(frame)
 
     local header = frame.FriendsTabHeader
-    StyleDropdown(header.StatusDropdown)
+    StyleStatusDropdown(header.StatusDropdown, header)
     StyleArtworkButton(header.BattlenetFrame.ContactsMenuButton)
 
     S.RemoveTextures(header.BattlenetFrame)
@@ -890,7 +992,7 @@ local function StyleSocialUI()
     battleNetBar.Background:SetAlpha(0)
     local controls = battleNetBar.ControlsContainer
     SetFlatTexture(controls.BattleNetBackground, "widget_dark", 0.8)
-    StyleDropdown(controls.OnlineStatusDropdown)
+    StyleStatusDropdown(controls.OnlineStatusDropdown)
     StyleArtworkButton(controls.BattleNetMenuButton)
 
     if not frame._BFISocialTabLayoutHooked then
@@ -933,6 +1035,7 @@ local function StyleRaidFrames()
 end
 
 local function StyleBlizzard()
+    InstallStatusMenuHooks()
     StyleLegacyFriendsFrame()
     StyleSocialUI()
     StyleRecentAllies()
