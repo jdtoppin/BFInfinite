@@ -41,7 +41,8 @@ local function loadRenderer(
     initialNativeEnabled,
     savedRestoreEnabled,
     availableSessionCount,
-    objectiveTrackerAvailable
+    objectiveTrackerAvailable,
+    objectiveDockFrameAvailable
 )
     local state = {
         ambiguousInputs = {},
@@ -55,6 +56,7 @@ local function loadRenderer(
             },
         },
         classColorInputs = {},
+        callbacks = {},
         currentSessions = {},
         deathRecapCalls = {},
         deathRecapEvents = {},
@@ -396,6 +398,7 @@ local function loadRenderer(
 
     local uiParent = newFrame("UIParent")
     local objectiveTracker
+    local objectiveTrackerDockFrame
     if objectiveTrackerAvailable ~= false then
         objectiveTracker = newFrame(
             "ObjectiveTrackerFrame",
@@ -405,7 +408,24 @@ local function loadRenderer(
             805
         )
         objectiveTracker.isOnLeftSideOfScreen = false
+        objectiveTracker.NineSlice = newFrame(
+            "ObjectiveTrackerNineSlice",
+            objectiveTracker,
+            nil,
+            272,
+            400
+        )
+        if objectiveDockFrameAvailable ~= false then
+            objectiveTrackerDockFrame = newFrame(
+                "ObjectiveTrackerDockFrame",
+                objectiveTracker,
+                "BFIObjectiveTrackerDockFrame",
+                272,
+                400
+            )
+        end
     end
+    state.objectiveTrackerDockFrame = objectiveTrackerDockFrame
 
     local AF = {}
 
@@ -495,6 +515,10 @@ local function loadRenderer(
 
     function AF.Fire(...)
         state.fires[#state.fires + 1] = {...}
+    end
+
+    function AF.RegisterCallback(name, registeredCallback)
+        state.callbacks[name] = registeredCallback
     end
 
     function AF.ApplyDefaultBackdrop_NoBorder(frame)
@@ -614,24 +638,24 @@ local function loadRenderer(
         windowAnchors = {
             {
                 relativeTo = 0,
-                point = "BOTTOMRIGHT",
-                relativePoint = "BOTTOMRIGHT",
+                point = "TOPRIGHT",
+                relativePoint = "TOPRIGHT",
                 x = -4,
-                y = 4,
+                y = -4,
             },
             {
                 relativeTo = 1,
-                point = "BOTTOMRIGHT",
-                relativePoint = "TOPRIGHT",
+                point = "TOPRIGHT",
+                relativePoint = "BOTTOMRIGHT",
                 x = 0,
-                y = 4,
+                y = -4,
             },
             {
                 relativeTo = 2,
-                point = "BOTTOMRIGHT",
-                relativePoint = "TOPRIGHT",
+                point = "TOPRIGHT",
+                relativePoint = "BOTTOMRIGHT",
                 x = 0,
-                y = 4,
+                y = -4,
             },
         },
         windowHeights = {
@@ -745,8 +769,12 @@ local function loadRenderer(
         name = "BFInfinite",
         modules = {
             DamageMeter = DM,
+            UIWidgets = {
+                objectiveTrackerDockFrame = objectiveTrackerDockFrame,
+            },
         },
     }
+    state.uiWidgets = BFI.modules.UIWidgets
 
     local environment = {
         AbstractFramework = AF,
@@ -1014,12 +1042,12 @@ assertEqual(third.shown, true, "third window shown")
 assertPoint(
     first,
     1,
+    "TOPRIGHT",
+    state.objectiveTrackerDockFrame,
     "BOTTOMRIGHT",
-    objectiveTracker,
-    "BOTTOMLEFT",
-    -38,
-    4,
-    "first default anchor clears the Objective Tracker"
+    0,
+    -8,
+    "first default anchor starts below the Objective Tracker"
 )
 assertEqual(
     DM.config.windowAnchors[1].relativeTo,
@@ -1029,23 +1057,61 @@ assertEqual(
 assertPoint(
     second,
     1,
-    "BOTTOMRIGHT",
-    first,
     "TOPRIGHT",
+    first,
+    "BOTTOMRIGHT",
     0,
-    4,
+    -4,
     "second default anchor"
 )
 assertPoint(
     third,
     1,
-    "BOTTOMRIGHT",
-    second,
     "TOPRIGHT",
+    second,
+    "BOTTOMRIGHT",
     0,
-    4,
+    -4,
     "third default anchor"
 )
+
+local EarlyRenderer, _, earlyState, _, _, _, earlyObjectiveTracker =
+    loadRenderer(nil, nil, nil, true, false)
+assertEqual(
+    EarlyRenderer.SetEnabled(true),
+    true,
+    "renderer starts before the BFI tracker surface is ready"
+)
+local earlyFirst = earlyState.namedFrames.BFIDamageMeterWindow1
+assertPoint(
+    earlyFirst,
+    1,
+    "TOPRIGHT",
+    earlyObjectiveTracker.NineSlice,
+    "BOTTOMRIGHT",
+    0,
+    -8,
+    "native content bounds provide a temporary tracker fallback"
+)
+local readyDockFrame = {}
+earlyState.uiWidgets.objectiveTrackerDockFrame = readyDockFrame
+assertEqual(
+    type(earlyState.callbacks.BFI_ObjectiveTrackerDockFrameChanged),
+    "function",
+    "Objective Tracker dock-frame callback registered"
+)
+earlyState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
+assertPoint(
+    earlyFirst,
+    1,
+    "TOPRIGHT",
+    readyDockFrame,
+    "BOTTOMRIGHT",
+    0,
+    -8,
+    "ready BFI tracker surface replaces the temporary fallback"
+)
+EarlyRenderer.SetEnabled(false)
 
 local FallbackRenderer, _, fallbackState, _, _, fallbackUIParent =
     loadRenderer(nil, nil, nil, false)
@@ -1058,17 +1124,20 @@ local fallbackFirst = fallbackState.namedFrames.BFIDamageMeterWindow1
 assertPoint(
     fallbackFirst,
     1,
-    "BOTTOMRIGHT",
+    "TOPRIGHT",
     fallbackUIParent,
-    "BOTTOMRIGHT",
+    "TOPRIGHT",
     -4,
-    4,
+    -4,
     "unloaded Objective Tracker uses the safe screen fallback"
 )
 local lateObjectiveTracker = {
     isOnLeftSideOfScreen = false,
 }
+local lateObjectiveTrackerDockFrame = {}
 fallbackState.environment.ObjectiveTrackerFrame = lateObjectiveTracker
+fallbackState.uiWidgets.objectiveTrackerDockFrame =
+    lateObjectiveTrackerDockFrame
 local fallbackEventFrame
 for _, frame in ipairs(fallbackState.frames) do
     if frame.events.ADDON_LOADED then
@@ -1089,12 +1158,12 @@ fallbackEventFrame:RunScript(
 assertPoint(
     fallbackFirst,
     1,
+    "TOPRIGHT",
+    lateObjectiveTrackerDockFrame,
     "BOTTOMRIGHT",
-    lateObjectiveTracker,
-    "BOTTOMLEFT",
-    -38,
-    4,
-    "late Objective Tracker load reapplies the non-overlapping anchor"
+    0,
+    -8,
+    "late Objective Tracker load reapplies the below-tracker anchor"
 )
 FallbackRenderer.SetEnabled(false)
 
@@ -1109,12 +1178,12 @@ assertEqual(
 assertPoint(
     optOutState.namedFrames.BFIDamageMeterWindow1,
     1,
-    "BOTTOMRIGHT",
+    "TOPRIGHT",
     optOutUIParent,
-    "BOTTOMRIGHT",
+    "TOPRIGHT",
     -4,
-    4,
-    "explicit opt-out retains the historical screen anchor"
+    -4,
+    "explicit opt-out retains the screen-relative anchor"
 )
 OptOutRenderer.SetEnabled(false)
 
@@ -1627,24 +1696,24 @@ damageMeterEventFrame:RunScript("OnEvent", "EDIT_MODE_LAYOUTS_UPDATED")
 assertPoint(
     first,
     1,
-    "BOTTOMLEFT",
-    objectiveTracker,
+    "TOPRIGHT",
+    state.objectiveTrackerDockFrame,
     "BOTTOMRIGHT",
-    13,
-    4,
-    "left-side Objective Tracker places meters on its inward edge"
+    0,
+    -8,
+    "Edit Mode keeps meters below the Objective Tracker"
 )
 objectiveTracker.isOnLeftSideOfScreen = false
 damageMeterEventFrame:RunScript("OnEvent", "EDIT_MODE_LAYOUTS_UPDATED")
 assertPoint(
     first,
     1,
+    "TOPRIGHT",
+    state.objectiveTrackerDockFrame,
     "BOTTOMRIGHT",
-    objectiveTracker,
-    "BOTTOMLEFT",
-    -38,
-    4,
-    "right-side Objective Tracker restores left-side meter placement"
+    0,
+    -8,
+    "right-side Objective Tracker retains the vertical lane"
 )
 Renderer.SetWindowSession(1, "history", 91, {sync = false})
 first.body:RunScript("OnMouseWheel", -1)
@@ -1886,6 +1955,37 @@ assertEqual(
     "resize refresh targets Damage Meter options"
 )
 
+local function SeedUpwardDockingScenario()
+    DM.config.windowAnchors = {
+        {
+            relativeTo = 0,
+            point = "BOTTOMRIGHT",
+            relativePoint = "BOTTOMRIGHT",
+            x = -4,
+            y = 4,
+        },
+        {
+            relativeTo = 1,
+            point = "BOTTOMRIGHT",
+            relativePoint = "TOPRIGHT",
+            x = 0,
+            y = 4,
+        },
+        {
+            relativeTo = 2,
+            point = "BOTTOMRIGHT",
+            relativePoint = "TOPRIGHT",
+            x = 0,
+            y = 4,
+        },
+    }
+    Renderer.ApplySettings()
+end
+
+-- The generic drag/drop coverage exercises both insertion directions using a
+-- dedicated upward chain; default placement is asserted separately above.
+SeedUpwardDockingScenario()
+
 first.mouseOver = true
 first.centerY = 300
 state.cursorY = 350
@@ -2085,23 +2185,25 @@ end
 assertPoint(
     first,
     1,
+    "TOPRIGHT",
+    state.objectiveTrackerDockFrame,
     "BOTTOMRIGHT",
-    objectiveTracker,
-    "BOTTOMLEFT",
-    -38,
-    4,
-    "reset places the stack beside the Objective Tracker"
+    0,
+    -8,
+    "reset places the stack below the Objective Tracker"
 )
 assertPoint(
     second,
     1,
-    "BOTTOMRIGHT",
-    first,
     "TOPRIGHT",
+    first,
+    "BOTTOMRIGHT",
     0,
-    4,
+    -4,
     "reset restores vertical stack"
 )
+
+SeedUpwardDockingScenario()
 
 first.mouseOver = false
 second.mouseOver = true
@@ -2175,12 +2277,12 @@ assertEqual(
 assertPoint(
     second,
     1,
+    "TOPRIGHT",
+    state.objectiveTrackerDockFrame,
     "BOTTOMRIGHT",
-    objectiveTracker,
-    "BOTTOMLEFT",
-    -38,
-    4,
-    "moving the root transfers tracker-safe placement to its neighbor"
+    0,
+    -8,
+    "moving the root transfers below-tracker placement to its neighbor"
 )
 Renderer.ResetPosition()
 

@@ -690,7 +690,7 @@ local function CreateActionsPane()
 
     local placeMeters = AF.CreateButton(
         actionsPane,
-        L["Place Meters Beside Objective Tracker"],
+        L["Place Meters Below Objective Tracker"],
         "BFI",
         245,
         25

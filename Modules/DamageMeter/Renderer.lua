@@ -28,13 +28,6 @@ local Renderer = DM.Renderer
 local MAX_WINDOWS = 3
 local WINDOW_INSET = 4
 local WINDOW_GAP = 4
--- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit d3915c78:
--- Blizzard_ObjectiveTracker/Blizzard_ObjectiveTrackerContainer.xml defines
--- ObjectiveTrackerContainerTemplate as 260 pixels wide, with its NineSlice
--- starting 30 pixels left of the managed frame. Keep a visible gap beyond it
--- without taking ownership of the Objective Tracker's position or height.
-local OBJECTIVE_TRACKER_LEFT_OVERHANG = 30
-local OBJECTIVE_TRACKER_RIGHT_OVERHANG = 5
 local OBJECTIVE_TRACKER_GAP = 8
 local REFRESH_DELAY = 0.1
 local NATIVE_RESTORE_KEY = "damageMeterNativeEnabledBeforeBFI"
@@ -182,19 +175,19 @@ local function GetDefaultAnchor(index)
     if index == 1 then
         return {
             relativeTo = 0,
-            point = "BOTTOMRIGHT",
-            relativePoint = "BOTTOMRIGHT",
+            point = "TOPRIGHT",
+            relativePoint = "TOPRIGHT",
             x = -WINDOW_INSET,
-            y = WINDOW_INSET,
+            y = -WINDOW_INSET,
         }
     end
 
     return {
         relativeTo = index - 1,
-        point = "BOTTOMRIGHT",
-        relativePoint = "TOPRIGHT",
+        point = "TOPRIGHT",
+        relativePoint = "BOTTOMRIGHT",
         x = 0,
-        y = WINDOW_GAP,
+        y = -WINDOW_GAP,
     }
 end
 
@@ -1894,6 +1887,13 @@ local function AnchorChainReaches(config, startIndex, targetIndex)
     return false
 end
 
+local function GetObjectiveTrackerDockTarget(tracker)
+    local widgets = BFI.modules.UIWidgets
+    return widgets and widgets.objectiveTrackerDockFrame
+        or tracker.NineSlice
+        or tracker
+end
+
 local function ApplyAllAnchors(config)
     EnsureInteractionConfig(config)
     for index = 1, MAX_WINDOWS do
@@ -1919,21 +1919,16 @@ local function ApplyAllAnchors(config)
             and _G.ObjectiveTrackerFrame
         then
             local tracker = _G.ObjectiveTrackerFrame
-            relativeTo = tracker
-            -- The pinned Blizzard_MawBuffs.lua and
-            -- Blizzard_UIWidgetTemplateStatusBar.lua use this field to orient
-            -- tracker-adjacent UI. Put meters on the inward side of a custom
-            -- Edit Mode layout so clamping cannot push them back over it.
-            if tracker.isOnLeftSideOfScreen == true then
-                point = "BOTTOMLEFT"
-                relativePoint = "BOTTOMRIGHT"
-                x = OBJECTIVE_TRACKER_RIGHT_OVERHANG
-                    + OBJECTIVE_TRACKER_GAP
-            else
-                relativePoint = "BOTTOMLEFT"
-                x = -OBJECTIVE_TRACKER_LEFT_OVERHANG
-                    - OBJECTIVE_TRACKER_GAP
-            end
+            -- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit
+            -- d3915c78: ObjectiveTrackerContainerMixin updates visible content
+            -- after each native layout. BFI's owned dock frame follows that
+            -- content, so a declarative anchor keeps one right-side lane
+            -- without taking ownership of the tracker or its height.
+            relativeTo = GetObjectiveTrackerDockTarget(tracker)
+            point = "TOPRIGHT"
+            relativePoint = "BOTTOMRIGHT"
+            x = 0
+            y = -OBJECTIVE_TRACKER_GAP
         end
         local window = windows[index]
         window:ClearAllPoints()
@@ -3177,3 +3172,10 @@ end
 function Renderer.IsEnabled()
     return rendererEnabled == true
 end
+
+AF.RegisterCallback("BFI_ObjectiveTrackerDockFrameChanged", function()
+    local config = GetConfig()
+    if rendererEnabled and config.dockToObjectiveTracker then
+        ApplyAllAnchors(config)
+    end
+end)

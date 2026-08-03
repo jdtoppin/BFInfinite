@@ -6,6 +6,7 @@ local DM = BFI.modules.DamageMeter
 local AF = _G.AbstractFramework
 
 local CURRENT_SIZE_DEFAULTS_VERSION = 1
+local CURRENT_DOCK_DEFAULTS_VERSION = 1
 local LEGACY_DEFAULT_WIDTH = 300
 local LEGACY_DEFAULT_HEIGHT = 220
 local LEGACY_DEFAULT_WINDOW_HEIGHTS = {
@@ -17,6 +18,29 @@ local PREVIOUS_DEFAULT_WINDOW_HEIGHTS = {
     147,
     134,
     134,
+}
+local PREVIOUS_DEFAULT_WINDOW_ANCHORS = {
+    {
+        relativeTo = 0,
+        point = "BOTTOMRIGHT",
+        relativePoint = "BOTTOMRIGHT",
+        x = -4,
+        y = 4,
+    },
+    {
+        relativeTo = 1,
+        point = "BOTTOMRIGHT",
+        relativePoint = "TOPRIGHT",
+        x = 0,
+        y = 4,
+    },
+    {
+        relativeTo = 2,
+        point = "BOTTOMRIGHT",
+        relativePoint = "TOPRIGHT",
+        x = 0,
+        y = 4,
+    },
 }
 
 local defaults = {
@@ -67,27 +91,28 @@ local defaults = {
     windowAnchors = {
         {
             relativeTo = 0,
-            point = "BOTTOMRIGHT",
-            relativePoint = "BOTTOMRIGHT",
+            point = "TOPRIGHT",
+            relativePoint = "TOPRIGHT",
             x = -4,
-            y = 4,
+            y = -4,
         },
         {
             relativeTo = 1,
-            point = "BOTTOMRIGHT",
-            relativePoint = "TOPRIGHT",
+            point = "TOPRIGHT",
+            relativePoint = "BOTTOMRIGHT",
             x = 0,
-            y = 4,
+            y = -4,
         },
         {
             relativeTo = 2,
-            point = "BOTTOMRIGHT",
-            relativePoint = "TOPRIGHT",
+            point = "TOPRIGHT",
+            relativePoint = "BOTTOMRIGHT",
             x = 0,
-            y = 4,
+            y = -4,
         },
     },
     dockToObjectiveTracker = true,
+    dockDefaultsVersion = CURRENT_DOCK_DEFAULTS_VERSION,
     locked = false,
     width = 260,
     sizeDefaultsVersion = CURRENT_SIZE_DEFAULTS_VERSION,
@@ -314,10 +339,13 @@ local function NormalizeWindowAnchors(config)
     end
 end
 
-local function WindowAnchorsMatchDefaults(anchors)
+local function WindowAnchorsMatch(anchors, expected)
+    if type(anchors) ~= "table" then return false end
+
     for index = 1, 3 do
         local anchor = anchors[index]
-        local default = defaults.windowAnchors[index]
+        local default = expected[index]
+        if type(anchor) ~= "table" then return false end
         if anchor.relativeTo ~= default.relativeTo
             or anchor.point ~= default.point
             or anchor.relativePoint ~= default.relativePoint
@@ -328,6 +356,32 @@ local function WindowAnchorsMatchDefaults(anchors)
         end
     end
     return true
+end
+
+local function WindowAnchorsMatchDefaults(anchors)
+    return WindowAnchorsMatch(anchors, defaults.windowAnchors)
+end
+
+local function MigrateDefaultDock(config)
+    local version = config.dockDefaultsVersion
+    if type(version) == "number"
+        and version >= CURRENT_DOCK_DEFAULTS_VERSION
+    then
+        return
+    end
+
+    -- Move only an untouched upward stack into the new tracker-first lane.
+    -- Explicit opt-outs and every custom anchor chain remain user-owned.
+    if config.dockToObjectiveTracker ~= false
+        and WindowAnchorsMatch(
+            config.windowAnchors,
+            PREVIOUS_DEFAULT_WINDOW_ANCHORS
+        )
+    then
+        config.windowAnchors = CopyWindowAnchors(defaults.windowAnchors)
+        config.dockToObjectiveTracker = true
+    end
+    config.dockDefaultsVersion = CURRENT_DOCK_DEFAULTS_VERSION
 end
 
 local function NormalizeWindowSessions(config)
@@ -448,6 +502,7 @@ local function NormalizeConfig(config)
             true
         )
     end
+    MigrateDefaultDock(config)
     local hadTrackerDockSetting =
         type(config.dockToObjectiveTracker) == "boolean"
     NormalizeWindowAnchors(config)

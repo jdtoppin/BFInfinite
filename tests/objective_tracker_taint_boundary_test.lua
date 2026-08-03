@@ -101,6 +101,7 @@ local backdropAnchors = {}
 local backdropParent
 local backdropColor
 local backdropBorderColor
+local dockFrameEvents = 0
 local trackerBackdrop = {
     ClearAllPoints = function()
         backdropAnchors = {}
@@ -135,6 +136,11 @@ local AF = {
     end,
     RegisterCallback = function(_, registeredCallback)
         callback = registeredCallback
+    end,
+    Fire = function(event)
+        assertEqual(event, "BFI_ObjectiveTrackerDockFrameChanged",
+            "Objective Tracker dock-frame callback")
+        dockFrameEvents = dockFrameEvents + 1
     end,
     GetColorRGB = function(name, alpha)
         if name == "background" then
@@ -290,16 +296,16 @@ assertEqual(backdropAnchors[1][2], trackerHeader,
     "shared backdrop top-left follows the header")
 assertEqual(backdropAnchors[1][3], "TOPLEFT",
     "shared backdrop top-left relative point")
-assertEqual(backdropAnchors[1][4], -36,
-    "shared backdrop includes left overhang and padding")
+assertEqual(backdropAnchors[1][4], -6,
+    "shared backdrop removes the empty native left overhang")
 assertEqual(backdropAnchors[1][5], 6,
     "shared backdrop moves above the header")
 assertEqual(backdropAnchors[2][1], "TOPRIGHT",
     "shared backdrop top-right point")
 assertEqual(backdropAnchors[2][2], trackerHeader,
     "shared backdrop top-right follows the header")
-assertEqual(backdropAnchors[2][4], 11,
-    "shared backdrop includes right overhang and padding")
+assertEqual(backdropAnchors[2][4], 6,
+    "shared backdrop uses compact right padding")
 assertEqual(backdropAnchors[2][5], 6,
     "shared backdrop top padding is symmetrical")
 assertEqual(backdropAnchors[3][1], "BOTTOM",
@@ -310,6 +316,19 @@ assertEqual(backdropAnchors[3][5], -16,
     "shared backdrop includes native and extra bottom padding")
 assertEqual(backdropRelativeLevel, -1,
     "shared backdrop remains behind tracker content")
+assertEqual(W.objectiveTrackerDockFrame, trackerBackdrop,
+    "shared backdrop is published as the meter dock target")
+assertEqual(dockFrameEvents, 1,
+    "meter docking refreshes when the tracker surface becomes ready")
+
+secondModule.leftMargin = -20
+trackerUpdateHook()
+assertEqual(backdropAnchors[1][4], -26,
+    "shown Scenario content receives only its required left overhang")
+secondModule.leftMargin = nil
+trackerUpdateHook()
+assertEqual(backdropAnchors[1][4], -6,
+    "normal objectives return to the compact left edge")
 
 secondModuleShown = false
 trackerUpdateHook()
@@ -322,6 +341,8 @@ assertEqual(backdropAnchors[3][2], trackerHeader,
     "collapsed tracker background shrinks to the visible header")
 assertEqual(backdropAnchors[3][5], -6,
     "collapsed tracker keeps only surface padding below the header")
+assertEqual(backdropAnchors[1][4], -6,
+    "collapsed tracker retains the compact left edge")
 
 trackerCollapsed = false
 secondModuleShown = true

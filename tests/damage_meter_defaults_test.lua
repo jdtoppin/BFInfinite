@@ -28,6 +28,32 @@ local function assertAnchor(actual, expected, message)
     assertEqual(actual.y, expected.y, message .. " y")
 end
 
+local function previousDefaultAnchors()
+    return {
+        {
+            relativeTo = 0,
+            point = "BOTTOMRIGHT",
+            relativePoint = "BOTTOMRIGHT",
+            x = -4,
+            y = 4,
+        },
+        {
+            relativeTo = 1,
+            point = "BOTTOMRIGHT",
+            relativePoint = "TOPRIGHT",
+            x = 0,
+            y = 4,
+        },
+        {
+            relativeTo = 2,
+            point = "BOTTOMRIGHT",
+            relativePoint = "TOPRIGHT",
+            x = 0,
+            y = 4,
+        },
+    }
+end
+
 local function loadDefaults()
     local callbacks = {}
     local state = {
@@ -148,24 +174,24 @@ local function assertDefaults(config, message)
     assertEqual(config.alwaysShowPlayer, true, message .. " always show player")
     assertAnchor(config.windowAnchors[1], {
         relativeTo = 0,
-        point = "BOTTOMRIGHT",
-        relativePoint = "BOTTOMRIGHT",
+        point = "TOPRIGHT",
+        relativePoint = "TOPRIGHT",
         x = -4,
-        y = 4,
+        y = -4,
     }, message .. " first anchor")
     assertAnchor(config.windowAnchors[2], {
         relativeTo = 1,
-        point = "BOTTOMRIGHT",
-        relativePoint = "TOPRIGHT",
+        point = "TOPRIGHT",
+        relativePoint = "BOTTOMRIGHT",
         x = 0,
-        y = 4,
+        y = -4,
     }, message .. " second anchor")
     assertAnchor(config.windowAnchors[3], {
         relativeTo = 2,
-        point = "BOTTOMRIGHT",
-        relativePoint = "TOPRIGHT",
+        point = "TOPRIGHT",
+        relativePoint = "BOTTOMRIGHT",
         x = 0,
-        y = 4,
+        y = -4,
     }, message .. " third anchor")
     assertEqual(
         config.dockToObjectiveTracker,
@@ -175,6 +201,7 @@ local function assertDefaults(config, message)
     assertEqual(config.locked, false, message .. " locked")
     assertEqual(config.width, 260, message .. " width")
     assertEqual(config.sizeDefaultsVersion, 1, message .. " size defaults version")
+    assertEqual(config.dockDefaultsVersion, 1, message .. " dock defaults version")
     assertEqual(config.height, nil, message .. " legacy height removed")
     assertEqual(config.headerHeight, 22, message .. " header height")
     assertEqual(config.barHeight, 20, message .. " bar height")
@@ -300,7 +327,7 @@ assertEqual(partialConfig.alwaysShowPlayer, true, "partial player pin default")
 assertEqual(
     partialConfig.dockToObjectiveTracker,
     true,
-    "untouched historical anchors migrate beside the Objective Tracker"
+    "untouched anchors dock below the Objective Tracker"
 )
 assertEqual(partialConfig.width, 260, "partial width default")
 assertEqual(partialConfig.windowHeights[1], 138, "partial first height default")
@@ -431,6 +458,70 @@ assertEqual(versionedPreviousDefaultsConfig.width, 300,
     "versioned user-selected width is preserved")
 assertEqual(versionedPreviousDefaultsConfig.windowHeights[1], 147,
     "versioned user-selected heights are preserved")
+
+local historicalDockConfig = {
+    windowAnchors = previousDefaultAnchors(),
+}
+updateProfile(nil, {
+    damageMeter = historicalDockConfig,
+})
+assertEqual(historicalDockConfig.dockToObjectiveTracker, true,
+    "historical default stack migrates below the Objective Tracker")
+for index = 1, 3 do
+    assertAnchor(
+        historicalDockConfig.windowAnchors[index],
+        DM.GetDefaults().windowAnchors[index],
+        "historical default dock anchor " .. index
+    )
+end
+
+local previousBranchDockConfig = {
+    dockToObjectiveTracker = true,
+    windowAnchors = previousDefaultAnchors(),
+}
+updateProfile(nil, {
+    damageMeter = previousBranchDockConfig,
+})
+assertEqual(previousBranchDockConfig.dockToObjectiveTracker, true,
+    "previous branch docking remains enabled")
+for index = 1, 3 do
+    assertAnchor(
+        previousBranchDockConfig.windowAnchors[index],
+        DM.GetDefaults().windowAnchors[index],
+        "previous branch dock anchor " .. index
+    )
+end
+
+local historicalDockOptOutConfig = {
+    dockToObjectiveTracker = false,
+    windowAnchors = previousDefaultAnchors(),
+}
+updateProfile(nil, {
+    damageMeter = historicalDockOptOutConfig,
+})
+assertEqual(historicalDockOptOutConfig.dockToObjectiveTracker, false,
+    "historical docking opt-out remains disabled")
+for index = 1, 3 do
+    assertAnchor(
+        historicalDockOptOutConfig.windowAnchors[index],
+        previousDefaultAnchors()[index],
+        "historical opt-out anchor " .. index
+    )
+end
+
+local versionedHistoricalDockConfig = {
+    dockDefaultsVersion = 1,
+    dockToObjectiveTracker = true,
+    windowAnchors = previousDefaultAnchors(),
+}
+updateProfile(nil, {
+    damageMeter = versionedHistoricalDockConfig,
+})
+assertAnchor(
+    versionedHistoricalDockConfig.windowAnchors[1],
+    previousDefaultAnchors()[1],
+    "versioned user-selected dock anchor is preserved"
+)
 
 local customAnchorConfig = {
     windowAnchors = {
@@ -689,8 +780,8 @@ assertEqual(invalidConfig.windowHeights[3], 520, "window three height clamp")
 assertEqual(invalidConfig.locked, false, "lock normalization")
 assertAnchor(invalidConfig.windowAnchors[1], {
     relativeTo = 0,
-    point = "BOTTOMRIGHT",
-    relativePoint = "BOTTOMRIGHT",
+    point = "TOPRIGHT",
+    relativePoint = "TOPRIGHT",
     x = -4096,
     y = 4096,
 }, "invalid first anchor normalization")
@@ -785,7 +876,7 @@ assertAnchor(
 assertEqual(
     cyclicAnchorsConfig.dockToObjectiveTracker,
     true,
-    "repaired default stack docks beside the Objective Tracker"
+    "repaired default stack docks below the Objective Tracker"
 )
 
 local validWindowTypes = {
