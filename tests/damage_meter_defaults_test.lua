@@ -106,7 +106,7 @@ local function loadDefaults()
 end
 
 local function assertDefaults(config, message)
-    local expectedWindowHeights = {138, 120, 120}
+    local expectedWindowHeights = {124, 104, 104}
     assertEqual(config.enabled, false, message .. " enabled")
     assertEqual(config.windowCount, 3, message .. " window count")
     assertEqual(
@@ -199,14 +199,14 @@ local function assertDefaults(config, message)
         message .. " Objective Tracker docking"
     )
     assertEqual(config.locked, false, message .. " locked")
-    assertEqual(config.width, 260, message .. " width")
-    assertEqual(config.sizeDefaultsVersion, 1, message .. " size defaults version")
+    assertEqual(config.width, 240, message .. " width")
+    assertEqual(config.sizeDefaultsVersion, 2, message .. " size defaults version")
     assertEqual(config.dockDefaultsVersion, 1, message .. " dock defaults version")
     assertEqual(config.height, nil, message .. " legacy height removed")
-    assertEqual(config.headerHeight, 22, message .. " header height")
-    assertEqual(config.barHeight, 20, message .. " bar height")
+    assertEqual(config.headerHeight, 20, message .. " header height")
+    assertEqual(config.barHeight, 18, message .. " bar height")
     assertEqual(config.spacing, 2, message .. " spacing")
-    assertEqual(config.padding, 4, message .. " padding")
+    assertEqual(config.padding, 3, message .. " padding")
     assertEqual(config.texture, "AF", message .. " texture")
     assertEqual(config.numberMode, "both", message .. " number mode")
     assertEqual(config.showSpecIcon, true, message .. " spec icon")
@@ -290,7 +290,7 @@ assertEqual(
 )
 assertEqual(
     DM.GetDefaults().windowHeights[1],
-    138,
+    124,
     "profile window heights independent from defaults"
 )
 assertEqual(
@@ -329,10 +329,10 @@ assertEqual(
     true,
     "untouched anchors dock below the Objective Tracker"
 )
-assertEqual(partialConfig.width, 260, "partial width default")
-assertEqual(partialConfig.windowHeights[1], 138, "partial first height default")
-assertEqual(partialConfig.windowHeights[2], 120, "partial second height default")
-assertEqual(partialConfig.windowHeights[3], 120, "partial third height default")
+assertEqual(partialConfig.width, 240, "partial width default")
+assertEqual(partialConfig.windowHeights[1], 124, "partial first height default")
+assertEqual(partialConfig.windowHeights[2], 104, "partial second height default")
+assertEqual(partialConfig.windowHeights[3], 104, "partial third height default")
 assertEqual(partialConfig.extra, "preserved", "unknown config preserved")
 
 local partialHeightsConfig = {
@@ -343,9 +343,9 @@ local partialHeightsConfig = {
 updateProfile(nil, {
     damageMeter = partialHeightsConfig,
 })
-assertEqual(partialHeightsConfig.windowHeights[1], 138, "missing first height")
+assertEqual(partialHeightsConfig.windowHeights[1], 124, "missing first height")
 assertEqual(partialHeightsConfig.windowHeights[2], 199, "saved second height")
-assertEqual(partialHeightsConfig.windowHeights[3], 120, "missing third height")
+assertEqual(partialHeightsConfig.windowHeights[3], 104, "missing third height")
 
 local previousDefaultsConfig = {
     width = 300,
@@ -358,21 +358,79 @@ local previousDefaultsConfig = {
 updateProfile(nil, {
     damageMeter = previousDefaultsConfig,
 })
-assertEqual(previousDefaultsConfig.width, 260,
+assertEqual(previousDefaultsConfig.width, 240,
     "previous default width migrates to compact width")
-assertEqual(previousDefaultsConfig.windowHeights[1], 138,
+assertEqual(previousDefaultsConfig.windowHeights[1], 124,
     "previous first default height migrates")
-assertEqual(previousDefaultsConfig.windowHeights[2], 120,
+assertEqual(previousDefaultsConfig.windowHeights[2], 104,
     "previous second default height migrates")
-assertEqual(previousDefaultsConfig.windowHeights[3], 120,
+assertEqual(previousDefaultsConfig.windowHeights[3], 104,
     "previous third default height migrates")
-assertEqual(previousDefaultsConfig.sizeDefaultsVersion, 1,
+assertEqual(previousDefaultsConfig.headerHeight, 20,
+    "previous default header density migrates")
+assertEqual(previousDefaultsConfig.barHeight, 18,
+    "previous default bar density migrates")
+assertEqual(previousDefaultsConfig.padding, 3,
+    "previous default padding migrates")
+assertEqual(previousDefaultsConfig.sizeDefaultsVersion, 2,
     "previous default sizes record migration")
 updateProfile(nil, {
     damageMeter = previousDefaultsConfig,
 })
-assertEqual(previousDefaultsConfig.width, 260,
+assertEqual(previousDefaultsConfig.width, 240,
     "default size migration is idempotent")
+
+local versionOneDefaultsConfig = {
+    sizeDefaultsVersion = 1,
+    width = 260,
+    windowHeights = {
+        138,
+        120,
+        120,
+    },
+    headerHeight = 22,
+    barHeight = 20,
+    spacing = 2,
+    padding = 4,
+}
+updateProfile(nil, {
+    damageMeter = versionOneDefaultsConfig,
+})
+assertEqual(versionOneDefaultsConfig.width, 240,
+    "version one default width migrates")
+assertEqual(versionOneDefaultsConfig.windowHeights[1], 124,
+    "version one first default height migrates")
+assertEqual(versionOneDefaultsConfig.windowHeights[2], 104,
+    "version one stacked default height migrates")
+assertEqual(versionOneDefaultsConfig.headerHeight, 20,
+    "version one default header density migrates")
+assertEqual(versionOneDefaultsConfig.barHeight, 18,
+    "version one default bar density migrates")
+assertEqual(versionOneDefaultsConfig.spacing, 2,
+    "version one default spacing migrates")
+assertEqual(versionOneDefaultsConfig.padding, 3,
+    "version one default padding migrates")
+assertEqual(versionOneDefaultsConfig.sizeDefaultsVersion, 2,
+    "version one migration is stamped")
+
+local versionOneDefaultsWithoutDensityConfig = {
+    sizeDefaultsVersion = 1,
+    width = 260,
+    windowHeights = {
+        138,
+        120,
+        120,
+    },
+}
+updateProfile(nil, {
+    damageMeter = versionOneDefaultsWithoutDensityConfig,
+})
+assertEqual(versionOneDefaultsWithoutDensityConfig.width, 240,
+    "missing version one density still migrates exact dimensions")
+assertEqual(versionOneDefaultsWithoutDensityConfig.headerHeight, 20,
+    "missing version one header receives compact density")
+assertEqual(versionOneDefaultsWithoutDensityConfig.padding, 3,
+    "missing version one padding receives compact density")
 
 local historicalWindowDefaultsConfig = {
     width = 300,
@@ -385,9 +443,9 @@ local historicalWindowDefaultsConfig = {
 updateProfile(nil, {
     damageMeter = historicalWindowDefaultsConfig,
 })
-assertEqual(historicalWindowDefaultsConfig.width, 260,
+assertEqual(historicalWindowDefaultsConfig.width, 240,
     "historical default width migrates")
-assertEqual(historicalWindowDefaultsConfig.windowHeights[1], 138,
+assertEqual(historicalWindowDefaultsConfig.windowHeights[1], 124,
     "historical window defaults migrate")
 
 local historicalScalarDefaultConfig = {
@@ -397,13 +455,13 @@ local historicalScalarDefaultConfig = {
 updateProfile(nil, {
     damageMeter = historicalScalarDefaultConfig,
 })
-assertEqual(historicalScalarDefaultConfig.width, 260,
+assertEqual(historicalScalarDefaultConfig.width, 240,
     "historical scalar default width migrates")
 assertEqual(historicalScalarDefaultConfig.height, nil,
     "historical scalar default is removed")
-assertEqual(historicalScalarDefaultConfig.windowHeights[1], 138,
+assertEqual(historicalScalarDefaultConfig.windowHeights[1], 124,
     "historical scalar default uses compact first height")
-assertEqual(historicalScalarDefaultConfig.windowHeights[2], 120,
+assertEqual(historicalScalarDefaultConfig.windowHeights[2], 104,
     "historical scalar default uses compact stacked height")
 
 local customWidthConfig = {
@@ -441,6 +499,66 @@ assertEqual(customHeightConfig.windowHeights[2], 199,
     "custom height remains unchanged")
 assertEqual(customHeightConfig.windowHeights[3], 134,
     "custom height preserves the third saved height")
+assertEqual(customHeightConfig.sizeDefaultsVersion, 2,
+    "custom historical dimensions are stamped current")
+
+local customVersionOneDimensionConfig = {
+    sizeDefaultsVersion = 1,
+    width = 250,
+    windowHeights = {
+        138,
+        120,
+        120,
+    },
+    headerHeight = 22,
+    barHeight = 20,
+    spacing = 2,
+    padding = 4,
+}
+updateProfile(nil, {
+    damageMeter = customVersionOneDimensionConfig,
+})
+assertEqual(customVersionOneDimensionConfig.width, 250,
+    "custom version one width is preserved")
+assertEqual(customVersionOneDimensionConfig.windowHeights[1], 138,
+    "custom version one tuple preserves old heights")
+assertEqual(customVersionOneDimensionConfig.headerHeight, 22,
+    "custom version one tuple preserves old header density")
+assertEqual(customVersionOneDimensionConfig.barHeight, 20,
+    "custom version one tuple preserves old bar density")
+assertEqual(customVersionOneDimensionConfig.padding, 4,
+    "custom version one tuple preserves old padding")
+assertEqual(customVersionOneDimensionConfig.sizeDefaultsVersion, 2,
+    "custom version one dimensions are stamped current")
+
+local customVersionOneDensityConfig = {
+    sizeDefaultsVersion = 1,
+    width = 260,
+    windowHeights = {
+        138,
+        120,
+        120,
+    },
+    headerHeight = 22,
+    barHeight = 20,
+    spacing = 2,
+    padding = 5,
+}
+updateProfile(nil, {
+    damageMeter = customVersionOneDensityConfig,
+})
+assertEqual(customVersionOneDensityConfig.width, 260,
+    "custom density preserves version one width")
+assertEqual(customVersionOneDensityConfig.windowHeights[2], 120,
+    "custom density preserves version one heights")
+assertEqual(customVersionOneDensityConfig.headerHeight, 22,
+    "custom density preserves version one header")
+assertEqual(customVersionOneDensityConfig.barHeight, 20,
+    "custom density preserves version one bars")
+assertEqual(customVersionOneDensityConfig.padding, 5,
+    "custom density remains unchanged")
+assertEqual(customVersionOneDensityConfig.sizeDefaultsVersion, 2,
+    "custom version one density is stamped current")
 
 local versionedPreviousDefaultsConfig = {
     sizeDefaultsVersion = 1,
@@ -458,6 +576,8 @@ assertEqual(versionedPreviousDefaultsConfig.width, 300,
     "versioned user-selected width is preserved")
 assertEqual(versionedPreviousDefaultsConfig.windowHeights[1], 147,
     "versioned user-selected heights are preserved")
+assertEqual(versionedPreviousDefaultsConfig.sizeDefaultsVersion, 2,
+    "versioned historical selection is stamped current")
 
 local historicalDockConfig = {
     windowAnchors = previousDefaultAnchors(),
@@ -774,7 +894,7 @@ assertEqual(
 )
 assertEqual(invalidConfig.width, 220, "width clamp")
 assertEqual(invalidConfig.height, nil, "legacy height removed")
-assertEqual(invalidConfig.windowHeights[1], 120, "window one height clamp")
+assertEqual(invalidConfig.windowHeights[1], 104, "window one height clamp")
 assertEqual(invalidConfig.windowHeights[2], 410, "window two legacy height")
 assertEqual(invalidConfig.windowHeights[3], 520, "window three height clamp")
 assertEqual(invalidConfig.locked, false, "lock normalization")

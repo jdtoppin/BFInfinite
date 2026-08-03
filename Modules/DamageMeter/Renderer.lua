@@ -33,7 +33,7 @@ local REFRESH_DELAY = 0.1
 local NATIVE_RESTORE_KEY = "damageMeterNativeEnabledBeforeBFI"
 local MIN_WINDOW_WIDTH = 220
 local MAX_WINDOW_WIDTH = 520
-local MIN_WINDOW_HEIGHT = 120
+local MIN_WINDOW_HEIGHT = 104
 local MAX_WINDOW_HEIGHT = 520
 local DEFAULT_SESSION_KEY = "current"
 local SESSION_MODE_CURRENT = "current"
@@ -153,6 +153,8 @@ local nativeRestoreEnabled
 local resetPositionPending
 local activeDockTarget
 local activeDockDirection
+local lastObjectiveTrackerLaneBudget
+local lastObjectiveTrackerLaneTarget
 local ScrollWindow
 local ScrollWindowDetails
 local OpenWindowDetails
@@ -201,13 +203,17 @@ local function GetFallbackAnchor()
     }
 end
 
-local function IsDefaultRootAnchor(anchor)
-    local default = GetDefaultAnchor(1)
+local function IsDefaultAnchor(anchor, index)
+    local default = GetDefaultAnchor(index)
     return anchor.relativeTo == default.relativeTo
         and anchor.point == default.point
         and anchor.relativePoint == default.relativePoint
         and anchor.x == default.x
         and anchor.y == default.y
+end
+
+local function IsDefaultRootAnchor(anchor)
+    return IsDefaultAnchor(anchor, 1)
 end
 
 local function SetAnchorRecord(config, index, anchor)
@@ -1842,6 +1848,10 @@ ScrollWindowDetails = function(window, delta)
 end
 
 local function ToggleMinimized(window)
+    -- A space-constrained body expands automatically when objectives release
+    -- room. Do not turn that temporary state into a user collapse.
+    if window.runtimeMinimized and not window.minimized then return end
+
     window.minimized = not window.minimized
     Renderer.ApplySettings()
 end
@@ -2173,7 +2183,11 @@ local function FinishWindowDrag(window)
     window.dragOriginAnchor = nil
 
     ClearDockPreview()
-    ApplyAllAnchors(config)
+    if rendererEnabled then
+        Renderer.ApplySettings()
+    else
+        ApplyAllAnchors(config)
+    end
 end
 
 local function BeginWindowDrag(window)
@@ -2220,7 +2234,13 @@ local function ApplySharedWidth(sourceWindow, width)
 end
 
 local function OnWindowSizeChanged(window, width, height)
-    if window.applyingLayout or window.minimized then return end
+    if window.applyingLayout
+        or window.minimized
+        or window.runtimeConstrained
+        or window.runtimeHidden
+    then
+        return
+    end
 
     local config = GetConfig()
     EnsureInteractionConfig(config)
@@ -2233,7 +2253,13 @@ local function OnWindowSizeChanged(window, width, height)
 end
 
 local function FinishWindowResize(window)
-    if GetConfig().locked or window.minimized then return end
+    if GetConfig().locked
+        or window.minimized
+        or window.runtimeConstrained
+        or window.runtimeHidden
+    then
+        return
+    end
     OnWindowSizeChanged(window, window:GetWidth(), window:GetHeight())
     Renderer.ApplySettings()
     AF.Fire("BFI_RefreshOptions", "damageMeter")
@@ -2582,7 +2608,11 @@ local function CreateWindow(index)
             "Drag to resize this meter. Width is shared; height is saved per window."
         ]
     )
+    resize:HookScript("OnMouseDown", function()
+        window.isResizing = true
+    end)
     resize:HookScript("OnMouseUp", function()
+        window.isResizing = nil
         FinishWindowResize(window)
     end)
 
@@ -2624,26 +2654,203 @@ local function GetVisibleRowCount(config, windowHeight)
     )
 end
 
-local function ApplyWindowLayout(window, config)
+local function GetHeightForRowCount(config, rowCount)
+    if rowCount <= 0 then
+        return config.headerHeight
+    end
+
+    return config.headerHeight
+        + (config.padding * 2)
+        + (rowCount * config.barHeight)
+        + ((rowCount - 1) * config.spacing)
+end
+
+local function GetObjectiveTrackerLaneHeight(config)
+    if not config.dockToObjectiveTracker
+        or not _G.ObjectiveTrackerFrame
+    then
+        return false
+    end
+
+    for index = 1, config.windowCount do
+        if not IsDefaultAnchor(config.windowAnchors[index], index) then
+            return false
+        end
+    end
+
+    local target = GetObjectiveTrackerDockTarget(
+        _G.ObjectiveTrackerFrame
+    )
+    local uiParent = _G.UIParent
+    if not target
+        or type(target.GetBottom) ~= "function"
+        or not uiParent
+        or type(uiParent.GetEffectiveScale) ~= "function"
+    then
+        return true, nil, target
+    end
+
+    local bottom = target:GetBottom()
+    local uiScale = uiParent:GetEffectiveScale()
+    local targetScale
+    if type(target.GetEffectiveScale) == "function" then
+        targetScale = target:GetEffectiveScale()
+    else
+        targetScale = uiScale
+    end
+    if not F.isValueNonSecret(bottom)
+        or not F.isValueNonSecret(uiScale)
+        or not F.isValueNonSecret(targetScale)
+        or type(bottom) ~= "number"
+        or type(uiScale) ~= "number"
+        or uiScale <= 0
+        or type(targetScale) ~= "number"
+        or targetScale <= 0
+    then
+        return true, nil, target
+    end
+
+    local uiBottom = 0
+    if type(uiParent.GetBottom) == "function" then
+        uiBottom = uiParent:GetBottom()
+    end
+    if not F.isValueNonSecret(uiBottom)
+        or type(uiBottom) ~= "number"
+    then
+        return true, nil, target
+    end
+
+    return true, math.max(
+        0,
+        math.floor(
+            (bottom * targetScale / uiScale)
+                - uiBottom
+                - OBJECTIVE_TRACKER_GAP
+        )
+    ), target
+end
+
+local function GetRuntimeWindowLayout(config)
+    local usesTrackerLane, availableHeight, target =
+        GetObjectiveTrackerLaneHeight(config)
+    local layout = {
+        availableHeight = availableHeight,
+        target = target,
+        usesTrackerLane = usesTrackerLane
+            and type(availableHeight) == "number",
+        windows = {},
+    }
+    local desiredTotal = math.max(0, config.windowCount - 1)
+        * WINDOW_GAP
+
+    for index = 1, MAX_WINDOWS do
+        local window = windows[index]
+        local savedHeight = GetWindowHeight(config, index)
+        local minimized = window.minimized == true
+        local height = minimized and config.headerHeight or savedHeight
+        local rows = minimized and 0
+            or GetVisibleRowCount(config, savedHeight)
+        layout.windows[index] = {
+            height = height,
+            hidden = false,
+            rows = rows,
+        }
+        if index <= config.windowCount then
+            desiredTotal = desiredTotal + height
+        end
+    end
+
+    if type(availableHeight) ~= "number"
+        or desiredTotal <= availableHeight
+    then
+        return layout
+    end
+
+    -- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit
+    -- d3915c78: a default-position Objective Tracker owns nearly the full
+    -- right-managed column and ignores its Edit Mode height value. Fit only
+    -- BFI-owned meter rows into the remaining lane; saved dimensions and
+    -- Blizzard's protected tracker geometry remain untouched.
+    local activeCount = config.windowCount
+    local baseHeight = activeCount * config.headerHeight
+        + math.max(0, activeCount - 1) * WINDOW_GAP
+    while activeCount > 0 and baseHeight > availableHeight do
+        activeCount = activeCount - 1
+        baseHeight = activeCount * config.headerHeight
+            + math.max(0, activeCount - 1) * WINDOW_GAP
+    end
+
+    for index = 1, config.windowCount do
+        local runtime = layout.windows[index]
+        runtime.height = config.headerHeight
+        runtime.hidden = index > activeCount
+        runtime.rows = 0
+    end
+
+    local remainingHeight = math.max(0, availableHeight - baseHeight)
+    local allocated
+    repeat
+        allocated = false
+        for index = 1, activeCount do
+            local window = windows[index]
+            local runtime = layout.windows[index]
+            local desiredRows = window.minimized and 0
+                or GetVisibleRowCount(
+                    config,
+                    GetWindowHeight(config, index)
+                )
+            if runtime.rows < desiredRows then
+                local rowCost = runtime.rows == 0
+                    and (config.padding * 2) + config.barHeight
+                    or config.barHeight + config.spacing
+                if rowCost <= remainingHeight then
+                    runtime.rows = runtime.rows + 1
+                    remainingHeight = remainingHeight - rowCost
+                    allocated = true
+                end
+            end
+        end
+    until not allocated
+
+    for index = 1, activeCount do
+        local runtime = layout.windows[index]
+        runtime.height = GetHeightForRowCount(config, runtime.rows)
+    end
+
+    return layout
+end
+
+local function ApplyWindowLayout(window, config, runtime)
     local definition = GetWindowDefinition(window.index)
     local sessionMode, sessionID =
         GetWindowSessionSelection(config, window.index)
     local controlSize = math.max(14, math.min(20, config.headerHeight - 4))
-    local windowHeight = GetWindowHeight(config, window.index)
-    local visibleRows = GetVisibleRowCount(config, windowHeight)
+    local savedHeight = GetWindowHeight(config, window.index)
+    local windowHeight = runtime and runtime.height or savedHeight
+    local visibleRows = runtime and runtime.rows
+        or GetVisibleRowCount(config, windowHeight)
+    local effectiveMinimized = window.minimized or visibleRows == 0
     local texture = AF.LSM_GetBarTexture(config.texture)
     if not texture then
         texture = (BFI.media and BFI.media.bar) or AF.GetPlainTexture()
     end
 
+    window.runtimeHidden = runtime and runtime.hidden or false
+    window.runtimeMinimized = not window.minimized and visibleRows == 0
+    window.runtimeConstrained = not window.minimized
+        and (window.runtimeHidden or windowHeight < savedHeight)
     window.visibleRowCount = visibleRows
     window.applyingLayout = true
     window:SetSize(
         config.width,
-        window.minimized and config.headerHeight or windowHeight
+        effectiveMinimized and config.headerHeight or windowHeight
     )
     window.applyingLayout = nil
-    window:SetResizable(not config.locked and not window.minimized)
+    window:SetResizable(
+        not config.locked
+            and not effectiveMinimized
+            and not window.runtimeConstrained
+    )
     window:SetBackdropColor(
         AF.GetColorRGB("background", config.backgroundAlpha)
     )
@@ -2659,7 +2866,7 @@ local function ApplyWindowLayout(window, config)
     window.minimize:SetPoint("RIGHT", window.header, "RIGHT", -2, 0)
     SetButtonIcon(
         window.minimize,
-        AF.GetIcon(window.minimized and "Plus_Small" or "Minus_Small")
+        AF.GetIcon(effectiveMinimized and "Plus_Small" or "Minus_Small")
     )
 
     window.settings:SetSize(controlSize, controlSize)
@@ -2737,17 +2944,21 @@ local function ApplyWindowLayout(window, config)
     window.typeDropdown:SetHeight(controlSize)
     window.typeDropdown:SetSelectedValue(definition.enumName)
 
-    window.resize:SetShown(not config.locked and not window.minimized)
+    window.resize:SetShown(
+        not config.locked
+            and not effectiveMinimized
+            and not window.runtimeConstrained
+    )
 
     window.body:ClearAllPoints()
     window.body:SetPoint("TOPLEFT", window.header, "BOTTOMLEFT")
     window.body:SetPoint("BOTTOMRIGHT")
-    window.body:SetShown(not window.minimized)
+    window.body:SetShown(not effectiveMinimized)
 
     EnsureRows(window, visibleRows)
     ApplyDetailLayout(window, config, texture)
     window.detailPanel:SetShown(
-        window.detailOpen == true and not window.minimized
+        window.detailOpen == true and not effectiveMinimized
     )
     for index, row in ipairs(window.rows) do
         row.hoverCard:Hide()
@@ -2758,6 +2969,56 @@ local function ApplyWindowLayout(window, config)
             row:Hide()
         end
     end
+end
+
+local function ReflowWindows(config, closeDetails)
+    local runtimeLayout = GetRuntimeWindowLayout(config)
+    lastObjectiveTrackerLaneBudget = runtimeLayout.usesTrackerLane
+        and runtimeLayout.availableHeight
+        or false
+    lastObjectiveTrackerLaneTarget = runtimeLayout.target
+    for index = 1, MAX_WINDOWS do
+        local window = windows[index]
+        if closeDetails then
+            CloseWindowDetails(window, true)
+        end
+        ApplyWindowLayout(
+            window,
+            config,
+            runtimeLayout.windows[index]
+        )
+        window:SetClampedToScreen(
+            not (
+                runtimeLayout.usesTrackerLane
+                    and index <= config.windowCount
+            )
+        )
+    end
+    ApplyAllAnchors(config)
+end
+
+local function RefreshObjectiveTrackerLane()
+    local config = GetConfig()
+    if not rendererEnabled or not config.dockToObjectiveTracker then return end
+
+    for _, window in ipairs(windows) do
+        if window.isDragging or window.isResizing then return end
+    end
+
+    local usesTrackerLane, availableHeight, target =
+        GetObjectiveTrackerLaneHeight(config)
+    local budget = usesTrackerLane
+        and type(availableHeight) == "number"
+        and availableHeight
+        or false
+    if budget == lastObjectiveTrackerLaneBudget
+        and target == lastObjectiveTrackerLaneTarget
+    then
+        return
+    end
+
+    ReflowWindows(config)
+    Renderer.Refresh()
 end
 
 local function HideWindowTransient(window)
@@ -2861,7 +3122,7 @@ local function ShowSourceRow(
 end
 
 local function UpdateWindow(window, config)
-    if window.minimized then return end
+    if window.minimized or window.runtimeMinimized then return end
 
     if window.detailOpen then
         if RefreshWindowDetails(window) then
@@ -3001,7 +3262,11 @@ function Renderer.ResetPosition()
     end
 
     ClearDockPreview()
-    ApplyAllAnchors(config)
+    if rendererEnabled then
+        Renderer.ApplySettings()
+    else
+        ApplyAllAnchors(config)
+    end
     resetPositionPending = nil
     return true
 end
@@ -3028,13 +3293,19 @@ function Renderer.Refresh()
         end
     end
     for index = 1, MAX_WINDOWS do
-        if index > config.windowCount then
+        local window = windows[index]
+        local shouldShow = index <= config.windowCount
+            and not window.runtimeHidden
+        if not shouldShow then
             HideWindowTransient(windows[index])
         end
-        windows[index]:SetShown(index <= config.windowCount)
+        window:SetShown(shouldShow)
     end
     for index = 1, config.windowCount do
-        UpdateWindow(windows[index], config)
+        local window = windows[index]
+        if not window.runtimeHidden then
+            UpdateWindow(window, config)
+        end
     end
     return true
 end
@@ -3058,10 +3329,10 @@ local function EnsureEventFrame()
             if addonName == "Blizzard_ObjectiveTracker"
                 and GetConfig().dockToObjectiveTracker
             then
-                ApplyAllAnchors(GetConfig())
+                RefreshObjectiveTrackerLane()
             end
         elseif event == "EDIT_MODE_LAYOUTS_UPDATED" then
-            ApplyAllAnchors(GetConfig())
+            RefreshObjectiveTrackerLane()
         elseif event == "PLAYER_LOGOUT" then
             CloseAllWindowDetails()
             EndNativeOverride()
@@ -3128,13 +3399,10 @@ function Renderer.ApplySettings()
     local config = GetConfig()
     EnsureInteractionConfig(config)
     ValidateHistoricalSelections(config)
+    ReflowWindows(config, true)
     for index = 1, MAX_WINDOWS do
-        local window = windows[index]
-        CloseWindowDetails(window, true)
-        ApplyWindowLayout(window, config)
-        window:Hide()
+        windows[index]:Hide()
     end
-    ApplyAllAnchors(config)
     Renderer.Refresh()
     return true
 end
@@ -3174,8 +3442,5 @@ function Renderer.IsEnabled()
 end
 
 AF.RegisterCallback("BFI_ObjectiveTrackerDockFrameChanged", function()
-    local config = GetConfig()
-    if rendererEnabled and config.dockToObjectiveTracker then
-        ApplyAllAnchors(config)
-    end
+    RefreshObjectiveTrackerLane()
 end)

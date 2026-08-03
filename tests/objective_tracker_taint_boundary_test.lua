@@ -225,6 +225,10 @@ local forbiddenOwnership = {
     "tracker:MarkDirty(",
     "tracker:ClearAllPoints(",
     "tracker:SetPoint(",
+    "tracker:SetHeight(",
+    "tracker:SetSize(",
+    "tracker:SetClipsChildren(",
+    "tracker:SetParent(",
     "tracker.NineSlice:ClearAllPoints(",
     "tracker.NineSlice:SetPoint(",
     "module:GetContentsHeight(",
@@ -234,11 +238,35 @@ local forbiddenOwnership = {
     "tracker.ignoreFramePositionManager =",
     "tracker.isManagedFrame =",
     "tracker.isRightManagedFrame =",
+    "tracker.GetAvailableHeight =",
+    "C_EditMode.SaveLayouts",
 }
 for _, pattern in ipairs(forbiddenOwnership) do
     assertNotContains(trackerSource, pattern,
         "Objective Tracker layout must remain Blizzard-owned")
 end
+
+local updateSource = trackerSource:match(
+    "local function UpdateObjectiveTracker(.-)AF.RegisterCallback"
+)
+assertEqual(type(updateSource), "string",
+    "Objective Tracker update callback source")
+local observerAt = updateSource:find(
+    "SetupTrackerLayoutObserver()",
+    1,
+    true
+)
+local disabledReturnAt = updateSource:find(
+    "if not config.enabled then",
+    1,
+    true
+)
+assertEqual(type(observerAt), "number",
+    "native layout observer remains installed")
+assertEqual(type(disabledReturnAt), "number",
+    "Objective Tracker disabled guard remains available")
+assertEqual(observerAt < disabledReturnAt, true,
+    "native layout observer also covers an unstyled tracker")
 
 local optionsSource = readFile("Options/UIWidgets_Options.lua")
 local objectiveSettings = optionsSource:match(

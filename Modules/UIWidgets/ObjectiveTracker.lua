@@ -13,6 +13,7 @@ local scenarioTracker = _G.ScenarioObjectiveTracker
 local rewardsFrame = _G.ScenarioRewardsFrame
 
 local trackerStyled
+local trackerLayoutObserved
 local trackerBackgroundStyled
 local trackerBackground
 
@@ -24,7 +25,7 @@ local GenerateClosure = GenerateClosure
 ---------------------------------------------------------------------
 -- background
 ---------------------------------------------------------------------
-local function UpdateTrackerBackgroundLayout()
+local function LayoutTrackerBackground()
     if not trackerBackground or not tracker.Header then return end
 
     local bottomRegion = tracker.Header
@@ -76,6 +77,21 @@ local function UpdateTrackerBackgroundLayout()
     )
 end
 
+local function UpdateTrackerBackgroundLayout()
+    LayoutTrackerBackground()
+    -- Meter windows use the BFI surface when enabled and native NineSlice
+    -- geometry otherwise. Reflow them whenever native objective content
+    -- changes without mutating the protected tracker height.
+    AF.Fire("BFI_ObjectiveTrackerDockFrameChanged")
+end
+
+local function SetupTrackerLayoutObserver()
+    if trackerLayoutObserved then return end
+
+    trackerLayoutObserved = true
+    hooksecurefunc(tracker, "Update", UpdateTrackerBackgroundLayout)
+end
+
 local function SetupTrackerBackground()
     if trackerBackgroundStyled or not tracker.NineSlice then return end
 
@@ -100,9 +116,7 @@ local function SetupTrackerBackground()
     )
     AF.SetFrameLevel(trackerBackground, -1)
     W.objectiveTrackerDockFrame = trackerBackground
-    hooksecurefunc(tracker, "Update", UpdateTrackerBackgroundLayout)
     UpdateTrackerBackgroundLayout()
-    AF.Fire("BFI_ObjectiveTrackerDockFrameChanged")
 end
 
 ---------------------------------------------------------------------
@@ -465,6 +479,7 @@ local function UpdateObjectiveTracker(_, module, which)
     if module and module ~= "uiWidgets" then return end
     if which and which ~= "objectiveTracker" then return end
 
+    SetupTrackerLayoutObserver()
     local config = W.config.objectiveTracker
     if not config.enabled then
         -- do nothing here, since this requires a reload

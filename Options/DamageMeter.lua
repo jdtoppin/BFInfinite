@@ -264,7 +264,7 @@ local function CreateWindowHeightSlider(parent, index, x, y)
         L["Meter %d Height"]:format(index),
         x,
         y,
-        120,
+        104,
         520,
         1
     )

@@ -5,7 +5,7 @@ local DM = BFI.modules.DamageMeter
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local CURRENT_SIZE_DEFAULTS_VERSION = 1
+local CURRENT_SIZE_DEFAULTS_VERSION = 2
 local CURRENT_DOCK_DEFAULTS_VERSION = 1
 local LEGACY_DEFAULT_WIDTH = 300
 local LEGACY_DEFAULT_HEIGHT = 220
@@ -19,6 +19,16 @@ local PREVIOUS_DEFAULT_WINDOW_HEIGHTS = {
     134,
     134,
 }
+local VERSION_ONE_DEFAULT_WIDTH = 260
+local VERSION_ONE_DEFAULT_WINDOW_HEIGHTS = {
+    138,
+    120,
+    120,
+}
+local VERSION_ONE_DEFAULT_HEADER_HEIGHT = 22
+local VERSION_ONE_DEFAULT_BAR_HEIGHT = 20
+local VERSION_ONE_DEFAULT_SPACING = 2
+local VERSION_ONE_DEFAULT_PADDING = 4
 local PREVIOUS_DEFAULT_WINDOW_ANCHORS = {
     {
         relativeTo = 0,
@@ -84,9 +94,9 @@ local defaults = {
     resetOnMythicPlusStart = false,
     alwaysShowPlayer = true,
     windowHeights = {
-        138,
-        120,
-        120,
+        124,
+        104,
+        104,
     },
     windowAnchors = {
         {
@@ -114,12 +124,12 @@ local defaults = {
     dockToObjectiveTracker = true,
     dockDefaultsVersion = CURRENT_DOCK_DEFAULTS_VERSION,
     locked = false,
-    width = 260,
+    width = 240,
     sizeDefaultsVersion = CURRENT_SIZE_DEFAULTS_VERSION,
-    headerHeight = 22,
-    barHeight = 20,
+    headerHeight = 20,
+    barHeight = 18,
     spacing = 2,
-    padding = 4,
+    padding = 3,
     texture = "AF",
     numberMode = "both",
     showSpecIcon = true,
@@ -238,8 +248,34 @@ local function WindowHeightsMatch(values, expected)
     return true
 end
 
-local function UsesLegacyDefaultSizes(config)
-    if config.width ~= LEGACY_DEFAULT_WIDTH then return false end
+local function DefaultDensityMatches(config)
+    local function FieldMatches(key, expected)
+        return config[key] == nil or config[key] == expected
+    end
+
+    return FieldMatches("headerHeight", VERSION_ONE_DEFAULT_HEADER_HEIGHT)
+        and FieldMatches("barHeight", VERSION_ONE_DEFAULT_BAR_HEIGHT)
+        and FieldMatches("spacing", VERSION_ONE_DEFAULT_SPACING)
+        and FieldMatches("padding", VERSION_ONE_DEFAULT_PADDING)
+end
+
+local function UsesVersionOneDefaultSizes(config)
+    return config.width == VERSION_ONE_DEFAULT_WIDTH
+        and WindowHeightsMatch(
+            config.windowHeights,
+            VERSION_ONE_DEFAULT_WINDOW_HEIGHTS
+        )
+        and config.height == nil
+        and DefaultDensityMatches(config)
+end
+
+local function UsesUnversionedHistoricalDefaultSizes(config)
+    if type(config.sizeDefaultsVersion) == "number"
+        or config.width ~= LEGACY_DEFAULT_WIDTH
+        or not DefaultDensityMatches(config)
+    then
+        return false
+    end
 
     if config.height == nil then
         return WindowHeightsMatch(
@@ -263,12 +299,18 @@ local function MigrateDefaultSizes(config)
         return
     end
 
-    -- Only compact exact historical defaults. If any dimension differs, the
-    -- complete saved size remains user-owned.
-    if UsesLegacyDefaultSizes(config) then
+    -- Only compact an exact default tuple. If any dimension or density differs,
+    -- the complete saved layout remains user-owned.
+    if UsesVersionOneDefaultSizes(config)
+        or UsesUnversionedHistoricalDefaultSizes(config)
+    then
         config.width = defaults.width
         config.height = nil
         config.windowHeights = CopyWindowHeights(defaults.windowHeights)
+        config.headerHeight = defaults.headerHeight
+        config.barHeight = defaults.barHeight
+        config.spacing = defaults.spacing
+        config.padding = defaults.padding
     end
     config.sizeDefaultsVersion = CURRENT_SIZE_DEFAULTS_VERSION
 end
@@ -484,7 +526,7 @@ local function NormalizeConfig(config)
         legacyHeight = NormalizeNumber(
             config.height,
             defaults.windowHeights[1],
-            120,
+            104,
             520,
             true
         )
@@ -497,7 +539,7 @@ local function NormalizeConfig(config)
         config.windowHeights[index] = NormalizeNumber(
             config.windowHeights[index],
             legacyHeight or defaults.windowHeights[index],
-            120,
+            104,
             520,
             true
         )
