@@ -237,6 +237,11 @@ local function newSlotButton(harness, container, key)
         )
     end
 
+    function button:SetAllPoints(relativeTo)
+        self.allPoints = relativeTo
+        record(harness, "slot.set-all-points", self, relativeTo)
+    end
+
     harness.slotButtons[#harness.slotButtons + 1] = button
     return button
 end
@@ -256,7 +261,7 @@ local function makeHarness(options)
     }
     local AF = {
         isRetail = options.isRetail ~= false,
-        versionNum = options.versionNum or 37,
+        versionNum = options.versionNum or 38,
     }
     local UF = {}
     local afConstructionTotals = {
@@ -490,6 +495,53 @@ local function makeHarness(options)
             slotOptions.anchor.x,
             slotOptions.anchor.y
         )
+    end
+
+    function AF.AddCustomAuraDispelOverlaySlot(
+        container,
+        key,
+        filterString,
+        slotOptions,
+        overlayStyle
+    )
+        afConstructionTotals.slotAddAttempts =
+            afConstructionTotals.slotAddAttempts + 1
+        afConstructionTotals.initialFrameReservationsAttempted =
+            afConstructionTotals.initialFrameReservationsAttempted + 1
+        validateSort(slotOptions.sortMethod, slotOptions.sortDirection)
+        assertTrue(type(slotOptions.anchor) == "table",
+            "missing mock dispel overlay anchor")
+        assertEqual(slotOptions.anchor.matchAnchorBounds, true,
+            "mock dispel overlay bounds mode")
+        assertTrue(slotOptions.anchor.relativeTo ~= nil,
+            "missing mock dispel overlay bounds target")
+        local button = newSlotButton(harness, container, key)
+        container.slots[key] = {
+            filterString = filterString,
+            options = slotOptions,
+            overlayStyle = overlayStyle,
+            button = button,
+            kind = "dispelOverlay",
+        }
+        container.afConstructionStats.slotsAdded =
+            container.afConstructionStats.slotsAdded + 1
+        container.afConstructionStats.initialFrameReservationsCompleted =
+            container.afConstructionStats.initialFrameReservationsCompleted + 1
+        afConstructionTotals.slotsAdded =
+            afConstructionTotals.slotsAdded + 1
+        afConstructionTotals.initialFrameReservationsCompleted =
+            afConstructionTotals.initialFrameReservationsCompleted + 1
+        record(
+            harness,
+            "af.add-dispel-overlay-slot",
+            container,
+            key,
+            filterString,
+            slotOptions,
+            overlayStyle
+        )
+        button:SetAllPoints(slotOptions.anchor.relativeTo)
+        return button
     end
 
     function AF.SetCustomAuraSlotFilterString(container, key, filterString)
@@ -810,7 +862,7 @@ local function testCapabilityGate()
     assertEqual(
         oldAF.UF.HasNativeAuraContainerBackend(),
         false,
-        "AF r36 duration-color gate"
+        "AF r36 dispel-overlay gate"
     )
     assertEqual(
         oldAF.UF.CreateNativeAuraContainerController({}, "OldAF"),
@@ -839,6 +891,15 @@ local function testCapabilityGate()
     )
     assertEqual(#missingConstructionMethod.holders, 0,
         "missing-construction-method holder count")
+
+    local missingDispelOverlay = makeHarness({
+        missingMethod = "AddCustomAuraDispelOverlaySlot",
+    })
+    assertEqual(
+        missingDispelOverlay.UF.HasNativeAuraContainerBackend(),
+        false,
+        "missing dispel-overlay method gate"
+    )
 end
 
 local function testGlobalFrameworkRequirement()
@@ -882,12 +943,128 @@ local function testGlobalFrameworkRequirement()
     assertTrue(chunk, loadError)
     setfenv(chunk, environment)
     chunk("BFInfinite", BFI)
-    assertEqual(BFI.requiredAFVersion, 37, "published global AF minimum")
+    assertEqual(BFI.requiredAFVersion, 38, "published global AF minimum")
 
     local ok, versionError = pcall(eventHandler.ADDON_LOADED, eventHandler, BFI.name)
     assertEqual(ok, false, "global AF version check stops harness")
     assertEqual(versionError, stopAfterVersionCheck, "global AF version check sentinel")
-    assertEqual(requiredVersion, 37, "global AF minimum")
+    assertEqual(requiredVersion, 38, "global AF minimum")
+end
+
+local function testDispelOverlaySlotContract()
+    local harness = makeHarness()
+    local anchorTarget = {frameLevel = 3}
+    local overlayStyle = {
+        texture = "gradient",
+        alpha = 0.5,
+        blendMode = "ADD",
+        frameLevelOffset = 0,
+    }
+    local controller = harness.UF.CreateNativeAuraContainerController(
+        {},
+        "BFITestDispelOverlay",
+        {
+            unit = "party1",
+            enabled = true,
+            shown = true,
+            holder = {width = 1, height = 1},
+            containerPoint = {
+                point = "CENTER",
+                relativePoint = "CENTER",
+                x = 0,
+                y = 0,
+            },
+            flowLayout = {},
+            processing = {policy = MOCK_PROCESSING_POLICY.None},
+            groups = {},
+            slots = {
+                {
+                    kind = "dispelOverlay",
+                    key = "dispelHighlight",
+                    filterString = "HARMFUL|RAID",
+                    candidateFilters = {
+                        includeDispelTypes = {Magic = true},
+                    },
+                    sortMethod = MOCK_SORT_METHOD.UnitFrameDebuff,
+                    sortDirection = MOCK_SORT_DIRECTION.Normal,
+                    anchorTarget = anchorTarget,
+                    overlayStyle = overlayStyle,
+                },
+            },
+        }
+    )
+
+    local slot = harness.containers[1].slots.dispelHighlight
+    assertTrue(slot, "native dispel overlay slot")
+    assertEqual(slot.kind, "dispelOverlay", "dispel overlay slot kind")
+    assertEqual(slot.filterString, "HARMFUL|RAID",
+        "dispel overlay native filter")
+    assertEqual(slot.options.anchor.relativeTo, anchorTarget,
+        "dispel overlay anchor identity")
+    assertEqual(slot.button.allPoints, anchorTarget,
+        "dispel overlay button bounds")
+    assertTrue(slot.overlayStyle ~= overlayStyle,
+        "dispel overlay style copied as config")
+    assertEqual(slot.overlayStyle.alpha, 0.5,
+        "dispel overlay alpha")
+    assertEqual(countEvents(harness, "af.add-slot"), 0,
+        "ordinary slot adapter bypassed")
+    assertEqual(countEvents(harness, "af.add-dispel-overlay-slot"), 1,
+        "dispel overlay adapter count")
+
+    local constructionBefore = assertConstructionStats(harness, {
+        controllersCreated = 1,
+        buildAttempts = 1,
+        buildCompletions = 1,
+        frameworkBuilds = 1,
+        expectedGroups = 0,
+        expectedSlots = 1,
+        expectedInitialReservations = 1,
+        afContainerAllocations = 1,
+        afGroupsAdded = 0,
+        afSlotsAdded = 1,
+        afInitialFrameReservationsCompleted = 1,
+    }, "dispel overlay construction")
+    local tuning = {
+        holder = {width = 1, height = 1},
+        containerPoint = {
+            point = "CENTER",
+            relativePoint = "CENTER",
+            x = 0,
+            y = 0,
+        },
+        flowLayout = {},
+        processing = {policy = MOCK_PROCESSING_POLICY.None},
+        groups = {},
+        slots = {
+            {
+                key = "dispelHighlight",
+                filterString = "HARMFUL|DISPELLABLE",
+                candidateFilters = {
+                    includeDispelTypes = {Bleed = true},
+                },
+                sortMethod = MOCK_SORT_METHOD.UnitFrameDebuff,
+                sortDirection = MOCK_SORT_DIRECTION.Normal,
+            },
+        },
+    }
+    controller:ApplyTuning(tuning)
+    assertEqual(slot.filterString, "HARMFUL|DISPELLABLE",
+        "dispel overlay tuned filter")
+    assertEqual(slot.options.candidateFilters.includeDispelTypes.Bleed,
+        true, "dispel overlay tuned candidate map")
+
+    controller:ApplyTuning(tuning)
+    local constructionAfter =
+        harness.UF.GetNativeAuraConstructionStats()
+    for field, beforeValue in pairs(constructionBefore) do
+        assertEqual(constructionAfter[field], beforeValue,
+            "repeated dispel tuning construction delta " .. field)
+    end
+    assertEqual(#harness.containers, 1,
+        "repeated dispel tuning container count")
+    assertEqual(countEvents(harness, "af.add-dispel-overlay-slot"), 1,
+        "repeated dispel tuning slot count")
 end
 
 local function testBuildContract()
@@ -2231,6 +2408,7 @@ end
 testConstructionStatsContract()
 testGlobalFrameworkRequirement()
 testCapabilityGate()
+testDispelOverlaySlotContract()
 testBuildContract()
 testTuningContract()
 testHolderConfigQueue()
