@@ -10,6 +10,7 @@ select(2, ...).L = setmetatable({
     ["Categories"] = "Categories",
     ["Categories View"] = "Categories View",
     ["Views"] = "Views",
+    ["Auto Hide"] = "Auto Hide",
     ["Equipment"] = "Equipment",
     ["Quest Items"] = "Quest Items",
     ["Miscellaneous"] = "Miscellaneous",

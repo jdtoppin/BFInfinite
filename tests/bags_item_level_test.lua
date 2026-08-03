@@ -82,6 +82,8 @@ assertEqual(defaultsBags.GetDefaults().showItemLevel, true,
     "item level default is enabled")
 assertEqual(defaultsBags.GetDefaults().viewMode, "combined",
     "combined bag view is the default")
+assertEqual(defaultsBags.GetDefaults().sidebarAutoHide, false,
+    "sidebar labels are pinned open by default")
 
 local legacyCategoryProfile = {
     bags = {
@@ -134,6 +136,23 @@ local profile = {
 defaultsCallbacks.BFI_UpdateProfile(nil, profile)
 assertEqual(profile.bags.showItemLevel, true,
     "missing item level setting is normalized")
+assertEqual(profile.bags.sidebarAutoHide, false,
+    "missing sidebar auto-hide setting is normalized")
+
+profile.bags.sidebarAutoHide = "yes"
+defaultsCallbacks.BFI_UpdateProfile(nil, profile)
+assertEqual(profile.bags.sidebarAutoHide, false,
+    "invalid sidebar auto-hide setting is normalized")
+
+profile.bags.sidebarAutoHide = true
+defaultsCallbacks.BFI_UpdateProfile(nil, profile)
+assertEqual(profile.bags.sidebarAutoHide, true,
+    "valid enabled sidebar auto-hide setting is preserved")
+
+profile.bags.sidebarAutoHide = false
+defaultsCallbacks.BFI_UpdateProfile(nil, profile)
+assertEqual(profile.bags.sidebarAutoHide, false,
+    "valid pinned sidebar setting is preserved")
 
 profile.bags.showItemLevel = "yes"
 defaultsCallbacks.BFI_UpdateProfile(nil, profile)

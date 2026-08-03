@@ -49,6 +49,7 @@ for _, icon in ipairs({
     "Bag_Recipes",
     "Bag_Quest",
     "Bag_Misc",
+    "Bag_Housing",
     "Bag_Empty",
     "Bag_Backpack",
     "Bag_Reagent",
@@ -64,7 +65,11 @@ for _, api in ipairs({
     "function Sidebar.SetExpanded(",
     "function Sidebar.ToggleExpanded(",
     "function Sidebar.SetShown(",
+    "function Sidebar.SetAutoHide(",
+    "function Sidebar.GetAutoHide(",
+    "function Sidebar.ToggleAutoHide(",
     "function Sidebar.SetOnSelected(",
+    "function Sidebar.SetOnAutoHideChanged(",
     "function Sidebar.GetDesiredWidth(",
     "function Sidebar.GetContentInset(",
 }) do
@@ -73,8 +78,18 @@ end
 
 assertContains(
     source,
-    "return DESIRED_WIDTH + CONTENT_GAP",
-    "every enabled bag view must reserve the persistent rail"
+    "local COLLAPSED_WIDTH = 40",
+    "auto-hide must retain a compact icon rail"
+)
+assertContains(
+    source,
+    "return autoHide and COLLAPSED_WIDTH or DESIRED_WIDTH",
+    "the reserved rail width must follow the persisted auto-hide state"
+)
+assertContains(
+    source,
+    "return Sidebar.GetDesiredWidth() + CONTENT_GAP",
+    "the item inset must include the current rail width and content gap"
 )
 assertContains(
     source,
@@ -114,12 +129,22 @@ assertContains(
 assertContains(
     source,
     "local function IsSelectedRow(row)",
-    "collapsed parents must surface an active child selection"
+    "parents must surface an active child selection"
+)
+assertContains(
+    source,
+    "if IsNestedTreeShown() and expandedById[row.id] then return false end",
+    "expanded labeled parents leave the active treatment on their visible child"
+)
+assertContains(
+    source,
+    "while selected and selected.parentId do",
+    "compact and collapsed parents must walk the active child's ancestry"
 )
 assertContains(
     source,
     "if selected.parentId == row.id then",
-    "active descendants must highlight their collapsed parent"
+    "active descendants must highlight their compact or collapsed parent"
 )
 assertContains(
     source,
@@ -128,8 +153,33 @@ assertContains(
 )
 assertContains(
     source,
-    "row.highlight:SetColorTexture(1, 1, 1, 0.11)",
-    "selected rows must use a subtle neutral full-row treatment"
+    "row.highlight = AF.CreateGradientTexture(",
+    "rows must use the main BFI navigation accent gradient"
+)
+assertContains(
+    source,
+    'AF.GetColorTable("BFI", 0.9)',
+    "the navigation gradient must use the BFI accent color"
+)
+assertContains(
+    source,
+    'local targetWidth = state == "selected" and DESIRED_WIDTH',
+    "active rows must fill the labeled navigation width"
+)
+assertContains(
+    source,
+    'or state == "hover" and 7',
+    "hovered rows must use the main menu's narrow accent treatment"
+)
+assertContains(
+    source,
+    'local shouldShow = state ~= "idle"',
+    "idle rows must not retain a left accent line"
+)
+assertContains(
+    source,
+    "AF.AnimatedResize(",
+    "hover and active navigation changes must animate like the main BFI menu"
 )
 assertContains(
     source,
@@ -138,7 +188,7 @@ assertContains(
 )
 assertContains(
     source,
-    "AF.SetAdaptiveIcon(row.icon, entry.icon)",
+    "AF.SetAdaptiveIcon(row.icon, icon)",
     "available bag icons must use AF's adaptive icon helper"
 )
 assertContains(
@@ -157,11 +207,153 @@ assertNotContains(
     "temporarily absent category parents must retain expansion state"
 )
 
+assertContains(
+    source,
+    "local function CreateAutoHideControl()",
+    "the sidebar must expose a fixed auto-hide utility control"
+)
+assertContains(
+    source,
+    'autoHideClip = _G.CreateFrame("ScrollFrame", nil, rail)',
+    "the fixed auto-hide label must clip cleanly in compact mode"
+)
+assertContains(
+    source,
+    'autoHideButton = _G.CreateFrame("Button", nil, autoHideClip)',
+    "the auto-hide control must use a template-free button"
+)
+assertContains(
+    source,
+    'autoHideButton.label = AF.CreateFontString(autoHideButton, L["Auto Hide"], "white")',
+    "the utility control must be labeled above the view list"
+)
+assertContains(
+    source,
+    "    CreateAutoHideControl()\n\n    scrollFrame = _G.CreateFrame",
+    "the fixed auto-hide control must be created before the scrolling navigation"
+)
+assertContains(
+    source,
+    'scrollFrame:SetPoint("TOPLEFT", 0, -(UTILITY_HEIGHT + UTILITY_GAP))',
+    "the scrolling view/category list must begin below the fixed utility row"
+)
+
+assertContains(
+    source,
+    "local function IsNestedTreeShown()",
+    "auto-hide must distinguish its stable top-level view from an opened tree"
+)
+assertContains(
+    source,
+    "if entry.hasChildren and IsNestedTreeShown() and expandedById[entry.id] then",
+    "nested children must stay closed until the labeled tree is explicitly opened"
+)
+assertContains(
+    source,
+    "row.label:SetShown(not compact)",
+    "compact mode must hide navigation labels"
+)
+assertContains(
+    source,
+    "row.label:SetShown(not IsCompact())",
+    "compact mode must hide section headings"
+)
+assertContains(
+    source,
+    "if entry.hasChildren and not compact then",
+    "compact mode must hide nested expansion targets"
+)
+
+assertContains(
+    source,
+    'scrollBar = _G.CreateFrame("Slider", nil, rail)',
+    "overflow navigation must use a template-free native slider"
+)
+assertContains(
+    source,
+    'scrollBar:SetOrientation("VERTICAL")',
+    "the overflow control must be a vertical scrollbar"
+)
+assertContains(
+    source,
+    "scrollBar:SetThumbTexture(scrollThumb)",
+    "the sidebar scrollbar must expose a draggable thumb"
+)
+assertContains(
+    source,
+    "AF.SetFrameLevel(scrollBar, 10, scrollContent)",
+    "the scrollbar must remain above pooled navigation rows for hit testing"
+)
+assertContains(
+    source,
+    'row.toggle:SetPoint("RIGHT", -(SCROLLBAR_WIDTH + 2), 0)',
+    "nested chevrons must not overlap the visible scrollbar"
+)
+assertContains(
+    source,
+    "AF.CreateFadeInOutAnimation(scrollBar, 0.18)",
+    "the scrollbar must use the shared fade animation"
+)
+assertContains(
+    source,
+    "local needed = range > 0",
+    "the scrollbar must only be required when content overflows"
+)
+assertContains(
+    source,
+    "if needed == scrollBarNeeded then return end",
+    "unchanged overflow state must not restart the fade animation"
+)
+assertContains(source, "scrollBar:FadeIn()",
+    "overflow must reveal the scrollbar")
+assertContains(source, "scrollBar:FadeOut()",
+    "resolved overflow must fade the scrollbar away")
+assertContains(
+    source,
+    "expandedScrollOffset = offset",
+    "expanded navigation must preserve its own scroll offset"
+)
+assertContains(
+    source,
+    "compactScrollOffset = offset",
+    "the icon rail must preserve an independent useful scroll offset"
+)
+assertContains(
+    source,
+    "expandedScrollOffset = compactScrollOffset",
+    "hover expansion must keep the icon under the pointer stable"
+)
+assertContains(
+    source,
+    "showNestedEntries = false",
+    "automatic collapse must return to a compact top-level category list"
+)
+
+assertContains(
+    source,
+    "local function IsRailMouseOver()",
+    "auto-hide collapse must share one pointer-boundary check"
+)
+assertContains(
+    source,
+    "_G.C_Timer.After(0, function()",
+    "pointer exit must defer collapse until child enter events settle"
+)
+assertContains(
+    source,
+    "if generation ~= leaveGeneration then return end",
+    "a newer pointer transition must cancel a stale deferred collapse"
+)
+assertContains(
+    source,
+    "if scrollBarDragging or IsRailMouseOver() then return end",
+    "the rail must remain expanded while hovered or dragging its scrollbar"
+)
+
 for _, forbidden in ipairs({
     "BackdropTemplate",
     "NineSlice",
     "OnUpdate",
-    "CreateGradientTexture",
     "row.indicator",
     "AF.CreateButton(",
     "AF.CreateButtonGroup(",
@@ -171,9 +363,15 @@ for _, forbidden in ipairs({
     assertNotContains(
         source,
         forbidden,
-        "sidebar must stay on the lightweight neutral event-driven path"
+        "sidebar must stay on the lightweight event-driven path"
     )
 end
+
+assertNotContains(
+    source,
+    "row.highlight:SetColorTexture",
+    "rows must not fall back to the lost neutral hover/active treatment"
+)
 
 assertBefore(
     loadOrder,
@@ -197,6 +395,7 @@ local chunk, loadError = loadfile("Modules/Bags/Sidebar.lua")
 assertEqual(type(chunk), "function", loadError or "sidebar module load")
 setfenv(chunk, environment)
 chunk("BFInfinite", {
+    L = {},
     modules = {
         Bags = bags,
     },
@@ -204,6 +403,43 @@ chunk("BFInfinite", {
 
 assertEqual(bags.Sidebar.GetDesiredWidth(), 170, "rail desired width")
 assertEqual(bags.Sidebar.GetContentInset(), 178, "persistent content inset")
+assertEqual(bags.Sidebar.GetAutoHide(), false, "auto-hide is initially disabled")
+assertEqual(bags.Sidebar.SetAutoHide("yes"), false,
+    "non-boolean auto-hide state rejected")
+
+local autoHideCalls = {}
+assertEqual(bags.Sidebar.SetOnAutoHideChanged("yes"), false,
+    "non-function auto-hide callback rejected")
+assertEqual(bags.Sidebar.SetOnAutoHideChanged(function(enabled)
+    autoHideCalls[#autoHideCalls + 1] = enabled
+end), true, "auto-hide callback accepted")
+assertEqual(bags.Sidebar.SetAutoHide(true), true,
+    "auto-hide can be enabled programmatically")
+assertEqual(bags.Sidebar.GetAutoHide(), true, "auto-hide state is queryable")
+assertEqual(bags.Sidebar.GetDesiredWidth(), 40, "compact rail desired width")
+assertEqual(bags.Sidebar.GetContentInset(), 48, "compact content inset")
+assertEqual(#autoHideCalls, 0,
+    "programmatic auto-hide synchronization is silent")
+assertEqual(bags.Sidebar.SetAutoHide(true), true,
+    "reapplying the current auto-hide state is accepted")
+assertEqual(#autoHideCalls, 0,
+    "idempotent auto-hide synchronization stays silent")
+assertEqual(bags.Sidebar.ToggleAutoHide(), false,
+    "utility toggle can pin the labeled rail open")
+assertEqual(autoHideCalls[1], false,
+    "utility toggle reports the disabled auto-hide state")
+assertEqual(bags.Sidebar.GetDesiredWidth(), 170,
+    "pinned rail restores its full desired width")
+assertEqual(bags.Sidebar.GetContentInset(), 178,
+    "pinned rail restores its full content inset")
+assertEqual(bags.Sidebar.ToggleAutoHide(), true,
+    "utility toggle can restore compact auto-hide")
+assertEqual(autoHideCalls[2], true,
+    "utility toggle reports the enabled auto-hide state")
+assertEqual(bags.Sidebar.SetAutoHide(false), true,
+    "profile synchronization can restore pinned mode")
+assertEqual(#autoHideCalls, 2,
+    "programmatic profile synchronization does not emit a utility callback")
 assertEqual(bags.Sidebar.SetShown("yes"), false, "non-boolean shown state rejected")
 assertEqual(bags.Sidebar.SetShown(false), true, "rail can be explicitly disabled")
 assertEqual(bags.Sidebar.SetShown(true), true, "rail can be explicitly enabled")

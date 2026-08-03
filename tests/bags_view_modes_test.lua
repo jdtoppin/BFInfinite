@@ -35,6 +35,10 @@ local options = readFile("Options/Bags.lua")
 local style = readFile("Modules/Style/Style.lua")
 
 assertContains(defaults, 'viewMode = "combined"', "default bag view")
+assertContains(defaults, "sidebarAutoHide = false",
+    "sidebar labels are pinned open by default")
+assertContains(defaults, 'if type(config.sidebarAutoHide) ~= "boolean" then',
+    "saved auto-hide state is normalized")
 assertContains(defaults, "local validViewModes = {", "saved bag view allowlist")
 assertContains(defaults, "combined = true", "combined saved view")
 assertContains(defaults, "individual = true", "individual saved view")
@@ -57,6 +61,21 @@ assertContains(bags, 'AF.RegisterCallback("BFI_UpdateProfile", function()',
     "profile changes reset transient sidebar navigation")
 assertContains(bags, "activeCategoryKey = nil",
     "a new profile is not overridden by the previous category filter")
+assertContains(bags, "B.Sidebar.SetAutoHide(B.config.sidebarAutoHide)",
+    "profile and layout refreshes synchronize persisted auto-hide state")
+assertContains(bags, "B.Sidebar.SetOnAutoHideChanged(function(enabled)",
+    "the in-sidebar utility publishes user auto-hide changes")
+assertContains(bags, "B.config.sidebarAutoHide = enabled",
+    "user auto-hide changes persist in the active bag profile")
+assertContains(bags,
+    "B.config.sidebarAutoHide = enabled\n        LayoutItems(true)",
+    "changing reserved sidebar width forces an item relayout")
+assertContains(bags,
+    "or B.config.sidebarAutoHide ~= snapshotSidebarAutoHide",
+    "auto-hide width participates in the layout snapshot")
+assertContains(bags,
+    "snapshotSidebarAutoHide = B.config.sidebarAutoHide",
+    "captured layouts retain their auto-hide width state")
 
 -- The rail is one permanent navigation model: main views first, then the
 -- independently selectable category tree. Combined never hides the rail.
@@ -80,8 +99,24 @@ assertContains(bags, "B.Sidebar.SetShown(true)",
     "all enabled bag views keep the sidebar shown")
 assertContains(bags, "local contentInset = B.Sidebar.GetContentInset()",
     "all item layouts reserve the sidebar inset")
-assertContains(sidebar, "return DESIRED_WIDTH + CONTENT_GAP",
-    "the sidebar inset does not depend on selected view")
+assertContains(sidebar, "return Sidebar.GetDesiredWidth() + CONTENT_GAP",
+    "the sidebar inset follows pinned or compact width, not selected view")
+
+assertContains(bags,
+    '[ITEM_CLASS.Tradegoods] = "Bag_TradeGoods"',
+    "trade-skill goods retain the crossed-tools icon")
+assertContains(bags,
+    '[ITEM_CLASS.Reagent] = "Bag_Reagent"',
+    "reagents use the distinct flask icon")
+assertNotContains(bags,
+    '[ITEM_CLASS.Reagent] = "Bag_TradeGoods"',
+    "reagents must not share the trade-skill goods icon")
+assertContains(bags,
+    "if ITEM_CLASS.Housing then",
+    "housing class support must remain compatible with clients lacking the enum")
+assertContains(bags,
+    'categoryIconByClass[ITEM_CLASS.Housing] = "Bag_Housing"',
+    "housing items use a distinct furnishings icon")
 
 -- Category families are selectable aggregate parents with nested, concise
 -- subtype rows. In particular, equipment children read Chest/Gloves rather

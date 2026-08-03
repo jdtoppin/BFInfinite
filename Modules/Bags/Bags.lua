@@ -86,12 +86,19 @@ local categoryIconByClass = {
     [ITEM_CLASS.Consumable] = "Bag_Consumables",
     [ITEM_CLASS.Gem] = "Bag_TradeGoods",
     [ITEM_CLASS.Tradegoods] = "Bag_TradeGoods",
-    [ITEM_CLASS.Reagent] = "Bag_TradeGoods",
+    [ITEM_CLASS.Reagent] = "Bag_Reagent",
     [ITEM_CLASS.ItemEnhancement] = "Bag_TradeGoods",
     [ITEM_CLASS.Profession] = "Bag_TradeGoods",
     [ITEM_CLASS.Recipe] = "Bag_Recipes",
     [ITEM_CLASS.Questitem] = "Bag_Quest",
 }
+-- Retail 12.1.0.68914 ItemConstantsDocumentation.lua (wow-ui-source
+-- d3915c78aba7) adds ItemClass.Housing. Keep the nil guard for the supported
+-- 12.0.7 client, where that enum member is not available.
+if ITEM_CLASS.Housing then
+    categoryOrderByClass[ITEM_CLASS.Housing] = 600
+    categoryIconByClass[ITEM_CLASS.Housing] = "Bag_Housing"
+end
 
 local inventoryConstants = _G.Constants.InventoryConstants
 local REAGENT_BAG_ID = inventoryConstants.NumBagSlots + inventoryConstants.NumReagentBagSlots
@@ -115,6 +122,7 @@ local snapshotCategoryKey
 local snapshotShowBagSlots
 local snapshotColumns
 local snapshotSpacing
+local snapshotSidebarAutoHide
 local snapshotWidth
 local snapshotHeight
 local snapshotFooterHeight
@@ -786,6 +794,7 @@ local function InvalidateLayoutSnapshot()
     snapshotShowBagSlots = nil
     snapshotColumns = nil
     snapshotSpacing = nil
+    snapshotSidebarAutoHide = nil
     snapshotWidth = nil
     snapshotHeight = nil
     snapshotFooterHeight = nil
@@ -821,6 +830,7 @@ local function CaptureLayoutSnapshot(force)
         or B.config.showBagSlots ~= snapshotShowBagSlots
         or B.config.columns ~= snapshotColumns
         or B.config.spacing ~= snapshotSpacing
+        or B.config.sidebarAutoHide ~= snapshotSidebarAutoHide
         or screenWidth ~= snapshotWidth
         or screenHeight ~= snapshotHeight
         or footerHeight ~= snapshotFooterHeight
@@ -860,6 +870,7 @@ local function CaptureLayoutSnapshot(force)
     snapshotShowBagSlots = B.config.showBagSlots
     snapshotColumns = B.config.columns
     snapshotSpacing = B.config.spacing
+    snapshotSidebarAutoHide = B.config.sidebarAutoHide
     snapshotWidth = screenWidth
     snapshotHeight = screenHeight
     snapshotFooterHeight = footerHeight
@@ -1366,6 +1377,7 @@ local function FinalizeLayoutEntries(spacing, contentInset, sectionCount)
 end
 
 local function LayoutItemsInternal(force)
+    B.Sidebar.SetAutoHide(B.config.sidebarAutoHide)
     local changed, footerHeight, screenWidth, screenHeight = CaptureLayoutSnapshot(force)
     if not changed then return end
 
@@ -1718,6 +1730,7 @@ local function StyleCombinedFrame()
 
     CreateBagButtons()
 
+    B.Sidebar.SetAutoHide(B.config.sidebarAutoHide)
     bagSidebar = B.Sidebar.Initialize(combinedFrame, function(_, entry)
         if entry.kind == "view" then
             activeCategoryKey = nil
@@ -1727,6 +1740,11 @@ local function StyleCombinedFrame()
             activeCategoryKey = entry.categoryKey
         end
         LayoutItems(true)
+    end)
+    B.Sidebar.SetOnAutoHideChanged(function(enabled)
+        B.config.sidebarAutoHide = enabled
+        LayoutItems(true)
+        AF.Fire("BFI_RefreshOptions", "bags")
     end)
 
     AF.SetDraggable(combinedFrame.BFIHeader, combinedFrame, true, nil, function(frame)
@@ -1941,4 +1959,7 @@ AF.RegisterCallback("BFI_UpdateProfile", function()
     -- Sidebar selection is transient navigation state. A newly selected
     -- profile must open its own persisted Combined/Individual default.
     activeCategoryKey = nil
+    if B.config then
+        B.Sidebar.SetAutoHide(B.config.sidebarAutoHide)
+    end
 end)
