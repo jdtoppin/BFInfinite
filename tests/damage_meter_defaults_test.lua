@@ -80,7 +80,7 @@ local function loadDefaults()
 end
 
 local function assertDefaults(config, message)
-    local expectedWindowHeights = {147, 134, 134}
+    local expectedWindowHeights = {138, 120, 120}
     assertEqual(config.enabled, false, message .. " enabled")
     assertEqual(config.windowCount, 3, message .. " window count")
     assertEqual(
@@ -173,7 +173,8 @@ local function assertDefaults(config, message)
         message .. " Objective Tracker docking"
     )
     assertEqual(config.locked, false, message .. " locked")
-    assertEqual(config.width, 300, message .. " width")
+    assertEqual(config.width, 260, message .. " width")
+    assertEqual(config.sizeDefaultsVersion, 1, message .. " size defaults version")
     assertEqual(config.height, nil, message .. " legacy height removed")
     assertEqual(config.headerHeight, 22, message .. " header height")
     assertEqual(config.barHeight, 20, message .. " bar height")
@@ -262,7 +263,7 @@ assertEqual(
 )
 assertEqual(
     DM.GetDefaults().windowHeights[1],
-    147,
+    138,
     "profile window heights independent from defaults"
 )
 assertEqual(
@@ -301,9 +302,10 @@ assertEqual(
     true,
     "untouched historical anchors migrate beside the Objective Tracker"
 )
-assertEqual(partialConfig.windowHeights[1], 147, "partial first height default")
-assertEqual(partialConfig.windowHeights[2], 134, "partial second height default")
-assertEqual(partialConfig.windowHeights[3], 134, "partial third height default")
+assertEqual(partialConfig.width, 260, "partial width default")
+assertEqual(partialConfig.windowHeights[1], 138, "partial first height default")
+assertEqual(partialConfig.windowHeights[2], 120, "partial second height default")
+assertEqual(partialConfig.windowHeights[3], 120, "partial third height default")
 assertEqual(partialConfig.extra, "preserved", "unknown config preserved")
 
 local partialHeightsConfig = {
@@ -314,9 +316,121 @@ local partialHeightsConfig = {
 updateProfile(nil, {
     damageMeter = partialHeightsConfig,
 })
-assertEqual(partialHeightsConfig.windowHeights[1], 147, "missing first height")
+assertEqual(partialHeightsConfig.windowHeights[1], 138, "missing first height")
 assertEqual(partialHeightsConfig.windowHeights[2], 199, "saved second height")
-assertEqual(partialHeightsConfig.windowHeights[3], 134, "missing third height")
+assertEqual(partialHeightsConfig.windowHeights[3], 120, "missing third height")
+
+local previousDefaultsConfig = {
+    width = 300,
+    windowHeights = {
+        147,
+        134,
+        134,
+    },
+}
+updateProfile(nil, {
+    damageMeter = previousDefaultsConfig,
+})
+assertEqual(previousDefaultsConfig.width, 260,
+    "previous default width migrates to compact width")
+assertEqual(previousDefaultsConfig.windowHeights[1], 138,
+    "previous first default height migrates")
+assertEqual(previousDefaultsConfig.windowHeights[2], 120,
+    "previous second default height migrates")
+assertEqual(previousDefaultsConfig.windowHeights[3], 120,
+    "previous third default height migrates")
+assertEqual(previousDefaultsConfig.sizeDefaultsVersion, 1,
+    "previous default sizes record migration")
+updateProfile(nil, {
+    damageMeter = previousDefaultsConfig,
+})
+assertEqual(previousDefaultsConfig.width, 260,
+    "default size migration is idempotent")
+
+local historicalWindowDefaultsConfig = {
+    width = 300,
+    windowHeights = {
+        220,
+        220,
+        220,
+    },
+}
+updateProfile(nil, {
+    damageMeter = historicalWindowDefaultsConfig,
+})
+assertEqual(historicalWindowDefaultsConfig.width, 260,
+    "historical default width migrates")
+assertEqual(historicalWindowDefaultsConfig.windowHeights[1], 138,
+    "historical window defaults migrate")
+
+local historicalScalarDefaultConfig = {
+    width = 300,
+    height = 220,
+}
+updateProfile(nil, {
+    damageMeter = historicalScalarDefaultConfig,
+})
+assertEqual(historicalScalarDefaultConfig.width, 260,
+    "historical scalar default width migrates")
+assertEqual(historicalScalarDefaultConfig.height, nil,
+    "historical scalar default is removed")
+assertEqual(historicalScalarDefaultConfig.windowHeights[1], 138,
+    "historical scalar default uses compact first height")
+assertEqual(historicalScalarDefaultConfig.windowHeights[2], 120,
+    "historical scalar default uses compact stacked height")
+
+local customWidthConfig = {
+    width = 280,
+    windowHeights = {
+        147,
+        134,
+        134,
+    },
+}
+updateProfile(nil, {
+    damageMeter = customWidthConfig,
+})
+assertEqual(customWidthConfig.width, 280,
+    "custom width preserves the complete saved size")
+assertEqual(customWidthConfig.windowHeights[1], 147,
+    "custom width preserves previous saved heights")
+
+local customHeightConfig = {
+    width = 300,
+    windowHeights = {
+        147,
+        199,
+        134,
+    },
+}
+updateProfile(nil, {
+    damageMeter = customHeightConfig,
+})
+assertEqual(customHeightConfig.width, 300,
+    "custom height preserves the saved width")
+assertEqual(customHeightConfig.windowHeights[1], 147,
+    "custom height preserves the first saved height")
+assertEqual(customHeightConfig.windowHeights[2], 199,
+    "custom height remains unchanged")
+assertEqual(customHeightConfig.windowHeights[3], 134,
+    "custom height preserves the third saved height")
+
+local versionedPreviousDefaultsConfig = {
+    sizeDefaultsVersion = 1,
+    width = 300,
+    windowHeights = {
+        147,
+        134,
+        134,
+    },
+}
+updateProfile(nil, {
+    damageMeter = versionedPreviousDefaultsConfig,
+})
+assertEqual(versionedPreviousDefaultsConfig.width, 300,
+    "versioned user-selected width is preserved")
+assertEqual(versionedPreviousDefaultsConfig.windowHeights[1], 147,
+    "versioned user-selected heights are preserved")
 
 local customAnchorConfig = {
     windowAnchors = {

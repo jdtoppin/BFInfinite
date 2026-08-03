@@ -5,6 +5,20 @@ local DM = BFI.modules.DamageMeter
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
+local CURRENT_SIZE_DEFAULTS_VERSION = 1
+local LEGACY_DEFAULT_WIDTH = 300
+local LEGACY_DEFAULT_HEIGHT = 220
+local LEGACY_DEFAULT_WINDOW_HEIGHTS = {
+    220,
+    220,
+    220,
+}
+local PREVIOUS_DEFAULT_WINDOW_HEIGHTS = {
+    147,
+    134,
+    134,
+}
+
 local defaults = {
     enabled = false,
     windowCount = 3,
@@ -46,9 +60,9 @@ local defaults = {
     resetOnMythicPlusStart = false,
     alwaysShowPlayer = true,
     windowHeights = {
-        147,
-        134,
-        134,
+        138,
+        120,
+        120,
     },
     windowAnchors = {
         {
@@ -75,7 +89,8 @@ local defaults = {
     },
     dockToObjectiveTracker = true,
     locked = false,
-    width = 300,
+    width = 260,
+    sizeDefaultsVersion = CURRENT_SIZE_DEFAULTS_VERSION,
     headerHeight = 22,
     barHeight = 20,
     spacing = 2,
@@ -185,6 +200,52 @@ local function CopyDefaults()
     copy.windowHeights = CopyWindowHeights(defaults.windowHeights)
     copy.windowAnchors = CopyWindowAnchors(defaults.windowAnchors)
     return copy
+end
+
+local function WindowHeightsMatch(values, expected)
+    if type(values) ~= "table" then return false end
+
+    for index = 1, 3 do
+        if values[index] ~= expected[index] then
+            return false
+        end
+    end
+    return true
+end
+
+local function UsesLegacyDefaultSizes(config)
+    if config.width ~= LEGACY_DEFAULT_WIDTH then return false end
+
+    if config.height == nil then
+        return WindowHeightsMatch(
+            config.windowHeights,
+            PREVIOUS_DEFAULT_WINDOW_HEIGHTS
+        ) or WindowHeightsMatch(
+            config.windowHeights,
+            LEGACY_DEFAULT_WINDOW_HEIGHTS
+        )
+    end
+
+    return config.height == LEGACY_DEFAULT_HEIGHT
+        and config.windowHeights == nil
+end
+
+local function MigrateDefaultSizes(config)
+    local version = config.sizeDefaultsVersion
+    if type(version) == "number"
+        and version >= CURRENT_SIZE_DEFAULTS_VERSION
+    then
+        return
+    end
+
+    -- Only compact exact historical defaults. If any dimension differs, the
+    -- complete saved size remains user-owned.
+    if UsesLegacyDefaultSizes(config) then
+        config.width = defaults.width
+        config.height = nil
+        config.windowHeights = CopyWindowHeights(defaults.windowHeights)
+    end
+    config.sizeDefaultsVersion = CURRENT_SIZE_DEFAULTS_VERSION
 end
 
 local function NormalizeNumber(value, default, minimum, maximum, integer)
@@ -361,6 +422,8 @@ local function NormalizeConfig(config)
     if type(config.alwaysShowPlayer) ~= "boolean" then
         config.alwaysShowPlayer = defaults.alwaysShowPlayer
     end
+
+    MigrateDefaultSizes(config)
 
     local legacyHeight
     if type(config.height) == "number" and config.height == config.height then

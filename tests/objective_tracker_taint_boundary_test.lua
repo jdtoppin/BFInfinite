@@ -51,11 +51,33 @@ end
 local callback
 local originalPositionCheck = function() return true end
 local trackerNineSlice = {}
+local trackerHeader = {}
+local trackerCollapsed = false
+local firstModuleShown = true
+local secondModuleShown = true
+local firstModule = {
+    IsShown = function()
+        return firstModuleShown
+    end,
+}
+local secondModule = {
+    IsShown = function()
+        return secondModuleShown
+    end,
+}
 local tracker = {
+    Header = trackerHeader,
     IsInDefaultPosition = originalPositionCheck,
+    IsCollapsed = function()
+        return trackerCollapsed
+    end,
     ignoreFramePositionManager = "blizzard",
     isManagedFrame = "blizzard",
     isRightManagedFrame = "blizzard",
+    modules = {
+        firstModule,
+        secondModule,
+    },
     Update = forbiddenCall("ObjectiveTrackerFrame:Update"),
     UpdateHeight = forbiddenCall("ObjectiveTrackerFrame:UpdateHeight"),
     MarkDirty = forbiddenCall("ObjectiveTrackerFrame:MarkDirty"),
@@ -75,13 +97,16 @@ local fontUpdates = 0
 local backdropCreates = 0
 local textureRemovals = 0
 local backdropRelativeLevel
-local backdropAnchor
+local backdropAnchors = {}
 local backdropParent
 local backdropColor
 local backdropBorderColor
 local trackerBackdrop = {
-    SetAllPoints = function(_, relativeTo)
-        backdropAnchor = relativeTo
+    ClearAllPoints = function()
+        backdropAnchors = {}
+    end,
+    SetPoint = function(_, ...)
+        backdropAnchors[#backdropAnchors + 1] = {...}
     end,
     SetBackdropColor = function(_, red, green, blue, alpha)
         backdropColor = {red, green, blue, alpha}
@@ -142,6 +167,7 @@ local W = {
         },
     },
 }
+local trackerUpdateHook
 local environment = {
     _G = false,
     AbstractFramework = AF,
@@ -156,6 +182,13 @@ local environment = {
     ScenarioObjectiveTracker = scenarioTracker,
     ScenarioRewardsFrame = rewardsFrame,
     debug = debug,
+    hooksecurefunc = function(target, method, hook)
+        assertEqual(target, tracker, "Objective Tracker update hook target")
+        assertEqual(method, "Update", "Objective Tracker update hook method")
+        assertEqual(type(hook), "function", "Objective Tracker update hook")
+        assertEqual(trackerUpdateHook, nil, "Objective Tracker update hooked once")
+        trackerUpdateHook = hook
+    end,
     ipairs = ipairs,
     math = math,
     next = next,
@@ -188,6 +221,8 @@ local forbiddenOwnership = {
     "tracker:SetPoint(",
     "tracker.NineSlice:ClearAllPoints(",
     "tracker.NineSlice:SetPoint(",
+    "module:GetContentsHeight(",
+    "module:IsVisible(",
     "tracker.IsInDefaultPosition =",
     "tracker.editModeHeight =",
     "tracker.ignoreFramePositionManager =",
@@ -245,10 +280,56 @@ assertEqual(backdropCreates, 1,
     "shared BFI Objective Tracker backdrop created once")
 assertEqual(backdropParent, tracker,
     "shared backdrop inherits Objective Tracker visibility")
-assertEqual(backdropAnchor, trackerNineSlice,
-    "shared backdrop follows native content bounds")
+assertEqual(type(trackerUpdateHook), "function",
+    "shared backdrop follows native Objective Tracker updates")
+assertEqual(#backdropAnchors, 3,
+    "shared backdrop uses explicit content bounds")
+assertEqual(backdropAnchors[1][1], "TOPLEFT",
+    "shared backdrop top-left point")
+assertEqual(backdropAnchors[1][2], trackerHeader,
+    "shared backdrop top-left follows the header")
+assertEqual(backdropAnchors[1][3], "TOPLEFT",
+    "shared backdrop top-left relative point")
+assertEqual(backdropAnchors[1][4], -36,
+    "shared backdrop includes left overhang and padding")
+assertEqual(backdropAnchors[1][5], 6,
+    "shared backdrop moves above the header")
+assertEqual(backdropAnchors[2][1], "TOPRIGHT",
+    "shared backdrop top-right point")
+assertEqual(backdropAnchors[2][2], trackerHeader,
+    "shared backdrop top-right follows the header")
+assertEqual(backdropAnchors[2][4], 11,
+    "shared backdrop includes right overhang and padding")
+assertEqual(backdropAnchors[2][5], 6,
+    "shared backdrop top padding is symmetrical")
+assertEqual(backdropAnchors[3][1], "BOTTOM",
+    "shared backdrop bottom point")
+assertEqual(backdropAnchors[3][2], secondModule,
+    "shared backdrop follows the last shown objective module")
+assertEqual(backdropAnchors[3][5], -16,
+    "shared backdrop includes native and extra bottom padding")
 assertEqual(backdropRelativeLevel, -1,
     "shared backdrop remains behind tracker content")
+
+secondModuleShown = false
+trackerUpdateHook()
+assertEqual(backdropAnchors[3][2], firstModule,
+    "hidden last modules do not extend the shared backdrop")
+
+trackerCollapsed = true
+trackerUpdateHook()
+assertEqual(backdropAnchors[3][2], trackerHeader,
+    "collapsed tracker background shrinks to the visible header")
+assertEqual(backdropAnchors[3][5], -6,
+    "collapsed tracker keeps only surface padding below the header")
+
+trackerCollapsed = false
+secondModuleShown = true
+trackerUpdateHook()
+assertEqual(backdropAnchors[3][2], secondModule,
+    "expanded tracker background follows restored objective content")
+assertEqual(backdropAnchors[3][5], -16,
+    "expanded tracker restores objective bottom padding")
 assertEqual(backdropColor[1], 0.1,
     "shared backdrop uses the BFI background color")
 assertEqual(backdropColor[4], 0.73,

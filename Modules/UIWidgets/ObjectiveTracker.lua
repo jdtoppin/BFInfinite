@@ -16,22 +16,70 @@ local trackerStyled
 local trackerBackgroundStyled
 local trackerBackground
 
+local TRACKER_NATIVE_LEFT_OVERHANG = 30
+local TRACKER_NATIVE_RIGHT_OVERHANG = 5
+local TRACKER_NATIVE_BOTTOM_PADDING = 10
+local TRACKER_BACKGROUND_PADDING = 6
+
 local GenerateClosure = GenerateClosure
 
 ---------------------------------------------------------------------
 -- background
 ---------------------------------------------------------------------
+local function UpdateTrackerBackgroundLayout()
+    if not trackerBackground or not tracker.Header then return end
+
+    local bottomRegion = tracker.Header
+    if not tracker:IsCollapsed() then
+        for _, module in ipairs(tracker.modules) do
+            -- Retail collapse leaves GetContentsHeight() populated while
+            -- hiding the modules. IsShown() reflects the regions Blizzard
+            -- actually laid out without reading or taking ownership of their
+            -- protected geometry.
+            if module:IsShown() then
+                bottomRegion = module
+            end
+        end
+    end
+
+    trackerBackground:ClearAllPoints()
+    trackerBackground:SetPoint(
+        "TOPLEFT",
+        tracker.Header,
+        "TOPLEFT",
+        -TRACKER_NATIVE_LEFT_OVERHANG - TRACKER_BACKGROUND_PADDING,
+        TRACKER_BACKGROUND_PADDING
+    )
+    trackerBackground:SetPoint(
+        "TOPRIGHT",
+        tracker.Header,
+        "TOPRIGHT",
+        TRACKER_NATIVE_RIGHT_OVERHANG + TRACKER_BACKGROUND_PADDING,
+        TRACKER_BACKGROUND_PADDING
+    )
+    trackerBackground:SetPoint(
+        "BOTTOM",
+        bottomRegion,
+        "BOTTOM",
+        0,
+        bottomRegion == tracker.Header
+            and -TRACKER_BACKGROUND_PADDING
+            or -TRACKER_NATIVE_BOTTOM_PADDING
+                - TRACKER_BACKGROUND_PADDING
+    )
+end
+
 local function SetupTrackerBackground()
     if trackerBackgroundStyled or not tracker.NineSlice then return end
 
     -- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit d3915c78:
-    -- Blizzard_ObjectiveTrackerContainer.xml anchors NineSlice around the
-    -- tracker contents, and Blizzard_ObjectiveTrackerContainer.lua updates
-    -- its bottom edge; Blizzard_ObjectiveTrackerManager.lua defaults its
-    -- opacity to zero. A child of NineSlice would therefore hide BFI's shared
-    -- surface. Anchor a BFI-owned sibling to those bounds instead; BFI's
-    -- background option owns the surface opacity, the ObjectiveTrackerFrame
-    -- parent owns overall visibility, and Blizzard retains all geometry.
+    -- Blizzard_ObjectiveTrackerContainer.xml gives NineSlice 30/5-pixel side
+    -- overhangs and 10 pixels below the last module. Container collapse hides
+    -- modules but deliberately leaves their content heights (and NineSlice's
+    -- expanded bottom anchor) intact. Follow the last shown module instead,
+    -- falling back to the resized header, and add BFI-owned surface padding.
+    -- Blizzard_ObjectiveTrackerManager.lua still owns the tracker and defaults
+    -- the native background opacity to zero.
     trackerBackgroundStyled = true
     S.RemoveTextures(tracker.NineSlice, true)
     trackerBackground = AF.CreateBorderedFrame(
@@ -42,8 +90,9 @@ local function SetupTrackerBackground()
         "background",
         "border"
     )
-    trackerBackground:SetAllPoints(tracker.NineSlice)
     AF.SetFrameLevel(trackerBackground, -1)
+    hooksecurefunc(tracker, "Update", UpdateTrackerBackgroundLayout)
+    UpdateTrackerBackgroundLayout()
 end
 
 ---------------------------------------------------------------------
@@ -92,7 +141,7 @@ local function SetupTracker()
 
         if module == tracker then
             local originalWidth = header:GetWidth()
-            hooksecurefunc(module, "SetCollapsed", function(_, collapsed)
+            local function UpdateMainHeaderLayout(collapsed)
                 header:ClearAllPoints()
                 if collapsed then
                     header:SetPoint("TOPRIGHT")
@@ -101,7 +150,12 @@ local function SetupTracker()
                     header:SetPoint("TOPLEFT")
                     header:SetWidth(originalWidth)
                 end
+                UpdateTrackerBackgroundLayout()
+            end
+            hooksecurefunc(module, "SetCollapsed", function(_, collapsed)
+                UpdateMainHeaderLayout(collapsed)
             end)
+            UpdateMainHeaderLayout(module:IsCollapsed())
         else
             hooksecurefunc(module, "SetCollapsed", function(_, collapsed)
                 if collapsed then
