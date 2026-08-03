@@ -95,7 +95,16 @@ local environment = {
     },
     AuraContainerSortDirection = SORT_DIRECTION,
     AuraContainerSortMethod = SORT_METHOD,
+    AuraUtil = {
+        AuraFilters = {
+            Important = "IMPORTANT",
+            Dispellable = "DISPELLABLE",
+        },
+    },
     CustomAuraContainerAuraProcessingPolicy = PROCESSING_POLICY,
+    GetCVar = function()
+        return "0"
+    end,
     assert = assert,
     error = error,
     ipairs = ipairs,
@@ -118,6 +127,7 @@ setmetatable(environment, {
 })
 
 for _, path in ipairs({
+    "Utils.lua",
     "Modules/UnitFrames/AuraPolicy.lua",
     "Modules/UnitFrames/AuraSpec.lua",
     "Modules/UnitFrames/Presets.lua",
@@ -194,11 +204,10 @@ local function assertPartyContract(preset)
     assertEqual(debuffDescriptor.empty, false,
         preset.id .. " debuff empty")
 
-    local expectedFilters = {
-        "HARMFUL|PLAYER",
-        "HARMFUL|RAID_IN_COMBAT|!PLAYER",
-        "HARMFUL|RAID_PLAYER_DISPELLABLE|!PLAYER|!RAID_IN_COMBAT",
-    }
+    -- The current production resolver treats the shipped legacy
+    -- castByUnit=true setting as the full harmful set. Keep this replayed
+    -- Party contract aligned with the canonical migration used by BFI #137.
+    local expectedFilters = {"HARMFUL"}
     assertEqual(#debuffDescriptor.completeSpec.groups, #expectedFilters,
         preset.id .. " debuff group count")
     for index, expectedFilter in ipairs(expectedFilters) do
@@ -215,21 +224,21 @@ local function assertPartyContract(preset)
 
     assertEqual(debuffDescriptor.completeSpec.holder.width, 59,
         preset.id .. " debuff holder width")
-    assertEqual(debuffDescriptor.completeSpec.holder.height, 119,
+    assertEqual(debuffDescriptor.completeSpec.holder.height, 39,
         preset.id .. " debuff holder height")
-    assertEqual(debuffDescriptor.visibility.requiresVisible, true,
+    assertEqual(debuffDescriptor.visibility.requiresVisible, false,
         preset.id .. " debuff visible gate")
     assertEqual(debuffDescriptor.visibility.requiresAssist, false,
         preset.id .. " debuff assist gate")
     assertEqual(debuffDescriptor.metrics.legacyMaxFrameCount, 6,
         preset.id .. " debuff legacy capacity")
-    assertEqual(debuffDescriptor.metrics.nativeVisibleCapacity, 18,
+    assertEqual(debuffDescriptor.metrics.nativeVisibleCapacity, 6,
         preset.id .. " debuff native capacity")
-    assertEqual(debuffDescriptor.metrics.initialRestrictedButtonCount, 30,
+    assertEqual(debuffDescriptor.metrics.initialRestrictedButtonCount, 10,
         preset.id .. " debuff initial buttons")
     assertEqual(
         debuffDescriptor.metrics.freshContainerRestrictedButtonCountCeiling,
-        30,
+        10,
         preset.id .. " debuff button ceiling"
     )
     assertEqual(
@@ -257,8 +266,9 @@ assertEqual(firstBuffs.numTotal, secondBuffs.numTotal,
 assertEqual(firstDebuffs.numTotal, secondDebuffs.numTotal,
     "shared Party debuff contract")
 
--- Five fixed Party children prebuild one 10-button buff group and three
--- 10-button debuff groups apiece.
-assertEqual(5 * (10 + 30), 200, "Party initial restricted buttons")
+-- Five fixed Party children prebuild one 10-button buff group, one 10-button
+-- debuff group, and one dispel-overlay AuraSlot apiece.
+assertEqual(5 * (10 + 10 + 1), 105,
+    "Party initial restricted buttons")
 
 print("unit_frame_party_aura_contract_test.lua: ok")

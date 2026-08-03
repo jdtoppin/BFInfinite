@@ -30,6 +30,7 @@ local indicators = {
     "threatGlow",
     {"groupNativeAuras", "buffs", "HELPFUL", "buffs"},
     {"groupNativeAuras", "debuffs", "HARMFUL", "debuffs"},
+    {"groupNativeDispels", "dispels", "dispels"},
 }
 
 ---------------------------------------------------------------------
@@ -75,6 +76,9 @@ local function CreateParty()
                 -- second bounded shell before indicator construction.
                 buffs = UF.CreateNativeGroupAuraContainerSeed(button),
                 debuffs = button.AuraContainer,
+                -- The full-frame dispel tint has an independent lifecycle
+                -- and topology from the visible harmful-icon row.
+                dispels = UF.CreateNativeGroupAuraContainerSeed(button),
             }
         end
 

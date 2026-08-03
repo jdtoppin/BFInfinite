@@ -28,6 +28,7 @@ local function makeHarness(hasNativeBackend)
         configGroups = {},
         createIndicatorCalls = {},
         disableIndicatorCalls = {},
+        dispelCalls = {},
         driverRegistrations = {},
         events = {},
         framesByName = {},
@@ -383,6 +384,38 @@ local function makeHarness(hasNativeBackend)
         return indicator
     end
 
+    function UF.CreateGroupNativeDispelHighlight(
+        parent,
+        name,
+        containerKey
+    )
+        local call = {
+            containerKey = containerKey,
+            name = name,
+            parent = parent,
+        }
+        harness.dispelCalls[#harness.dispelCalls + 1] = call
+        record(
+            "group-native.dispel-builder",
+            parent,
+            name,
+            containerKey
+        )
+
+        if not UF.HasNativeAuraContainerBackend() then
+            return newIndicator(name, "unavailable")
+        end
+
+        local containers = parent._nativeAuraContainers
+        local seed = containers and containers[containerKey]
+        assertTrue(seed, "native group dispel seed is missing")
+        call.seed = seed
+        local indicator = newIndicator(name, "native-dispel")
+        indicator.containerKey = containerKey
+        indicator.seed = seed
+        return indicator
+    end
+
     function UF.CreateIndicators(frame, indicators)
         harness.createIndicatorCalls[
             #harness.createIndicatorCalls + 1
@@ -396,15 +429,25 @@ local function makeHarness(hasNativeBackend)
             if type(descriptor) == "table" then
                 local builder = descriptor[1]
                 local name = descriptor[2]
-                assertEqual(builder, "groupNativeAuras",
-                    "unexpected Party aura builder")
-                frame.indicators[name] =
-                    UF.CreateGroupNativeAuras(
-                        frame,
-                        frame:GetName() .. "_" .. AF.UpperFirst(name),
-                        descriptor[3],
-                        descriptor[4]
-                    )
+                if builder == "groupNativeAuras" then
+                    frame.indicators[name] =
+                        UF.CreateGroupNativeAuras(
+                            frame,
+                            frame:GetName() .. "_" .. AF.UpperFirst(name),
+                            descriptor[3],
+                            descriptor[4]
+                        )
+                elseif builder == "groupNativeDispels" then
+                    frame.indicators[name] =
+                        UF.CreateGroupNativeDispelHighlight(
+                            frame,
+                            frame:GetName() .. "_" .. AF.UpperFirst(name),
+                            descriptor[3]
+                        )
+                else
+                    error("unexpected Party indicator builder: "
+                        .. tostring(builder))
+                end
             else
                 frame.indicators[descriptor] =
                     newIndicator(descriptor, "ordinary")
@@ -572,6 +615,16 @@ local function findGroupAuraCall(harness, parent, containerKey)
     end
 end
 
+local function findDispelCall(harness, parent, containerKey)
+    for _, call in ipairs(harness.dispelCalls) do
+        if call.parent == parent
+            and call.containerKey == containerKey
+        then
+            return call
+        end
+    end
+end
+
 local function testNativeHeaderSeedsAndBuilderArguments()
     local harness = makeHarness(true)
     harness:FireUpdate()
@@ -612,12 +665,14 @@ local function testNativeHeaderSeedsAndBuilderArguments()
     )
 
     assertEqual(#header.children, 5, "Party child count")
-    assertEqual(#harness.nativeSeeds, 5,
-        "eager helpful seed count")
+    assertEqual(#harness.nativeSeeds, 10,
+        "eager helpful and dispel seed count")
     assertEqual(#harness.groupAuraCalls, 10,
         "group aura builder call count")
     assertEqual(#harness.nativeAuraCalls, 10,
         "native aura selection count")
+    assertEqual(#harness.dispelCalls, 5,
+        "native dispel builder call count")
     assertEqual(#harness.legacyAuraCalls, 0,
         "native Party legacy selection count")
 
@@ -625,6 +680,7 @@ local function testNativeHeaderSeedsAndBuilderArguments()
         harness.createIndicatorCalls[1].indicators
     local buffsTuple = findAuraTuple(indicators, "buffs")
     local debuffsTuple = findAuraTuple(indicators, "debuffs")
+    local dispelsTuple = findAuraTuple(indicators, "dispels")
     assertTrue(buffsTuple, "Party buffs tuple")
     assertEqual(#buffsTuple, 4, "Party buffs tuple size")
     assertEqual(buffsTuple[1], "groupNativeAuras",
@@ -645,6 +701,15 @@ local function testNativeHeaderSeedsAndBuilderArguments()
         "Party debuffs filter")
     assertEqual(debuffsTuple[4], "debuffs",
         "Party debuffs seed key")
+    assertTrue(dispelsTuple, "Party dispels tuple")
+    assertEqual(#dispelsTuple, 3,
+        "Party dispels tuple size")
+    assertEqual(dispelsTuple[1], "groupNativeDispels",
+        "Party dispels builder")
+    assertEqual(dispelsTuple[2], "dispels",
+        "Party dispels name")
+    assertEqual(dispelsTuple[3], "dispels",
+        "Party dispels seed key")
 
     local claimedSeeds = {}
     for index, button in ipairs(header.children) do
@@ -652,7 +717,7 @@ local function testNativeHeaderSeedsAndBuilderArguments()
             rawget(button, "_nativeAuraContainers")
         assertTrue(containers,
             "Party child native container map " .. index)
-        assertEqual(countKeys(containers), 2,
+        assertEqual(countKeys(containers), 3,
             "Party child explicit seed count " .. index)
         assertEqual(containers.debuffs, button.AuraContainer,
             "Party header-born harmful seed " .. index)
@@ -662,21 +727,35 @@ local function testNativeHeaderSeedsAndBuilderArguments()
             "Party helpful seed origin " .. index)
         assertEqual(containers.buffs.child, button,
             "Party helpful seed parent " .. index)
+        assertEqual(containers.dispels.origin, "eager",
+            "Party dispel seed origin " .. index)
+        assertEqual(containers.dispels.child, button,
+            "Party dispel seed parent " .. index)
         assertTrue(
             containers.buffs ~= containers.debuffs,
             "Party aura seeds must be distinct " .. index
+        )
+        assertTrue(
+            containers.dispels ~= containers.buffs
+                and containers.dispels ~= containers.debuffs,
+            "Party dispel seed must be independent " .. index
         )
         assertTrue(not claimedSeeds[containers.buffs],
             "duplicate Party helpful seed " .. index)
         assertTrue(not claimedSeeds[containers.debuffs],
             "duplicate Party harmful seed " .. index)
+        assertTrue(not claimedSeeds[containers.dispels],
+            "duplicate Party dispel seed " .. index)
         claimedSeeds[containers.buffs] = true
         claimedSeeds[containers.debuffs] = true
+        claimedSeeds[containers.dispels] = true
 
         local buffsCall =
             findGroupAuraCall(harness, button, "buffs")
         local debuffsCall =
             findGroupAuraCall(harness, button, "debuffs")
+        local dispelsCall =
+            findDispelCall(harness, button, "dispels")
         assertTrue(buffsCall,
             "Party helpful builder call " .. index)
         assertEqual(buffsCall.auraFilter, "HELPFUL",
@@ -689,6 +768,10 @@ local function testNativeHeaderSeedsAndBuilderArguments()
             "Party harmful builder filter " .. index)
         assertEqual(debuffsCall.seed, containers.debuffs,
             "Party harmful forwarded seed " .. index)
+        assertTrue(dispelsCall,
+            "Party dispel builder call " .. index)
+        assertEqual(dispelsCall.seed, containers.dispels,
+            "Party dispel forwarded seed " .. index)
 
         assertEqual(button._updateOnGroupUpdate, true,
             "Party group-update flag " .. index)
@@ -697,8 +780,13 @@ local function testNativeHeaderSeedsAndBuilderArguments()
         assertEqual(button._enableUnitButtonMapping, true,
             "Party unit mapping flag " .. index)
     end
-    assertEqual(countKeys(claimedSeeds), 10,
-        "distinct Party native seed count")
+    assertEqual(countKeys(claimedSeeds), 15,
+        "distinct Party native container count")
+    -- Each Party child reserves 10 helpful buttons, 10 harmful buttons, and
+    -- one dispel-overlay AuraSlot. Dynamic scope/type tuning must not grow
+    -- this fixed construction budget.
+    assertEqual(#harness.groupAuraCalls * 10 + #harness.dispelCalls,
+        105, "Party initial native button reservations")
 end
 
 local function testUnavailableBackendIsExactLegacyPath()
@@ -719,6 +807,8 @@ local function testUnavailableBackendIsExactLegacyPath()
         "12.0.7 group builder dispatch count")
     assertEqual(#harness.legacyAuraCalls, 10,
         "12.0.7 legacy builder selection count")
+    assertEqual(#harness.dispelCalls, 5,
+        "unavailable dispel builder dispatch count")
 
     for index, button in ipairs(header.children) do
         assertEqual(

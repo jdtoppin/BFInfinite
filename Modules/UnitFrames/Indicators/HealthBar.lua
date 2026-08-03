@@ -79,11 +79,6 @@ local function HealthBar_LoadConfig(self, config)
         self:SetupHealAbsorb_NormalStyle(config.healAbsorb.excessGlow.enabled)
     end
 
-    -- dispel highlight
-    self:EnableDispelHighlight(config.dispelHighlight.enabled, config.dispelHighlight.dispellable)
-    self:SetDispelHighlightBlendMode(config.dispelHighlight.blendMode)
-    self:SetDispelHighlightAlpha(config.dispelHighlight.alpha)
-
     -- mouseover highlight
     self:EnableMouseoverHighlight(config.mouseoverHighlight.enabled)
     self:SetMouseoverHighlightColor(AF.UnpackColor(config.mouseoverHighlight.color))
@@ -135,14 +130,6 @@ function UF.CreateHealthBar(parent, name)
 
     -- events
     AF.AddEventHandler(bar)
-
-    -- -- dispel highlight
-    -- local dispelHighlight = bar:CreateTexture(name .. "DispelHighlight", "ARTWORK", nil, 1)
-    -- bar.dispelHighlight = dispelHighlight
-    -- dispelHighlight:SetAllPoints(bar.fill.mask)
-    -- dispelHighlight:Hide()
-
-    -- bar.dispelTypes = {}
 
     -- functions
     bar.Update = HealthBar_Update

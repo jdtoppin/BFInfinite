@@ -63,7 +63,6 @@ local settings = {
         "damageAbsorb",
         "healAbsorb",
         "mouseoverHighlight",
-        "dispelHighlight",
         "frameLevel",
     },
     powerBar = {
@@ -217,6 +216,12 @@ local settings = {
         "tooltip",
         "frameLevel"
     },
+    dispels = {
+        "enabled",
+        "dispelScope",
+        "dispelTypes",
+        "dispelAppearance",
+    },
     raidIcon = {
         "enabled",
         "position,anchorTo",
@@ -291,7 +296,9 @@ local settings = {
 -- shared functions
 ---------------------------------------------------------------------
 local function IsAuraIndicator(t)
-    return t.id == "buffs" or t.id == "debuffs"
+    return t.id == "buffs"
+        or t.id == "debuffs"
+        or t.id == "dispels"
 end
 
 local nativeHelpfulOwners = {
@@ -363,7 +370,9 @@ local function GetAuraIndicatorRuntimeKind(t)
             and frame.indicators
             and frame.indicators[t.id]
         if indicator then
-            if type(indicator.GetNativeAuraState) == "function" then
+            if type(indicator.GetNativeAuraState) == "function"
+                or type(indicator.GetNativeDispelState) == "function"
+            then
                 return "native"
             elseif type(indicator.LoadConfig) == "function" then
                 legacyFound = true
@@ -392,6 +401,7 @@ local function UsesNativeAuraContainer(t)
     -- integration contract until the frame exists, then prefer the actual
     -- runtime above so option wording cannot drift from implementation.
     return t.id == "debuffs"
+        or (t.id == "dispels" and t.owner == "party")
         or (
             t.id == "buffs"
             and nativeHelpfulOwners[t.owner] == true
@@ -453,7 +463,9 @@ AF.RegisterCallback(
     ShowNativeAuraReloadDialog
 )
 
-local function LoadIndicatorConfig(t)
+local LoadIndicatorConfig
+
+LoadIndicatorConfig = function(t)
     AF.Debug(AF.GetColorStr("darkgray"), "LoadIndicatorConfig", t.owner, t.id)
 
     local count = GetIndicatorFrameCount(t)
@@ -471,6 +483,24 @@ local function LoadIndicatorConfig(t)
 
     if reloadRequired then
         ShowNativeAuraReloadDialog()
+    end
+
+    -- The managed dispel overlay inherits the health bar's frame level only
+    -- when WoW initializes its AuraButton. Re-evaluate the dependent Party
+    -- runtime after every health-bar mutation so a level change quiesces the
+    -- old overlay and uses the same reload notice as other native changes.
+    if t.owner == "party" and t.id == "healthBar" then
+        local party = UF.config and UF.config.party
+        local indicators = party and party.indicators
+        local dispels = indicators and indicators.dispels
+        if dispels then
+            LoadIndicatorConfig({
+                cfg = dispels,
+                id = "dispels",
+                owner = "party",
+                target = t.target,
+            })
+        end
     end
 end
 
@@ -818,6 +848,18 @@ builder["enabled"] = function(parent)
             AF.Fire("BFI_RefreshOptions", "unitFrames")
         else
             LoadIndicatorConfig(pane.t)
+            if pane.t.id == "dispels" then
+                for _, key in ipairs({
+                    "dispelScope",
+                    "dispelTypes",
+                    "dispelAppearance",
+                }) do
+                    local optionPane = created[key]
+                    if optionPane and optionPane.SetConfigEnabled then
+                        optionPane:SetConfigEnabled(checked)
+                    end
+                end
+            end
         end
     end)
 
@@ -825,6 +867,211 @@ builder["enabled"] = function(parent)
         pane.t = t
         UpdateColor(t.cfg.enabled)
         enabled:SetChecked(t.cfg.enabled)
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- dispelScope
+---------------------------------------------------------------------
+builder["dispelScope"] = function(parent)
+    if created["dispelScope"] then return created["dispelScope"] end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UnitFrameOption_DispelScope",
+        nil,
+        88
+    )
+    created["dispelScope"] = pane
+
+    local scope = AF.CreateDropdown(pane, 335)
+    scope:SetLabel(L["Show When"])
+    AF.SetPoint(scope, "TOPLEFT", 15, -25)
+    scope:SetItems({
+        {text = L["You Can Dispel"], value = "player"},
+        {text = L["Group Can Dispel"], value = "group"},
+        {text = L["Any Dispel Type"], value = "any"},
+    })
+    scope:SetOnSelect(function(value)
+        pane.t.cfg.scope = value
+        LoadIndicatorConfig(pane.t)
+    end)
+
+    local tip = AF.CreateFontString(
+        pane,
+        L["WoW chooses the matching debuff and color. Private auras can appear in Debuffs when WoW allows them"]
+    )
+    tip:SetColor("tip")
+    tip:SetJustifyH("LEFT")
+    tip:SetJustifyV("TOP")
+    tip:SetWordWrap(true)
+    AF.SetPoint(tip, "TOPLEFT", scope, "BOTTOMLEFT", 0, -8)
+    AF.SetPoint(tip, "TOPRIGHT", pane, -15, -58)
+
+    function pane.Load(t)
+        pane.t = t
+        scope:SetSelectedValue(t.cfg.scope)
+        pane:SetConfigEnabled(t.cfg.enabled)
+    end
+
+    function pane:SetConfigEnabled(enabled)
+        scope:SetEnabled(enabled)
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- dispelTypes
+---------------------------------------------------------------------
+builder["dispelTypes"] = function(parent)
+    if created["dispelTypes"] then return created["dispelTypes"] end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UnitFrameOption_DispelTypes",
+        nil,
+        85
+    )
+    created["dispelTypes"] = pane
+
+    local tip = AF.CreateFontString(
+        pane,
+        L["Choose which debuff types can color the frame"]
+    )
+    tip:SetColor("tip")
+    AF.SetPoint(tip, "TOPLEFT", 15, -8)
+
+    local definitions = {
+        {key = "magic", label = "Magic"},
+        {key = "curse", label = "Curse"},
+        {key = "disease", label = "Disease"},
+        {key = "poison", label = "Poison"},
+        {key = "bleed", label = "Bleed"},
+    }
+    local checks = {}
+    for index, definition in ipairs(definitions) do
+        local check = AF.CreateCheckButton(pane, L[definition.label])
+        checks[index] = check
+        if index == 1 then
+            AF.SetPoint(check, "TOPLEFT", tip, "BOTTOMLEFT", 0, -9)
+        elseif index == 2 then
+            AF.SetPoint(check, "TOPLEFT", checks[1], 120, 0)
+        elseif index == 3 then
+            AF.SetPoint(check, "TOPLEFT", checks[2], 120, 0)
+        elseif index == 4 then
+            AF.SetPoint(check, "TOPLEFT", checks[1], "BOTTOMLEFT", 0, -8)
+        else
+            AF.SetPoint(check, "TOPLEFT", checks[2], "BOTTOMLEFT", 0, -8)
+        end
+        check:SetOnCheck(function(checked)
+            if type(pane.t.cfg.types) ~= "table" then
+                pane.t.cfg.types = {}
+            end
+            pane.t.cfg.types[definition.key] = checked
+            LoadIndicatorConfig(pane.t)
+        end)
+    end
+
+    function pane.Load(t)
+        pane.t = t
+        if type(t.cfg.types) ~= "table" then
+            t.cfg.types = {}
+        end
+        for index, definition in ipairs(definitions) do
+            checks[index]:SetChecked(t.cfg.types[definition.key])
+        end
+        pane:SetConfigEnabled(t.cfg.enabled)
+    end
+
+    function pane:SetConfigEnabled(enabled)
+        for _, check in ipairs(checks) do
+            check:SetEnabled(enabled)
+        end
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- dispelAppearance
+---------------------------------------------------------------------
+builder["dispelAppearance"] = function(parent)
+    if created["dispelAppearance"] then
+        return created["dispelAppearance"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UnitFrameOption_DispelAppearance",
+        nil,
+        105
+    )
+    created["dispelAppearance"] = pane
+
+    local appearance = AF.CreateDropdown(pane, 150)
+    appearance:SetLabel(L["Appearance"])
+    AF.SetPoint(appearance, "TOPLEFT", 15, -25)
+    appearance:SetItems({
+        {text = L["Bottom Gradient"], value = "bottom_gradient"},
+        {text = L["Full Gradient"], value = "full_gradient"},
+        {text = L["Full Solid"], value = "full_solid"},
+    })
+    appearance:SetOnSelect(function(value)
+        pane.t.cfg.appearance = value
+        LoadIndicatorConfig(pane.t)
+    end)
+
+    local alpha = AF.CreateSlider(
+        pane,
+        L["Alpha"],
+        150,
+        0,
+        1,
+        0.01,
+        true,
+        true
+    )
+    AF.SetPoint(alpha, "TOPLEFT", appearance, 185, 0)
+    alpha:SetOnValueChanged(function(value)
+        pane.t.cfg.alpha = value
+        LoadIndicatorConfig(pane.t)
+    end)
+
+    local blendMode = AF.CreateDropdown(pane, 150)
+    blendMode:SetLabel(L["Blend Mode"])
+    AF.SetPoint(
+        blendMode,
+        "TOPLEFT",
+        appearance,
+        "BOTTOMLEFT",
+        0,
+        -29
+    )
+    blendMode:SetItems({
+        {text = "BLEND", value = "BLEND"},
+        {text = "ADD", value = "ADD"},
+        {text = "MOD", value = "MOD"},
+    })
+    blendMode:SetOnSelect(function(value)
+        pane.t.cfg.blendMode = value
+        LoadIndicatorConfig(pane.t)
+    end)
+
+    function pane.Load(t)
+        pane.t = t
+        appearance:SetSelectedValue(t.cfg.appearance)
+        alpha:SetValue(t.cfg.alpha)
+        blendMode:SetSelectedValue(t.cfg.blendMode)
+        pane:SetConfigEnabled(t.cfg.enabled)
+    end
+
+    function pane:SetConfigEnabled(enabled)
+        appearance:SetEnabled(enabled)
+        alpha:SetEnabled(enabled)
+        blendMode:SetEnabled(enabled)
     end
 
     return pane
@@ -1758,70 +2005,6 @@ builder["mouseoverHighlight"] = function(parent)
         mouseoverHighlightCheckButton:SetChecked(t.cfg.mouseoverHighlight.enabled)
         mouseoverHighlightColorPicker:SetColor(t.cfg.mouseoverHighlight.color)
         mouseoverHighlightColorPicker:SetEnabled(t.cfg.mouseoverHighlight.enabled)
-    end
-
-    return pane
-end
-
----------------------------------------------------------------------
--- dispelHighlight
----------------------------------------------------------------------
-builder["dispelHighlight"] = function(parent)
-    if created["dispelHighlight"] then return created["dispelHighlight"] end
-
-    local pane = AF.CreateBorderedFrame(parent, "BFI_UnitFrameOption_DispelHighlight", nil, 80)
-    created["dispelHighlight"] = pane
-
-    local dispelHighlightCheckButton = AF.CreateCheckButton(pane, L["Dispel Highlight"])
-    AF.SetPoint(dispelHighlightCheckButton, "TOPLEFT", 15, -8)
-
-    local onlyDispellableCheckButton = AF.CreateCheckButton(pane, L["Only Dispellable"])
-    AF.SetPoint(onlyDispellableCheckButton, "TOPLEFT", dispelHighlightCheckButton, 185, 0)
-    onlyDispellableCheckButton:SetOnCheck(function(checked)
-        pane.t.cfg.dispelHighlight.dispellable = checked
-        LoadIndicatorConfig(pane.t)
-    end)
-
-    local alphaSlider = AF.CreateSlider(pane, L["Alpha"], 150, 0, 1, 0.01, true, true)
-    AF.SetPoint(alphaSlider, "TOPLEFT", dispelHighlightCheckButton, "BOTTOMLEFT", 0, -25)
-    alphaSlider:SetOnValueChanged(function(value)
-        pane.t.cfg.dispelHighlight.alpha = value
-        LoadIndicatorConfig(pane.t)
-    end)
-
-    local blendModeDropdown = AF.CreateDropdown(pane, 150)
-    blendModeDropdown:SetLabel(L["Blend Mode"])
-    AF.SetPoint(blendModeDropdown, "TOPLEFT", alphaSlider, 185, 0)
-    blendModeDropdown:SetItems({
-        {text = "DISABLE"},
-        {text = "ADD"},
-        -- {text = "ALPHAKEY"},
-        -- {text = "BLEND"},
-        {text = "MOD"},
-    })
-    blendModeDropdown:SetOnSelect(function(value)
-        pane.t.cfg.dispelHighlight.blendMode = value
-        LoadIndicatorConfig(pane.t)
-    end)
-
-    local function UpdateWidgets()
-        AF.SetEnabled(pane.t.cfg.dispelHighlight.enabled, onlyDispellableCheckButton, alphaSlider, blendModeDropdown)
-
-        dispelHighlightCheckButton:SetChecked(pane.t.cfg.dispelHighlight.enabled)
-        onlyDispellableCheckButton:SetChecked(pane.t.cfg.dispelHighlight.dispellable)
-        alphaSlider:SetValue(pane.t.cfg.dispelHighlight.alpha)
-        blendModeDropdown:SetSelectedValue(pane.t.cfg.dispelHighlight.blendMode)
-    end
-
-    dispelHighlightCheckButton:SetOnCheck(function(checked)
-        pane.t.cfg.dispelHighlight.enabled = checked
-        UpdateWidgets()
-        LoadIndicatorConfig(pane.t)
-    end)
-
-    function pane.Load(t)
-        pane.t = t
-        UpdateWidgets()
     end
 
     return pane

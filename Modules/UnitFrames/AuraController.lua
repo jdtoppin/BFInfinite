@@ -14,14 +14,15 @@ local ipairs, next, pairs, type = ipairs, next, pairs, type
 -- groups/slots add-only and restricts their buttons after initialization.
 -- This controller owns only configuration-derived state and never reads aura
 -- data, live buttons, native container geometry, or native visibility.
--- AF r37 adds native duration-text color curves driven by Blizzard's opaque
--- remaining-time binding.
-local REQUIRED_AF_VERSION = 37
+-- AF r38 adds native dispel-overlay slots whose selection and color stay
+-- entirely inside Blizzard's 12.1 AuraContainer implementation.
+local REQUIRED_AF_VERSION = 38
 local NATIVE_GROUP_AURA_TEMPLATE = "CustomAuraContainerTemplate"
 -- CustomAuraContainerConstants.FrameCreationBatchSize in the pinned build.
 local NATIVE_INITIAL_GROUP_RESERVATIONS = 10
 local REQUIRED_AF_METHODS = {
     "AddCustomAuraGroup",
+    "AddCustomAuraDispelOverlaySlot",
     "AddCustomAuraSlot",
     "CreateCustomAuraContainer",
     "GetCustomAuraContainerConstructionStats",
@@ -259,11 +260,24 @@ local function NormalizeSlot(slot, seenKeys, includeStyle)
         sortDirection = sortDirection,
     }
     if includeStyle then
-        normalized.point = NormalizePoint(slot.point, {
-            point = "CENTER",
-            relativePoint = "CENTER",
-        })
-        normalized.buttonStyle = CopyTable(slot.buttonStyle or {})
+        if slot.kind == "dispelOverlay" then
+            assert(slot.anchorTarget ~= nil,
+                "dispel overlay slot anchorTarget is required")
+            normalized.kind = "dispelOverlay"
+            -- This is a construction-owned frame reference. Keep it by
+            -- identity rather than copying a script object as configuration.
+            normalized.anchorTarget = slot.anchorTarget
+            normalized.overlayStyle = CopyTable(slot.overlayStyle or {})
+        else
+            assert(slot.kind == nil or slot.kind == "aura",
+                "unsupported aura slot kind")
+            normalized.kind = "aura"
+            normalized.point = NormalizePoint(slot.point, {
+                point = "CENTER",
+                relativePoint = "CENTER",
+            })
+            normalized.buttonStyle = CopyTable(slot.buttonStyle or {})
+        end
     end
     return normalized
 end
@@ -692,18 +706,36 @@ function ControllerMixin:_Build()
     end
 
     for _, slot in ipairs(spec.slots) do
-        AF.AddCustomAuraSlot(container, slot.key, slot.filterString, {
-            candidateFilters = slot.candidateFilters,
-            sortMethod = slot.sortMethod,
-            sortDirection = slot.sortDirection,
-            anchor = {
-                point = slot.point.point,
-                relativeTo = holder,
-                relativePoint = slot.point.relativePoint,
-                x = slot.point.x,
-                y = slot.point.y,
-            },
-        }, slot.buttonStyle)
+        if slot.kind == "dispelOverlay" then
+            AF.AddCustomAuraDispelOverlaySlot(
+                container,
+                slot.key,
+                slot.filterString,
+                {
+                    candidateFilters = slot.candidateFilters,
+                    sortMethod = slot.sortMethod,
+                    sortDirection = slot.sortDirection,
+                    anchor = {
+                        matchAnchorBounds = true,
+                        relativeTo = slot.anchorTarget,
+                    },
+                },
+                slot.overlayStyle
+            )
+        else
+            AF.AddCustomAuraSlot(container, slot.key, slot.filterString, {
+                candidateFilters = slot.candidateFilters,
+                sortMethod = slot.sortMethod,
+                sortDirection = slot.sortDirection,
+                anchor = {
+                    point = slot.point.point,
+                    relativeTo = holder,
+                    relativePoint = slot.point.relativePoint,
+                    x = slot.point.x,
+                    y = slot.point.y,
+                },
+            }, slot.buttonStyle)
+        end
         AddKnownBuildReservations(self, 1)
     end
 
