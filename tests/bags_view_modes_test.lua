@@ -141,6 +141,48 @@ assertNotContains(bags,
     'bagSidebar:SetPoint("TOPLEFT", combinedFrame, "TOPLEFT"',
     "hover expansion must not grow right across bag items")
 
+-- The reserved compact rail keeps item layout stable while a right-anchored
+-- presentation proxy grows the full styled bag shell left with the hover rail.
+assertContains(bags,
+    'local visualShell = _G.CreateFrame("Frame", nil, combinedFrame)',
+    "auto-hide expansion must use a template-free visual shell")
+assertContains(bags,
+    'visualShell:SetPoint("TOPRIGHT", combinedFrame, "TOPRIGHT")',
+    "the visual shell must preserve the bag window's right edge")
+assertContains(bags,
+    'visualShell:SetPoint("BOTTOMRIGHT", combinedFrame, "BOTTOMRIGHT")',
+    "the visual shell must span the full bag window height")
+assertContains(bags,
+    "combinedFrame:GetWidth() + (self.sidebarExtension or 0)",
+    "the shell must add only transient rail width to the container width")
+assertContains(bags,
+    "self.sidebarExtension = math.max(0, width - reservedWidth)",
+    "the shell must exclude the sidebar width already reserved by layout")
+assertContains(bags,
+    "combinedFrame.BFIBg:SetAllPoints(visualShell)",
+    "the full lightweight background must expand with the hover rail")
+assertContains(bags,
+    'combinedFrame.BFIHeader:SetPoint("TOPLEFT", visualShell, "TOPLEFT")',
+    "the title strip must expand left with the visual shell")
+assertContains(bags,
+    'combinedFrame.BFIHeader:SetPoint("TOPRIGHT", visualShell, "TOPRIGHT")',
+    "the title strip must retain the bag window's right edge")
+assertContains(bags,
+    'combinedFrame:HookScript("OnSizeChanged", function()',
+    "the visual shell must follow later Blizzard container resizes")
+assertContains(bags,
+    "B.Sidebar.SetOnPresentationWidthChanged(function(width, reservedWidth)",
+    "the sidebar must publish animated width changes to the visual shell")
+assertContains(bags,
+    "visualShell:SetSidebarPresentationWidth(width, reservedWidth)",
+    "the presentation callback must resize the complete styled shell")
+assertContains(bags,
+    "local function OnCombinedFrameShow()\n    if not IsEnabled() then return end\n    B.Sidebar.SetShown(true)",
+    "showing the bag window must restore sidebar presentation updates")
+assertContains(bags,
+    "local function OnCombinedFrameHide()\n    B.Sidebar.SetShown(false)",
+    "hiding the bag window must settle and hide the sidebar presentation")
+
 -- Auto-hide is a header action beside the other bag controls. Its arrow
 -- communicates the next action rather than using the old lock metaphor.
 assertContains(bags,

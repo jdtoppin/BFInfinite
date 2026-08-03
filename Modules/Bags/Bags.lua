@@ -1540,6 +1540,7 @@ end
 
 local function OnCombinedFrameShow()
     if not IsEnabled() then return end
+    B.Sidebar.SetShown(true)
     B:RegisterEvent("BAG_UPDATE", B.BAG_UPDATE)
     B:RegisterEvent("ITEM_LOCK_CHANGED", B.ITEM_LOCK_CHANGED)
     B:RegisterEvent("DISPLAY_SIZE_CHANGED", B.DISPLAY_SIZE_CHANGED)
@@ -1558,6 +1559,7 @@ local function OnCombinedFrameShow()
 end
 
 local function OnCombinedFrameHide()
+    B.Sidebar.SetShown(false)
     B.Cleanup:Cancel(false)
     HideItemLevelTexts()
     B:UnregisterEvent("BAG_UPDATE")
@@ -1711,6 +1713,36 @@ local function StyleCombinedFrame()
     -- (wow-ui-source d3915c78aba7) without BackdropTemplate's nine regions
     -- and OnSizeChanged texture-coordinate work.
     S.StyleTitledFrame(combinedFrame, nil, true)
+
+    -- Auto-hide reserves only the compact icon rail in the item layout. While
+    -- hovered, expand the styled shell left with the rail without resizing the
+    -- Blizzard container or moving its items, controls, or saved anchor.
+    local visualShell = _G.CreateFrame("Frame", nil, combinedFrame)
+    combinedFrame.BFIVisualShell = visualShell
+    visualShell:SetPoint("TOPRIGHT", combinedFrame, "TOPRIGHT")
+    visualShell:SetPoint("BOTTOMRIGHT", combinedFrame, "BOTTOMRIGHT")
+    visualShell.sidebarExtension = 0
+    function visualShell:SyncWidth()
+        AF.SetWidth(
+            self,
+            combinedFrame:GetWidth() + (self.sidebarExtension or 0)
+        )
+    end
+    function visualShell:SetSidebarPresentationWidth(width, reservedWidth)
+        self.sidebarExtension = math.max(0, width - reservedWidth)
+        self:SyncWidth()
+    end
+    visualShell:SyncWidth()
+
+    combinedFrame.BFIBg:ClearAllPoints()
+    combinedFrame.BFIBg:SetAllPoints(visualShell)
+    combinedFrame.BFIHeader:ClearAllPoints()
+    combinedFrame.BFIHeader:SetPoint("TOPLEFT", visualShell, "TOPLEFT")
+    combinedFrame.BFIHeader:SetPoint("TOPRIGHT", visualShell, "TOPRIGHT")
+    combinedFrame:HookScript("OnSizeChanged", function()
+        visualShell:SyncWidth()
+    end)
+
     combinedFrame:SetClampedToScreen(true)
     SuppressCombinedMenu()
     UpdateCombinedFrameTitle(combinedFrame)
@@ -1769,6 +1801,9 @@ local function StyleCombinedFrame()
             activeCategoryKey = entry.categoryKey
         end
         LayoutItems(true)
+    end)
+    B.Sidebar.SetOnPresentationWidthChanged(function(width, reservedWidth)
+        visualShell:SetSidebarPresentationWidth(width, reservedWidth)
     end)
     B.Sidebar.SetOnAutoHideChanged(function(enabled)
         B.config.sidebarAutoHide = enabled

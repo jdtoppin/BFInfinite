@@ -21,7 +21,9 @@ local ICON_SIZE = 16
 local TOGGLE_SIZE = 18
 local SCROLLBAR_WIDTH = 10
 local SCROLLBAR_THUMB_MIN_HEIGHT = 20
+local SCROLLBAR_FADE_DELAY = 0.9
 local ROW_RIGHT_INSET = SCROLLBAR_WIDTH + 4
+local COMPACT_ICON_AREA_WIDTH = COLLAPSED_WIDTH - ROW_RIGHT_INSET
 local SCROLL_STEP = (ROW_HEIGHT + ROW_SPACING) * 3
 
 local ICON_BY_ID = {
@@ -56,12 +58,15 @@ local scrollBar
 local scrollThumb
 local onSelected
 local onAutoHideChanged
+local onPresentationWidthChanged
 local shown = true
 local autoHide = false
 local hoverExpanded = false
+local presentationWidth = DESIRED_WIDTH
 local scrollBarNeeded = false
 local settingScrollBar
 local scrollBarDragging
+local scrollBarFadeGeneration = 0
 local leaveGeneration = 0
 local expandedScrollOffset = 0
 local compactScrollOffset = 0
@@ -73,6 +78,7 @@ local expandedById = {}
 local visibleEntries = {}
 local rows = {}
 local activeRows = {}
+local modelAnimation
 
 local function IsCompact()
     return autoHide and not hoverExpanded
@@ -86,6 +92,23 @@ local function StopResize(region)
     if not region or not region._animatedResizeTimer then return end
     region._animatedResizeTimer:Cancel()
     region._animatedResizeTimer = nil
+end
+
+local function PublishPresentationWidth(width)
+    presentationWidth = width
+    if onPresentationWidthChanged then
+        onPresentationWidthChanged(
+            width,
+            autoHide and COLLAPSED_WIDTH or DESIRED_WIDTH
+        )
+    end
+end
+
+local function SetRailWidth(width)
+    if rail then
+        AF.SetWidth(rail, width)
+    end
+    PublishPresentationWidth(width)
 end
 
 local function SetNavigationState(control, state, immediate)
@@ -184,7 +207,7 @@ local function SetScroll(offset)
     end
 end
 
-local function UpdateScrollBar()
+local function UpdateScrollBarGeometry()
     if not scrollBar or not scrollFrame then return end
 
     local range = GetVerticalScrollRange()
@@ -200,15 +223,87 @@ local function UpdateScrollBar()
         AF.SetHeight(scrollThumb, min(trackHeight, thumbHeight))
     end
 
-    SetScroll(scrollFrame:GetVerticalScroll())
-    local needed = range > 0
-    if needed == scrollBarNeeded then return end
+    return range
+end
 
-    scrollBarNeeded = needed
-    if needed then
-        scrollBar:FadeIn()
+local function HideScrollBar(immediate)
+    if not scrollBar then return end
+
+    scrollBarFadeGeneration = scrollBarFadeGeneration + 1
+    scrollBar:EnableMouse(false)
+    if immediate or not scrollBar:IsShown() then
+        scrollBar:HideNow()
     else
         scrollBar:FadeOut()
+    end
+end
+
+local function ScheduleScrollBarFadeOut()
+    if not scrollBarNeeded then return end
+
+    scrollBarFadeGeneration = scrollBarFadeGeneration + 1
+    local generation = scrollBarFadeGeneration
+    _G.C_Timer.After(SCROLLBAR_FADE_DELAY, function()
+        if generation ~= scrollBarFadeGeneration
+            or not scrollBarNeeded
+            or scrollBarDragging
+            or scrollBar:IsMouseOver() then
+            return
+        end
+        HideScrollBar(false)
+    end)
+end
+
+local function RevealScrollBar(scheduleFade)
+    if not scrollBar or not scrollBarNeeded then return end
+
+    scrollBarFadeGeneration = scrollBarFadeGeneration + 1
+    scrollBar:EnableMouse(true)
+    if not scrollBar:IsShown()
+        or scrollBar:GetAlpha() < 1
+        or scrollBar.fadeOut:IsPlaying() then
+        scrollBar:FadeIn()
+    end
+    if scheduleFade ~= false then
+        ScheduleScrollBarFadeOut()
+    end
+end
+
+local function UpdateScrollBar()
+    local range = UpdateScrollBarGeometry()
+    if range == nil then return end
+
+    SetScroll(scrollFrame:GetVerticalScroll())
+    local needed = range > 0
+    local changed = needed ~= scrollBarNeeded
+
+    scrollBarNeeded = needed
+    if not needed then
+        HideScrollBar(false)
+    elseif changed then
+        RevealScrollBar()
+    end
+end
+
+local function IsRailMouseOver()
+    return rail and rail:IsMouseOver()
+        or scrollBar and scrollBar:IsMouseOver()
+end
+
+local function SetScrollFromWheel(delta)
+    if not scrollFrame then return end
+
+    RevealScrollBar()
+    SetScroll(scrollFrame:GetVerticalScroll() - (delta * SCROLL_STEP))
+end
+
+local function SetScrollBarDragging(dragging)
+    if dragging then
+        scrollBarDragging = true
+        RevealScrollBar(false)
+    elseif scrollBarDragging then
+        scrollBarDragging = nil
+        ScheduleScrollBarFadeOut()
     end
 end
 
@@ -246,16 +341,25 @@ local function BuildVisibleEntries()
 end
 
 local function SelectFromClick(row)
-    if row.kind == "heading" or row.id == selectionId then return end
+    if row.kind == "heading" or modelAnimation then return end
 
-    selectionId = row.id
-    for _, activeRow in ipairs(activeRows) do
-        PaintRow(activeRow)
+    local id = row.id
+    local entry = row.entry
+    local hasChildren = entry and entry.hasChildren
+    if id ~= selectionId then
+        selectionId = id
+        for _, activeRow in ipairs(activeRows) do
+            PaintRow(activeRow)
+        end
+        EnsureSelectedRowVisible()
+
+        if onSelected then
+            onSelected(id, entry)
+        end
     end
-    EnsureSelectedRowVisible()
 
-    if onSelected then
-        onSelected(row.id, row.entry)
+    if hasChildren then
+        Sidebar.ToggleExpanded(id)
     end
 end
 
@@ -265,46 +369,80 @@ local function SetRowHovered(row, hovered)
 end
 
 local ApplyModel
+local FinishModelAnimation
 
 local function ExpandRail()
     leaveGeneration = leaveGeneration + 1
     if not rail or not shown or not autoHide then return end
+    StopResize(rail)
 
     if not hoverExpanded then
         -- Keep the top-level icon under the pointer at the same scroll offset
-        -- while its label is revealed. Nested rows open only on chevron click.
+        -- while its label is revealed. Nested rows open only on an explicit
+        -- category title or chevron click.
         expandedScrollOffset = compactScrollOffset
         hoverExpanded = true
         ApplyModel()
     end
-    AF.AnimatedResize(rail, DESIRED_WIDTH)
-end
+    if presentationWidth >= DESIRED_WIDTH then return end
 
-local function IsRailMouseOver()
-    return rail and rail:IsMouseOver()
-        or scrollBar and scrollBar:IsMouseOver()
+    AF.AnimatedResize(
+        rail,
+        DESIRED_WIDTH,
+        nil,
+        nil,
+        nil,
+        nil,
+        function()
+            SetRailWidth(DESIRED_WIDTH)
+        end,
+        function(width)
+            PublishPresentationWidth(width)
+        end
+    )
 end
 
 local function CollapseRail()
     if not rail or not shown or not autoHide or not hoverExpanded then return end
     if scrollBarDragging or IsRailMouseOver() then return end
 
-    AF.AnimatedResize(rail, COLLAPSED_WIDTH, nil, nil, nil, nil, function()
-        if not autoHide or scrollBarDragging or IsRailMouseOver() then return end
-        showNestedEntries = false
-        hoverExpanded = false
-        ApplyModel()
-    end)
+    if FinishModelAnimation then
+        FinishModelAnimation()
+    end
+    AF.AnimatedResize(
+        rail,
+        COLLAPSED_WIDTH,
+        nil,
+        nil,
+        nil,
+        nil,
+        function()
+            if scrollBarDragging or IsRailMouseOver() then
+                ExpandRail()
+                return
+            end
+            if not autoHide then return end
+            SetRailWidth(COLLAPSED_WIDTH)
+            showNestedEntries = false
+            hoverExpanded = false
+            ApplyModel()
+        end,
+        function(width)
+            PublishPresentationWidth(width)
+        end
+    )
 end
 
 local function PointerEnter()
     leaveGeneration = leaveGeneration + 1
+    RevealScrollBar()
     ExpandRail()
 end
 
 local function PointerLeave()
     leaveGeneration = leaveGeneration + 1
     local generation = leaveGeneration
+    ScheduleScrollBarFadeOut()
     _G.C_Timer.After(0, function()
         if generation ~= leaveGeneration then return end
         CollapseRail()
@@ -394,6 +532,7 @@ end
 
 local function ApplyEntry(row, entry)
     ResetRowForEntry(row, entry)
+    row:SetAlpha(1)
     row.entry = entry
     row.id = entry.id
     row.kind = entry.kind
@@ -401,6 +540,7 @@ local function ApplyEntry(row, entry)
     row.label:SetText(entry.label)
     row.label:ClearAllPoints()
     row.label:Show()
+    row.toggle:EnableMouse(true)
 
     if entry.kind == "heading" then
         row:EnableMouse(false)
@@ -418,7 +558,7 @@ local function ApplyEntry(row, entry)
     row.label:SetFontObject("AF_FONT_NORMAL")
     row.label:SetShown(not compact)
 
-    local leftInset = compact and ((COLLAPSED_WIDTH - ICON_SIZE) / 2)
+    local leftInset = compact and ((COMPACT_ICON_AREA_WIDTH - ICON_SIZE) / 2)
         or 8 + ((entry.depth or 0) * 22)
     local icon = entry.icon or compact and "Bag_Misc"
     if icon then
@@ -494,9 +634,209 @@ ApplyModel = function()
     UpdateScrollBar()
 end
 
+local function BuildEntryLayout(entries)
+    local layout = {}
+    local offset = 0
+    for index, entry in ipairs(entries) do
+        local height = entry.kind == "heading" and HEADING_HEIGHT or ROW_HEIGHT
+        if entry.kind == "heading" and index > 1 then
+            offset = offset + HEADING_TOP_GAP
+        end
+
+        local key = entry.id or entry
+        layout[key] = {
+            top = offset,
+            bottom = offset + height,
+            height = height,
+        }
+        offset = offset + height + ROW_SPACING
+    end
+    return layout, max(1, offset - ROW_SPACING)
+end
+
+local function PositionAnimatedRows(animation, progress)
+    for _, state in ipairs(animation.rows) do
+        local row = state.row
+        local top = state.fromTop + ((state.toTop - state.fromTop) * progress)
+        local alpha = state.fromAlpha + ((state.toAlpha - state.fromAlpha) * progress)
+        row.layoutTop = top
+        row.layoutBottom = top + state.height
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", scrollContent, "TOPLEFT", 0, -top)
+        row:SetPoint("RIGHT", scrollContent, "RIGHT")
+        AF.SetHeight(row, state.height)
+        row:SetAlpha(alpha)
+        row:Show()
+    end
+end
+
+local function UpdateModelAnimation(animation, currentHeight)
+    if modelAnimation ~= animation then return end
+
+    local heightDelta = animation.targetHeight - animation.startHeight
+    local progress = heightDelta == 0
+        and 1
+        or (currentHeight - animation.startHeight) / heightDelta
+    progress = max(0, min(1, progress))
+    PositionAnimatedRows(animation, progress)
+    UpdateScrollBarGeometry()
+    SetScroll(
+        animation.startOffset
+            + ((animation.targetOffset - animation.startOffset) * progress)
+    )
+end
+
+FinishModelAnimation = function()
+    if not modelAnimation then return end
+
+    StopResize(scrollContent)
+    modelAnimation = nil
+    ApplyModel()
+    ScheduleScrollBarFadeOut()
+end
+
+local function AnimateExpandedChange(id, expanded)
+    if not rail or not scrollContent or not shown or not rail:IsShown() then
+        expandedById[id] = expanded
+        ApplyModel()
+        return
+    end
+
+    local oldRowsByKey = {}
+    local oldLayout = {}
+    for _, row in ipairs(activeRows) do
+        if row.entry then
+            local key = row.id or row.entry
+            oldRowsByKey[key] = row
+            oldLayout[key] = {
+                top = row.layoutTop,
+                bottom = row.layoutBottom,
+                height = row.layoutBottom - row.layoutTop,
+            }
+        end
+    end
+
+    local startHeight = scrollContent:GetHeight()
+    local startOffset = scrollFrame:GetVerticalScroll()
+    expandedById[id] = expanded
+    if autoHide and hoverExpanded and expanded then
+        showNestedEntries = true
+    end
+    BuildVisibleEntries()
+
+    local targetLayout, targetHeight = BuildEntryLayout(visibleEntries)
+    local targetOffset = min(
+        startOffset,
+        max(0, targetHeight - scrollFrame:GetHeight())
+    )
+    if targetHeight == startHeight then
+        ApplyModel()
+        SetScroll(targetOffset)
+        return
+    end
+
+    local parentLayout = targetLayout[id] or oldLayout[id]
+    local branchTop = parentLayout and (parentLayout.bottom + ROW_SPACING) or 0
+    local animation = {
+        rows = {},
+        startHeight = startHeight,
+        targetHeight = targetHeight,
+        startOffset = startOffset,
+        targetOffset = targetOffset,
+    }
+    local usedRows = {}
+    local nextPoolIndex = #activeRows + 1
+
+    for _, entry in ipairs(visibleEntries) do
+        local key = entry.id or entry
+        local row = oldRowsByKey[key]
+        local incoming = row == nil
+        if incoming then
+            row = AcquireRow(nextPoolIndex)
+            nextPoolIndex = nextPoolIndex + 1
+        end
+
+        ApplyEntry(row, entry)
+        PaintRow(row, true)
+        row:EnableMouse(false)
+        row.toggle:EnableMouse(false)
+        usedRows[row] = true
+        local target = targetLayout[key]
+        local previous = oldLayout[key]
+        local fromTop = previous and previous.top or branchTop
+        if incoming and entry.parentId then
+            local parent = oldLayout[entry.parentId]
+                or targetLayout[entry.parentId]
+            if parent then
+                fromTop = parent.bottom + ROW_SPACING
+            end
+        end
+        animation.rows[#animation.rows + 1] = {
+            row = row,
+            height = target.height,
+            fromTop = fromTop,
+            toTop = target.top,
+            fromAlpha = incoming and 0 or 1,
+            toAlpha = 1,
+        }
+    end
+
+    for _, row in ipairs(activeRows) do
+        if row.entry and not usedRows[row] then
+            row:EnableMouse(false)
+            row.toggle:EnableMouse(false)
+            local parentId = row.entry.parentId
+            local survivingParent
+            while parentId do
+                survivingParent = targetLayout[parentId]
+                if survivingParent then break end
+                local parent = entriesById[parentId]
+                parentId = parent and parent.parentId
+            end
+            animation.rows[#animation.rows + 1] = {
+                row = row,
+                height = row.layoutBottom - row.layoutTop,
+                fromTop = row.layoutTop,
+                toTop = survivingParent
+                    and (survivingParent.bottom + ROW_SPACING)
+                    or branchTop,
+                fromAlpha = 1,
+                toAlpha = 0,
+            }
+        end
+    end
+
+    modelAnimation = animation
+    PositionAnimatedRows(animation, 0)
+    scrollBarNeeded = max(startHeight, targetHeight) > scrollFrame:GetHeight()
+    UpdateScrollBarGeometry()
+    RevealScrollBar()
+    AF.AnimatedResize(
+        scrollContent,
+        nil,
+        targetHeight,
+        0.015,
+        10,
+        nil,
+        function()
+            if modelAnimation ~= animation then return end
+            modelAnimation = nil
+            ApplyModel()
+            SetScroll(animation.targetOffset)
+            ScheduleScrollBarFadeOut()
+        end,
+        function(_, currentHeight)
+            UpdateModelAnimation(animation, currentHeight)
+        end
+    )
+end
+
 local function ApplyDesiredState()
     if not rail then return end
 
+    if FinishModelAnimation then
+        FinishModelAnimation()
+    end
     StopResize(rail)
     if shown then
         if autoHide then
@@ -506,15 +846,15 @@ local function ApplyDesiredState()
         if autoHide and hoverExpanded then
             expandedScrollOffset = compactScrollOffset
         end
-        AF.SetWidth(rail, IsCompact() and COLLAPSED_WIDTH or DESIRED_WIDTH)
+        SetRailWidth(IsCompact() and COLLAPSED_WIDTH or DESIRED_WIDTH)
         rail:Show()
         ApplyModel()
     else
         hoverExpanded = false
-        AF.SetWidth(rail, autoHide and COLLAPSED_WIDTH or DESIRED_WIDTH)
+        SetRailWidth(autoHide and COLLAPSED_WIDTH or DESIRED_WIDTH)
         if scrollBar then
-            scrollBar:HideNow()
             scrollBarNeeded = false
+            HideScrollBar(true)
         end
         rail:Hide()
     end
@@ -522,11 +862,12 @@ end
 
 local function CreateScrollBar()
     scrollBar = _G.CreateFrame("Slider", nil, rail)
-    scrollBar:SetPoint("TOPRIGHT", scrollFrame, "TOPRIGHT")
-    scrollBar:SetPoint("BOTTOMRIGHT", scrollFrame, "BOTTOMRIGHT")
+    scrollBar:SetPoint("TOPRIGHT", rail, "TOPRIGHT")
+    scrollBar:SetPoint("BOTTOMRIGHT", rail, "BOTTOMRIGHT")
     AF.SetWidth(scrollBar, SCROLLBAR_WIDTH)
     AF.SetFrameLevel(scrollBar, 10, scrollContent)
     scrollBar:SetOrientation("VERTICAL")
+    scrollBar:EnableMouseWheel(true)
     scrollBar:SetValueStep(1)
     scrollBar:SetObeyStepOnDrag(false)
     scrollBar:SetMinMaxValues(0, 0)
@@ -544,33 +885,44 @@ local function CreateScrollBar()
 
     AF.CreateFadeInOutAnimation(scrollBar, 0.18)
     scrollBar:SetAlpha(0)
+    scrollBar:EnableMouse(false)
     scrollBar:Hide()
 
     scrollBar:SetScript("OnValueChanged", function(_, value)
         if not settingScrollBar then
+            RevealScrollBar(not scrollBarDragging)
             SetScroll(value)
         end
     end)
     scrollBar:SetScript("OnMouseDown", function()
-        scrollBarDragging = true
+        SetScrollBarDragging(true)
         PointerEnter()
     end)
     scrollBar:SetScript("OnMouseUp", function()
-        scrollBarDragging = nil
+        SetScrollBarDragging(false)
         PointerLeave()
     end)
-    scrollBar:SetScript("OnEnter", PointerEnter)
+    scrollBar:SetScript("OnEnter", function()
+        RevealScrollBar(false)
+        PointerEnter()
+    end)
     scrollBar:SetScript("OnLeave", PointerLeave)
+    scrollBar:SetScript("OnMouseWheel", function(_, delta)
+        SetScrollFromWheel(delta)
+    end)
     scrollBar:SetScript("OnHide", function()
+        local wasDragging = scrollBarDragging
         scrollBarDragging = nil
-        PointerLeave()
+        if wasDragging then
+            PointerLeave()
+        end
     end)
 end
 
 local function CreateRail(parent)
     rail = AF.CreateFrame(parent)
     Sidebar.frame = rail
-    AF.SetWidth(rail, autoHide and COLLAPSED_WIDTH or DESIRED_WIDTH)
+    SetRailWidth(autoHide and COLLAPSED_WIDTH or DESIRED_WIDTH)
     AF.SetFrameLevel(rail, 30, parent)
     rail:EnableMouse(true)
 
@@ -595,8 +947,8 @@ local function CreateRail(parent)
     rail:SetScript("OnLeave", PointerLeave)
     scrollFrame:SetScript("OnEnter", PointerEnter)
     scrollFrame:SetScript("OnLeave", PointerLeave)
-    scrollFrame:SetScript("OnMouseWheel", function(self, delta)
-        SetScroll(self:GetVerticalScroll() - (delta * SCROLL_STEP))
+    scrollFrame:SetScript("OnMouseWheel", function(_, delta)
+        SetScrollFromWheel(delta)
     end)
     scrollFrame:SetScript("OnSizeChanged", function()
         SetScroll(scrollFrame:GetVerticalScroll())
@@ -633,6 +985,9 @@ end
 ---@return boolean accepted
 function Sidebar.SetModel(nextModel)
     if type(nextModel) ~= "table" then return false end
+    if FinishModelAnimation then
+        FinishModelAnimation()
+    end
 
     local normalizedModel = {}
     local normalizedById = {}
@@ -696,6 +1051,9 @@ end
 ---@return boolean selected
 function Sidebar.SetSelection(id)
     if id == nil then
+        if FinishModelAnimation then
+            FinishModelAnimation()
+        end
         selectionId = nil
         ApplyModel()
         return false
@@ -703,6 +1061,9 @@ function Sidebar.SetSelection(id)
     local entry = entriesById[id]
     if not entry or entry.kind == "heading" then return false end
 
+    if FinishModelAnimation then
+        FinishModelAnimation()
+    end
     selectionId = id
     ExpandAncestors(entry)
     ApplyModel()
@@ -717,12 +1078,13 @@ function Sidebar.SetExpanded(id, expanded)
     if not entry or not entry.hasChildren or type(expanded) ~= "boolean" then
         return false
     end
+    if modelAnimation then return false end
 
-    expandedById[id] = expanded
-    if autoHide and hoverExpanded and expanded then
-        showNestedEntries = true
-    end
-    ApplyModel()
+    local revealNested = autoHide and hoverExpanded and expanded
+        and not showNestedEntries
+    if expandedById[id] == expanded and not revealNested then return true end
+
+    AnimateExpandedChange(id, expanded)
     return true
 end
 
@@ -732,14 +1094,15 @@ end
 function Sidebar.ToggleExpanded(id)
     local entry = entriesById[id]
     if not entry or not entry.hasChildren then return false end
+    if modelAnimation then return false end
 
+    local expanded
     if autoHide and hoverExpanded and not showNestedEntries then
-        showNestedEntries = true
-        expandedById[id] = true
+        expanded = true
     else
-        expandedById[id] = not expandedById[id]
+        expanded = not expandedById[id]
     end
-    ApplyModel()
+    AnimateExpandedChange(id, expanded)
     return true
 end
 
@@ -747,6 +1110,7 @@ end
 ---@return boolean accepted
 function Sidebar.SetShown(nextShown)
     if type(nextShown) ~= "boolean" then return false end
+    if shown == nextShown then return true end
     shown = nextShown
     ApplyDesiredState()
     return true
@@ -759,6 +1123,9 @@ function Sidebar.SetAutoHide(nextAutoHide)
     if autoHide == nextAutoHide then return true end
 
     autoHide = nextAutoHide
+    if FinishModelAnimation then
+        FinishModelAnimation()
+    end
     if rail then
         StopResize(rail)
         if autoHide then
@@ -768,8 +1135,10 @@ function Sidebar.SetAutoHide(nextAutoHide)
         if autoHide and hoverExpanded then
             expandedScrollOffset = compactScrollOffset
         end
-        AF.SetWidth(rail, IsCompact() and COLLAPSED_WIDTH or DESIRED_WIDTH)
+        SetRailWidth(IsCompact() and COLLAPSED_WIDTH or DESIRED_WIDTH)
         ApplyModel()
+    else
+        SetRailWidth(autoHide and COLLAPSED_WIDTH or DESIRED_WIDTH)
     end
     return true
 end
@@ -802,6 +1171,20 @@ end
 function Sidebar.SetOnAutoHideChanged(callback)
     if callback ~= nil and type(callback) ~= "function" then return false end
     onAutoHideChanged = callback
+    return true
+end
+
+---@param callback? fun(presentationWidth:number, reservedWidth:number)
+---@return boolean accepted
+function Sidebar.SetOnPresentationWidthChanged(callback)
+    if callback ~= nil and type(callback) ~= "function" then return false end
+    onPresentationWidthChanged = callback
+    if callback then
+        callback(
+            presentationWidth,
+            autoHide and COLLAPSED_WIDTH or DESIRED_WIDTH
+        )
+    end
     return true
 end
 

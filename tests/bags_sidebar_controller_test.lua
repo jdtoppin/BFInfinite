@@ -70,6 +70,7 @@ for _, api in ipairs({
     "function Sidebar.ToggleAutoHide(",
     "function Sidebar.SetOnSelected(",
     "function Sidebar.SetOnAutoHideChanged(",
+    "function Sidebar.SetOnPresentationWidthChanged(",
     "function Sidebar.GetDesiredWidth(",
     "function Sidebar.GetContentInset(",
 }) do
@@ -125,6 +126,22 @@ assertContains(
     source,
     'row.toggle:SetScript("OnClick"',
     "parent expansion must have an independent chevron target"
+)
+assertContains(
+    source,
+    "local hasChildren = entry and entry.hasChildren",
+    "the full parent row must recognize expandable categories"
+)
+assertContains(
+    source,
+    "end\n\n    if hasChildren then\n        Sidebar.ToggleExpanded(id)",
+    "a category title must toggle even when it is already selected"
+)
+assertBefore(
+    source,
+    "onSelected(id, entry)",
+    "Sidebar.ToggleExpanded(id)",
+    "a parent title click must select before it toggles the category"
 )
 assertContains(
     source,
@@ -275,6 +292,31 @@ assertContains(
 )
 assertContains(
     source,
+    "local ROW_RIGHT_INSET = SCROLLBAR_WIDTH + 4",
+    "navigation rows must reserve a dedicated scrollbar lane"
+)
+assertContains(
+    source,
+    "local COMPACT_ICON_AREA_WIDTH = COLLAPSED_WIDTH - ROW_RIGHT_INSET",
+    "compact icons must be centered outside the scrollbar lane"
+)
+assertContains(
+    source,
+    "compact and ((COMPACT_ICON_AREA_WIDTH - ICON_SIZE) / 2)",
+    "compact icons must remain clear of the visible scrollbar"
+)
+assertContains(
+    source,
+    'scrollBar:SetPoint("TOPRIGHT", rail, "TOPRIGHT")',
+    "the scrollbar lane must stay beside the compact icon column"
+)
+assertContains(
+    source,
+    'scrollBar:SetPoint("BOTTOMRIGHT", rail, "BOTTOMRIGHT")',
+    "the scrollbar lane must span the rail beside its icons"
+)
+assertContains(
+    source,
     'row.toggle:SetPoint("RIGHT", -(SCROLLBAR_WIDTH + 2), 0)',
     "nested chevrons must not overlap the visible scrollbar"
 )
@@ -288,15 +330,100 @@ assertContains(
     "local needed = range > 0",
     "the scrollbar must only be required when content overflows"
 )
-assertContains(
+assertNotContains(
     source,
     "if needed == scrollBarNeeded then return end",
-    "unchanged overflow state must not restart the fade animation"
+    "overflow geometry must keep updating after the transient thumb fades"
+)
+assertContains(
+    source,
+    "local SCROLLBAR_FADE_DELAY = 0.9",
+    "overflow feedback must linger briefly after interaction"
+)
+assertContains(
+    source,
+    "local function ScheduleScrollBarFadeOut()",
+    "visible overflow feedback must schedule a transient fade"
+)
+assertContains(
+    source,
+    "local generation = scrollBarFadeGeneration",
+    "new scrollbar activity must invalidate stale fade timers"
+)
+assertContains(
+    source,
+    "_G.C_Timer.After(SCROLLBAR_FADE_DELAY, function()",
+    "the transient scrollbar must use an event-driven delayed fade"
+)
+assertContains(
+    source,
+    "generation ~= scrollBarFadeGeneration",
+    "stale scrollbar fade callbacks must be ignored"
+)
+assertContains(
+    source,
+    "or scrollBar:IsMouseOver() then",
+    "the transient thumb must remain visible while directly hovered"
+)
+assertContains(
+    source,
+    "scrollBar:EnableMouse(false)",
+    "a faded scrollbar must not retain invisible hit testing"
+)
+assertContains(
+    source,
+    "scrollBar:EnableMouse(true)",
+    "revealing the scrollbar must restore drag hit testing"
 )
 assertContains(source, "scrollBar:FadeIn()",
     "overflow must reveal the scrollbar")
 assertContains(source, "scrollBar:FadeOut()",
-    "resolved overflow must fade the scrollbar away")
+    "inactive or resolved overflow must fade the scrollbar away")
+assertContains(
+    source,
+    "if scheduleFade ~= false then\n        ScheduleScrollBarFadeOut()",
+    "revealed overflow must fade again after interaction ends"
+)
+assertContains(
+    source,
+    'scrollBar:SetScript("OnMouseDown", function()',
+    "dragging the thumb must enter a persistent interaction state"
+)
+assertContains(
+    source,
+    "SetScrollBarDragging(true)",
+    "thumb dragging must hold the transient scrollbar open"
+)
+assertContains(
+    source,
+    "SetScrollBarDragging(false)",
+    "releasing the thumb must resume the transient fade"
+)
+assertContains(
+    source,
+    "local wasDragging = scrollBarDragging",
+    "a hidden thumb must remember whether it interrupted a drag"
+)
+assertContains(
+    source,
+    "if wasDragging then\n            PointerLeave()",
+    "overflow resolution during a drag must retry auto-hide collapse"
+)
+assertContains(
+    source,
+    "scrollBar:EnableMouseWheel(true)",
+    "the dedicated scrollbar lane must accept wheel input"
+)
+assertContains(
+    source,
+    'scrollBar:SetScript("OnMouseWheel", function(_, delta)',
+    "wheel input over the scrollbar lane must scroll the category list"
+)
+assertContains(
+    source,
+    "RevealScrollBar()\n    SetScroll(scrollFrame:GetVerticalScroll()",
+    "wheel input must reveal the scrollbar before changing its offset"
+)
 assertContains(
     source,
     "expandedScrollOffset = offset",
@@ -320,6 +447,114 @@ assertContains(
 
 assertContains(
     source,
+    "local function AnimateExpandedChange(id, expanded)",
+    "nested category changes must use a dedicated transition"
+)
+assertContains(
+    source,
+    "local oldRowsByKey = {}",
+    "category transitions must reuse the existing pooled rows by identity"
+)
+assertContains(
+    source,
+    "row = AcquireRow(nextPoolIndex)",
+    "category transitions must acquire only missing pooled rows"
+)
+assertContains(
+    source,
+    "local function PositionAnimatedRows(animation, progress)",
+    "category transitions must smoothly interpolate row positions"
+)
+assertContains(
+    source,
+    "row:SetAlpha(alpha)",
+    "category transitions must fade nested rows in and out"
+)
+assertContains(
+    source,
+    "fromAlpha = incoming and 0 or 1",
+    "new nested rows must fade in from the parent branch"
+)
+assertContains(
+    source,
+    "local parent = oldLayout[entry.parentId]",
+    "each incoming branch must animate from its own parent"
+)
+assertContains(
+    source,
+    "survivingParent = targetLayout[parentId]",
+    "outgoing descendants must find their nearest surviving parent"
+)
+assertContains(
+    source,
+    "survivingParent.bottom + ROW_SPACING",
+    "outgoing branches must converge on their own parent origin"
+)
+assertContains(
+    source,
+    "toAlpha = 0",
+    "removed nested rows must fade out toward the parent branch"
+)
+assertContains(
+    source,
+    "AF.AnimatedResize(\n        scrollContent",
+    "the shared timer animation must interpolate category content height"
+)
+assertContains(
+    source,
+    "if modelAnimation then return false end",
+    "rapid category toggles must not corrupt an active pooled-row transition"
+)
+assertContains(
+    source,
+    "FinishModelAnimation = function()",
+    "external model changes must be able to settle an active transition"
+)
+assertContains(
+    source,
+    "row:SetAlpha(1)",
+    "normal pooled-row binding must clear transient animation alpha"
+)
+assertContains(
+    source,
+    "SetScroll(animation.targetOffset)",
+    "chevron-only transitions must retain the user's category scroll position"
+)
+
+assertContains(
+    source,
+    "local function PublishPresentationWidth(width)",
+    "rail presentation changes must be published to the bag shell"
+)
+assertContains(
+    source,
+    "onPresentationWidthChanged(\n            width,",
+    "presentation callbacks must receive the animated rail width"
+)
+assertContains(
+    source,
+    "autoHide and COLLAPSED_WIDTH or DESIRED_WIDTH",
+    "presentation callbacks must also report the reserved layout width"
+)
+assertContains(
+    source,
+    "function(width)\n            PublishPresentationWidth(width)",
+    "each rail resize tick must drive the visible bag shell"
+)
+assertBefore(
+    source,
+    "StopResize(rail)\n\n    if not hoverExpanded then",
+    "if presentationWidth >= DESIRED_WIDTH then return end",
+    "re-entering before the first collapse tick must cancel the stale resize"
+)
+assertContains(
+    source,
+    "if scrollBarDragging or IsRailMouseOver() then\n                ExpandRail()",
+    "a guarded collapse completion must reverse toward the open rail"
+)
+
+assertContains(
+    source,
     "local function IsRailMouseOver()",
     "auto-hide collapse must share one pointer-boundary check"
 )
@@ -337,6 +572,11 @@ assertContains(
     source,
     "if scrollBarDragging or IsRailMouseOver() then return end",
     "the rail must remain expanded while hovered or dragging its scrollbar"
+)
+assertContains(
+    source,
+    "if shown == nextShown then return true end",
+    "routine bag layouts must not interrupt hover or category animations"
 )
 
 for _, forbidden in ipairs({
@@ -396,6 +636,19 @@ assertEqual(bags.Sidebar.GetAutoHide(), false, "auto-hide is initially disabled"
 assertEqual(bags.Sidebar.SetAutoHide("yes"), false,
     "non-boolean auto-hide state rejected")
 
+local presentationCalls = {}
+assertEqual(bags.Sidebar.SetOnPresentationWidthChanged("yes"), false,
+    "non-function presentation callback rejected")
+assertEqual(bags.Sidebar.SetOnPresentationWidthChanged(function(width, reservedWidth)
+    presentationCalls[#presentationCalls + 1] = {width, reservedWidth}
+end), true, "presentation callback accepted")
+assertEqual(#presentationCalls, 1,
+    "presentation callback immediately synchronizes the current rail")
+assertEqual(presentationCalls[1][1], 170,
+    "initial presentation width is the labeled rail width")
+assertEqual(presentationCalls[1][2], 170,
+    "initial reserved width is the labeled rail width")
+
 local autoHideCalls = {}
 assertEqual(bags.Sidebar.SetOnAutoHideChanged("yes"), false,
     "non-function auto-hide callback rejected")
@@ -404,6 +657,10 @@ assertEqual(bags.Sidebar.SetOnAutoHideChanged(function(enabled)
 end), true, "auto-hide callback accepted")
 assertEqual(bags.Sidebar.SetAutoHide(true), true,
     "auto-hide can be enabled programmatically")
+assertEqual(presentationCalls[2][1], 40,
+    "auto-hide publishes the compact presentation width")
+assertEqual(presentationCalls[2][2], 40,
+    "auto-hide publishes the compact reserved width")
 assertEqual(bags.Sidebar.GetAutoHide(), true, "auto-hide state is queryable")
 assertEqual(bags.Sidebar.GetDesiredWidth(), 40, "compact rail desired width")
 assertEqual(bags.Sidebar.GetContentInset(), 48, "compact content inset")
@@ -411,10 +668,16 @@ assertEqual(#autoHideCalls, 0,
     "programmatic auto-hide synchronization is silent")
 assertEqual(bags.Sidebar.SetAutoHide(true), true,
     "reapplying the current auto-hide state is accepted")
+assertEqual(#presentationCalls, 2,
+    "idempotent auto-hide state does not republish its width")
 assertEqual(#autoHideCalls, 0,
     "idempotent auto-hide synchronization stays silent")
 assertEqual(bags.Sidebar.ToggleAutoHide(), false,
     "header toggle can pin the labeled rail open")
+assertEqual(presentationCalls[3][1], 170,
+    "pinning the rail publishes the labeled presentation width")
+assertEqual(presentationCalls[3][2], 170,
+    "pinning the rail publishes the labeled reserved width")
 assertEqual(autoHideCalls[1], false,
     "header toggle reports the disabled auto-hide state")
 assertEqual(bags.Sidebar.GetDesiredWidth(), 170,
@@ -423,10 +686,18 @@ assertEqual(bags.Sidebar.GetContentInset(), 178,
     "pinned rail restores its full content inset")
 assertEqual(bags.Sidebar.ToggleAutoHide(), true,
     "header toggle can restore compact auto-hide")
+assertEqual(presentationCalls[4][1], 40,
+    "restoring auto-hide republishes the compact presentation width")
+assertEqual(presentationCalls[4][2], 40,
+    "restoring auto-hide republishes the compact reserved width")
 assertEqual(autoHideCalls[2], true,
     "header toggle reports the enabled auto-hide state")
 assertEqual(bags.Sidebar.SetAutoHide(false), true,
     "profile synchronization can restore pinned mode")
+assertEqual(presentationCalls[5][1], 170,
+    "profile synchronization republishes the pinned presentation width")
+assertEqual(presentationCalls[5][2], 170,
+    "profile synchronization republishes the pinned reserved width")
 assertEqual(#autoHideCalls, 2,
     "programmatic profile synchronization does not emit a header callback")
 assertEqual(bags.Sidebar.SetShown("yes"), false, "non-boolean shown state rejected")
