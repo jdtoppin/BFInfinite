@@ -79,6 +79,7 @@ local function loadRenderer(
         tooltipSpellCalls = {},
         unsafeOperations = 0,
         inCombat = false,
+        secretGeometryToken = {},
     }
     if type(savedRestoreEnabled) == "boolean" then
         state.nativeOverrideState.damageMeterNativeEnabledBeforeBFI =
@@ -173,6 +174,7 @@ local function loadRenderer(
     function frameMethods:SetSize(width, height)
         self.width = width
         self.height = height
+        self.sizeChangeCount = (self.sizeChangeCount or 0) + 1
         if self.scripts.OnSizeChanged then
             self.scripts.OnSizeChanged(self, width, height)
         end
@@ -777,6 +779,9 @@ local function loadRenderer(
             end,
         }),
         funcs = {
+            isValueNonSecret = function(value)
+                return value ~= state.secretGeometryToken
+            end,
             OpenOptionsFrame = function(section)
                 state.openOptionsCalls[#state.openOptionsCalls + 1] =
                     section
@@ -1013,6 +1018,8 @@ local third = state.namedFrames.BFIDamageMeterWindow3
 assertEqual(type(first), "table", "first addon-owned window")
 assertEqual(type(second), "table", "second addon-owned window")
 assertEqual(type(third), "table", "third addon-owned window")
+assertEqual(first.clamped, true,
+    "unresolved tracker geometry keeps normal screen clamping")
 assertEqual(
     first.kind,
     "BorderedFrame",
@@ -2832,10 +2839,14 @@ local function RunDetailReportTests()
     )
 
     local fittedRenderer, fittedDM, fittedState = loadRenderer()
-    fittedDM.config.width = 260
-    fittedDM.config.windowHeights[1] = 138
-    fittedDM.config.windowHeights[2] = 120
-    fittedDM.config.windowHeights[3] = 120
+    fittedDM.config.width = 240
+    fittedDM.config.headerHeight = 20
+    fittedDM.config.barHeight = 18
+    fittedDM.config.spacing = 2
+    fittedDM.config.padding = 3
+    fittedDM.config.windowHeights[1] = 124
+    fittedDM.config.windowHeights[2] = 104
+    fittedDM.config.windowHeights[3] = 104
     assertEqual(
         fittedRenderer.SetEnabled(true),
         true,
@@ -2853,7 +2864,7 @@ local function RunDetailReportTests()
     )
     assertEqual(
         fittedState.namedFrames.BFIDamageMeterWindow1.width,
-        260,
+        240,
         "fitted meter uses the compact tracker-width default"
     )
     assertEqual(
@@ -2904,5 +2915,125 @@ local function RunDetailReportTests()
 end
 
 RunDetailReportTests()
+
+local function RunObjectiveTrackerLaneFitTests()
+    local fitRenderer, fitDM, fitState, _, _, fitUIParent =
+        loadRenderer()
+    local dockFrame = fitState.objectiveTrackerDockFrame
+    fitUIParent.bottom = 0
+    dockFrame.bottom = 260
+
+    fitDM.config.width = 240
+    fitDM.config.headerHeight = 20
+    fitDM.config.barHeight = 18
+    fitDM.config.spacing = 2
+    fitDM.config.padding = 3
+    fitDM.config.windowHeights[1] = 124
+    fitDM.config.windowHeights[2] = 104
+    fitDM.config.windowHeights[3] = 104
+
+    assertEqual(
+        fitRenderer.SetEnabled(true),
+        true,
+        "tracker-lane renderer enables"
+    )
+    local firstWindow = fitState.namedFrames.BFIDamageMeterWindow1
+    local secondWindow = fitState.namedFrames.BFIDamageMeterWindow2
+    local thirdWindow = fitState.namedFrames.BFIDamageMeterWindow3
+    assertEqual(firstWindow.visibleRowCount, 3,
+        "constrained first meter keeps three rows")
+    assertEqual(secondWindow.visibleRowCount, 3,
+        "constrained second meter keeps three rows")
+    assertEqual(thirdWindow.visibleRowCount, 2,
+        "constrained third meter keeps two rows")
+    assertEqual(firstWindow.height, 84,
+        "constrained first height fits whole rows")
+    assertEqual(secondWindow.height, 84,
+        "constrained second height fits whole rows")
+    assertEqual(thirdWindow.height, 64,
+        "constrained third height fits whole rows")
+    assertEqual(firstWindow.clamped, false,
+        "tracker-lane root does not clamp over objectives")
+    assertEqual(secondWindow.clamped, false,
+        "tracker-lane child does not clamp over its sibling")
+    assertEqual(firstWindow.resizable, false,
+        "runtime fitting cannot overwrite the saved height")
+    assertEqual(fitDM.config.windowHeights[1], 124,
+        "runtime fitting preserves the first saved height")
+    assertEqual(fitDM.config.windowHeights[2], 104,
+        "runtime fitting preserves the second saved height")
+
+    dockFrame.bottom = 400
+    fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
+    assertEqual(firstWindow.visibleRowCount, 5,
+        "more tracker-lane space restores first rows")
+    assertEqual(secondWindow.visibleRowCount, 4,
+        "more tracker-lane space restores stacked rows")
+    assertEqual(firstWindow.height, 124,
+        "more tracker-lane space restores saved first height")
+    assertEqual(secondWindow.height, 104,
+        "more tracker-lane space restores saved second height")
+    assertEqual(firstWindow.resizable, true,
+        "restored saved height can be resized")
+    local unchangedSizeCount = firstWindow.sizeChangeCount
+    fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
+    assertEqual(firstWindow.sizeChangeCount, unchangedSizeCount,
+        "unchanged tracker geometry does not reflow the meters")
+
+    dockFrame.bottom = 80
+    fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
+    assertEqual(firstWindow.runtimeMinimized, true,
+        "full tracker collapses the first meter body")
+    assertEqual(secondWindow.runtimeMinimized, true,
+        "full tracker collapses the second meter body")
+    assertEqual(thirdWindow.runtimeMinimized, true,
+        "full tracker collapses the third meter body")
+    assertEqual(firstWindow.height + secondWindow.height
+        + thirdWindow.height + 8, 68,
+        "header-only stack remains inside the 72-unit lane")
+    assertEqual(firstWindow.body.shown, false,
+        "runtime-minimized body stays hidden")
+    assertEqual(thirdWindow.shown, true,
+        "compact headers keep every configured meter reachable")
+    firstWindow.minimize:Click()
+    assertEqual(firstWindow.minimized, nil,
+        "automatic collapse does not become a user collapse")
+
+    dockFrame.bottom = 30
+    fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
+    assertEqual(firstWindow.shown, true,
+        "the highest-priority meter header uses the final lane space")
+    assertEqual(secondWindow.shown, false,
+        "lower-priority meters hide when even headers cannot fit")
+    assertEqual(thirdWindow.shown, false,
+        "runtime hiding prevents an impossible stack from overlapping")
+    assertEqual(fitDM.config.windowCount, 3,
+        "runtime hiding preserves the configured meter count")
+
+    fitDM.config.windowAnchors[1].x = -30
+    fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
+    assertEqual(firstWindow.height, 124,
+        "custom root restores the user-owned saved height")
+    assertEqual(firstWindow.clamped, true,
+        "custom root keeps normal screen clamping")
+    assertEqual(firstWindow.runtimeConstrained, false,
+        "custom root opts out of tracker-lane fitting")
+
+    fitDM.config.windowAnchors[1].x = -4
+    dockFrame.bottom = fitState.secretGeometryToken
+    fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
+    assertEqual(firstWindow.height, 124,
+        "secret tracker geometry leaves the saved height untouched")
+    assertEqual(firstWindow.clamped, true,
+        "secret tracker geometry fails closed to screen clamping")
+
+    assertEqual(
+        fitRenderer.SetEnabled(false),
+        true,
+        "tracker-lane renderer disables"
+    )
+end
+
+RunObjectiveTrackerLaneFitTests()
 
 print("damage_meter_renderer_test.lua: ok")

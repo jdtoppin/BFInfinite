@@ -520,6 +520,8 @@ assertEqual(
 assertEqual(firstMeterHeight.value, 277, "first meter height loaded")
 assertEqual(secondMeterHeight.value, 288, "second meter height loaded")
 assertEqual(thirdMeterHeight.value, 299, "third meter height loaded")
+assertEqual(firstMeterHeight.low, 104, "meter height minimum is compact")
+assertEqual(firstMeterHeight.high, 520, "meter height maximum remains available")
 assertEqual(lockMeters.checked, true, "lock state loaded")
 assertEqual(alwaysShowPlayer.checked, false, "player pin state loaded")
 assertEqual(
