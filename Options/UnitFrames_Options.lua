@@ -6,6 +6,7 @@ local L = BFI.L
 local UF = BFI.modules.UnitFrames
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
+local rawget = rawget
 
 local created = {}
 local builder = {}
@@ -289,26 +290,207 @@ local settings = {
 ---------------------------------------------------------------------
 -- shared functions
 ---------------------------------------------------------------------
-local function LoadIndicatorConfig(t)
-    AF.Debug(AF.GetColorStr("darkgray"), "LoadIndicatorConfig", t.owner, t.id)
+local function IsAuraIndicator(t)
+    return t.id == "buffs" or t.id == "debuffs"
+end
+
+local nativeHelpfulOwners = {
+    boss = true,
+    focus = true,
+    focustarget = true,
+    player = true,
+    pet = true,
+    pettarget = true,
+    party = true,
+    raid = true,
+    target = true,
+    targettarget = true,
+}
+
+local function HasNativeAuraContainerBackend()
+    return AF.isRetail
+        and type(UF.HasNativeAuraContainerBackend) == "function"
+        and UF.HasNativeAuraContainerBackend()
+end
+
+local function HasAuraFilterToken(key, token)
+    local auraFilters = AuraUtil and AuraUtil.AuraFilters
+    return type(auraFilters) == "table"
+        and auraFilters[key] == token
+end
+
+local nativeAuraReloadDialog
+local nativeAuraReloadConfirm
+local nativeAuraReloadCancel
+
+local function ClearNativeAuraReloadDialog(dialog)
+    if nativeAuraReloadDialog ~= dialog then return end
+
+    nativeAuraReloadDialog = nil
+    nativeAuraReloadConfirm = nil
+    nativeAuraReloadCancel = nil
+end
+
+local function GetIndicatorFrameCount(t)
     if t.owner == "party" then
-        for i = 1, 5 do
-            UF.LoadIndicatorConfig(t.target.header[i], t.id, t.cfg)
-        end
+        return 5
     elseif t.owner == "raid" then
-        for i = 1, 40 do
-            UF.LoadIndicatorConfig(t.target.header[i], t.id, t.cfg)
-        end
+        return 40
     elseif t.owner == "boss" then
-        for i = 1, 8 do
-            UF.LoadIndicatorConfig(t.target[i], t.id, t.cfg)
+        return 8
+    end
+    return 1
+end
+
+local function GetIndicatorFrame(t, index)
+    if not t.target then return nil end
+
+    if t.owner == "party" or t.owner == "raid" then
+        return t.target.header and t.target.header[index]
+    elseif t.owner == "boss" then
+        return t.target[index]
+    end
+    return t.target
+end
+
+local function GetAuraIndicatorRuntimeKind(t)
+    local legacyFound
+    local count = GetIndicatorFrameCount(t)
+
+    for i = 1, count do
+        local frame = GetIndicatorFrame(t, i)
+        local indicator = frame
+            and frame.indicators
+            and frame.indicators[t.id]
+        if indicator then
+            if type(indicator.GetNativeAuraState) == "function" then
+                return "native"
+            elseif type(indicator.LoadConfig) == "function" then
+                legacyFound = true
+            end
         end
-    else
-        UF.LoadIndicatorConfig(t.target, t.id, t.cfg)
+    end
+
+    if legacyFound then
+        return "legacy"
     end
 end
 
+local function UsesNativeAuraContainer(t)
+    if not HasNativeAuraContainerBackend()
+        or not IsAuraIndicator(t)
+    then
+        return false
+    end
+
+    local runtimeKind = GetAuraIndicatorRuntimeKind(t)
+    if runtimeKind then
+        return runtimeKind == "native"
+    end
+
+    -- Disabled frames may not have an indicator runtime yet. Mirror the
+    -- integration contract until the frame exists, then prefer the actual
+    -- runtime above so option wording cannot drift from implementation.
+    return t.id == "debuffs"
+        or (
+            t.id == "buffs"
+            and nativeHelpfulOwners[t.owner] == true
+        )
+end
+
+local function RequiresNativeAuraReload(t, count)
+    if not IsAuraIndicator(t) then return false end
+
+    for i = 1, count do
+        local frame = GetIndicatorFrame(t, i)
+        local indicator = frame
+            and frame.indicators
+            and frame.indicators[t.id]
+        local requiresReload = indicator
+            and indicator.RequiresReloadForConfig
+        if type(requiresReload) == "function"
+            and requiresReload(indicator, t.cfg) == true
+        then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function ShowNativeAuraReloadDialog()
+    if nativeAuraReloadDialog
+        and AF.IsDialogActive(nativeAuraReloadDialog)
+        and nativeAuraReloadDialog.onConfirm
+            == nativeAuraReloadConfirm
+        and nativeAuraReloadDialog.onCancel
+            == nativeAuraReloadCancel
+    then
+        return
+    end
+
+    local dialog = AF.GetDialog(
+        BFIOptionsFrame_UnitFramesPanel,
+        L["Native aura layout changes require a UI reload\nDo it now?"],
+        300
+    )
+    nativeAuraReloadDialog = dialog
+    nativeAuraReloadConfirm = function()
+        ClearNativeAuraReloadDialog(dialog)
+        _G.ReloadUI()
+    end
+    nativeAuraReloadCancel = function()
+        ClearNativeAuraReloadDialog(dialog)
+    end
+
+    AF.SetPoint(dialog, "TOP", 0, -50)
+    dialog:SetOnConfirm(nativeAuraReloadConfirm)
+    dialog:SetOnCancel(nativeAuraReloadCancel)
+end
+
+AF.RegisterCallback(
+    "BFI_NativeAuraReloadRequired",
+    ShowNativeAuraReloadDialog
+)
+
+local function LoadIndicatorConfig(t)
+    AF.Debug(AF.GetColorStr("darkgray"), "LoadIndicatorConfig", t.owner, t.id)
+
+    local count = GetIndicatorFrameCount(t)
+    local reloadRequired = RequiresNativeAuraReload(t, count)
+
+    -- Always load every frame after checking. Native runtimes use this call
+    -- to quiesce their current container while the reload decision is shown.
+    for i = 1, count do
+        UF.LoadIndicatorConfig(
+            GetIndicatorFrame(t, i),
+            t.id,
+            t.cfg
+        )
+    end
+
+    if reloadRequired then
+        ShowNativeAuraReloadDialog()
+    end
+end
+
+local function RefreshOptionPaneHeight(parent, pane)
+    if not pane.index or not parent._contentHeights then return end
+
+    parent._contentHeights[pane.index] =
+        tostring(pane:GetHeight())
+    AF.ReSize(parent)
+end
+
 local function LoadIndicatorPosition(t)
+    -- Aura placement is part of the compiled layout contract. Moving only
+    -- the holder leaves legacy subframe flow and native container flow based
+    -- on the previous anchor, so reload the complete aura configuration.
+    if IsAuraIndicator(t) then
+        LoadIndicatorConfig(t)
+        return
+    end
+
     if t.owner == "party" then
         for i = 1, 5 do
             UF.LoadIndicatorPosition(t.target.header[i].indicators[t.id], t.cfg.position, t.cfg.anchorTo, t.cfg.parent)
@@ -2368,6 +2550,9 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
 
     local colorPicker = AF.CreateColorPicker(pane)
     AF.SetPoint(colorPicker, "BOTTOMRIGHT", fontDropdown, "TOPRIGHT", 0, 2)
+    if extra == "duration" then
+        colorPicker:Hide()
+    end
     colorPicker:SetOnChange(function(r, g, b)
         AF.FillColorTable(pane.t.cfg[textType].color, r, g, b)
         LoadIndicatorConfig(pane.t)
@@ -2483,7 +2668,58 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
 
     --------------------------------------------------
     -- duration
-    local normalColorPicker, percentCheckButton, percentColorPicker, percentDropdown, secondsCheckButton, secondsColorPicker, secondsEditBox, sec
+    local normalColorPicker, thresholdModeDropdown, percentColorPicker,
+        percentDropdown, secondsColorPicker, secondsEditBox, sec
+    local UpdateWidgets
+
+    local function GetDurationThresholdMode(color)
+        if color.seconds.enabled == true then
+            return "seconds"
+        elseif color.percent.enabled == true then
+            return "percent"
+        end
+        return "off"
+    end
+
+    local function IsDurationThresholdValue(mode, value)
+        if type(value) ~= "number"
+            or value ~= value
+            or value <= 0
+            or value >= math.huge
+        then
+            return false
+        end
+        return mode ~= "percent" or value < 1
+    end
+
+    local function SetDurationThresholdMode(color, mode)
+        if mode ~= "off"
+            and mode ~= "seconds"
+            and mode ~= "percent"
+        then
+            return false
+        end
+
+        if mode == "seconds"
+            and not IsDurationThresholdValue(
+                "seconds",
+                color.seconds.value
+            )
+        then
+            color.seconds.value = 5
+        elseif mode == "percent"
+            and not IsDurationThresholdValue(
+                "percent",
+                color.percent.value
+            )
+        then
+            color.percent.value = 0.5
+        end
+
+        color.seconds.enabled = mode == "seconds"
+        color.percent.enabled = mode == "percent"
+        return true
+    end
 
     if extra == "duration" then
         normalColorPicker = AF.CreateColorPicker(pane, L["Normal"])
@@ -2493,11 +2729,54 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
             LoadIndicatorConfig(pane.t)
         end)
 
-        percentCheckButton = AF.CreateCheckButton(pane)
-        AF.SetPoint(percentCheckButton, "TOPLEFT", normalColorPicker, "BOTTOMLEFT", 0, -7)
+        thresholdModeDropdown = AF.CreateDropdown(pane, 150)
+        thresholdModeDropdown:SetLabel(L["Low-Time Color"])
+        AF.SetPoint(
+            thresholdModeDropdown,
+            "TOPLEFT",
+            normalColorPicker,
+            "BOTTOMLEFT",
+            0,
+            -25
+        )
+        thresholdModeDropdown:SetItems({
+            {text = L["Off"], value = "off"},
+            {text = L["Seconds"], value = "seconds"},
+            {text = L["Percent"], value = "percent"},
+        })
+        thresholdModeDropdown:SetTooltip(
+            L["Low-Time Color"],
+            L["Choose whether duration text changes color by seconds left or percent left"]
+        )
+        thresholdModeDropdown:SetOnSelect(function(value)
+            if not SetDurationThresholdMode(
+                pane.t.cfg[textType].color,
+                value
+            ) then
+                return
+            end
+            if value == "seconds" then
+                secondsEditBox:SetText(
+                    pane.t.cfg[textType].color.seconds.value
+                )
+            elseif value == "percent" then
+                percentDropdown:SetSelectedValue(
+                    pane.t.cfg[textType].color.percent.value
+                )
+            end
+            UpdateWidgets()
+            LoadIndicatorConfig(pane.t)
+        end)
 
         percentColorPicker = AF.CreateColorPicker(pane, L["Remaining Time"] .. " <")
-        AF.SetPoint(percentColorPicker, "TOPLEFT", percentCheckButton, "TOPRIGHT", 2, 0)
+        AF.SetPoint(
+            percentColorPicker,
+            "TOPLEFT",
+            thresholdModeDropdown,
+            "BOTTOMLEFT",
+            0,
+            -25
+        )
         percentColorPicker:SetOnChange(function(r, g, b)
             AF.FillColorTable(pane.t.cfg[textType].color.percent.rgb, r, g, b)
             LoadIndicatorConfig(pane.t)
@@ -2521,17 +2800,15 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
             LoadIndicatorConfig(pane.t)
         end)
 
-        percentCheckButton:SetOnCheck(function(checked)
-            pane.t.cfg[textType].color.percent.enabled = checked
-            AF.SetEnabled(checked, percentColorPicker, percentDropdown)
-            LoadIndicatorConfig(pane.t)
-        end)
-
-        secondsCheckButton = AF.CreateCheckButton(pane)
-        AF.SetPoint(secondsCheckButton, "TOPLEFT", percentCheckButton, "BOTTOMLEFT", 0, -7)
-
         secondsColorPicker = AF.CreateColorPicker(pane, L["Remaining Time"] .. " <")
-        AF.SetPoint(secondsColorPicker, "TOPLEFT", secondsCheckButton, "TOPRIGHT", 2, 0)
+        AF.SetPoint(
+            secondsColorPicker,
+            "TOPLEFT",
+            thresholdModeDropdown,
+            "BOTTOMLEFT",
+            0,
+            -25
+        )
         secondsColorPicker:SetOnChange(function(r, g, b)
             AF.FillColorTable(pane.t.cfg[textType].color.seconds.rgb, r, g, b)
             LoadIndicatorConfig(pane.t)
@@ -2541,22 +2818,22 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
         AF.SetPoint(secondsEditBox, "LEFT", secondsColorPicker.label, "RIGHT", 5, 0)
         secondsEditBox:SetMaxLetters(3)
         secondsEditBox:SetConfirmButton(function(value)
+            if not IsDurationThresholdValue("seconds", value) then
+                secondsEditBox:SetText(
+                    pane.t.cfg[textType].color.seconds.value
+                )
+                return
+            end
             pane.t.cfg[textType].color.seconds.value = value
             LoadIndicatorConfig(pane.t)
         end, nil, "RIGHT_OUTSIDE")
 
         sec = AF.CreateFontString(pane, L["sec"])
         AF.SetPoint(sec, "LEFT", secondsEditBox, "RIGHT", 5, 0)
-
-        secondsCheckButton:SetOnCheck(function(checked)
-            pane.t.cfg[textType].color.seconds.enabled = checked
-            AF.SetEnabled(checked, secondsColorPicker, secondsEditBox, sec)
-            LoadIndicatorConfig(pane.t)
-        end)
     end
     --------------------------------------------------
 
-    local function UpdateWidgets()
+    UpdateWidgets = function()
         AF.HideColorPicker()
         AF.SetEnabled(pane.t.cfg[textType].enabled, colorPicker,
             fontDropdown, fontOutlineDropdown, fontSizeSlider, shadowCheckButton,
@@ -2565,9 +2842,45 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
             AF.SetEnabled(pane.t.cfg[textType].enabled, numericFormatDropdown, percentFormatDropdown, delimiterEditBox, delimiterEditBox.label, percentSignCheckButton)
             useAsianUnitsCheckButton:SetEnabled(pane.t.cfg[textType].enabled and AF.isAsian)
         elseif extra == "duration" then
-            AF.SetEnabled(pane.t.cfg[textType].enabled, normalColorPicker, percentCheckButton, secondsCheckButton)
-            AF.SetEnabled(pane.t.cfg[textType].enabled and pane.t.cfg[textType].color.percent.enabled, percentColorPicker, percentDropdown)
-            AF.SetEnabled(pane.t.cfg[textType].enabled and pane.t.cfg[textType].color.seconds.enabled, secondsColorPicker, secondsEditBox, sec)
+            local mode = GetDurationThresholdMode(
+                pane.t.cfg[textType].color
+            )
+            local percentShown = mode == "percent"
+            local secondsShown = mode == "seconds"
+
+            if percentShown then
+                percentColorPicker:Show()
+                percentDropdown:Show()
+            else
+                percentColorPicker:Hide()
+                percentDropdown:Hide()
+            end
+            if secondsShown then
+                secondsColorPicker:Show()
+                secondsEditBox:Show()
+                sec:Show()
+            else
+                secondsColorPicker:Hide()
+                secondsEditBox:Hide()
+                sec:Hide()
+            end
+
+            AF.SetEnabled(
+                pane.t.cfg[textType].enabled,
+                normalColorPicker,
+                thresholdModeDropdown
+            )
+            AF.SetEnabled(
+                pane.t.cfg[textType].enabled and percentShown,
+                percentColorPicker,
+                percentDropdown
+            )
+            AF.SetEnabled(
+                pane.t.cfg[textType].enabled and secondsShown,
+                secondsColorPicker,
+                secondsEditBox,
+                sec
+            )
         end
     end
 
@@ -2579,6 +2892,15 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
 
     function pane.Load(t)
         pane.t = t
+        if extra == "duration"
+            and t.cfg[textType].color.seconds.enabled == true
+            and t.cfg[textType].color.percent.enabled == true
+        then
+            -- The native binding supports one threshold. Match the legacy
+            -- evaluation priority and persist a truthful settings state once
+            -- this pane is visited.
+            t.cfg[textType].color.percent.enabled = false
+        end
         UpdateWidgets()
 
         enabledCheckButton:SetChecked(t.cfg[textType].enabled)
@@ -2606,13 +2928,13 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
             percentSignCheckButton:SetChecked(t.cfg[textType].format.showPercentSign)
             useAsianUnitsCheckButton:SetChecked(t.cfg[textType].format.useAsianUnits)
         elseif extra == "duration" then
-            colorPicker:Hide()
             normalColorPicker:SetColor(pane.t.cfg[textType].color.normal)
             percentColorPicker:SetColor(pane.t.cfg[textType].color.percent.rgb)
             secondsColorPicker:SetColor(pane.t.cfg[textType].color.seconds.rgb)
-            percentCheckButton:SetChecked(pane.t.cfg[textType].color.percent.enabled)
+            thresholdModeDropdown:SetSelectedValue(
+                GetDurationThresholdMode(pane.t.cfg[textType].color)
+            )
             percentDropdown:SetSelectedValue(pane.t.cfg[textType].color.percent.value)
-            secondsCheckButton:SetChecked(pane.t.cfg[textType].color.seconds.enabled)
             secondsEditBox:SetText(t.cfg[textType].color.seconds.value)
         end
     end
@@ -2646,7 +2968,7 @@ end
 builder["stackText"] = function(parent)
     if created["stackText"] then return created["stackText"] end
 
-    created["stackText"] = CreateFontPositionExtraPane(parent, "stackText", "BFI_UnitFrameOption_StackText", AF.GetGradientText(L["Stack Text"], "BFI", "white"))
+    created["stackText"] = CreateFontPositionExtraPane(parent, "stackText", "BFI_UnitFrameOption_StackText", L["Stack Text"])
     return created["stackText"]
 end
 
@@ -2656,7 +2978,7 @@ end
 builder["durationText"] = function(parent)
     if created["durationText"] then return created["durationText"] end
 
-    created["durationText"] = CreateFontPositionExtraPane(parent, "durationText", "BFI_UnitFrameOption_DurationText", AF.GetGradientText(L["Duration Text"], "BFI", "white"), "duration")
+    created["durationText"] = CreateFontPositionExtraPane(parent, "durationText", "BFI_UnitFrameOption_DurationText", L["Duration Text"], "duration")
     return created["durationText"]
 end
 
@@ -3074,64 +3396,517 @@ end
 builder["auraBaseFilters"] = function(parent)
     if created["auraBaseFilters"] then return created["auraBaseFilters"] end
 
-    local pane = AF.CreateBorderedFrame(parent, "BFI_UnitFrameOption_AuraBaseFilters", nil, 94)
+    local pane = AF.CreateBorderedFrame(parent, "BFI_UnitFrameOption_AuraBaseFilters", nil, 117)
     created["auraBaseFilters"] = pane
 
     local tip = AF.CreateFontString(pane, L["The aura will show if any enabled filter is met"])
     tip:SetColor("tip")
     AF.SetPoint(tip, "TOPLEFT", 15, -8)
+    AF.SetPoint(tip, "TOPRIGHT", pane, -15, -8)
+    tip:SetJustifyH("LEFT")
+    tip:SetJustifyV("TOP")
+    tip:SetWordWrap(true)
+
+    local retailBaseHeight = 117
+    local function SetRetailAuraFilter(
+        baseFilter,
+        config,
+        field,
+        checked
+    )
+        if not F.SetUnitFrameAuraFilter(
+            baseFilter,
+            config,
+            field,
+            checked
+        ) then
+            return false
+        end
+
+        -- A supported edit is the explicit migration boundary for profiles
+        -- copied back from a newer client. Retire only fields this client
+        -- cannot express so a hidden selection cannot keep widening the row.
+        if not HasAuraFilterToken("Important", "IMPORTANT") then
+            config.important = false
+        end
+        if not HasAuraFilterToken("Dispellable", "DISPELLABLE") then
+            config.anyDispellable = false
+        end
+        return true
+    end
+
+    local function UpdateRetailPaneHeight()
+        local extraHeight =
+            tip:GetStringHeight() - tip:GetLineHeight()
+        if extraHeight < 0 then
+            extraHeight = 0
+        end
+        pane:SetHeight(retailBaseHeight + ceil(extraHeight))
+        RefreshOptionPaneHeight(parent, pane)
+    end
+
+    local allAuras = AF.CreateCheckButton(pane, L["All Auras"])
+    allAuras:SetOnCheck(function(checked)
+        if not SetRetailAuraFilter(
+            pane.t.id == "buffs" and "HELPFUL" or "HARMFUL",
+            pane.t.cfg.filters,
+            "all",
+            checked
+        ) then
+            return
+        end
+        LoadIndicatorConfig(pane.t)
+    end)
 
     local castByMe = AF.CreateCheckButton(pane, L["Cast By Me"])
-    AF.SetPoint(castByMe, "TOPLEFT", 15, -30)
     castByMe:SetOnCheck(function(checked)
-        pane.t.cfg.filters.castByMe = checked
+        if AF.isRetail then
+            local baseFilter =
+                pane.t.id == "buffs" and "HELPFUL" or "HARMFUL"
+            if not SetRetailAuraFilter(
+                baseFilter,
+                pane.t.cfg.filters,
+                "player",
+                checked
+            ) then
+                return
+            end
+        else
+            pane.t.cfg.filters.castByMe = checked
+        end
+        LoadIndicatorConfig(pane.t)
+    end)
+
+    local notPlayer = AF.CreateCheckButton(
+        pane,
+        L["Not Player, Pet, or Vehicle"]
+    )
+    notPlayer:SetOnCheck(function(checked)
+        if not SetRetailAuraFilter(
+            pane.t.id == "buffs" and "HELPFUL" or "HARMFUL",
+            pane.t.cfg.filters,
+            "notPlayer",
+            checked
+        ) then
+            return
+        end
         LoadIndicatorConfig(pane.t)
     end)
 
     local castByOthers = AF.CreateCheckButton(pane, L["Cast By Others"])
-    AF.SetPoint(castByOthers, "TOPLEFT", castByMe, 185, 0)
     castByOthers:SetOnCheck(function(checked)
-        pane.t.cfg.filters.castByOthers = checked
+        if AF.isRetail then
+            if not SetRetailAuraFilter(
+                "HELPFUL",
+                pane.t.cfg.filters,
+                "bigDefensive",
+                checked
+            ) then
+                return
+            end
+        else
+            pane.t.cfg.filters.castByOthers = checked
+        end
         LoadIndicatorConfig(pane.t)
     end)
 
     local castByUnit = AF.CreateCheckButton(pane, L["Cast By Unit"])
-    AF.SetPoint(castByUnit, "TOPLEFT", castByMe, "BOTTOMLEFT", 0, -7)
     castByUnit:SetOnCheck(function(checked)
-        pane.t.cfg.filters.castByUnit = checked
+        if AF.isRetail then
+            if not SetRetailAuraFilter(
+                "HELPFUL",
+                pane.t.cfg.filters,
+                "externalDefensive",
+                checked
+            ) then
+                return
+            end
+        else
+            pane.t.cfg.filters.castByUnit = checked
+        end
         LoadIndicatorConfig(pane.t)
     end)
 
     local castByNPC = AF.CreateCheckButton(pane, L["Cast By NPC"])
-    AF.SetPoint(castByNPC, "TOPLEFT", castByUnit, 185, 0)
     castByNPC:SetOnCheck(function(checked)
-        pane.t.cfg.filters.castByNPC = checked
+        if AF.isRetail then
+            local baseFilter =
+                pane.t.id == "buffs" and "HELPFUL" or "HARMFUL"
+            if not SetRetailAuraFilter(
+                baseFilter,
+                pane.t.cfg.filters,
+                "raidInCombat",
+                checked
+            ) then
+                return
+            end
+        else
+            pane.t.cfg.filters.castByNPC = checked
+        end
         LoadIndicatorConfig(pane.t)
     end)
 
     local castByBoss = AF.CreateCheckButton(pane, L["Cast By Boss"])
-    AF.SetPoint(castByBoss, "TOPLEFT", castByUnit, "BOTTOMLEFT", 0, -7)
     castByBoss:SetOnCheck(function(checked)
-        pane.t.cfg.filters.isBossAura = checked
+        if AF.isRetail then
+            local baseFilter =
+                pane.t.id == "buffs" and "HELPFUL" or "HARMFUL"
+            if not SetRetailAuraFilter(
+                baseFilter,
+                pane.t.cfg.filters,
+                "raidPlayerDispellable",
+                checked
+            ) then
+                return
+            end
+        else
+            pane.t.cfg.filters.isBossAura = checked
+        end
         LoadIndicatorConfig(pane.t)
     end)
 
     local dispellable = AF.CreateCheckButton(pane, L["Dispellable"])
-    AF.SetPoint(dispellable, "TOPLEFT", castByBoss, 185, 0)
     dispellable:SetOnCheck(function(checked)
-        pane.t.cfg.filters.dispellable = checked
+        if AF.isRetail then
+            local baseFilter =
+                pane.t.id == "buffs" and "HELPFUL" or "HARMFUL"
+            if not SetRetailAuraFilter(
+                baseFilter,
+                pane.t.cfg.filters,
+                "anyDispellable",
+                checked
+            ) then
+                return
+            end
+        else
+            pane.t.cfg.filters.dispellable = checked
+        end
         LoadIndicatorConfig(pane.t)
     end)
+
+    local important =
+        AF.CreateCheckButton(pane, L["Important Enemy Buffs"])
+    important:SetOnCheck(function(checked)
+        if not SetRetailAuraFilter(
+            "HELPFUL",
+            pane.t.cfg.filters,
+            "important",
+            checked
+        ) then
+            return
+        end
+        LoadIndicatorConfig(pane.t)
+    end)
+
+    local function ClearFilterPoints()
+        AF.ClearPoints(allAuras)
+        AF.ClearPoints(castByMe)
+        AF.ClearPoints(notPlayer)
+        AF.ClearPoints(castByOthers)
+        AF.ClearPoints(castByUnit)
+        AF.ClearPoints(castByNPC)
+        AF.ClearPoints(castByBoss)
+        AF.ClearPoints(dispellable)
+        AF.ClearPoints(important)
+    end
+
+    local function LayoutRetailFilters(
+        hasImportant,
+        hasAnyDispellable
+    )
+        ClearFilterPoints()
+        AF.SetPoint(
+            allAuras,
+            "TOPLEFT",
+            tip,
+            "BOTTOMLEFT",
+            0,
+            -10
+        )
+        AF.SetPoint(castByMe, "TOPLEFT", allAuras, 185, 0)
+        AF.SetPoint(
+            notPlayer,
+            "TOPLEFT",
+            allAuras,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        AF.SetPoint(castByNPC, "TOPLEFT", notPlayer, 185, 0)
+        AF.SetPoint(
+            castByBoss,
+            "TOPLEFT",
+            notPlayer,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        if hasAnyDispellable then
+            AF.SetPoint(dispellable, "TOPLEFT", castByBoss, 185, 0)
+            AF.SetPoint(
+                castByOthers,
+                "TOPLEFT",
+                castByBoss,
+                "BOTTOMLEFT",
+                0,
+                -7
+            )
+            AF.SetPoint(castByUnit, "TOPLEFT", castByOthers, 185, 0)
+            if hasImportant then
+                AF.SetPoint(
+                    important,
+                    "TOPLEFT",
+                    castByOthers,
+                    "BOTTOMLEFT",
+                    0,
+                    -7
+                )
+            end
+        else
+            AF.SetPoint(castByOthers, "TOPLEFT", castByBoss, 185, 0)
+            AF.SetPoint(
+                castByUnit,
+                "TOPLEFT",
+                castByBoss,
+                "BOTTOMLEFT",
+                0,
+                -7
+            )
+            if hasImportant then
+                AF.SetPoint(important, "TOPLEFT", castByUnit, 185, 0)
+            end
+        end
+
+        retailBaseHeight =
+            hasImportant and hasAnyDispellable and 142 or 117
+    end
+
+    local function LayoutLegacyFilters()
+        ClearFilterPoints()
+        AF.SetPoint(castByMe, "TOPLEFT", 15, -30)
+        AF.SetPoint(castByOthers, "TOPLEFT", castByMe, 185, 0)
+        AF.SetPoint(
+            castByUnit,
+            "TOPLEFT",
+            castByMe,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        AF.SetPoint(castByNPC, "TOPLEFT", castByUnit, 185, 0)
+        AF.SetPoint(
+            castByBoss,
+            "TOPLEFT",
+            castByUnit,
+            "BOTTOMLEFT",
+            0,
+            -7
+        )
+        AF.SetPoint(dispellable, "TOPLEFT", castByBoss, 185, 0)
+        important:Hide()
+    end
 
     function pane.Load(t)
         pane.t = t
 
         if AF.isRetail then
-            tip:SetText(L["Retail uses Blizzard's C-side aura classifications"])
-            castByOthers:SetText(t.id == "buffs" and L["Defensive"] or L["Cast By Others"])
-            castByBoss:SetText(L["Raid In Combat"])
+            local baseFilter =
+                t.id == "buffs" and "HELPFUL" or "HARMFUL"
+            local filters, migration =
+                F.ResolveUnitFrameAuraFilters(baseFilter, t.cfg.filters)
+            filters = filters or {}
+            migration = migration or {}
+            local usesNative = UsesNativeAuraContainer(t)
+            local hasImportant =
+                HasAuraFilterToken("Important", "IMPORTANT")
+            local hasAnyDispellable =
+                HasAuraFilterToken("Dispellable", "DISPELLABLE")
+            local unsupportedPtr7Selection =
+                (filters.important and not hasImportant)
+                or (
+                    filters.anyDispellable
+                    and not hasAnyDispellable
+                )
+            local friendlyHelpful =
+                t.id == "buffs"
+                and (
+                    t.owner == "player"
+                    or t.owner == "pet"
+                    or t.owner == "party"
+                    or t.owner == "raid"
+                )
+
+            LayoutRetailFilters(hasImportant, hasAnyDispellable)
+            tip:SetText(
+                L["Retail uses Blizzard-defined categories; All Auras overrides narrower categories"]
+                    .. (
+                        unsupportedPtr7Selection
+                        and (
+                            "\n"
+                            .. L["This profile selects a 12.1 aura category unavailable on this client. The legacy renderer safely widens the row to All Auras; changing any supported category retires the unavailable selection"]
+                        )
+                        or ""
+                    )
+            )
+            RunNextFrame(UpdateRetailPaneHeight)
+            allAuras:Show()
+            notPlayer:Show()
+            castByMe:SetText(L["Player, Pet, or Vehicle"])
+            notPlayer:SetText(L["Not Player, Pet, or Vehicle"])
+            castByOthers:SetText(L["Big Defensive"])
+            castByUnit:SetText(L["External Defensive"])
+            castByNPC:SetText(L["Raid In Combat"])
+            castByBoss:SetText(L["Raid Player-Dispellable"])
+            dispellable:SetText(L["Any Dispel Type"])
+            important:SetText(L["Important Enemy Buffs"])
+            if hasAnyDispellable then
+                dispellable:Show()
+            else
+                dispellable:Hide()
+            end
+            if hasImportant then
+                important:Show()
+            else
+                important:Hide()
+            end
+
+            allAuras:SetTooltip(
+                L["All Auras"],
+                L["Shows every aura of this type. Legacy Cast By Unit selections widen to All because exact unit-source matching is unavailable across both Retail versions"]
+            )
+            notPlayer:SetTooltip(
+                L["Not Player, Pet, or Vehicle"],
+                L["Uses the C-side complement of Blizzard's PLAYER category. A single legacy Cast By Others or Cast By NPC selection widens to this safe superset"]
+            )
+            castByNPC:SetTooltip(
+                L["Raid In Combat"],
+                L["Legacy Cast By Boss is approximated by Blizzard's curated RAID_IN_COMBAT category; it is not an exact boss-aura predicate"]
+            )
+            if HasNativeAuraContainerBackend() then
+                castByBoss:SetTooltip(
+                    L["Raid Player-Dispellable"],
+                    L["Shows auras someone in your raid can dispel, including helpful enrages on enemies"]
+                )
+            else
+                castByBoss:SetTooltip(
+                    L["Raid Player-Dispellable"],
+                    L["Shows auras your character can dispel"]
+                )
+            end
+            if usesNative then
+                dispellable:SetTooltip(
+                    L["Any Dispel Type"],
+                    L["Shows any aura with a dispel type, whether or not anyone in your raid can dispel it"]
+                )
+                if t.id ~= "buffs" then
+                    important:SetTooltip(
+                        L["Important Enemy Buffs"],
+                        L["IMPORTANT is a helpful-aura category and is unavailable for debuff indicators"]
+                    )
+                elseif friendlyHelpful then
+                    important:SetTooltip(
+                        L["Important Enemy Buffs"],
+                        L["IMPORTANT is intended for helpful auras on units that may be hostile"]
+                    )
+                else
+                    important:SetTooltip(
+                        L["Important Enemy Buffs"],
+                        L["Shows helpful auras Blizzard flags as important, including non-stealable auras shown on enemy nameplates"]
+                    )
+                end
+            else
+                dispellable:SetTooltip(
+                    L["Native Aura Container Required"],
+                    L["This legacy Retail aura list widens the selection to all auras of this type"]
+                )
+                important:SetTooltip(
+                    L["Native Aura Container Required"],
+                    L["This legacy Retail aura list widens the selection to all auras of this type"]
+                )
+            end
+            if migration.legacySourceFilterUsesSuperset then
+                allAuras:SetTooltip(
+                    L["Conservative Legacy Migration"],
+                    L["This legacy source selection was widened so requested auras are not silently lost"]
+                )
+            end
+            if migration.bossAuraUsesCuratedRaidInCombat then
+                castByNPC:SetTooltip(
+                    L["Conservative Legacy Migration"],
+                    L["Legacy Cast By Boss is shown through Blizzard's curated RAID_IN_COMBAT category, not an exact boss-aura predicate"]
+                )
+            end
+            if migration.legacyDispellableUsesRaidPlayerDispellable then
+                castByBoss:SetTooltip(
+                    L["Conservative Legacy Migration"],
+                    L["Legacy Dispellable now uses Blizzard's RAID_PLAYER_DISPELLABLE category; on 12.1 this means someone in your raid can dispel the aura"]
+                )
+            end
+            if unsupportedPtr7Selection then
+                allAuras:SetTooltip(
+                    L["Newer Aura Category Fallback"],
+                    L["This profile selects a 12.1 aura category unavailable on this client. The legacy renderer safely widens the row to All Auras; changing any supported category retires the unavailable selection"]
+                )
+            end
+
+            allAuras:SetChecked(
+                filters.all or unsupportedPtr7Selection
+            )
+            castByMe:SetChecked(
+                not unsupportedPtr7Selection and filters.player
+            )
+            notPlayer:SetChecked(
+                not unsupportedPtr7Selection and filters.notPlayer
+            )
+            castByOthers:SetChecked(
+                not unsupportedPtr7Selection
+                and filters.bigDefensive
+            )
+            castByUnit:SetChecked(
+                not unsupportedPtr7Selection
+                and filters.externalDefensive
+            )
+            castByNPC:SetChecked(
+                not unsupportedPtr7Selection
+                and filters.raidInCombat
+            )
+            castByBoss:SetChecked(
+                not unsupportedPtr7Selection
+                and filters.raidPlayerDispellable
+            )
+            dispellable:SetChecked(
+                not unsupportedPtr7Selection
+                and filters.anyDispellable
+            )
+            important:SetChecked(
+                not unsupportedPtr7Selection
+                and filters.important
+            )
+
+            allAuras:SetEnabled(true)
+            castByMe:SetEnabled(true)
+            notPlayer:SetEnabled(true)
+            castByOthers:SetEnabled(t.id == "buffs")
+            castByUnit:SetEnabled(t.id == "buffs")
+            castByNPC:SetEnabled(true)
+            castByBoss:SetEnabled(not friendlyHelpful)
+            dispellable:SetEnabled(
+                hasAnyDispellable and usesNative
+            )
+            important:SetEnabled(
+                hasImportant
+                and usesNative
+                and t.id == "buffs"
+                and not friendlyHelpful
+            )
+            return
         end
 
+        LayoutLegacyFilters()
+        allAuras:Hide()
+        notPlayer:Hide()
+        important:Hide()
+        dispellable:Show()
         castByMe:SetChecked(t.cfg.filters.castByMe)
         castByOthers:SetChecked(t.cfg.filters.castByOthers)
         castByUnit:SetChecked(t.cfg.filters.castByUnit)
@@ -3139,9 +3914,9 @@ builder["auraBaseFilters"] = function(parent)
         castByBoss:SetChecked(t.cfg.filters.isBossAura)
         dispellable:SetChecked(t.cfg.filters.dispellable)
 
-        castByOthers:SetEnabled(not AF.isRetail or t.id == "buffs")
-        castByUnit:SetEnabled(not AF.isRetail)
-        castByNPC:SetEnabled(not AF.isRetail)
+        castByOthers:SetEnabled(true)
+        castByUnit:SetEnabled(true)
+        castByNPC:SetEnabled(true)
 
         if t.id == "buffs" and (t.owner == "player" or t.owner == "pet" or t.owner == "party" or t.owner == "raid") then
             dispellable:SetEnabled(false)
@@ -3156,22 +3931,123 @@ end
 ---------------------------------------------------------------------
 -- auraBlackListWhitelist
 ---------------------------------------------------------------------
+local function IsCurrentSpecializationHealer()
+    local getSpecialization = rawget(_G, "GetSpecialization")
+    local getSpecializationRole =
+        rawget(_G, "GetSpecializationRole")
+    if type(getSpecialization) ~= "function"
+        or type(getSpecializationRole) ~= "function"
+    then
+        return false
+    end
+
+    local specialization = getSpecialization()
+    return specialization ~= nil
+        and getSpecializationRole(specialization) == "HEALER"
+end
+
+-- Retail 12.1.0.68914, wow-ui-source d3915c78:
+-- Blizzard's Group Buff filter uses these spell IDs as aura IDs. Availability
+-- reads are non-mutating; only an explicit user click writes the snapshot.
+local function GetGroupBuffImportAPI()
+    local cooldownViewer = rawget(_G, "C_CooldownViewer")
+    local enum = rawget(_G, "Enum")
+    local bitLibrary = rawget(_G, "bit")
+    local getItems = cooldownViewer
+        and cooldownViewer.GetGroupBuffItems
+    local hideByDefault = enum
+        and enum.GroupBuffItemFlags
+        and enum.GroupBuffItemFlags.HideByDefault
+    local band = bitLibrary and bitLibrary.band
+
+    if type(getItems) ~= "function"
+        or type(hideByDefault) ~= "number"
+        or type(band) ~= "function"
+    then
+        return
+    end
+
+    return getItems, band, hideByDefault
+end
+
+local function GetImportableGroupBuffSpellIDs()
+    local getItems, band, hideByDefault =
+        GetGroupBuffImportAPI()
+    if not getItems then return end
+
+    local items = getItems()
+    if type(items) ~= "table" or #items == 0 then return end
+
+    local imported = {}
+    local importedSet = {}
+    for _, item in ipairs(items) do
+        local spellID = type(item) == "table"
+            and item.spellID
+        local flags = type(item) == "table"
+            and item.flags
+        if type(spellID) == "number"
+            and spellID > 0
+            and spellID % 1 == 0
+            and type(flags) == "number"
+            and band(flags, hideByDefault) == 0
+            and not importedSet[spellID]
+        then
+            importedSet[spellID] = true
+            tinsert(imported, spellID)
+        end
+    end
+    if #imported == 0 then return end
+    return imported
+end
+
 builder["auraBlackListWhitelist"] = function(parent)
     if created["auraBlackListWhitelist"] then return created["auraBlackListWhitelist"] end
 
     local pane = AF.CreateBorderedFrame(parent, "BFI_UnitFrameOption_AuraBlackListWhitelist", nil, 0)
     created["auraBlackListWhitelist"] = pane
 
-    local mode = AF.CreateDropdown(pane, 150)
+    local mode = AF.CreateDropdown(pane, 220)
     AF.SetPoint(mode, "TOPLEFT", 15, -8)
-    mode:SetItems({
+    local legacyModeItems = {
         {text = L["Blacklist"], value = "blacklist"},
         {text = L["Whitelist"], value = "whitelist"},
-    })
+    }
+    local retailModeItems = {
+        {
+            text = L["Hide Listed Spells"],
+            value = "blacklist",
+        },
+        {
+            text = L["Show Only Listed Spells"],
+            value = "whitelist",
+        },
+    }
+    mode:SetItems(legacyModeItems)
 
-    local tip = AF.CreateFontString(pane, AF.GetIconString("MouseLeftClick") .. L["Edit"] .. "  " .. AF.GetIconString("MouseRightClick") .. L["Delete"])
-    AF.SetPoint(tip, "LEFT", mode, "RIGHT", 8, 0)
+    local editDeleteTip = AF.GetIconString("MouseLeftClick")
+        .. L["Edit"]
+        .. "  "
+        .. AF.GetIconString("MouseRightClick")
+        .. L["Delete"]
+    local tip = AF.CreateFontString(pane, editDeleteTip)
     tip:SetColor("tip")
+    tip:SetJustifyH("LEFT")
+    tip:SetJustifyV("TOP")
+    if AF.isRetail then
+        AF.SetPoint(
+            tip,
+            "TOPLEFT",
+            mode,
+            "BOTTOMLEFT",
+            0,
+            -8
+        )
+        AF.SetPoint(tip, "TOPRIGHT", pane, -15, -36)
+        tip:SetWordWrap(true)
+    else
+        AF.SetPoint(tip, "LEFT", mode, "RIGHT", 8, 0)
+        tip:SetWordWrap(false)
+    end
 
     local buttons = {}
     local editBox
@@ -3234,6 +4110,55 @@ builder["auraBlackListWhitelist"] = function(parent)
         GetEditBox(addButton)
     end)
 
+    local importButton = AF.CreateButton(
+        pane,
+        L["Import Healer Spells"],
+        "BFI_hover",
+        150,
+        20
+    )
+    importButton:EnablePushEffect(false)
+    importButton:SetTooltip(
+        L["Import Healer Spells"],
+        L["Adds Blizzard's default group-buff spells for your current healing specialization. Existing entries are kept"]
+    )
+
+    local function CanImportHealerSpells(t)
+        return AF.isRetail
+            and t.id == "buffs"
+            and t.cfg.mode == "whitelist"
+            and UsesNativeAuraContainer(t)
+            and IsCurrentSpecializationHealer()
+    end
+
+    local function ImportHealerSpells()
+        local t = pane.t
+        if not t or not CanImportHealerSpells(t) then return end
+
+        local imported = GetImportableGroupBuffSpellIDs()
+        if not imported then return end
+
+        local list = t.cfg.whitelist
+        local seen = {}
+        local changed = false
+        for _, spellID in ipairs(list) do
+            seen[spellID] = true
+        end
+        for _, spellID in ipairs(imported) do
+            if not seen[spellID] then
+                seen[spellID] = true
+                tinsert(list, spellID)
+                changed = true
+            end
+        end
+        if not changed then return end
+
+        pane.Load(t)
+        LoadIndicatorConfig(t)
+    end
+
+    importButton:SetOnClick(ImportHealerSpells)
+
     local pool = AF.CreateObjectPool(function()
         local b = AF.CreateButton(pane, nil, "BFI_hover", 150, 20)
         b:SetTexture(AF.GetIcon("QuestionMark"), nil, {"LEFT", 2, 0}, nil, "black")
@@ -3273,14 +4198,53 @@ builder["auraBlackListWhitelist"] = function(parent)
 
     function pane.Load(t)
         pane.t = t
+        local canEdit = not AF.isRetail
+        local usesNative = false
         if AF.isRetail then
             HideEditBox()
-            tip:SetText(L["Spell-ID aura lists are unavailable for restricted Retail auras"])
+            usesNative = UsesNativeAuraContainer(t)
+            if usesNative then
+                canEdit = true
+                mode:SetItems(retailModeItems)
+                tip:SetText(
+                    L["Works for buffs on units you can help and debuffs on units you cannot help. In other cases, protected spells may bypass the list, so BFI hides that aura row. Spells Blizzard keeps available can still be filtered"]
+                        .. "\n"
+                        .. editDeleteTip
+                )
+            elseif HasNativeAuraContainerBackend() then
+                mode:SetItems(retailModeItems)
+                tip:SetText(
+                    L["This aura row uses the older aura system. Your saved spell list is kept, but it is not used or editable here"]
+                )
+            else
+                mode:SetItems(retailModeItems)
+                tip:SetText(
+                    L["Spell lists require WoW 12.1 and a compatible aura display. Your saved list is kept, but it cannot be used or edited here"]
+                )
+            end
+        else
+            mode:SetItems(legacyModeItems)
         end
 
         mode:SetSelectedValue(t.cfg.mode)
-        mode:SetEnabled(not AF.isRetail)
-        addButton:SetEnabled(not AF.isRetail)
+        mode:SetEnabled(canEdit)
+        addButton:SetEnabled(canEdit)
+
+        local canImport = canEdit
+            and usesNative
+            and t.id == "buffs"
+            and t.cfg.mode == "whitelist"
+            and IsCurrentSpecializationHealer()
+        if canImport then
+            importButton:Show()
+        else
+            importButton:Hide()
+        end
+        local importable = canImport
+            and GetImportableGroupBuffSpellIDs()
+        importButton:SetEnabled(
+            canImport and importable ~= nil
+        )
 
         pane.list = t.cfg.mode == "blacklist" and t.cfg.blacklist or t.cfg.whitelist
 
@@ -3289,27 +4253,40 @@ builder["auraBlackListWhitelist"] = function(parent)
 
         local num = #pane.list
 
-        for i = 1, num + 1 do
+        for i = 1, num do
             local spell = pane.list[i]
 
-            local b
-            if i <= num then
-                b = pool:Acquire()
-                local name, icon = AF.GetSpellInfo(spell, true)
-                b:SetText(name)
-                b:SetTexture(icon, nil, nil, nil, "black")
-                b.spell = spell
-                b.index = i
-            else
-                b = addButton
-            end
+            local b = pool:Acquire()
+            local name, icon = AF.GetSpellInfo(spell, true)
+            b:SetText(name)
+            b:SetTexture(icon, nil, nil, nil, "black")
+            b.spell = spell
+            b.index = i
 
             buttons[i] = b
-            b:SetEnabled(not AF.isRetail)
+            b:SetEnabled(canEdit)
             b:Show()
 
             if i == 1 then
-                AF.SetPoint(b, "TOPLEFT", mode, "BOTTOMLEFT", 0, -8)
+                if AF.isRetail then
+                    AF.SetPoint(
+                        b,
+                        "TOPLEFT",
+                        tip,
+                        "BOTTOMLEFT",
+                        0,
+                        -8
+                    )
+                else
+                    AF.SetPoint(
+                        b,
+                        "TOPLEFT",
+                        mode,
+                        "BOTTOMLEFT",
+                        0,
+                        -8
+                    )
+                end
             elseif i % 2 == 1 then
                 AF.SetPoint(b, "TOPLEFT", buttons[i - 2], "BOTTOMLEFT", 0, -5)
             else
@@ -3317,9 +4294,83 @@ builder["auraBlackListWhitelist"] = function(parent)
             end
         end
 
-        AF.SetListHeight(pane, ceil((num + 1) / 2), 20, 5, 8 + 20 + 8, 8)
-        parent._contentHeights[pane.index] = tostring(pane:GetHeight()) -- update height
-        AF.ReSize(parent) -- call AF.SetScrollContentHeight
+        AF.ClearPoints(addButton)
+        AF.ClearPoints(importButton)
+        local firstControlAnchor = AF.isRetail and tip or mode
+        if num == 0 then
+            AF.SetPoint(
+                addButton,
+                "TOPLEFT",
+                firstControlAnchor,
+                "BOTTOMLEFT",
+                0,
+                -8
+            )
+        elseif canImport then
+            local leftButton = buttons[num % 2 == 0 and num - 1 or num]
+            AF.SetPoint(
+                addButton,
+                "TOPLEFT",
+                leftButton,
+                "BOTTOMLEFT",
+                0,
+                -5
+            )
+        elseif num % 2 == 0 then
+            AF.SetPoint(
+                addButton,
+                "TOPLEFT",
+                buttons[num - 1],
+                "BOTTOMLEFT",
+                0,
+                -5
+            )
+        else
+            AF.SetPoint(
+                addButton,
+                "TOPLEFT",
+                buttons[num],
+                "TOPRIGHT",
+                5,
+                0
+            )
+        end
+        addButton:Show()
+        AF.SetPoint(
+            importButton,
+            "TOPLEFT",
+            addButton,
+            "TOPRIGHT",
+            5,
+            0
+        )
+
+        local rows = canImport
+            and ceil(num / 2) + 1
+            or ceil((num + 1) / 2)
+        if AF.isRetail then
+            RunNextFrame(function()
+                AF.SetListHeight(
+                    pane,
+                    rows,
+                    20,
+                    5,
+                    36 + tip:GetStringHeight() + 8,
+                    8
+                )
+                RefreshOptionPaneHeight(parent, pane)
+            end)
+        else
+            AF.SetListHeight(
+                pane,
+                rows,
+                20,
+                5,
+                8 + 20 + 8,
+                8
+            )
+            RefreshOptionPaneHeight(parent, pane)
+        end
     end
 
     return pane
@@ -3333,7 +4384,7 @@ builder["auraTypeColor"] = function(parent)
     local pane = AF.CreateBorderedFrame(parent, "BFI_UnitFrameOption_AuraTypeColor", nil, 72)
     created["auraTypeColor"] = pane
 
-    local tip = AF.CreateFontString(pane, AF.GetGradientText(L["Border Color"], "BFI", "white") .. "\n" .. L["Priority: top to bottom"])
+    local tip = AF.CreateFontString(pane, L["Border Color"] .. "\n" .. L["Priority: top to bottom"])
     AF.SetPoint(tip, "TOPLEFT", 15, -8)
     AF.SetPoint(tip, "BOTTOMLEFT", 15, 8)
     tip:SetColor("tip")
@@ -3365,7 +4416,14 @@ builder["auraTypeColor"] = function(parent)
     function pane.Load(t)
         pane.t = t
         if AF.isRetail then
-            tip:SetText(AF.GetGradientText(L["Border Color"], "BFI", "white") .. "\n" .. L["Retail supports debuff type coloring"])
+            tip:SetText(L["Border Color"] .. "\n" .. L["Retail supports debuff type coloring"])
+            castByMe:Hide()
+            dispellable:Hide()
+            AF.ClearPoints(debuffType)
+            AF.SetPoint(debuffType, "TOPLEFT", tip, 185, 0)
+        else
+            castByMe:Show()
+            dispellable:Show()
         end
 
         castByMe:SetChecked(t.cfg.auraTypeColor.castByMe)
@@ -3383,6 +4441,10 @@ builder["auraTypeColor"] = function(parent)
         debuffType:SetEnabled(t.id == "debuffs")
     end
 
+    function pane.IsApplicable(t)
+        return not AF.isRetail or t.id == "debuffs"
+    end
+
     return pane
 end
 
@@ -3397,7 +4459,7 @@ builder["auraSubFrame"] = function(parent)
 
     -- TODO: more filters and separate arrangement
 
-    local enabled = AF.CreateCheckButton(pane, AF.GetGradientText(L["Enable Sub Frame"], "BFI", "white"))
+    local enabled = AF.CreateCheckButton(pane, L["Enable Sub Frame"])
     AF.SetPoint(enabled, "TOPLEFT", 15, -8)
 
     local filter = AF.CreateDropdown(pane, 150)
@@ -3448,6 +4510,27 @@ builder["auraSubFrame"] = function(parent)
 
     function pane.Load(t)
         pane.t = t
+        if AF.isRetail then
+            enabled:SetText(
+                L["Separate Auras Not from Player, Pet, or Vehicle"]
+            )
+            filter:Hide()
+            enabled:SetTooltip(
+                L["Separate Auras Not from Player, Pet, or Vehicle"],
+                L["For target units, this separates the complement of Blizzard's PLAYER category"]
+            )
+            AF.ClearPoints(desaturated)
+            AF.SetPoint(
+                desaturated,
+                "TOPLEFT",
+                enabled,
+                "BOTTOMLEFT",
+                0,
+                -7
+            )
+        else
+            filter:Show()
+        end
         UpdateWidgets()
         enabled:SetChecked(t.cfg.subFrame.enabled)
         filter:SetSelectedValue(t.cfg.subFrame.filter)
@@ -3469,7 +4552,7 @@ builder["auraArrangement"] = function(parent)
     created["auraArrangement"] = pane
 
     local arrangement = AF.CreateDropdown(pane, 150)
-    arrangement:SetLabel(AF.GetGradientText(L["Arrangement"], "BFI", "white"))
+    arrangement:SetLabel(L["Arrangement"])
     AF.SetPoint(arrangement, "TOPLEFT", 15, -25)
     arrangement:SetItems(AF.GetDropdownItems_Arrangement_Simple())
     arrangement:SetOnSelect(function(value)
@@ -3521,6 +4604,16 @@ builder["auraArrangement"] = function(parent)
 
     function pane.Load(t)
         pane.t = t
+        if UsesNativeAuraContainer(t) then
+            numTotal:SetLabel(L["Max Per Aura Group"])
+            numTotal:SetTooltip(
+                L["Max Per Aura Group"],
+                L["WoW 12.1 may split a row by enabled category and saved spell colors. This limit applies to each group, so the row can show more auras overall and groups may sort separately"]
+            )
+        else
+            numTotal:SetLabel(L["Max Displayed"])
+            AF.ClearTooltip(numTotal)
+        end
         arrangement:SetSelectedValue(t.cfg.orientation)
         width:SetValue(t.cfg.width)
         height:SetValue(t.cfg.height)
@@ -3561,11 +4654,27 @@ builder["cooldownStyle"] = function(parent)
         LoadIndicatorConfig(pane.t)
     end)
 
-    styleDropdown:SetTooltip(L["Cooldown Style"], L["Block type: Recommended for whitelist mode only, and set aura colors in %s"]:format(AF.WrapTextInColor(L["Auras"], "BFI")))
-
     function pane.Load(t)
         pane.t = t
         styleDropdown:SetSelectedValue(t.cfg.cooldownStyle)
+        if AF.isRetail then
+            if UsesNativeAuraContainer(t) then
+                styleDropdown:SetTooltip(
+                    L["Cooldown Style"],
+                    L["Retail cooldown styles change presentation only; Blizzard's opaque aura duration continues to drive the swipe. Block styles can use the spell colors configured in Auras when WoW can match them safely; unlisted spells use gray"]
+                )
+            else
+                styleDropdown:SetTooltip(
+                    L["Cooldown Style"],
+                    L["Retail cooldown styles change presentation only; Blizzard's opaque aura duration continues to drive the swipe. Global spell colors are saved for WoW 12.1 but are not applied by this older aura system"]
+                )
+            end
+        else
+            styleDropdown:SetTooltip(
+                L["Cooldown Style"],
+                L["Block type: Recommended for whitelist mode only, and set aura colors in %s"]:format(AF.WrapTextInColor(L["Auras"], "BFI"))
+            )
+        end
     end
 
     return pane
@@ -3607,12 +4716,19 @@ builder["tooltip"] = function(parent)
         {text = L["Default"], value = "default"},
     }
 
+    local function ReloadAuraTooltip()
+        if IsAuraIndicator(pane.t) then
+            LoadIndicatorConfig(pane.t)
+        end
+    end
+
     local anchorPoint = AF.CreateDropdown(pane, 150)
     anchorPoint:SetLabel(L["Anchor Point"])
     AF.SetPoint(anchorPoint, "TOPLEFT", enabledCheckButton, 0, -45)
     anchorPoint:SetItems(AF.GetDropdownItems_AnchorPoint())
     anchorPoint:SetOnSelect(function(value)
         pane.t.cfg.tooltip.position[1] = value
+        ReloadAuraTooltip()
     end)
 
     local relativePoint = AF.CreateDropdown(pane, 150)
@@ -3621,18 +4737,21 @@ builder["tooltip"] = function(parent)
     relativePoint:SetItems(AF.GetDropdownItems_AnchorPoint())
     relativePoint:SetOnSelect(function(value)
         pane.t.cfg.tooltip.position[2] = value
+        ReloadAuraTooltip()
     end)
 
     local x = AF.CreateSlider(pane, L["X Offset"], 150, -1000, 1000, 1, nil, true)
     AF.SetPoint(x, "TOPLEFT", anchorPoint, 0, -45)
     x:SetOnValueChanged(function(value)
         pane.t.cfg.tooltip.position[3] = value
+        ReloadAuraTooltip()
     end)
 
     local y = AF.CreateSlider(pane, L["Y Offset"], 150, -1000, 1000, 1, nil, true)
     AF.SetPoint(y, "TOPLEFT", x, 185, 0)
     y:SetOnValueChanged(function(value)
         pane.t.cfg.tooltip.position[4] = value
+        ReloadAuraTooltip()
     end)
 
     local function UpdateWidgets()
@@ -3643,14 +4762,13 @@ builder["tooltip"] = function(parent)
     enabledCheckButton:SetOnCheck(function(checked)
         pane.t.cfg.tooltip.enabled = checked
         UpdateWidgets()
-        if not pane.t.id:find("^general") then
-            LoadIndicatorConfig(pane.t)
-        end
+        ReloadAuraTooltip()
     end)
 
      relativeTo:SetOnSelect(function(value)
         pane.t.cfg.tooltip.anchorTo = value
         UpdateWidgets()
+        ReloadAuraTooltip()
     end)
 
     function pane.Load(t)

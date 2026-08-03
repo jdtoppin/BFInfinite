@@ -42,9 +42,11 @@ end
 -- timer
 ---------------------------------------------------------------------
 local timers = {}
+-- Retail 12.0.7.68887 UnitDocumentation.lua marks UnitGUID secret while
+-- unit identity is restricted. Gate it before truth tests or table keys.
 local function ShowTimer(self)
     local guid = UnitGUID(self.root.unit)
-    if not guid or not F.isValueNonSecret(guid) then return end
+    if not F.isValueNonSecret(guid) or not guid then return end
 
     if not timers[guid] then
         timers[guid] = {status = self.status, start = GetTime()}
@@ -60,7 +62,7 @@ end
 
 local function HideTimer(self)
     local guid = UnitGUID(self.root.unit)
-    if guid and F.isValueNonSecret(guid) then
+    if F.isValueNonSecret(guid) and guid then
         timers[guid] = nil
     end
     self.updater:Hide()
@@ -68,9 +70,6 @@ local function HideTimer(self)
     self.info = nil
 end
 
----------------------------------------------------------------------
--- status
----------------------------------------------------------------------
 local function SetStatus(self, status)
     if self.useEn then
         self.status = status

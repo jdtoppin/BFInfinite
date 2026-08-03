@@ -12,8 +12,11 @@ local HEADER_HEIGHT = 35
 
 local optionsFrame
 local optionButtons = {}
-local buffsDebuffsAvailable = type(BFI.modules.BuffsDebuffs.HasSecureAuraHeaderBackend) == "function"
-    and BFI.modules.BuffsDebuffs.HasSecureAuraHeaderBackend()
+local buffsDebuffsAvailable = type(BFI.modules.BuffsDebuffs.HasAuraBackend) == "function"
+    and BFI.modules.BuffsDebuffs.HasAuraBackend()
+-- Global Colors remains a Retail settings surface; each 12.1 native row
+-- decides whether it is a supported consumer.
+local auraColorsAvailable = AF.isRetail
 
 ---------------------------------------------------------------------
 -- list
@@ -23,7 +26,7 @@ local list = {
     "SEPARATOR",
     "enhancements",
     "colors",
-    "-auras", -- global spell-ID lists are not consumed by the secret-safe aura widgets
+    auraColorsAvailable and "auras" or "-auras",
     -- "social",
     "SEPARATOR",
     "unitFrames",

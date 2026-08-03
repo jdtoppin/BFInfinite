@@ -5,6 +5,7 @@ local BD = BFI.modules.BuffsDebuffs
 
 local hooksecurefunc = hooksecurefunc
 local InCombatLockdown = InCombatLockdown
+local hasRestrictedAuraButtons = _G.C_AuraContainerUtil ~= nil
 
 local suppressedStates = {}
 local suppressedRoots = {}
@@ -12,17 +13,13 @@ local hookedRoots = {}
 
 local function IsAuraContainer(frame)
     return frame
-        and type(frame.IsShown) == "function"
-        and type(frame.Hide) == "function"
         and type(frame.SetShown) == "function"
         and type(frame.GetParent) == "function"
 end
 
 local function IsVisualControl(frame)
     return frame
-        and type(frame.GetAlpha) == "function"
         and type(frame.SetAlpha) == "function"
-        and type(frame.IsMouseEnabled) == "function"
         and type(frame.EnableMouse) == "function"
         and type(frame.GetParent) == "function"
 end
@@ -105,6 +102,13 @@ local function ResolveNativePublicAuraFrame(which)
 end
 
 local function HidePublicAuraOverlays(frame, publicParent)
+    -- Retail 12.1's intrinsic AuraButton type denies tainted access whenever
+    -- aura data is secret. This shared suppression path does not assume which
+    -- child type a native container owns, so it never enumerates 12.1
+    -- children. BlizzardDebuffs.lua separately validates and styles only the
+    -- pinned Blizzard_BuffFrame ordinary Button pool, outside combat.
+    if hasRestrictedAuraButtons then return end
+
     local auraFrames = frame.auraFrames
     if type(auraFrames) ~= "table" then return end
 
@@ -134,6 +138,8 @@ local function HideTargetOverlays(target)
 end
 
 local function InstallOverlayCleanupHook(target)
+    if hasRestrictedAuraButtons then return end
+
     local frame = target.frame
     if hookedRoots[frame] then return end
 
@@ -163,10 +169,10 @@ function BD.SetNativePublicAurasSuppressed(which, suppressed)
 
     if state then
         HideTargetOverlays(state.target)
-        state.target.container:SetShown(state.containerShown)
-        for i, control in ipairs(state.target.controls) do
-            control:SetAlpha(state.controls[i].alpha)
-            control:EnableMouse(state.controls[i].mouseEnabled)
+        state.target.container:SetShown(true)
+        for _, control in ipairs(state.target.controls) do
+            control:SetAlpha(1)
+            control:EnableMouse(true)
         end
 
         suppressedStates[which] = nil
@@ -177,24 +183,17 @@ function BD.SetNativePublicAurasSuppressed(which, suppressed)
     local target = ResolveNativePublicAuraFrame(which)
     if not target then return false end
 
-    -- Retail 12.0.7 and 12.1 keep public aura buttons under these two visual
-    -- containers. Private anchors are direct root children and DeadlyDebuffFrame
-    -- is separate; neither is touched here.
-    state = {
-        target = target,
-        containerShown = target.container:IsShown(),
-        controls = {},
-    }
-    for i, control in ipairs(target.controls) do
-        state.controls[i] = {
-            alpha = control:GetAlpha(),
-            mouseEnabled = control:IsMouseEnabled(),
-        }
-    end
+    -- Retail 12.1.0.68914 (UI source d3915c78aba7) creates the supported public
+    -- AuraContainerTemplate shown, with these ordinary controls at alpha 1 and
+    -- mouse enabled. Keep only a BFI-owned suppression ledger and restore those
+    -- known constants; observing visibility, alpha, or mouse state can return
+    -- secret values. Private anchors are direct root children and
+    -- DeadlyDebuffFrame is separate; neither is touched here.
+    state = {target = target}
 
     InstallOverlayCleanupHook(target)
     HideTargetOverlays(target)
-    target.container:Hide()
+    target.container:SetShown(false)
     for _, control in ipairs(target.controls) do
         control:SetAlpha(0)
         control:EnableMouse(false)

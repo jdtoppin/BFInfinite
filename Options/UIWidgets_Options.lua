@@ -279,7 +279,6 @@ builder["width,height"] = function(parent)
     return pane
 end
 
----------------------------------------------------------------------
 -- mythicPlusDisplay
 ---------------------------------------------------------------------
 builder["mythicPlusDisplay"] = function(parent)

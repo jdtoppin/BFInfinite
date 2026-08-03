@@ -1,0 +1,1041 @@
+# 12.1 aura full-stack live QA
+
+This is the release gate for BFInfinite's aura migration. The primary target
+is Retail 12.1. The current audited pin is `12.1.0.68914`, with Blizzard UI
+source at `d3915c78aba77a7a9be76acbfa35c674bbb6abe9`. Retail 12.1 is scheduled
+for August 11, 2026; repeat this entire gate against the final release build
+and replace both pins before release.
+
+The disposable aggregate branch is
+`codex/unitframe-aura-full-stack-test`. It exists to prove coexistence. Never
+merge PR #91 or use its aggregate commit as a substitute for the separately
+reviewed production PRs.
+
+## Exact inputs and test order
+
+Merging a PR into `master` is not required for in-game testing. Install the
+exact branch head as a complete addon folder. Do not overlay files from one
+branch onto another. Each integration leaf contains its own required
+ancestors, but it does not contain sibling frame integrations; use the
+aggregate only after the isolated leaves pass.
+
+Use this clean isolated-install sequence:
+
+Before the supported pairs, run one deliberate dependency-mismatch preflight:
+install AF #23/r35 at
+`43f79cf2e9e91c47c9142c3546c900baf8fe092f` with the exact checked-out
+head of BFInfinite #91. A dependency warning is acceptable. Every BFI-owned
+unit-frame and nameplate aura row must remain hidden. Begin with a reload in
+an active Challenge Mode dungeon, then enter combat and exercise hostile,
+friendly, cleared, and restored targets; party/raid roster and target changes;
+and hostile nameplate creation, removal, and token reuse. Blizzard-owned
+upper-right Buffs/Debuffs and any fallback unit/nameplate aura surfaces must
+remain available. The error log must contain no `GetUnitAuraInstanceIDs`,
+`UNIT_AURA`, Lua, or taint error. Then delete both addon folders before
+installing the supported AF #25/r37 pair.
+
+1. AF #19 at `d6858f3997a1014a7ab9ce05ddaaf53efe4df9c6` with BFInfinite
+   #90 at `d9c5a23246a01572e1fb75d470a250032f802b33`.
+2. AF #19 at `d6858f3997a1014a7ab9ce05ddaaf53efe4df9c6` with BFInfinite
+   #123 at `dcac8ca227734ee0132c3362ef7208f774e050c6`. Verify the
+   Buff/Debuff control labels are plain, editable spell-list rows show the
+   Edit/Delete mouse hints, and read-only rows do not advertise those actions.
+   The Unit Frame Presets heading and semantic enabled/disabled colours remain
+   unchanged.
+3. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
+   #101 at `fb2c4fa7b1334d825347647dcc5b2943d1ef6308`.
+4. AF #22 at `98db54e6734543265ed3a0eeaea12743e6d4e717` with BFInfinite
+   #102 at `040b556bb7fbbcd6758f3e18a261e46a119824b2`.
+5. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
+   #120 at `f80ac5b2863921fe90aa2796d857b72e82f6605f`.
+6. AF #36 at `f3434d777bfcea2da8e1cc769e43ce06f5b456f6` with BFInfinite
+   #136 at `4c9b5bbc5704159af321438d93b07f167fe723c9`. Run the complete
+   native duration-threshold matrix below.
+7. AF #36 at `f3434d777bfcea2da8e1cc769e43ce06f5b456f6` with BFInfinite
+   #137 at `f72409c8a32f5210ace39b6e1b83eb361fd9485e`. Run the Blizzard
+   healer-spell import matrix below.
+8. AF #36 at `f3434d777bfcea2da8e1cc769e43ce06f5b456f6` with BFInfinite
+   #134 at `762cbf687ae00456757a8747cf9216f12ee38faa`, then #110 at
+   `8068aa4601f372e70200491ac839115ece29ccbc`. At #134, verify other
+   allied players use class-coloured names, friendly NPCs retain reaction
+   colours, and hostile-player custom-white defaults do not change. Reuse a
+   nameplate token across public, restricted, and public identities; require
+   a neutral restricted fallback, no stale class colour, and no Lua or taint
+   error.
+9. AF #36 at `f3434d777bfcea2da8e1cc769e43ce06f5b456f6` with BFInfinite
+   #112 at `c7cda3c76e6264ed8d92a2b453481bd0f58d00d0`.
+10. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
+   #103 at `ab6a3fd8e2d0c18416717a0c59e3c675fc203bac`. Verify the
+   ordinary upper-right Debuffs use BFI's neutral square outline while
+   Blizzard continues to own their data and layout.
+11. Validation-only AF #25 at
+   `4155f9517502f8a19cf4080d30f18119e77d90e5` with BFInfinite #110
+   at `8068aa4601f372e70200491ac839115ece29ccbc`. This is the clean
+   combined check for AF #26's square border and AF #36's required r37
+   runtime. Verify Target Debuffs use a square border while Blizzard's native
+   dispel type still controls its colour and visibility. Target Buffs must
+   remain unchanged.
+12. AF #36 at `f3434d777bfcea2da8e1cc769e43ce06f5b456f6` with BFInfinite
+   #110 at `8068aa4601f372e70200491ac839115ece29ccbc`. On Target Buffs
+   and Debuffs, test every cooldown choice after its required reload and
+   require exactly one graphical timer.
+13. AF #36 at `f3434d777bfcea2da8e1cc769e43ce06f5b456f6` with BFInfinite
+    #112 at `c7cda3c76e6264ed8d92a2b453481bd0f58d00d0`. Repeat every
+    cooldown choice on hostile nameplate Debuffs.
+14. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
+    #121 at `d1a5fe741fc703458b5d0830e620cd6ac6f070b9`, then #103 at
+    `ab6a3fd8e2d0c18416717a0c59e3c675fc203bac`. Verify the
+    fixed-clock upper-right native Buff groups and temporary enchants have a
+    circular swipe only, never a second vertical fill.
+15. Current AF `main` at `4adfb283b03ce3055766c3a985302280687c624c`
+   with BFInfinite #118 at
+   `24c26df850ee0730982a1263e0770d5a5e7296c4`. Test the native tooltip
+   shell on Blizzard's TargetFrame with BFI Unit Frames disabled, then on any
+   upper-right native AuraButtons available to the fixture.
+16. Current AF `main` at `4adfb283b03ce3055766c3a985302280687c624c`
+   with BFInfinite #119 at
+   `d555ad11c49cb8e598340e7d273778d33f285b39`. Reload before testing,
+   then open the Character panel inside an active Challenge Mode both outside
+   and during combat.
+17. Current AF `main` at `4adfb283b03ce3055766c3a985302280687c624c`
+    with BFInfinite #122 at
+    `7334f0ba2b6ec8434d94f79050642a99c8ef37a5`. Give Target Buffs and
+    Debuffs visibly different settings, then switch between them slowly and
+    rapidly outside combat and during ordinary combat. No value from the
+    previous row may render on the selected row.
+18. Current AF `main` at `4adfb283b03ce3055766c3a985302280687c624c`
+    with BFInfinite #124 at
+    `5b01b20408e3044b18e8fc12a574f8c70befa6bf`. Start after a reload
+    without opening Achievements, enter Challenge Mode combat, and open
+    Achievements for the first time. Require no nil edit-box error, protected
+    action, or taint.
+19. Validation-only AF #25 at
+    `4155f9517502f8a19cf4080d30f18119e77d90e5` with BFInfinite
+    #127 at `625144a3aab87c95005de6b1930caf9d765a3e59`. Use the default
+    Horizontal / Left / Down Blizzard Debuff Frame layout. Outside combat,
+    move the restored **BFI Buff Frame** mover and verify custom Buffs and
+    ordinary Debuffs travel together, remain right-edge aligned, and keep the
+    five-pixel gap. Attempting to open BFI Edit Mode in combat must show the
+    combat warning and perform no movement.
+20. Validation-only AF #25 at
+    `4155f9517502f8a19cf4080d30f18119e77d90e5` with the exact
+    checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
+    validation SHA. Record that full branch-head SHA immediately before
+    installation.
+
+Delete and replace both addon folders between pairs. Descendants include their
+ancestors, never sibling integrations; do not merge branches or overlay
+folders to manufacture a test build. PR #91 is validation-only and must never
+be merged. Closed PR #98 is superseded and is not an install input.
+
+For the final stack, use validation-only AbstractFramework PR #25, branch
+`codex/aura-full-stack-test`, exact head
+`4155f9517502f8a19cf4080d30f18119e77d90e5`. It combines AF #23/r35,
+AF #26, AF #27/r36, AF #36/r37, and AF #28's legacy fail-closed boundary with current AF
+`main` at `4adfb283b03ce3055766c3a985302280687c624c`, including #24's Retail
+12.1 max-level fix, AF #29's saved-position shape fix, and AF #30's
+restricted-context mover guard. Never merge AF #25.
+
+The aggregate must contain these exact BFInfinite terminal heads:
+
+| Coverage | Branch | Exact head |
+|---|---|---|
+| Current BFInfinite master compatibility | `master` | `5f771c7fc93e1380823a988615ae509af927d5c5` |
+| Achievement UI 12.1 search topology (#124) | `codex/achievement-ui-12-1-search-path` | `5b01b20408e3044b18e8fc12a574f8c70befa6bf` |
+| Unit Frame pane-switch lifecycle (#122) | `codex/unitframe-aura-settings-switch` | `7334f0ba2b6ec8434d94f79050642a99c8ef37a5` |
+| Aura settings presentation (#123) | `codex/unitframe-aura-plain-option-labels` | `dcac8ca227734ee0132c3362ef7208f774e050c6` |
+| Global exact spell colors (#101) | `codex/unitframe-aura-spell-colors` | `fb2c4fa7b1334d825347647dcc5b2943d1ef6308` |
+| Presentation hardening (#102) | `codex/unitframe-aura-presentation-hardening` | `040b556bb7fbbcd6758f3e18a261e46a119824b2` |
+| Player | `codex/unitframe-aura-player` | `673838dc5dea739617155bf6806d4bb42fcaea97` |
+| Boss | `codex/unitframe-aura-boss` | `9f01f432289b6b2457c5bb9cc6f023582ad85b5c` |
+| Focus | `codex/unitframe-aura-focus` | `03b75af042fd84b93a3e3eaeb09ac68b1ff46440` |
+| TargetTarget | `codex/unitframe-aura-targettarget` | `b463ff16fe91d17a081e248727190c8744fbe3c2` |
+| FocusTarget | `codex/unitframe-aura-focustarget` | `58a60e011cb2dbd2d3b54d62cdb6ffc6b8df2df9` |
+| PetTarget | `codex/unitframe-aura-pettarget` | `02a75fd22f8f04e21e7f139df214697e6350e567` |
+| Pet | `codex/unitframe-aura-pet` | `8e91a8c7616b3000d5e607a2063bf528dd8c4f59` |
+| Unit/nameplate AF r36 gate (#120) | `codex/native-aura-r36-unitframe-gate` | `f80ac5b2863921fe90aa2796d857b72e82f6605f` |
+| Native duration thresholds (#136) | `codex/unitframe-aura-duration-text-colors` | `4c9b5bbc5704159af321438d93b07f167fe723c9` |
+| Blizzard healer-spell import (#137) | `codex/unitframe-aura-import-healer-spells` | `f72409c8a32f5210ace39b6e1b83eb361fd9485e` |
+| Friendly-player name class colours (#134) | `codex/nameplate-player-class-name-colors` | `762cbf687ae00456757a8747cf9216f12ee38faa` |
+| Target partition (#110) | `codex/unitframe-aura-target-final` | `8068aa4601f372e70200491ac839115ece29ccbc` |
+| Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `c7cda3c76e6264ed8d92a2b453481bd0f58d00d0` |
+| Party | `codex/unitframe-aura-party` | `2cfcbca80d0b2b45b9a9abb657907511152ae6b9` |
+| Raid | `codex/unitframe-aura-raid` | `0afa46686c1984b357200d1807929e26b99a8cb9` |
+| Upper-right AF r36 gate (#121) | `codex/native-aura-r36-upper-right-gate` | `d1a5fe741fc703458b5d0830e620cd6ac6f070b9` |
+| Upper-right Debuff appearance (#103; includes #99 and #121) | `codex/buffs-debuffs-native-debuffs` | `ab6a3fd8e2d0c18416717a0c59e3c675fc203bac` |
+| Upper-right shared BFI mover (#127; includes #103) | `codex/upper-aura-debuff-follower` | `625144a3aab87c95005de6b1930caf9d765a3e59` |
+| Tooltip/status safety (#85) | `codex/combat-secret-tooltip-fixes` | `b13a19842e7db7c19a447a97c009a4c968757d18` |
+| Native AuraButton tooltip skin (#118) | `codex/native-aura-tooltip-skin` | `24c26df850ee0730982a1263e0770d5a5e7296c4` |
+| Secret identity (#100) | `codex/unitframe-secret-identity` | `b8e1671ed8a1c11657416357875f9c8277051654` |
+| Unit Frame options preview safety (#114) | `codex/unitframe-options-preview-aura-safety` | `296667d9681c07ab1a7293ea8922561c44e9cb08` |
+| Objective Tracker taint boundary (#115) | `codex/objective-tracker-taint-boundary` | `b829efaffd45939e268cfa6c0c1e167ce17312fe` |
+| Secret pixel geometry (#116) | `codex/style-secret-pixel-geometry` | `3eb6642f82e81c1fb08a725727e80d0d2a1c566e` |
+| Player Spells combat deferral (#117) | `codex/player-spells-combat-style-deferral` | `50b3c30a17a05c8d82279676d248f3bc48da5d2c` |
+| Character unit-stat safety (#119) | `codex/character-frame-unit-stats-safety` | `d555ad11c49cb8e598340e7d273778d33f285b39` |
+
+Test in this order:
+
+1. Test AF #25 alone, including effective max-level compatibility, duration
+   abbreviations, native duration-color curves, and secret identity.
+2. Test #122 independently from current `master`. Give Buffs and Debuffs
+   visibly different values and verify both slow and rapid selection changes
+   bind the chosen pane immediately.
+3. Test the policy, spec, lifecycle/controller, provider/counter, and #90
+   supported-filter PRs in isolation. Test #123 next for plain aura labels and
+   spell-list action hints, then test refreshed #101 spell colours and #102
+   presentation hardening. Test AF #36 with #136 next, followed by #137's
+   Blizzard healer-spell importer.
+4. Test each of the ten unit-frame integration leaves independently.
+5. Test #134 after #137 and before #110. Verify allied-player class colours,
+   non-player reaction colours, hostile-player custom-white defaults, and a
+   public-to-restricted-to-public pooled-nameplate transition. Then test
+   #112's enemy nameplate Debuffs migration independently after #110.
+6. Test the upper-right foundation, controller, Buffs, options, and
+   forbidden-button branches in their PR order.
+7. Test #103's ordinary Debuff appearance controls with AF r33, including the
+   neutral square outline and exact restoration of Blizzard's rounded border
+   when styling is disabled.
+8. Test AF #30's mover guard independently in Challenge Mode, then test #127
+   with AF #25 after #103. Confirm the restored BFI Buff Frame mover owns one
+   fixed seam, custom Buffs grow left/up, and ordinary `DebuffFrame` follows
+   directly beneath it. Test combat refusal, Blizzard Edit Mode release and
+   reattachment, native fallback, private-aura anchors, and
+   `DeadlyDebuffFrame` independently.
+9. Test AF #26's focused regression, then test its square border in the
+   AF #25/BFI #110 combined pair because #110 now correctly requires AF r36.
+   Repeat the square, native-dispel-colour check across every harmful
+   unit-frame row on the final aggregate.
+10. Test AF #36 with #136/#137/#134/#110 and #112 as two clean paths. Use
+   AF #27 with #121/#103 for the independent upper-right path. Run the
+   single-graphical-timer and duration-threshold matrices below on unit-frame
+   groups and the graphical-timer matrix on nameplate and upper-right groups,
+   then repeat them on the final aggregate.
+11. Test #85 and then #118 independently. For #118 alone, disable BFI Unit
+   Frames and exercise Blizzard's native TargetFrame AuraButtons; the final
+   aggregate carries both PRs for their combined restricted-context gate.
+12. Test #114, #115, #116, and #117 independently against their documented
+   reproducers below.
+13. Test #119 independently after a reload. In restricted content, require
+    the custom Movement Speed row to be absent while Blizzard's supported
+    tertiary Speed row and BFI's presentation styling remain.
+14. Test #124 independently. The first Achievement UI load must occur during
+    Challenge Mode combat; then exercise search, filter visibility, and
+    comparison-mode layout as described below.
+15. Install AF #25 and the disposable BFI aggregate as clean, complete folders.
+16. Run the 12.1 gates below in order.
+
+Record the full local SHA for every installed folder. A short SHA in this
+document is a review aid, not permission to test a different head.
+
+## Exact spell-color contract
+
+Global aura colors are an explicit saved map from numeric spell ID to exact
+RGBA. BFInfinite gives that static map to Blizzard before constructing the
+native row.
+
+- BFInfinite never reads the spell ID, duration, source, secrecy, or other
+  state of an active aura.
+- There is no name, rank, family, healer, dispel, class, or visual inference.
+- IDs with byte-for-byte identical RGBA values share one color family.
+- Every listed ID in one family receives that exact RGBA.
+- Unlisted IDs use the baseline gray group.
+- Whitelist and blacklist candidate maps remain explicit and disjoint from
+  color-family maps.
+- Color families are compiled as compact, disjoint native groups plus one
+  gray complement. They are not implemented with `AuraSlots`.
+- Color applies only to supported Block cooldown styles. Blizzard's opaque
+  duration continues to drive the swipe and duration text.
+- If the reaction required for exact ID matching is false, indeterminate, or
+  secret, the entire presentation fails closed. BFInfinite does not substitute
+  a relation, inspect a native child, or refresh the curtained row.
+
+Changing membership inside an existing exact-RGBA family is live tuning.
+Adding, removing, or changing an RGBA family changes native construction and
+requires reload after the row has been built.
+
+Before runtime color checks, open **Auras → Global Colors** and verify:
+
+- the introduction is the short four-sentence explanation;
+- Search, `+`, and Reset share one toolbar above the bordered list;
+- the list uses three columns and never consumes a cell for `+`;
+- long spell names end in an ellipsis, while hovering the row shows the full
+  spell tooltip; and
+- clicking `+` opens a usable spell-ID field across the Search area.
+
+### Color expansion budget and counters
+
+The ceiling of eight applies only to the requested color-expanded active
+presentation. A baseline gray policy may already exceed eight after an
+any-scope category is duplicated across hostile main and complement variants.
+That baseline is never truncated, reordered, or partially colored.
+
+For an ordinary row with `P` baseline policy groups and `K` exact-RGBA color
+families:
+
+```text
+G = P * (K + 1)
+initial reservations = 10 * G
+fresh ceiling = G * ceil(numTotal / 10) * 10
+```
+
+Color expansion is accepted only when `G <= 8`. Otherwise the whole row keeps
+its exact baseline gray policy.
+
+For Target's mutually exclusive relation partition:
+
+```text
+Gf = Pf * (K + 1)
+Gm = Pm * (K + 1)
+Gc = Pc * (K + 1)
+maximum active groups = max(Gf, Gm + Gc)
+prebuilt groups = Gf + Gm + Gc
+initial reservations = 10 * prebuilt groups
+fresh ceiling = sum(Gv * ceil(numTotal / 10) * 10) for each prebuilt variant
+```
+
+Budget color expansion against `maximum active groups`, not the sum of hidden
+prebuilt variants. If it exceeds eight, all variants retain their full
+baseline gray groups. Never drop a category and never color only part of a
+row.
+
+Example: `Pf=2`, `Pm=1`, `Pc=1`, `K=2`, and `numTotal=4` produces six active
+groups in either relation, twelve prebuilt groups, 120 initial reservations,
+and a fresh ceiling of 120. Only one relation presentation may be visible.
+
+Target regression fixtures for #102 are mandatory:
+
+- a single `player` category with `K=7` must report eight maximum active
+  groups, sixteen prebuilt groups, and 160 initial reservations;
+- repeat with a single `notPlayer` category and require the same
+  `8 / 16 / 160` result; and
+- `all` with `K=7` must reject color expansion and keep the gray partition at
+  two maximum active groups, three prebuilt groups, and 30 initial
+  reservations.
+
+Raid example: `P=1`, `K=3`, and `numTotal=8` gives `G=4`, 40 initial
+reservations per indicator, and a fresh ceiling of 40. Forty Raid frames with
+two rows each therefore prebuild 320 groups and 3,200 initial reservations.
+
+## Clean setup and evidence
+
+For every 12.1 run:
+
+1. Back up `WTF` and `Interface/AddOns`.
+2. Delete the installed AbstractFramework and BFInfinite folders, then copy
+   clean folders at the recorded heads.
+3. Disable all other addons except an error collector. Disable Cell while
+   testing BFI Raid ownership.
+4. Create one clean profile and one copy of a pre-migration profile.
+5. Clear `Logs/taint.log`, then run:
+
+   ```text
+   /console scriptErrors 1
+   /console taintLog 2
+   /reload
+   ```
+
+6. Record `/dump GetBuildInfo()`, locale, character/class/spec, profile, exact
+   addon SHAs, AF/BFI versions, and other enabled addons.
+7. Capture a short video for combat, hover, reaction, roster, provider, and
+   visibility transitions. Capture before/after counters and the final taint
+   log.
+
+Do not dump a unit API, aura value, native child, or private-aura identity
+while it may be secret.
+
+## 12.1 live gates
+
+### Restricted-context regression preflight
+
+Run these seven checks on the clean aggregate before the longer aura gates.
+Clear and inspect the taint log after each check so one failure cannot
+contaminate later evidence.
+
+#### Unit Frame options during challenge combat
+
+1. Reload inside an active Mythic+ run without opening Unit Frame options.
+2. Enter combat, then open **BFInfinite → Unit Frames** for the first time.
+3. Switch repeatedly among General, Unit, Target, and Group; close and reopen
+   the panel while combat continues.
+4. Open Target, give Buffs and Debuffs visibly different values, then alternate
+   between their sidebar rows at least 20 times, including rapid clicks. Every
+   visible field must belong to the selected row immediately; the previous
+   row's values must never flash for one frame.
+5. Confirm there is no `GetUnitAuraInstanceIDs` error,
+   `BFI_ShowOptionsPanel` failure, nil `frameOptionsPane`, or nil callback.
+6. Confirm preset cards look unchanged. Their already-hidden Buff and Debuff
+   rows are intentionally not constructed, while live unit-frame aura rows
+   continue to render.
+
+#### Objective Tracker restricted-aura path
+
+1. Enable the Objective Tracker and set its position and height through
+   Blizzard Edit Mode.
+2. Reload in an active challenge run or scenario, enter combat, and force
+   several objective/scenario updates.
+3. Change only BFI's Objective Tracker font setting while the restricted
+   context remains active.
+4. Confirm there is no Maw Buffs `GetAuraDataByIndex` error or new taint.
+5. Confirm Blizzard still owns tracker position, height, managed-frame
+   membership, and layout. BFI visual and font styling remains, with no
+   duplicate tracker or BFI mover.
+
+#### Challenge reload with secret geometry
+
+1. Reload inside an active challenge dungeon while out of combat, then repeat
+   during combat.
+2. Open and close several BFI-styled Blizzard windows and, when permitted,
+   change and restore UI scale to trigger another pixel refresh.
+3. Confirm there is no Backdrop arithmetic error involving a secret width,
+   height, or scale and no corresponding taint entry.
+4. Leave the challenge context, trigger another pixel refresh, and confirm
+   ordinary public-geometry borders still update and remain aligned.
+
+#### BFI movers with unavailable Challenge geometry
+
+1. Install AF #30 at
+   `fa0a7b7e4be152da8f962bd74bc5b18238020976`, or the exact AF #25
+   aggregate head that contains it.
+2. Reload in an active Challenge Mode dungeon while out of combat and open
+   BFI mover mode. Repeat during combat; the movers must remain closed and a
+   localized combat warning must be printed.
+3. Require no `RoundToDecimal` nil arithmetic, secret-value arithmetic or
+   comparison, Lua error, blocked action, or new taint.
+4. When a mover's point, dimensions, edges, center, or scale are unavailable,
+   its mover or position editor must fail closed without changing frame points
+   or SavedVariables. Ordinary movers whose required values remain public must
+   continue to work.
+5. Open movers out of combat, begin dragging, and enter combat. The mover UI
+   must close immediately, stop its update script, avoid saving or restoring
+   protected owner points, and remain closed after combat until reopened.
+6. Leave the restricted context and verify ordinary movers can still be
+   shown, moved, saved, and undone.
+
+#### First Spellbook load during ordinary combat
+
+1. Start from a fresh reload without opening the Spellbook.
+2. Enter ordinary combat on a training dummy and open the Spellbook for the
+   first time.
+3. Confirm there is no `ADDON_ACTION_BLOCKED` for `Frame:ClearAllPoints()` or
+   `Frame:SetPoint()`.
+4. The assisted-combat rotation block may temporarily retain Blizzard's
+   appearance and position; the rest of the Spellbook styling should load.
+5. Leave combat and confirm that block receives BFI styling and positioning
+   automatically.
+6. Open and close the Spellbook again in and out of combat and confirm no
+   further blocked action or duplicate deferred update.
+
+#### First Achievement UI load during challenge combat
+
+1. Start from a fresh reload without opening Achievements.
+2. Enter Challenge Mode combat and open Achievements for the first time so
+   `Blizzard_AchievementUI` loads through its Bootstrap path.
+3. Require no `StyleEditBox: box is nil`, other Lua error, protected action,
+   or new taint.
+4. Exercise search text, category changes, filter visibility, and repeated
+   close/reopen while the restricted context remains active. Blizzard must
+   continue to own the search and filter layout.
+5. Leave combat, then enter and leave achievement comparison mode. The search
+   box, filter dropdown, comparison header, and search preview must remain
+   aligned without a stale anchor or duplicate style hook.
+6. Repeat the first-load check outside combat and flush the taint log.
+
+#### Native AuraButton tooltip shell and hover
+
+1. After a clean login, target fixtures with visible helpful and harmful
+   auras. Hover both BFI Target rows and compare their tooltip shell with an
+   ordinary BFI-skinned `GameTooltip`.
+2. Require the same flat background, black one-pixel border, and one-pixel
+   inset. Blizzard must still own the native tooltip text, aura content,
+   anchor, visibility, and lifetime.
+3. Repeat on upper-right native Buffs and on any private or boss AuraButton
+   that Blizzard exposes. The shared shell may match BFI, but the private or
+   boss button, anchor, contents, and update path must remain unchanged.
+4. Park the pointer, then enter and leave combat, swap and clear targets, and
+   reload in an active Challenge Mode both outside and during combat. Require
+   no forbidden access, Lua error, taint, tooltip-driven visibility recovery,
+   or delayed aura transition that depends on moving the pointer.
+5. Confirm nameplate aura tooltips remain disabled where their row contract
+   disables them. Disable BFI and reload once during the isolated #118 run to
+   confirm Blizzard's default native tooltip shell returns.
+
+#### Character panel with restricted unit stats
+
+1. Reload inside an active Challenge Mode while out of combat. This reload is
+   mandatory because an older BFI build may already have mutated Blizzard's
+   stat-category table for the current session.
+2. Open, close, and reopen the Character panel. Change gear, specialization,
+   and target, then begin moving to force stat and speed updates.
+3. Confirm BFI's former extra **Movement Speed** row is absent. Blizzard's
+   separate tertiary **Speed** stat, the supported stat list, row backgrounds,
+   and BFI fonts must remain intact.
+4. Repeat while in combat, then leave combat and repeat once more without
+   reloading.
+5. Require no `MovementSpeed_OnUpdate` secret arithmetic, Versatility
+   arithmetic, `Background:IsShown()` secret-boolean test, Lua error, blocked
+   action, or new taint.
+6. Leave the Challenge Mode restriction and reopen the panel. The retired
+   Movement Speed row must not return; ordinary Blizzard stats must continue
+   to update and retain BFI's presentation styling.
+
+### 0. Current-master compatibility preflight
+
+- Enable BFInfinite's Objective Tracker, then cover login, reload, and Edit
+  Mode. Confirm Blizzard Edit Mode remains the sole owner of its position,
+  height, managed-frame membership, and layout. BFI retains visual and font
+  styling only; no BFI tracker mover or height control should remain.
+- Exercise the Experience Bar while ordinary XP is available, while XP is
+  disabled, and at effective max level. Confirm there is no
+  `AF.IsMaxLevel` callback error, no screen-wide Stripe texture, and the
+  disabled overlay remains bounded to the inner bar and hidden when it should
+  not be shown.
+- Stop the aura certification if either baseline regression produces a Lua
+  error or contaminates the taint log; those failures can mask later aura
+  evidence.
+
+### 1. Backend, load, and ownership
+
+- Login and reload with every unit-frame Buffs and Debuffs indicator enabled.
+- Confirm the `BFI_UpdateModule` callback produces no interface-version
+  `tonumber` error when upper-right Buffs & Debuffs initializes.
+- Confirm Player, Pet, Party, Raid, Target, Boss, Focus, TargetTarget,
+  FocusTarget, and PetTarget use native containers.
+- Confirm hostile NPC/player nameplate Debuffs use a native container and
+  unsupported friendly Debuffs remain absent.
+- Confirm no unit-frame row silently falls back to the legacy backend.
+- Confirm no nameplate row calls the legacy aura iterator or suppresses
+  Blizzard nameplates when the complete native backend is unavailable.
+- Confirm Party and Raid reuse their secure-header seeded containers.
+- Confirm BFI never creates a `SecureAuraHeaderTemplate` on 12.1.
+- Enter and leave BFI Config Mode and Blizzard Edit Mode repeatedly. There
+  must be no duplicate row, stale preview identity, or controller growth.
+
+### 2. Settings, profiles, migration, and text
+
+Mutate every supported setting for both Buffs and Debuffs:
+
+- enabled, placement/anchor, orientation, size, spacing, per-line and total
+  limits, frame level, cooldown style, tooltip, duration text, stack text,
+  supported categories, explicit whitelist/blacklist IDs, and global colors;
+- Copy, Paste, Reset, profile switch, import, export, and reload;
+- same-value changes, multiple changes before commit, changes in combat, and
+  changes while hovered.
+
+Before the broad mutation pass, configure one Target Buff value and the
+matching Target Debuff value differently for size, cooldown style, Stack Text,
+and Duration Text. Alternate between Buffs and Debuffs slowly, then rapidly.
+Repeat outside combat, during training-dummy combat, and during Challenge Mode
+combat. The selected pane must show its own values before it is rendered; no
+stale check, slider, dropdown, text, or tooltip state may flash from the other
+row, and an older deferred refresh must not change the current selection.
+
+Inspect the aura controls in every available locale. **Stack Text**,
+**Duration Text**, **Border Color**, **Aura Arrangement**, and the Target
+Debuff partition label must use ordinary plain text without a per-character
+gradient. The Unit Frame Presets page heading, cast-bar labels, Party/Raid/Boss
+layout labels, and semantic enabled/disabled colours must remain unchanged.
+
+Exercise Global Colors as a complete CRUD surface: add, inspect, search,
+change, and delete exact IDs; cancel without mutation; confirm exactly one
+mutation; reset and restore defaults; import/export valid maps; and reject or
+normalize malformed IDs, RGBA values, and imported structures according to
+the documented policy. Repeat search, empty-state, validation, confirm/cancel,
+reset, and import in every available locale. Long rows and explanations must
+wrap without clipping. Confirm the old #98 per-indicator Block Fill Color
+picker is absent; color ownership lives only in Global Colors.
+
+Verify that live-tunable values update without allocation and that
+construction-owned values produce one reload-required state. Reverting to the
+exact applied construction clears the prompt. The newest saved mutation wins.
+
+#### Single graphical cooldown display
+
+Cooldown style is construction-owned on native rows. After selecting each
+style below, reload before judging the result. Keep Duration Text enabled for
+one pass and disabled for another; numeric text is independent and is not a
+second graphical timer.
+
+- **None:** no circular swipe and no vertical fill.
+- **Vertical** and **Block Vertical:** one vertical fill and no circular
+  swipe, including behind the block colour.
+- **Clock**, **Clock (With Leading Edge)**, **Block Clock**, and **Block Clock
+  (With Leading Edge):** one circular swipe and no vertical fill.
+
+Run the complete selector matrix on visible Target Buffs and Debuffs, then on
+hostile nameplate Debuffs. Repeat representative helpful and harmful rows on
+Player, Pet, Party, Raid, Boss, Focus, TargetTarget, FocusTarget, and PetTarget.
+For upper-right native Buffs, which intentionally use a fixed Clock style,
+verify ordinary Buff groups and both temporary-weapon-enchantment positions
+show only the circular swipe. Upper-right ordinary Debuffs remain on
+Blizzard's legacy duration presentation and are outside this selector matrix.
+
+Inspect the full duration: immediately after application, below one minute,
+across the minute boundary, and near expiration. No native update may reveal
+an AF-created second carrier that was hidden only at initialization.
+
+Check every locale available to the tester. Long explanations must wrap and
+remain readable; no help text may be clipped, including the native-category
+and spell-ID restrictions. Duration text must abbreviate seconds, minutes,
+hours, and days correctly, with permanent auras blank.
+
+#### Native low-time duration colour
+
+These controls change duration-text colour; they do not include or exclude an
+aura. Mode, threshold, and colour are native-button construction settings, so
+reload when BFI requests it before judging the result.
+
+1. On a visible Target Buff or Debuff row, enable Duration Text, choose a
+   conspicuous normal colour, and choose a different conspicuous low-time
+   colour.
+2. Select **Off**. Test both a short timed aura and a much longer timed aura.
+   Both must retain the normal colour for their complete duration.
+3. Select **Seconds** with a five-second threshold. Both fixtures must change
+   at the same remaining time, regardless of their original duration.
+4. Select **Percent** with a 50% threshold. Each fixture must change halfway
+   through its own duration, so the absolute remaining seconds differ.
+5. Record just above, exactly at, and just below each threshold. The threshold
+   colour applies below the configured value; the normal colour owns the exact
+   threshold. Record the build and video evidence if the client disagrees,
+   because Blizzard documents Step curves without defining boundary ownership.
+6. Import or edit a profile with both legacy Seconds and Percent flags enabled.
+   Opening the pane must normalize visibly to Seconds, matching the historical
+   seconds-first rule. The two rules must never appear active together.
+7. Change mode, value, normal colour, and low-time colour outside combat and
+   during Challenge Mode combat. The newest saved construction must apply at
+   the legal reload boundary, with no Lua duration read, `OnUpdate` poll,
+   forbidden-button access, or taint.
+8. Repeat representative crossings in Mythic+, raid, arena, and battleground
+   aura-secret contexts. Permanent auras remain blank and must not manufacture
+   a threshold transition.
+
+### 3. Filters, overlap, and exact colors
+
+- Temporarily enable Blizzard's nonpersistent tooltip spell-ID display. Run
+  the first command before choosing fixtures and the second after the gate:
+
+  ```text
+  /run BFIQAOldSpellIDs=GetCVar("tooltipShowAuraSpellIDs");SetCVar("tooltipShowAuraSpellIDs",1)
+  /run SetCVar("tooltipShowAuraSpellIDs",BFIQAOldSpellIDs);BFIQAOldSpellIDs=nil
+  ```
+
+  From visible tooltips, record fixtures outside addon code: A1 and A2 use
+  exactly the same green `{0, 1, 0, 1}`, A3 uses pink
+  `{1, 0.25, 0.6, 1}`, a related but unentered spell remains gray, and
+  unrelated U1 remains gray. Add optional hostile D1 when a permitted harmful
+  fixture is available. Never add addon logging or aura inspection to discover
+  or verify an identity.
+
+#### Blizzard healer-spell import
+
+1. Enter a healing specialization, wait for Cooldown Viewer data to load, and
+   open a native helpful Buffs row in **Show Only Listed Spells** mode. Confirm
+   **Import Healer Spells** is enabled beside `+`.
+2. In Blizzard's Cooldown Viewer Group Buffs page, use normal spell tooltips to
+   record the current specialization's shown/default entries and its hidden
+   entries. Include a desaturated unknown-talent entry when one is available.
+3. Seed BFI's whitelist with a custom spell, an existing Blizzard entry, and a
+   deliberate duplicate. Click **Import Healer Spells** once. The original
+   table order and duplicate must remain; missing shown/default Blizzard IDs
+   append in Blizzard order; hidden-by-default IDs must not be added. An
+   unknown-talent entry is eligible and must not be discarded merely because
+   the player has not learned it.
+4. Click Import again. The whitelist, row allocation, reload state, and profile
+   must not change. BFI must not call the legacy spell-existence lookup to
+   decide whether an aura-only ID is valid.
+5. Change Blizzard's Group Buff layout after importing. The saved BFI list must
+   not change automatically; Import is a user-requested snapshot, not a live
+   synchronization. Switch to another healing specialization and click Import
+   to append that specialization's missing defaults.
+6. Repeat in a damage/tank specialization, blacklist mode, a Debuffs row, and
+   any non-native/read-only row. The importer must be hidden there. If the
+   Blizzard catalog is unavailable or empty while an otherwise eligible pane
+   is open, the discoverable button remains disabled and clicking it changes
+   nothing.
+
+- Test each supported native category alone and in overlapping combinations.
+- Confirm OR-unions are compiled as disjoint groups and do not duplicate an
+  aura.
+- Test whitelist and blacklist overlap, unknown IDs, empty lists, duplicate
+  IDs, and profile-imported IDs.
+- Test two explicit IDs with the same RGBA, two families with different RGBA,
+  and an unlisted gray spell.
+- Change IDs inside one family and confirm live tuning. Add a new family and
+  confirm the reload boundary.
+- Add and remove families repeatedly. Native groups must remain compact and
+  contiguous, with no `AuraSlots` or blank-slot gaps. Confirm each group's cap
+  and sort are independent; combined row capacity and cross-family ordering
+  must not be mistaken for one global cap or sort.
+- Test exactly eight color-expanded active groups and an over-budget case.
+  The latter must preserve the complete baseline gray policy with no reaction
+  gate added by the unused colors.
+- Test a baseline partition whose any-scope split already exceeds eight, both
+  without colors and with requested colors. The no-color baseline must remain
+  exact, and the colored request must fall back to that same baseline.
+- Do not choose a healing spell because it is assumed public. The pass
+  condition depends only on Blizzard accepting the explicit ID map.
+
+### 4. Reaction, stationary pointer, visibility, and identity
+
+First reproduce the exact Target partition boundary:
+
+1. Enable Target Debuffs and **Separate Auras Not from Player, Pet, or
+   Vehicle**, then reload. This creates the hostile-complement holder named
+   `BFI_Target_Debuffs_HostileComplement`.
+2. In combat or another aura-secret context, target a hostile unit with a
+   harmful aura from another player. Park the pointer over a visible
+   complement aura and do not move it for the rest of this sequence.
+3. Clear the target or select a friendly, cross-faction, duel, phased,
+   offline, secret, or indeterminate unit, then retarget the hostile unit.
+4. Repeat hostile-to-friendly, friendly-to-hostile, and no-target transitions.
+   Also disable and re-enable the row, then repeat without relation
+   partitioning.
+
+The pointer is never a transition signal. Outside combat, the newest permitted
+presentation must apply immediately even while the pointer remains stationary.
+In combat, any physical visibility, initialization, retirement, or structural
+swap that is not already applied remains at alpha zero until
+`PLAYER_REGEN_ENABLED`; moving the pointer must not release it. A request that
+reverses to the already-applied relation or shown state may remove the curtain
+immediately using only BFInfinite's write ledgers.
+
+At no point may the stale row, both relation variants, or a partial new row be
+visible. Repeat the same stationary-pointer sequence on a non-partitioned row
+and on Party/Raid secure-header seeded containers, including roster retarget,
+disable, destroy, and reload quiesce. `GameTooltip` or Blizzard's native
+AuraButton tooltip may remain visible; BFInfinite must neither inspect nor
+dismiss either one. Its only native-tooltip operation is the one-time global
+static shell configuration through Blizzard's inbound styling API.
+
+The implementation must not call `IsShown`, `IsVisible`, `IsMouseOver`, or
+`GetAlpha` on holders or native aura objects; probe protected writes with
+`pcall`; call `Show`, `Hide`, or `SetShown` in combat; toggle an already-built
+native container merely because a pooled nameplate is temporarily hidden;
+schedule a hover retry; inspect children, buttons, aura data, or tooltip
+ownership; or make pointer movement necessary for recovery. The one nameplate
+first-build exception may submit the complete container's final enabled state
+after all groups, layout, unit, and refresh work, using the supported inbound
+12.1 method while the holder remains alpha-curtained.
+
+### 5. Unit and roster churn
+
+Before starting churn, place a visible harmful aura on each supported frame
+type and inspect every cooldown style. Debuff borders must use the complete
+square asset with no rounded atlas corners or cropped edge. Blizzard's native
+dispel classification must still control the border colour and visibility;
+helpful Buff rows must remain visually unchanged. Repeat this check on Player,
+Pet, Party, Raid, Target, Boss, Focus, TargetTarget, FocusTarget, and PetTarget.
+
+Exercise:
+
+- target/focus changes and rapid target swaps;
+- pet summon/dismiss, vehicle transitions, PetTarget and owner changes;
+- Party and Raid join/leave, role changes, subgroup changes, disconnects,
+  cross-faction members, phased units, and roster conversion;
+- TargetTarget and FocusTarget changes during combat;
+- repeated enable/disable and profile changes during the same churn.
+
+No secret identity may be cached or compared. A temporarily unavailable unit
+must wait, remain curtained, and recover to the newest clean token without
+retargeting a native container to a preview identity.
+
+### 6. Enemy nameplate Debuffs
+
+Test #112 first as the clean AF #27/BFI #112 pair, then repeat this entire
+section on the aggregate. This leaf owns only enemy NPC/player Debuffs.
+Friendly dispellable Debuffs, nameplate Buffs, and nameplate Crowd Controls
+are expected to remain absent.
+
+1. Enable **Nameplates → Auras → Debuffs** and verify the notice says the row
+   is enemy-only and that Global Colors do not affect it. Confirm the shared
+   toggle changes hostile NPC/player profiles only.
+2. Apply several player-cast harmful auras to hostile NPC and player fixtures.
+   Confirm the compact native row uses the configured size, spacing,
+   orientation, capacity, placement, cooldown style, duration text, stack
+   text, frame level, and supported Debuff border treatment. Do not infer an
+   exact active-aura count from the fixed maximum footprint.
+3. Add conspicuous Global Colors entries for the same spell IDs. The nameplate
+   row must remain on its ordinary appearance; it must not create color
+   families, fixed slots, blank gaps, or a gray-complement partition.
+4. Enter combat before a previously unseen hostile plate is created. The
+   complete row may be created in combat, but it must remain alpha-curtained
+   until its group, layout, unit, refresh, and final enabled state are all
+   submitted. Require no native `Show`, `Hide`, or `SetShown` call and no
+   regen queue for that complete first build.
+5. Force repeated pool reuse: hostile-to-hostile token changes, then
+   hostile-to-friendly-to-hostile before regen. The friendly assignment must
+   show no BFI Debuffs row. The returning hostile assignment must reuse and
+   retarget the completed native carrier without a second build or an
+   enable/disable cycle.
+6. Repeat with duel, cross-faction, phased, and `UNIT_FACTION` reaction
+   changes. A combat reaction change must curtain the row immediately; the
+   protected plate rebuild completes after `PLAYER_REGEN_ENABLED`.
+7. Park the pointer over the aura area and do not move it while plates appear,
+   disappear, phase, recycle, and change reaction. No tooltip, pointer-leave,
+   visibility read, or hover retry may control recovery. Native nameplate aura
+   tooltips are expected to remain disabled.
+8. Change every supported nameplate Debuffs setting outside combat, then in
+   combat, while the pooled row is hostile, friendly/hidden, and removed.
+   Same-topology tuning must apply at the legal boundary. Construction-owned
+   changes must raise the reload-required notice. The next hostile assignment
+   must use the newest prepared snapshot; an untouched cached row must not be
+   constructed merely because settings changed.
+9. Disable Debuffs and confirm the native carrier is disabled rather than
+   only made transparent. Re-enable it out of combat, reload, and repeat the
+   combat pool sequence.
+10. Repeat the section in an ordinary dungeon, Mythic+, raid, arena/BG, and
+    Edit Mode/test-provider transitions. Confirm unsupported friendly Buffs,
+    Debuffs, and Crowd Controls do not appear opportunistically in any mode.
+
+Record UnitFrames runtime/construction counters before and after first build,
+50 hostile plate churn cycles, settings changes, and provider transitions.
+One completed controller/container per cached nameplate root is expected;
+same-combat retargets and no-op/tuning changes must not add builds, groups,
+buttons, stranded shells, or reservations.
+
+### 7. Restricted content
+
+Repeat representative gates in:
+
+- an ordinary dungeon and Mythic+ pull;
+- a raid encounter;
+- battleground or arena/PvP restrictions;
+- a duel and cross-faction group;
+- combat lockdown while hovered.
+
+Use real boss, important, dispellable, private, and deadly auras where
+available. Unit-frame native groups may render only the private content
+Blizzard authorizes through its inseparable source. BFInfinite must never log
+or expose private identity, spell, duration, count, or source.
+
+### 8. Blizzard Edit Mode provider
+
+- Enter Edit Mode before first construction and after rows are already built.
+- Cover all ten frame types, with special evidence for Boss, Party, Raid, and
+  Target partition.
+- Verify provider entry/exit does not construct a duplicate container,
+  retarget to a test identity, apply reaction gates to Blizzard test data, or
+  mutate settings.
+- On one already-built live-to-test-to-live cycle, require exactly two added
+  provider-switch events, one test-provider activation, one live-provider
+  restoration, and no container, group, or button allocation.
+- Exit Edit Mode and confirm the newest live unit, relation, and roster appear.
+- Cover private and boss-aura fixtures supplied by Blizzard without reading
+  their protected data.
+- BFI Config Mode is not a spell-identity provider: its preview remains gray
+  and must not consume or infer a Global Colors entry.
+
+### 9. Upper-right Buffs and Debuffs
+
+- On 12.1, BFInfinite may own only the supported helpful Buffs native
+  container when its complete backend and settings allow it.
+- Blizzard continues to own all harmful-aura data, filtering, ordering,
+  layout, updates, tooltips, and visibility. BFInfinite only applies static
+  appearance settings to the fixed pool of 16 ordinary Blizzard Debuff
+  buttons.
+- BFInfinite's plain one-row holder is the shared location seam. Custom Buffs
+  anchor at its bottom-right and grow left/up. Outside combat,
+  `DebuffFrame.TOPRIGHT` anchors to the holder's `BOTTOMRIGHT` at `(0, -5)`,
+  so ordinary Debuffs sit immediately below and share the same right edge.
+  Dragging the holder needs no per-drag native-frame call: the relative anchor
+  carries `DebuffFrame` with it.
+- The restored **BFI Buff Frame** mover saves the shared position. Its saver
+  must canonicalize a legacy `{ point, relativePoint, x, y }` value to
+  `{ point, x, y }` and clear index 4. Both Buff and Debuff settings panes
+  offer **Open BFI Edit Mode** while the shared controller is active.
+- BFI may attach or restore `DebuffFrame` only outside combat, after
+  `CanBeAccessedInContext()` and every captured anchor/scale value validate as
+  ordinary. The path may use the pinned source-visible `SetPointBase`,
+  `ClearAllPointsBase`, and `systemInfo.anchorInfo` implementation details,
+  but it must never read native geometry, visibility, hover, button state,
+  aura state, or call a Blizzard aura/Edit Mode update method.
+- On `EditMode.Enter`, BFI restores Blizzard's saved Debuff anchor. On the
+  next tick after `EditMode.Exit`, layout changes, specialization changes, or
+  world entry, BFI reattaches the follower. Work requested during combat must
+  remain pending until `PLAYER_REGEN_ENABLED`. Disabling custom Buffs or any
+  follower/suppression failure must restore Blizzard Buffs and the saved
+  Debuff anchor rather than leave either row missing.
+- Private-aura anchors remain Blizzard-owned children of `DebuffFrame`; they
+  naturally travel with its root but are never inspected or styled by BFI.
+  `DeadlyDebuffFrame` is a separate top-level Blizzard warning that selects one
+  critical harmful aura for a prominent center-screen icon/text alert and may
+  play its configured sound. It is not the ordinary upper-right Debuff row and
+  must remain untouched and independently positioned.
+- If Blizzard routes a private or deadly tooltip through the shared native
+  AuraButton tooltip, only its global outer shell may use BFI's static
+  background and border; the anchor, contents, visibility, and lifetime remain
+  Blizzard-owned.
+- Use Blizzard's default **Horizontal / Left / Down** Debuff Frame layout for
+  the compact supported stack. BFInfinite Buffs should appear directly above
+  ordinary Debuffs with the same right edge. Vertical layouts or upward
+  Debuff wrapping can stop looking like a compact row; BFInfinite must not
+  rewrite Blizzard Edit Mode settings to compensate.
+- Open **BFInfinite → Buffs & Debuffs → Buffs**. Confirm Arrangement displays
+  the fixed right-to-left, then upward flow and cannot be changed. Confirm the
+  panel says both rows move with the BFI Buff Frame mover and offers
+  **Open BFI Edit Mode**.
+- With the custom Buff controller active, open the Debuffs pane and confirm it
+  offers the same BFI mover and explains that private auras and critical
+  warnings remain Blizzard-managed.
+- Outside combat, use **Open BFI Edit Mode** and move **BFI Buff Frame** through
+  several screen positions. Visible custom Buffs and ordinary Debuffs must move
+  together live, remain directly stacked and right-aligned, and save the new
+  position after closing mover mode and reloading.
+- While movers are open, begin a drag and enter combat. The overlay must close
+  immediately without saving, restoring, or further mutating protected owner
+  points. It must not reopen automatically after combat.
+- Attempt **Open BFI Edit Mode** during combat. The options panel must remain
+  usable, a localized combat warning must be printed, movers must stay closed,
+  and no protected action or SavedVariables change may occur.
+- Enter Blizzard Edit Mode outside combat. While it is active, confirm
+  `DebuffFrame` uses Blizzard's saved anchor. Move/save/revert the Blizzard
+  Debuff layout, then exit. On the next tick, ordinary Debuffs must reattach
+  beneath the unchanged BFI mover position. Repeat through specialization and
+  layout changes.
+- Reload in a city and in an active Challenge Mode dungeon, both outside and
+  during combat. Repeat the alignment check with one and multiple Buff rows,
+  both temporary-weapon-enchantment positions, and ordinary Debuffs. Require
+  no mover, geometry, forbidden-access, Lua, or taint error.
+- While Blizzard Edit Mode owns the native anchor, change one BFI Buff setting.
+  Blizzard Buffs must appear as the fail-native fallback; after Edit Mode exits,
+  the existing custom container must reactivate without a second allocation.
+- Generate ordinary, private, and deadly debuffs together. Ordinary Debuffs
+  receive BFI's selected appearance without duplication; private and deadly
+  presentations retain Blizzard's appearance, anchors, contents, visibility,
+  and lifetime apart from the permitted shared tooltip outer shell.
+- Toggle Buffs, Separate Own, supported appearance options, profiles, Edit
+  Mode, combat, hover, reload, and temporary enchants.
+- For ordinary Debuffs, verify the main enable toggle, icon width and height
+  from 10 through 30, icon crop, neutral square outline fit, and all supported
+  stack-count font, position, color, shadow, and visibility controls. The
+  rounded Blizzard atlas must be fully hidden while BFI styling is enabled;
+  the square outline must not depend on reading the active dispel type.
+- Confirm the ordinary Debuff duration control only shows or hides Blizzard's
+  text. Blizzard must continue to supply and abbreviate the value in seconds,
+  minutes, hours, and days.
+- Confirm the Debuff arrangement, sorting, spacing, per-line limit, total cap,
+  Separate Own, and duration font, position, and color controls are disabled.
+  Their plain-language explanations must wrap without clipping.
+- Disable ordinary Debuff styling and confirm the icon, rounded native border,
+  stack count, and duration visibility return exactly to their original
+  Blizzard values. Re-enable it and confirm the same fixed 16 buttons and the
+  same BFI-owned square outlines are reused.
+- Change every supported ordinary Debuff setting in combat. Confirm the old
+  presentation remains stable until combat ends, the options report a pending
+  update, and the new presentation applies afterward without a reload.
+- Keep the pointer stationary over an ordinary Debuff while changing each
+  supported setting outside combat. The appearance must update immediately;
+  no pointer-leave retry or tooltip manipulation is permitted. Repeat in
+  combat and confirm that combat alone, not hover, controls the pending state.
+- Repeat the ordinary/private/deadly checks across Edit Mode, reload, hover,
+  Mythic+, raid, and PvP restrictions.
+- Confirm no restricted AuraButton inspection, reparenting, duplicate aura,
+  script or event hooking, Blizzard update-method driving, active-state or
+  visibility reads, or hidden Blizzard-owned harmful/private presentation.
+
+### 10. Counters, leaks, errors, and taint
+
+Capture these before and after the full run:
+
+```text
+/dump BFInfinite.modules.UnitFrames.GetNativeAuraRuntimeStats()
+/dump BFInfinite.modules.UnitFrames.GetNativeAuraConstructionStats()
+/dump BFI_Target.indicators.buffs:GetNativeAuraState()
+/dump BFI_Target.indicators.debuffs:GetNativeAuraState()
+/dump BFInfinite.modules.BuffsDebuffs.GetCustomAuraContainerState("buffs")
+/dump BFInfinite.modules.BuffsDebuffs.GetCustomAuraContainerConstructionStats()
+/dump BFInfinite.modules.BuffsDebuffs.GetBlizzardDebuffStyleState()
+```
+
+These are tracked BFI state only; they do not inspect a native child or aura.
+The final runtime snapshot must satisfy
+`runtimesCreated - runtimesDestroyed == liveRuntimes`. Require no incomplete
+build, no stranded shell or reservation, no unexpected allocation after
+no-op/live-tuning/provider/unit changes, `providerMode == "live"`, and
+`reloadRequired == false`. Verify the Target state `metrics` against the
+explicit partition fixtures above. Party/Raid totals must match the fixed
+child count; Target totals must include all prebuilt relation variants while
+only one relation is active. Nameplate totals may grow only when Blizzard
+creates a new cached plate root; token retarget, reaction changes, settings
+tuning, and provider transitions must reuse that root's completed carrier.
+
+With ordinary Debuff styling enabled, require `active == true`,
+`styledButtonCount == 16`, and `snapshotsCreated == 16`. Repeated settings,
+combat deferral, Edit Mode, and reload-free enable/disable cycles must not
+increase `snapshotsCreated`. With styling disabled, require `active == false`
+and `styledButtonCount == 0`; retaining the 16 restoration snapshots is
+expected.
+
+Reload once, log out cleanly, and inspect the error collector and flushed
+`taint.log`.
+
+## Hard blockers
+
+Stop and file a failure with evidence for any of the following:
+
+- Lua error, blocked action, forbidden-access error, or new taint;
+- secret value comparison, logging, caching, or branching;
+- any holder/native visibility, hover, or alpha read-back; a protected-call
+  write probe; or an unsupported/protected visibility or enabled write in
+  combat outside #112's complete first-build final enabled submission;
+- restricted intrinsic AuraButton or aura-state inspection, or
+  tooltip-driving logic;
+- direct lookup, hook, inspection, or mutation of the hidden native AuraButton
+  tooltip; failure of its outer shell to match BFI while #118 is enabled; or
+  the global shell setter enabling a tooltip that the row disabled;
+- any transition delayed, completed, or retried because the pointer moved;
+- stale wrong-relation content visible during hover or visibility deferral;
+- refresh while presentation is disallowed or still curtained;
+- both Target relation variants visible together;
+- friendly nameplate Debuffs, nameplate Buffs, or nameplate Crowd Controls
+  appearing in #112; Global Colors affecting a nameplate row; a second build
+  on nameplate pool reuse; or a settings change constructing an untouched row;
+- Party/Raid external seeded content visible behind a hidden plain holder;
+- missing category, duplicate aura, partial color fallback, inferred spell
+  family, or a listed ID using the wrong exact RGBA;
+- more than one graphical duration display on a native AuraButton, including
+  a circular swipe beneath Vertical/Block Vertical or a vertical fill beneath
+  any Clock style;
+- a low-time duration mode that does not change text colour, Seconds and
+  Percent active together, a Seconds rule behaving as a percentage (or the
+  reverse), the exact threshold taking the low-time colour, or any Lua read or
+  poll of opaque remaining duration;
+- the healer importer deleting, reordering, or deduplicating existing entries;
+  importing a Blizzard hidden-by-default entry; omitting an eligible unknown
+  talent solely because it is unlearned; mutating on a second click; syncing
+  without a click; or appearing for a non-healer, blacklist, Debuffs, or
+  non-native row;
+- more than eight color-expanded active groups, except an unchanged baseline
+  gray policy that already exceeds eight;
+- reload prompt for same-family ID tuning, or no reload for a new family;
+- duplicate/stranded restricted buttons, unbounded counter growth, or
+  construction during provider-only changes;
+- Buffs showing Debuff settings, Debuffs showing Buff settings, any one-frame
+  stale-value flash while switching, or an obsolete deferred refresh changing
+  the current pane;
+- a per-character gradient on an ordinary aura control label, or loss of the
+  intended presets heading and enabled/disabled state colours;
+- BFI replacing or hiding Blizzard's harmful container, touching private
+  anchors or `DeadlyDebuffFrame`, hooking their scripts or update methods, or
+  reading an ordinary Debuff button's aura, active, or visibility state;
+- a missing/non-saving BFI Buff Frame mover, a saved four-field position that
+  is not canonicalized, or Buffs and ordinary Debuffs losing their shared
+  right edge and five-pixel seam under the default Horizontal / Left / Down
+  layout;
+- any `DebuffFrame` anchor mutation in combat, failure to release its anchor
+  to Blizzard Edit Mode, failure to reattach after exit, failure to restore
+  Blizzard's saved anchors/native Buff fallback, repeated native allocation,
+  or calls into Blizzard aura/Edit Mode update methods;
+- any read of `DebuffFrame` geometry, visibility, hover, protection, button,
+  or aura state; any private-aura or `DeadlyDebuffFrame` styling/positioning;
+- a mover `RoundToDecimal` nil error, secret-geometry arithmetic, mutation of
+  a mover owner whose required geometry is unavailable, a mover remaining
+  interactive in combat, or an absent combat warning when opening is blocked;
+- failure to restore the original ordinary Debuff appearance when its BFI
+  styling is disabled;
+- any unsupported ordinary Debuff control or upper-right Buff Arrangement
+  control being enabled;
+- BFI reading or mutating `PAPERDOLL_STATCATEGORIES`, adding the dormant
+  `MOVESPEED` row, formatting or deriving a restricted unit-stat value, or
+  branching on a stat row's visibility;
+- clipped or unwrapped settings explanations;
+- any 12.1 native frame silently using the legacy backend.

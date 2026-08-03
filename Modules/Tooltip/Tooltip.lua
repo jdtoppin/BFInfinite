@@ -81,9 +81,6 @@ local function IsAccessibleGameTooltip(tooltip)
     return IsObjectAccessible(tooltip)
 end
 
----------------------------------------------------------------------
--- anchor
----------------------------------------------------------------------
 local function GetOwnerConfig(owner)
     if not IsObjectAccessible(owner) or owner == nil then return end
 

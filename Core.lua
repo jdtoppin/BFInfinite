@@ -5,7 +5,10 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local REQUIRED_AF_VERSION = 29
+-- AF r37 carries the native Block-color and secret UnitClass guards, registers
+-- only the selected native aura duration carrier, and adds duration-text color
+-- curves driven by Blizzard's opaque remaining-time binding.
+local REQUIRED_AF_VERSION = 37
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar
@@ -58,7 +61,7 @@ function eventHandler:ADDON_LOADED(arg)
             AF.SetAddonAccentColor(BFI.name, "blazing_tangerine")
         end
 
-        -- check AF version
+        -- This is global because the supported filter path also runs on 12.0.7.
         AF.RequireVersion(REQUIRED_AF_VERSION)
 
         -- general.language
