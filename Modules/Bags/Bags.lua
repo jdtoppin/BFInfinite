@@ -23,7 +23,7 @@ local ITEM_CLASS = _G.Enum.ItemClass
 local BAG_TOP_WITH_SLOTS = 100
 local BAG_TOP_WITHOUT_SLOTS = 64
 local SIDEBAR_TOP = 58
-local SIDEBAR_MIN_HEIGHT = 180
+local SIDEBAR_MIN_HEIGHT = 320
 local SECTION_HEADER_HEIGHT = 18
 local SECTION_HEADER_GAP = 4
 local SECTION_SPACING = 7
@@ -723,15 +723,21 @@ local function LayoutControls(contentInset)
         bagSlotsButton:UnlockHighlight()
     end
 
+    local sidebarButton = combinedFrame.BFISidebarAutoHideButton
+    sidebarButton:ClearAllPoints()
+    sidebarButton:SetPoint(
+        "TOPLEFT",
+        combinedFrame,
+        "TOPLEFT",
+        HORIZONTAL_PADDING + contentInset,
+        -27
+    )
+    sidebarButton:Show()
+    sidebarButton:UpdateAutoHideState()
+
     if searchBox and searchBox:GetParent() == combinedFrame then
         searchBox:ClearAllPoints()
-        searchBox:SetPoint(
-            "TOPLEFT",
-            combinedFrame,
-            "TOPLEFT",
-            HORIZONTAL_PADDING + contentInset,
-            -27
-        )
+        searchBox:SetPoint("TOPLEFT", sidebarButton, "TOPRIGHT", 3, 0)
         searchBox:SetPoint("TOPRIGHT", bagSlotsButton, "TOPLEFT", -3, 0)
     end
 
@@ -1209,6 +1215,10 @@ local function GetLayoutConstraints(spacing, screenWidth, screenHeight, contentI
     return maxColumns, maxFrameHeight, minFrameWidth
 end
 
+function B.GetMinimumFrameHeight(maxFrameHeight, footerHeight)
+    return math.min(maxFrameHeight, SIDEBAR_TOP + SIDEBAR_MIN_HEIGHT + footerHeight)
+end
+
 local function CalculateFlatLayoutMetrics(
     itemCount,
     requestedColumns,
@@ -1233,9 +1243,7 @@ local function CalculateFlatLayoutMetrics(
         height = top + GetGridHeight(itemCount, columns, spacing) + footerHeight
     end
 
-    if contentInset > 0 then
-        height = math.max(height, math.min(maxFrameHeight, SIDEBAR_TOP + SIDEBAR_MIN_HEIGHT + footerHeight))
-    end
+    height = math.max(height, B.GetMinimumFrameHeight(maxFrameHeight, footerHeight))
 
     local width = math.max(
         minFrameWidth,
@@ -1296,7 +1304,7 @@ local function CalculateIndividualLayoutMetrics(
 
     height = math.max(
         height,
-        math.min(maxFrameHeight, SIDEBAR_TOP + SIDEBAR_MIN_HEIGHT + footerHeight)
+        B.GetMinimumFrameHeight(maxFrameHeight, footerHeight)
     )
     local width = math.max(
         minFrameWidth,
@@ -1388,9 +1396,10 @@ local function LayoutItemsInternal(force)
     B.Sidebar.SetShown(true)
     local contentInset = B.Sidebar.GetContentInset()
     if bagSidebar then
+        local sidebarRight = HORIZONTAL_PADDING + B.Sidebar.GetDesiredWidth()
         bagSidebar:ClearAllPoints()
-        bagSidebar:SetPoint("TOPLEFT", combinedFrame, "TOPLEFT", HORIZONTAL_PADDING, -SIDEBAR_TOP)
-        bagSidebar:SetPoint("BOTTOMLEFT", combinedFrame, "BOTTOMLEFT", HORIZONTAL_PADDING, footerHeight)
+        bagSidebar:SetPoint("TOPRIGHT", combinedFrame, "TOPLEFT", sidebarRight, -SIDEBAR_TOP)
+        bagSidebar:SetPoint("BOTTOMRIGHT", combinedFrame, "BOTTOMLEFT", sidebarRight, footerHeight)
     end
 
     ResetLayoutModel()
@@ -1726,6 +1735,26 @@ local function StyleCombinedFrame()
         AF.Fire("BFI_RefreshOptions", "bags")
     end)
 
+    local sidebarButton = AF.CreateButton(combinedFrame, nil, "gray", 24, 22)
+    combinedFrame.BFISidebarAutoHideButton = sidebarButton
+    sidebarButton:SetTexture(AF.GetIcon("ArrowRight1"), {16, 16}, {"CENTER", 0, 0})
+    sidebarButton:SetTextureColor(HEADER_ICON_COLOR)
+    function sidebarButton:UpdateAutoHideState()
+        local autoHide = B.config.sidebarAutoHide
+        self:SetTexture(AF.GetIcon(autoHide and "ArrowLeft1" or "ArrowRight1"))
+        self:SetTextureColor(HEADER_ICON_COLOR)
+        self:SetTooltip(autoHide and L["Keep Sidebar Open"] or L["Auto Hide Sidebar"])
+        if autoHide then
+            self:LockHighlight()
+        else
+            self:UnlockHighlight()
+        end
+    end
+    sidebarButton:SetOnClick(function()
+        B.Sidebar.ToggleAutoHide()
+    end)
+    sidebarButton:UpdateAutoHideState()
+
     CreateEmptyStateOverlays()
 
     CreateBagButtons()
@@ -1867,6 +1896,7 @@ local function DisableModule()
     combinedFrame:SetScale(1)
 
     bagSlotsButton:Hide()
+    combinedFrame.BFISidebarAutoHideButton:Hide()
     B.Sidebar.SetShown(false)
     for _, button in ipairs(bagButtons) do
         button:Hide()

@@ -20,6 +20,21 @@ local function assertNotContains(contents, text, message)
     end
 end
 
+local function assertCount(contents, text, expected, message)
+    local count = 0
+    local offset = 1
+    while true do
+        local found = contents:find(text, offset, true)
+        if not found then break end
+        count = count + 1
+        offset = found + #text
+    end
+    if count ~= expected then
+        error((message or "unexpected source contract count")
+            .. (": expected %d, got %d for %s"):format(expected, count, text), 2)
+    end
+end
+
 local function assertBefore(contents, first, second, message)
     local firstAt = contents:find(first, 1, true)
     local secondAt = contents:find(second, 1, true)
@@ -64,7 +79,7 @@ assertContains(bags, "activeCategoryKey = nil",
 assertContains(bags, "B.Sidebar.SetAutoHide(B.config.sidebarAutoHide)",
     "profile and layout refreshes synchronize persisted auto-hide state")
 assertContains(bags, "B.Sidebar.SetOnAutoHideChanged(function(enabled)",
-    "the in-sidebar utility publishes user auto-hide changes")
+    "the header toggle publishes user auto-hide changes")
 assertContains(bags, "B.config.sidebarAutoHide = enabled",
     "user auto-hide changes persist in the active bag profile")
 assertContains(bags,
@@ -101,6 +116,60 @@ assertContains(bags, "local contentInset = B.Sidebar.GetContentInset()",
     "all item layouts reserve the sidebar inset")
 assertContains(sidebar, "return Sidebar.GetDesiredWidth() + CONTENT_GAP",
     "the sidebar inset follows pinned or compact width, not selected view")
+
+-- Narrow category filters retain a useful navigation viewport. The rail is
+-- right-anchored so hover expansion grows left into the pinned rail's space.
+assertContains(bags, "local SIDEBAR_MIN_HEIGHT = 320",
+    "narrow category results retain a useful minimum bag height")
+assertContains(bags, "function B.GetMinimumFrameHeight(maxFrameHeight, footerHeight)",
+    "flat and individual layouts share one screen-capped minimum")
+assertContains(bags,
+    "return math.min(maxFrameHeight, SIDEBAR_TOP + SIDEBAR_MIN_HEIGHT + footerHeight)",
+    "the minimum remains footer-aware and screen-capped")
+assertCount(bags, "B.GetMinimumFrameHeight(maxFrameHeight, footerHeight)", 3,
+    "the minimum helper must be defined and used by both layout paths")
+assertContains(bags,
+    "local sidebarRight = HORIZONTAL_PADDING + B.Sidebar.GetDesiredWidth()",
+    "the rail's fixed right edge follows its reserved pinned or compact width")
+assertContains(bags,
+    'bagSidebar:SetPoint("TOPRIGHT", combinedFrame, "TOPLEFT", sidebarRight, -SIDEBAR_TOP)',
+    "the rail expands left from its top-right anchor")
+assertContains(bags,
+    'bagSidebar:SetPoint("BOTTOMRIGHT", combinedFrame, "BOTTOMLEFT", sidebarRight, footerHeight)',
+    "the rail expands left from its bottom-right anchor")
+assertNotContains(bags,
+    'bagSidebar:SetPoint("TOPLEFT", combinedFrame, "TOPLEFT"',
+    "hover expansion must not grow right across bag items")
+
+-- Auto-hide is a header action beside the other bag controls. Its arrow
+-- communicates the next action rather than using the old lock metaphor.
+assertContains(bags,
+    'local sidebarButton = AF.CreateButton(combinedFrame, nil, "gray", 24, 22)',
+    "auto-hide uses the same header button treatment as bag controls")
+assertContains(bags,
+    'self:SetTexture(AF.GetIcon(autoHide and "ArrowLeft1" or "ArrowRight1"))',
+    "the header uses AF arrows that follow the action available from the current state")
+assertContains(bags,
+    'self:SetTooltip(autoHide and L["Keep Sidebar Open"] or L["Auto Hide Sidebar"])',
+    "the header toggle explains its current action")
+assertContains(bags,
+    'searchBox:SetPoint("TOPLEFT", sidebarButton, "TOPRIGHT", 3, 0)',
+    "the auto-hide toggle sits immediately left of search")
+assertBefore(bags,
+    "sidebarButton:SetPoint(",
+    'searchBox:SetPoint("TOPLEFT", sidebarButton',
+    "the header toggle must be positioned before search anchors to it")
+for _, removedUtilityContract in ipairs({
+    "CreateAutoHideControl",
+    "autoHideButton",
+    'AF.SetAdaptiveIcon(autoHideButton.icon, "Lock")',
+    'AF.SetAdaptiveIcon(autoHideButton.icon, "Unlock")',
+}) do
+    assertNotContains(sidebar, removedUtilityContract,
+        "the rail must not retain the old lock utility row")
+end
+assertContains(sidebar, 'scrollFrame:SetPoint("TOPLEFT")',
+    "removing the utility row gives navigation the rail's full height")
 
 assertContains(bags,
     '[ITEM_CLASS.Tradegoods] = "Bag_TradeGoods"',

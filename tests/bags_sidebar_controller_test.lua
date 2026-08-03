@@ -209,34 +209,23 @@ assertNotContains(
 
 assertContains(
     source,
-    "local function CreateAutoHideControl()",
-    "the sidebar must expose a fixed auto-hide utility control"
+    'scrollFrame:SetPoint("TOPLEFT")',
+    "the scrolling view/category list must use the rail's full height"
 )
-assertContains(
-    source,
-    'autoHideClip = _G.CreateFrame("ScrollFrame", nil, rail)',
-    "the fixed auto-hide label must clip cleanly in compact mode"
-)
-assertContains(
-    source,
-    'autoHideButton = _G.CreateFrame("Button", nil, autoHideClip)',
-    "the auto-hide control must use a template-free button"
-)
-assertContains(
-    source,
-    'autoHideButton.label = AF.CreateFontString(autoHideButton, L["Auto Hide"], "white")',
-    "the utility control must be labeled above the view list"
-)
-assertContains(
-    source,
-    "    CreateAutoHideControl()\n\n    scrollFrame = _G.CreateFrame",
-    "the fixed auto-hide control must be created before the scrolling navigation"
-)
-assertContains(
-    source,
-    'scrollFrame:SetPoint("TOPLEFT", 0, -(UTILITY_HEIGHT + UTILITY_GAP))',
-    "the scrolling view/category list must begin below the fixed utility row"
-)
+for _, removedUtilityContract in ipairs({
+    "CreateAutoHideControl",
+    "autoHideClip",
+    "autoHideButton",
+    "UTILITY_HEIGHT",
+    "UTILITY_GAP",
+    'local icon = autoHide and "Unlock" or "Lock"',
+}) do
+    assertNotContains(
+        source,
+        removedUtilityContract,
+        "auto-hide belongs in the bag header rather than the navigation rail"
+    )
+end
 
 assertContains(
     source,
@@ -425,21 +414,21 @@ assertEqual(bags.Sidebar.SetAutoHide(true), true,
 assertEqual(#autoHideCalls, 0,
     "idempotent auto-hide synchronization stays silent")
 assertEqual(bags.Sidebar.ToggleAutoHide(), false,
-    "utility toggle can pin the labeled rail open")
+    "header toggle can pin the labeled rail open")
 assertEqual(autoHideCalls[1], false,
-    "utility toggle reports the disabled auto-hide state")
+    "header toggle reports the disabled auto-hide state")
 assertEqual(bags.Sidebar.GetDesiredWidth(), 170,
     "pinned rail restores its full desired width")
 assertEqual(bags.Sidebar.GetContentInset(), 178,
     "pinned rail restores its full content inset")
 assertEqual(bags.Sidebar.ToggleAutoHide(), true,
-    "utility toggle can restore compact auto-hide")
+    "header toggle can restore compact auto-hide")
 assertEqual(autoHideCalls[2], true,
-    "utility toggle reports the enabled auto-hide state")
+    "header toggle reports the enabled auto-hide state")
 assertEqual(bags.Sidebar.SetAutoHide(false), true,
     "profile synchronization can restore pinned mode")
 assertEqual(#autoHideCalls, 2,
-    "programmatic profile synchronization does not emit a utility callback")
+    "programmatic profile synchronization does not emit a header callback")
 assertEqual(bags.Sidebar.SetShown("yes"), false, "non-boolean shown state rejected")
 assertEqual(bags.Sidebar.SetShown(false), true, "rail can be explicitly disabled")
 assertEqual(bags.Sidebar.SetShown(true), true, "rail can be explicitly enabled")

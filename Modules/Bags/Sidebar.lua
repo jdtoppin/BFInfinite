@@ -2,7 +2,6 @@
 local BFI = select(2, ...)
 ---@class Bags
 local B = BFI.modules.Bags
-local L = BFI.L
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
@@ -14,8 +13,6 @@ local type = type
 local DESIRED_WIDTH = 170
 local COLLAPSED_WIDTH = 40
 local CONTENT_GAP = 8
-local UTILITY_HEIGHT = 26
-local UTILITY_GAP = 4
 local ROW_HEIGHT = 26
 local HEADING_HEIGHT = 22
 local ROW_SPACING = 2
@@ -53,8 +50,6 @@ Sidebar.CONTENT_GAP = CONTENT_GAP
 Sidebar.Icons = ICON_BY_ID
 
 local rail
-local autoHideClip
-local autoHideButton
 local scrollFrame
 local scrollContent
 local scrollBar
@@ -157,24 +152,6 @@ local function PaintRow(row, immediate)
             or "idle"
         SetNavigationState(row, state, immediate)
     end
-end
-
-local function ApplyAutoHideButton(immediate)
-    if not autoHideButton then return end
-
-    autoHideButton.label:SetShown(not IsCompact())
-    local icon = autoHide and "Unlock" or "Lock"
-    if AF.SetAdaptiveIcon then
-        AF.SetAdaptiveIcon(autoHideButton.icon, icon)
-    else
-        autoHideButton.icon:SetTexture(AF.GetIcon(icon))
-    end
-    autoHideButton.icon:SetTexCoord(0, 1, 0, 1)
-
-    local state = autoHide and "selected"
-        or autoHideButton.hovered and "hover"
-        or "idle"
-    SetNavigationState(autoHideButton, state, immediate)
 end
 
 local function GetVerticalScrollRange()
@@ -287,11 +264,6 @@ local function SetRowHovered(row, hovered)
     PaintRow(row)
 end
 
-local function SetAutoHideButtonHovered(hovered)
-    autoHideButton.hovered = hovered or nil
-    ApplyAutoHideButton()
-end
-
 local ApplyModel
 
 local function ExpandRail()
@@ -303,7 +275,6 @@ local function ExpandRail()
         -- while its label is revealed. Nested rows open only on chevron click.
         expandedScrollOffset = compactScrollOffset
         hoverExpanded = true
-        ApplyAutoHideButton()
         ApplyModel()
     end
     AF.AnimatedResize(rail, DESIRED_WIDTH)
@@ -322,7 +293,6 @@ local function CollapseRail()
         if not autoHide or scrollBarDragging or IsRailMouseOver() then return end
         showNestedEntries = false
         hoverExpanded = false
-        ApplyAutoHideButton()
         ApplyModel()
     end)
 end
@@ -538,7 +508,6 @@ local function ApplyDesiredState()
         end
         AF.SetWidth(rail, IsCompact() and COLLAPSED_WIDTH or DESIRED_WIDTH)
         rail:Show()
-        ApplyAutoHideButton(true)
         ApplyModel()
     else
         hoverExpanded = false
@@ -549,56 +518,6 @@ local function ApplyDesiredState()
         end
         rail:Hide()
     end
-end
-
-local function CreateAutoHideControl()
-    autoHideClip = _G.CreateFrame("ScrollFrame", nil, rail)
-    autoHideClip:SetPoint("TOPLEFT")
-    autoHideClip:SetPoint("TOPRIGHT")
-    AF.SetHeight(autoHideClip, UTILITY_HEIGHT)
-
-    autoHideButton = _G.CreateFrame("Button", nil, autoHideClip)
-    AF.SetSize(autoHideButton, DESIRED_WIDTH, UTILITY_HEIGHT)
-    autoHideButton:RegisterForClicks("LeftButtonUp")
-    autoHideClip:SetScrollChild(autoHideButton)
-
-    autoHideButton.highlight = AF.CreateGradientTexture(
-        autoHideButton,
-        "HORIZONTAL",
-        AF.GetColorTable("BFI", 0.9),
-        AF.GetColorTable("BFI", 0),
-        nil,
-        "BORDER"
-    )
-    autoHideButton.highlight:SetPoint("TOPLEFT")
-    autoHideButton.highlight:SetPoint("BOTTOMLEFT")
-    AF.SetWidth(autoHideButton.highlight, 1)
-    autoHideButton.highlight:Hide()
-
-    autoHideButton.icon = autoHideButton:CreateTexture(nil, "ARTWORK")
-    AF.SetSize(autoHideButton.icon, ICON_SIZE, ICON_SIZE)
-    autoHideButton.icon:SetPoint("LEFT", (COLLAPSED_WIDTH - ICON_SIZE) / 2, 0)
-    autoHideButton.icon:SetVertexColor(1, 1, 1, 0.9)
-
-    autoHideButton.label = AF.CreateFontString(autoHideButton, L["Auto Hide"], "white")
-    autoHideButton.label:SetPoint("LEFT", autoHideButton.icon, "RIGHT", 7, 0)
-    autoHideButton.label:SetPoint("RIGHT", -6, 0)
-    autoHideButton.label:SetJustifyH("LEFT")
-    autoHideButton.label:SetWordWrap(false)
-
-    autoHideButton:SetScript("OnClick", function()
-        Sidebar.ToggleAutoHide()
-    end)
-    autoHideButton:SetScript("OnEnter", function()
-        SetAutoHideButtonHovered(true)
-        PointerEnter()
-    end)
-    autoHideButton:SetScript("OnLeave", function(self)
-        _G.C_Timer.After(0, function()
-            SetAutoHideButtonHovered(self:IsMouseOver())
-        end)
-        PointerLeave()
-    end)
 end
 
 local function CreateScrollBar()
@@ -659,10 +578,8 @@ local function CreateRail(parent)
     background:SetAllPoints()
     background:SetColorTexture(AF.GetColorRGB("background", 0.96))
 
-    CreateAutoHideControl()
-
     scrollFrame = _G.CreateFrame("ScrollFrame", nil, rail)
-    scrollFrame:SetPoint("TOPLEFT", 0, -(UTILITY_HEIGHT + UTILITY_GAP))
+    scrollFrame:SetPoint("TOPLEFT")
     scrollFrame:SetPoint("BOTTOMRIGHT")
     scrollFrame:EnableMouse(true)
     scrollFrame:EnableMouseWheel(true)
@@ -852,7 +769,6 @@ function Sidebar.SetAutoHide(nextAutoHide)
             expandedScrollOffset = compactScrollOffset
         end
         AF.SetWidth(rail, IsCompact() and COLLAPSED_WIDTH or DESIRED_WIDTH)
-        ApplyAutoHideButton(true)
         ApplyModel()
     end
     return true
