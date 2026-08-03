@@ -142,6 +142,7 @@ local function createHarness()
         nativeReset = true,
         panes = {},
         repointed = {},
+        resetPositionCalls = 0,
         scrollFrames = {},
     }
     local root = newWidget(state, "root")
@@ -309,7 +310,9 @@ local function createHarness()
             end,
         },
         Renderer = {
-            ResetPosition = function() end,
+            ResetPosition = function()
+                state.resetPositionCalls = state.resetPositionCalls + 1
+            end,
         },
     }
     local L = setmetatable({}, {
@@ -412,6 +415,21 @@ assertEqual(meters.points[1][2], general, "Meters pane anchor parent")
 assertEqual(meters.points[1][3], "BOTTOMLEFT", "Meters pane anchor edge")
 assertEqual(meters.points[1][5], -12, "compact section gap")
 
+local placeMeters =
+    state.controls["Place Meters Below Objective Tracker"]
+assertTrue(placeMeters ~= nil, "tracker-safe placement action")
+placeMeters.onClick()
+assertEqual(
+    state.resetPositionCalls,
+    1,
+    "tracker-safe placement action resets the meter stack"
+)
+assertEqual(
+    state.controls["Place Meters Bottom Right"],
+    nil,
+    "obsolete overlapping placement action removed"
+)
+
 local expectedTips = {
     ["BFI Damage Meter"] = "BFI Damage Meter Tip",
     Meters = "BFI Damage Meter Windows Tip",
@@ -502,6 +520,8 @@ assertEqual(
 assertEqual(firstMeterHeight.value, 277, "first meter height loaded")
 assertEqual(secondMeterHeight.value, 288, "second meter height loaded")
 assertEqual(thirdMeterHeight.value, 299, "third meter height loaded")
+assertEqual(firstMeterHeight.low, 104, "meter height minimum is compact")
+assertEqual(firstMeterHeight.high, 520, "meter height maximum remains available")
 assertEqual(lockMeters.checked, true, "lock state loaded")
 assertEqual(alwaysShowPlayer.checked, false, "player pin state loaded")
 assertEqual(

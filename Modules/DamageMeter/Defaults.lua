@@ -5,6 +5,54 @@ local DM = BFI.modules.DamageMeter
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
+local CURRENT_SIZE_DEFAULTS_VERSION = 2
+local CURRENT_DOCK_DEFAULTS_VERSION = 1
+local LEGACY_DEFAULT_WIDTH = 300
+local LEGACY_DEFAULT_HEIGHT = 220
+local LEGACY_DEFAULT_WINDOW_HEIGHTS = {
+    220,
+    220,
+    220,
+}
+local PREVIOUS_DEFAULT_WINDOW_HEIGHTS = {
+    147,
+    134,
+    134,
+}
+local VERSION_ONE_DEFAULT_WIDTH = 260
+local VERSION_ONE_DEFAULT_WINDOW_HEIGHTS = {
+    138,
+    120,
+    120,
+}
+local VERSION_ONE_DEFAULT_HEADER_HEIGHT = 22
+local VERSION_ONE_DEFAULT_BAR_HEIGHT = 20
+local VERSION_ONE_DEFAULT_SPACING = 2
+local VERSION_ONE_DEFAULT_PADDING = 4
+local PREVIOUS_DEFAULT_WINDOW_ANCHORS = {
+    {
+        relativeTo = 0,
+        point = "BOTTOMRIGHT",
+        relativePoint = "BOTTOMRIGHT",
+        x = -4,
+        y = 4,
+    },
+    {
+        relativeTo = 1,
+        point = "BOTTOMRIGHT",
+        relativePoint = "TOPRIGHT",
+        x = 0,
+        y = 4,
+    },
+    {
+        relativeTo = 2,
+        point = "BOTTOMRIGHT",
+        relativePoint = "TOPRIGHT",
+        x = 0,
+        y = 4,
+    },
+}
+
 local defaults = {
     enabled = false,
     windowCount = 3,
@@ -46,39 +94,42 @@ local defaults = {
     resetOnMythicPlusStart = false,
     alwaysShowPlayer = true,
     windowHeights = {
-        147,
-        134,
-        134,
+        124,
+        104,
+        104,
     },
     windowAnchors = {
         {
             relativeTo = 0,
-            point = "BOTTOMRIGHT",
-            relativePoint = "BOTTOMRIGHT",
+            point = "TOPRIGHT",
+            relativePoint = "TOPRIGHT",
             x = -4,
-            y = 4,
+            y = -4,
         },
         {
             relativeTo = 1,
-            point = "BOTTOMRIGHT",
-            relativePoint = "TOPRIGHT",
+            point = "TOPRIGHT",
+            relativePoint = "BOTTOMRIGHT",
             x = 0,
-            y = 4,
+            y = -4,
         },
         {
             relativeTo = 2,
-            point = "BOTTOMRIGHT",
-            relativePoint = "TOPRIGHT",
+            point = "TOPRIGHT",
+            relativePoint = "BOTTOMRIGHT",
             x = 0,
-            y = 4,
+            y = -4,
         },
     },
+    dockToObjectiveTracker = true,
+    dockDefaultsVersion = CURRENT_DOCK_DEFAULTS_VERSION,
     locked = false,
-    width = 300,
-    headerHeight = 22,
-    barHeight = 20,
+    width = 240,
+    sizeDefaultsVersion = CURRENT_SIZE_DEFAULTS_VERSION,
+    headerHeight = 20,
+    barHeight = 18,
     spacing = 2,
-    padding = 4,
+    padding = 3,
     texture = "AF",
     numberMode = "both",
     showSpecIcon = true,
@@ -186,6 +237,84 @@ local function CopyDefaults()
     return copy
 end
 
+local function WindowHeightsMatch(values, expected)
+    if type(values) ~= "table" then return false end
+
+    for index = 1, 3 do
+        if values[index] ~= expected[index] then
+            return false
+        end
+    end
+    return true
+end
+
+local function DefaultDensityMatches(config)
+    local function FieldMatches(key, expected)
+        return config[key] == nil or config[key] == expected
+    end
+
+    return FieldMatches("headerHeight", VERSION_ONE_DEFAULT_HEADER_HEIGHT)
+        and FieldMatches("barHeight", VERSION_ONE_DEFAULT_BAR_HEIGHT)
+        and FieldMatches("spacing", VERSION_ONE_DEFAULT_SPACING)
+        and FieldMatches("padding", VERSION_ONE_DEFAULT_PADDING)
+end
+
+local function UsesVersionOneDefaultSizes(config)
+    return config.width == VERSION_ONE_DEFAULT_WIDTH
+        and WindowHeightsMatch(
+            config.windowHeights,
+            VERSION_ONE_DEFAULT_WINDOW_HEIGHTS
+        )
+        and config.height == nil
+        and DefaultDensityMatches(config)
+end
+
+local function UsesUnversionedHistoricalDefaultSizes(config)
+    if type(config.sizeDefaultsVersion) == "number"
+        or config.width ~= LEGACY_DEFAULT_WIDTH
+        or not DefaultDensityMatches(config)
+    then
+        return false
+    end
+
+    if config.height == nil then
+        return WindowHeightsMatch(
+            config.windowHeights,
+            PREVIOUS_DEFAULT_WINDOW_HEIGHTS
+        ) or WindowHeightsMatch(
+            config.windowHeights,
+            LEGACY_DEFAULT_WINDOW_HEIGHTS
+        )
+    end
+
+    return config.height == LEGACY_DEFAULT_HEIGHT
+        and config.windowHeights == nil
+end
+
+local function MigrateDefaultSizes(config)
+    local version = config.sizeDefaultsVersion
+    if type(version) == "number"
+        and version >= CURRENT_SIZE_DEFAULTS_VERSION
+    then
+        return
+    end
+
+    -- Only compact an exact default tuple. If any dimension or density differs,
+    -- the complete saved layout remains user-owned.
+    if UsesVersionOneDefaultSizes(config)
+        or UsesUnversionedHistoricalDefaultSizes(config)
+    then
+        config.width = defaults.width
+        config.height = nil
+        config.windowHeights = CopyWindowHeights(defaults.windowHeights)
+        config.headerHeight = defaults.headerHeight
+        config.barHeight = defaults.barHeight
+        config.spacing = defaults.spacing
+        config.padding = defaults.padding
+    end
+    config.sizeDefaultsVersion = CURRENT_SIZE_DEFAULTS_VERSION
+end
+
 local function NormalizeNumber(value, default, minimum, maximum, integer)
     if type(value) ~= "number" or value ~= value then
         return default
@@ -250,6 +379,51 @@ local function NormalizeWindowAnchors(config)
     if HasAnchorCycle(config.windowAnchors) then
         config.windowAnchors = CopyWindowAnchors(defaults.windowAnchors)
     end
+end
+
+local function WindowAnchorsMatch(anchors, expected)
+    if type(anchors) ~= "table" then return false end
+
+    for index = 1, 3 do
+        local anchor = anchors[index]
+        local default = expected[index]
+        if type(anchor) ~= "table" then return false end
+        if anchor.relativeTo ~= default.relativeTo
+            or anchor.point ~= default.point
+            or anchor.relativePoint ~= default.relativePoint
+            or anchor.x ~= default.x
+            or anchor.y ~= default.y
+        then
+            return false
+        end
+    end
+    return true
+end
+
+local function WindowAnchorsMatchDefaults(anchors)
+    return WindowAnchorsMatch(anchors, defaults.windowAnchors)
+end
+
+local function MigrateDefaultDock(config)
+    local version = config.dockDefaultsVersion
+    if type(version) == "number"
+        and version >= CURRENT_DOCK_DEFAULTS_VERSION
+    then
+        return
+    end
+
+    -- Move only an untouched upward stack into the new tracker-first lane.
+    -- Explicit opt-outs and every custom anchor chain remain user-owned.
+    if config.dockToObjectiveTracker ~= false
+        and WindowAnchorsMatch(
+            config.windowAnchors,
+            PREVIOUS_DEFAULT_WINDOW_ANCHORS
+        )
+    then
+        config.windowAnchors = CopyWindowAnchors(defaults.windowAnchors)
+        config.dockToObjectiveTracker = true
+    end
+    config.dockDefaultsVersion = CURRENT_DOCK_DEFAULTS_VERSION
 end
 
 local function NormalizeWindowSessions(config)
@@ -345,12 +519,14 @@ local function NormalizeConfig(config)
         config.alwaysShowPlayer = defaults.alwaysShowPlayer
     end
 
+    MigrateDefaultSizes(config)
+
     local legacyHeight
     if type(config.height) == "number" and config.height == config.height then
         legacyHeight = NormalizeNumber(
             config.height,
             defaults.windowHeights[1],
-            120,
+            104,
             520,
             true
         )
@@ -363,12 +539,22 @@ local function NormalizeConfig(config)
         config.windowHeights[index] = NormalizeNumber(
             config.windowHeights[index],
             legacyHeight or defaults.windowHeights[index],
-            120,
+            104,
             520,
             true
         )
     end
+    MigrateDefaultDock(config)
+    local hadTrackerDockSetting =
+        type(config.dockToObjectiveTracker) == "boolean"
     NormalizeWindowAnchors(config)
+    if not hadTrackerDockSetting then
+        -- Only migrate the untouched historical stack. Any user-positioned
+        -- anchor chain remains screen-relative until explicitly reset.
+        config.dockToObjectiveTracker = WindowAnchorsMatchDefaults(
+            config.windowAnchors
+        )
+    end
     if type(config.locked) ~= "boolean" then
         config.locked = defaults.locked
     end

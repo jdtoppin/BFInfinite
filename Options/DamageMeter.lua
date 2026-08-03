@@ -264,7 +264,7 @@ local function CreateWindowHeightSlider(parent, index, x, y)
         L["Meter %d Height"]:format(index),
         x,
         y,
-        120,
+        104,
         520,
         1
     )
@@ -688,15 +688,15 @@ local function CreateActionsPane()
         -SECTION_GAP
     )
 
-    local bottomRight = AF.CreateButton(
+    local placeMeters = AF.CreateButton(
         actionsPane,
-        L["Place Meters Bottom Right"],
+        L["Place Meters Below Objective Tracker"],
         "BFI",
         245,
         25
     )
-    AF.SetPoint(bottomRight, "TOPLEFT", actionsPane, 15, -42)
-    bottomRight:SetOnClick(function()
+    AF.SetPoint(placeMeters, "TOPLEFT", actionsPane, 15, -42)
+    placeMeters:SetOnClick(function()
         if DM.Renderer
             and type(DM.Renderer.ResetPosition) == "function" then
             DM.Renderer.ResetPosition()
