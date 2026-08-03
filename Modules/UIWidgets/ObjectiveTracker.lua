@@ -16,8 +16,6 @@ local trackerStyled
 local trackerBackgroundStyled
 local trackerBackground
 
-local TRACKER_NATIVE_LEFT_OVERHANG = 30
-local TRACKER_NATIVE_RIGHT_OVERHANG = 5
 local TRACKER_NATIVE_BOTTOM_PADDING = 10
 local TRACKER_BACKGROUND_PADDING = 6
 
@@ -30,6 +28,7 @@ local function UpdateTrackerBackgroundLayout()
     if not trackerBackground or not tracker.Header then return end
 
     local bottomRegion = tracker.Header
+    local leftOverhang = 0
     if not tracker:IsCollapsed() then
         for _, module in ipairs(tracker.modules) do
             -- Retail collapse leaves GetContentsHeight() populated while
@@ -38,6 +37,14 @@ local function UpdateTrackerBackgroundLayout()
             -- protected geometry.
             if module:IsShown() then
                 bottomRegion = module
+                -- ScenarioObjectiveTrackerMixin uses a -20 left margin in the
+                -- pinned source. Preserve space only while content actually
+                -- extends left; normal quests and the collapsed header stay
+                -- compact.
+                leftOverhang = math.max(
+                    leftOverhang,
+                    math.max(0, -(module.leftMargin or 0))
+                )
             end
         end
     end
@@ -47,14 +54,14 @@ local function UpdateTrackerBackgroundLayout()
         "TOPLEFT",
         tracker.Header,
         "TOPLEFT",
-        -TRACKER_NATIVE_LEFT_OVERHANG - TRACKER_BACKGROUND_PADDING,
+        -TRACKER_BACKGROUND_PADDING - leftOverhang,
         TRACKER_BACKGROUND_PADDING
     )
     trackerBackground:SetPoint(
         "TOPRIGHT",
         tracker.Header,
         "TOPRIGHT",
-        TRACKER_NATIVE_RIGHT_OVERHANG + TRACKER_BACKGROUND_PADDING,
+        TRACKER_BACKGROUND_PADDING,
         TRACKER_BACKGROUND_PADDING
     )
     trackerBackground:SetPoint(
@@ -73,11 +80,12 @@ local function SetupTrackerBackground()
     if trackerBackgroundStyled or not tracker.NineSlice then return end
 
     -- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit d3915c78:
-    -- Blizzard_ObjectiveTrackerContainer.xml gives NineSlice 30/5-pixel side
-    -- overhangs and 10 pixels below the last module. Container collapse hides
-    -- modules but deliberately leaves their content heights (and NineSlice's
-    -- expanded bottom anchor) intact. Follow the last shown module instead,
-    -- falling back to the resized header, and add BFI-owned surface padding.
+    -- Blizzard_ObjectiveTrackerContainer.xml gives NineSlice a 30-pixel empty
+    -- left overhang and 10 pixels below the last module. Container collapse
+    -- hides modules but deliberately leaves their content heights (and
+    -- NineSlice's expanded bottom anchor) intact. Follow the last shown module
+    -- instead, falling back to the resized header, and use compact, symmetrical
+    -- BFI-owned surface padding without retaining that unused left space.
     -- Blizzard_ObjectiveTrackerManager.lua still owns the tracker and defaults
     -- the native background opacity to zero.
     trackerBackgroundStyled = true
@@ -91,8 +99,10 @@ local function SetupTrackerBackground()
         "border"
     )
     AF.SetFrameLevel(trackerBackground, -1)
+    W.objectiveTrackerDockFrame = trackerBackground
     hooksecurefunc(tracker, "Update", UpdateTrackerBackgroundLayout)
     UpdateTrackerBackgroundLayout()
+    AF.Fire("BFI_ObjectiveTrackerDockFrameChanged")
 end
 
 ---------------------------------------------------------------------

@@ -416,7 +416,7 @@ assertEqual(meters.points[1][3], "BOTTOMLEFT", "Meters pane anchor edge")
 assertEqual(meters.points[1][5], -12, "compact section gap")
 
 local placeMeters =
-    state.controls["Place Meters Beside Objective Tracker"]
+    state.controls["Place Meters Below Objective Tracker"]
 assertTrue(placeMeters ~= nil, "tracker-safe placement action")
 placeMeters.onClick()
 assertEqual(
