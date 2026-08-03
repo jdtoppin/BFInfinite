@@ -51,6 +51,17 @@ local function readFile(path)
     return contents
 end
 
+local function countPlain(haystack, needle)
+    local count = 0
+    local start = 1
+    while true do
+        local found = haystack:find(needle, start, true)
+        if not found then return count end
+        count = count + 1
+        start = found + #needle
+    end
+end
+
 local function loadPresets()
     local UF = {}
     local AF = {}
@@ -122,6 +133,8 @@ local function testMigrationDefaultsAndLegacyMapping()
     UF.MigrateConfig(existing)
     assertEqual(existing.party.indicators.dispels.enabled, false,
         "existing profile does not silently enable dispels")
+    assertEqual(existing.raid.indicators.dispels.enabled, false,
+        "existing profile does not silently enable Raid dispels")
 
     local legacy = {
         party = {
@@ -173,6 +186,38 @@ local function testMigrationDefaultsAndLegacyMapping()
     assertEqual(playerDispellable.party.indicators.dispels.scope,
         "player", "legacy player-dispellable scope migrates")
 
+    local raidLegacy = {
+        raid = {
+            indicators = {
+                healthBar = {
+                    dispelHighlight = {
+                        enabled = true,
+                        dispellable = true,
+                        alpha = 0.65,
+                        blendMode = "MOD",
+                    },
+                },
+            },
+        },
+    }
+    UF.MigrateConfig(raidLegacy)
+    local migratedRaid = raidLegacy.raid.indicators.dispels
+    assertEqual(migratedRaid.enabled, true,
+        "legacy Raid player-dispellable mode stays enabled")
+    assertEqual(migratedRaid.scope, "player",
+        "legacy Raid player-dispellable scope migrates")
+    assertEqual(migratedRaid.appearance, "full_solid",
+        "legacy Raid appearance maps to solid")
+    assertEqual(migratedRaid.alpha, 0.65,
+        "legacy Raid alpha migrates")
+    assertEqual(migratedRaid.blendMode, "MOD",
+        "legacy Raid blend mode migrates")
+    assertEqual(
+        raidLegacy.raid.indicators.healthBar.dispelHighlight,
+        nil,
+        "legacy Raid nested setting is retired"
+    )
+
     local preserved = {
         party = {
             indicators = {
@@ -217,6 +262,13 @@ local function testMigrationDefaultsAndLegacyMapping()
         "new-profile dispel scope")
     assertEqual(defaultDispels.appearance, "bottom_gradient",
         "new-profile dispel appearance")
+    local defaultRaidDispels = defaults.raid.indicators.dispels
+    assertEqual(defaultRaidDispels.enabled, true,
+        "new-profile Raid dispel default")
+    assertEqual(defaultRaidDispels.scope, "player",
+        "new-profile Raid dispel scope")
+    assertEqual(defaultRaidDispels.appearance, "bottom_gradient",
+        "new-profile Raid dispel appearance")
 end
 
 local function testMigrationAndOptionsContracts()
@@ -236,6 +288,10 @@ local function testMigrationAndOptionsContracts()
         1,
         true
     ), "Party Dispels follows Buffs and Debuffs")
+    assertEqual(countPlain(
+        unitFrameOptions,
+        '"buffs", "debuffs", "dispels"'
+    ), 2, "Party and Raid each expose Dispels after aura rows")
 
     local optionBuilders = readFile("Options/UnitFrames_Options.lua")
     assertTrue(optionBuilders:find(
@@ -249,10 +305,10 @@ local function testMigrationAndOptionsContracts()
         true
     ), nil, "old nested dispel option is retired")
     assertTrue(optionBuilders:find(
-        't.owner == "party" and t.id == "healthBar"',
+        't.owner == "party" or t.owner == "raid"',
         1,
         true
-    ), "health-bar mutations reevaluate Party dispels")
+    ), "health-bar mutations reevaluate Party and Raid dispels")
 
     local healthBar = readFile(
         "Modules/UnitFrames/Indicators/HealthBar.lua"
@@ -262,6 +318,11 @@ local function testMigrationAndOptionsContracts()
         1,
         true
     ), nil, "dormant nested health-bar dispel call is removed")
+    assertTrue(healthBar:find(
+        "self._configuredFrameLevel = config.frameLevel",
+        1,
+        true
+    ), "Health Bar records the construction-owned frame level")
 end
 
 testMigrationDefaultsAndLegacyMapping()

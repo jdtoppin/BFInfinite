@@ -37,6 +37,7 @@ end
 -- load
 ---------------------------------------------------------------------
 local function HealthBar_LoadConfig(self, config)
+    self._configuredFrameLevel = config.frameLevel
     AF.SetFrameLevel(self, config.frameLevel, self.root)
     UF.LoadIndicatorPosition(self, config.position, config.anchorTo)
     AF.SetSize(self, config.width, config.height)

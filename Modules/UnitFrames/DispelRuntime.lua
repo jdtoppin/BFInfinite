@@ -48,14 +48,6 @@ local function SameConstructionKey(left, right)
         and left.anchorFrameLevel == right.anchorFrameLevel
 end
 
-local function GetConfiguredAnchorFrameLevel()
-    local config = UF.config
-    local party = config and config.party
-    local indicators = party and party.indicators
-    local healthBar = indicators and indicators.healthBar
-    return healthBar and healthBar.frameLevel
-end
-
 local function SetPreviewStyle(runtime)
     local preview = runtime._preview
     local config = runtime._descriptor.config
@@ -140,7 +132,7 @@ local function Compile(runtime, config)
         ResolveUnit(runtime),
         config,
         runtime._anchorTarget,
-        GetConfiguredAnchorFrameLevel()
+        runtime._anchorTarget._configuredFrameLevel
     )
 end
 

@@ -39,10 +39,10 @@ jobs:
       - name: Test Party native-aura integration
         run: luajit tests/unit_frame_party_native_aura_test.lua
 
-      - name: Test Party native dispel highlight
+      - name: Test group native dispel highlight
         run: luajit tests/unit_frame_dispel_highlight_test.lua
 
-      - name: Test Party dispel migration and options
+      - name: Test Party and Raid dispel migration and options
         run: luajit tests/unit_frame_dispel_migration_test.lua
 
       - name: Test Party shipped aura contracts
