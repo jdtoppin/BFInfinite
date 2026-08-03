@@ -356,6 +356,7 @@ local function makeHarness()
 
     function harness:NewRuntime(unit)
         local healthBar = {
+            _configuredFrameLevel = 3,
             enabled = true,
         }
         local root = setmetatable({
@@ -568,7 +569,7 @@ local function testHealthBarGatePreviewAndReloadDependencies()
     assertEqual(lastEvent(harness, "af.fire"), nil,
         "dynamic tuning does not request reload")
 
-    harness.UF.config.party.indicators.healthBar.frameLevel = 4
+    healthBar._configuredFrameLevel = 4
     assertEqual(runtime:RequiresReloadForConfig(dynamic), true,
         "health-bar frame level is a construction dependency")
     harness:ClearEvents()

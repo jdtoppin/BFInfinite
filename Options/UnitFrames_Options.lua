@@ -401,7 +401,10 @@ local function UsesNativeAuraContainer(t)
     -- integration contract until the frame exists, then prefer the actual
     -- runtime above so option wording cannot drift from implementation.
     return t.id == "debuffs"
-        or (t.id == "dispels" and t.owner == "party")
+        or (
+            t.id == "dispels"
+            and (t.owner == "party" or t.owner == "raid")
+        )
         or (
             t.id == "buffs"
             and nativeHelpfulOwners[t.owner] == true
@@ -485,19 +488,22 @@ LoadIndicatorConfig = function(t)
         ShowNativeAuraReloadDialog()
     end
 
-    -- The managed dispel overlay inherits the health bar's frame level only
-    -- when WoW initializes its AuraButton. Re-evaluate the dependent Party
-    -- runtime after every health-bar mutation so a level change quiesces the
-    -- old overlay and uses the same reload notice as other native changes.
-    if t.owner == "party" and t.id == "healthBar" then
-        local party = UF.config and UF.config.party
-        local indicators = party and party.indicators
+    -- The native dispel overlay receives the saved Health Bar level only
+    -- during managed-button initialization. Re-evaluate the dependent group
+    -- runtime after an options mutation; ordinary full-frame setup already
+    -- loads Health Bar before Dispels and therefore performs no duplicate
+    -- tuning pass.
+    if (t.owner == "party" or t.owner == "raid")
+        and t.id == "healthBar"
+    then
+        local group = UF.config and UF.config[t.owner]
+        local indicators = group and group.indicators
         local dispels = indicators and indicators.dispels
         if dispels then
             LoadIndicatorConfig({
                 cfg = dispels,
                 id = "dispels",
-                owner = "party",
+                owner = t.owner,
                 target = t.target,
             })
         end
