@@ -2064,12 +2064,24 @@ assertEqual(
     "CENTER",
     "cyclic anchor uses safe center fallback"
 )
+local widthBeforePositionReset = DM.config.width
+local heightsBeforePositionReset = {
+    DM.config.windowHeights[1],
+    DM.config.windowHeights[2],
+    DM.config.windowHeights[3],
+}
 assertEqual(Renderer.ResetPosition(), true, "reset restores default stack")
 assertEqual(
     DM.config.dockToObjectiveTracker,
     true,
     "reset restores Objective Tracker coexistence"
 )
+assertEqual(DM.config.width, widthBeforePositionReset,
+    "position reset preserves the user-selected width")
+for index = 1, 3 do
+    assertEqual(DM.config.windowHeights[index], heightsBeforePositionReset[index],
+        "position reset preserves window height " .. index)
+end
 assertPoint(
     first,
     1,
@@ -2631,6 +2643,37 @@ local function RunDetailReportTests()
         detailRenderer.SetEnabled(false),
         true,
         "detail-report renderer disables"
+    )
+
+    local fittedRenderer, fittedDM, fittedState = loadRenderer()
+    fittedDM.config.width = 260
+    fittedDM.config.windowHeights[1] = 138
+    fittedDM.config.windowHeights[2] = 120
+    fittedDM.config.windowHeights[3] = 120
+    assertEqual(
+        fittedRenderer.SetEnabled(true),
+        true,
+        "fitted default renderer enables"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow1.visibleRowCount,
+        5,
+        "fitted first meter retains five rows"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow2.visibleRowCount,
+        4,
+        "fitted stacked meters retain four rows"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow1.width,
+        260,
+        "fitted meter uses the compact tracker-width default"
+    )
+    assertEqual(
+        fittedRenderer.SetEnabled(false),
+        true,
+        "fitted default renderer disables"
     )
 
     local compactRenderer, compactDM, compactState = loadRenderer()
