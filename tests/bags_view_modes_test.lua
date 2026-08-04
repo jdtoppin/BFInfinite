@@ -422,4 +422,41 @@ assertContains(bags, "icon = child.icon or group.icon,",
     "child nodes fall back explicit child icon -> parent icon -> " ..
     "the AF widget's fallbackIcon")
 
+-- Baseline-height layout model (Task 5): frame-scale shrink-to-fit is gone
+-- entirely. This pattern was already removed twice before (cc5b545,
+-- baa7b82); the maintenance comments guard against a third reintroduction.
+assertNotContains(bags, "SetScale(layoutScale)",
+    "the frame must never scale itself to fit the screen")
+assertNotContains(bags, "layoutScale = math.min",
+    "the screen-fit scale calculation is removed, not just its application")
+assertNotContains(bags, "local layoutScale",
+    "the layoutScale local itself is removed")
+assertContains(bags, "cc5b545",
+    "a maintenance comment cites the first removed shrink-to-fit commit")
+assertContains(bags, "baa7b82",
+    "a maintenance comment cites the second removed shrink-to-fit commit")
+
+-- Combined's natural metrics are the baseline every other view measures
+-- against, recomputed fresh on every layout pass (never cached).
+assertContains(bags,
+    "local baselineColumns, baselineWidth, baselineHeight = CalculateFlatLayoutMetrics(",
+    "the baseline is computed unconditionally after BuildSidebarModel")
+assertContains(bags, "#flatGroup.items,",
+    "the baseline uses flatGroup's always-populated item count")
+
+-- Category filters render at baselineColumns/baselineWidth/baselineHeight
+-- exactly, not a fresh computation over the filtered subset -- so every
+-- category selection stays pixel-identical to Combined.
+assertContains(bags, "width, height = baselineWidth, baselineHeight",
+    "category and Combined both render at the baseline frame size exactly")
+assertContains(bags, "BuildFlatLayoutEntries(baselineColumns, spacing, top, contentInset, group)",
+    "category and Combined both lay out at baselineColumns, not requestedColumns")
+
+-- Individual grows from the baseline and shrinks back to it automatically
+-- (the recompute is per-pass, so nothing needs to be reset on view switch).
+assertContains(bags, "height = math.max(height, baselineHeight)",
+    "Individual metrics below baseline height are raised to baselineHeight")
+assertContains(bags, "width = math.max(width, baselineWidth)",
+    "Individual metrics below baseline width are raised to baselineWidth")
+
 print("bags_view_modes_test.lua: ok")

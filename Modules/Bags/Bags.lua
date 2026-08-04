@@ -168,7 +168,6 @@ local moduleEnabled
 local itemLevelDisplayActive
 local refreshPending
 local layoutInProgress
-local layoutScale = 1
 local layoutEntryCount = 0
 local emptyButtonCount = 0
 local layoutAddSlotsTarget
@@ -338,7 +337,9 @@ end
 local function ApplyPosition()
     if not IsEnabled() or not combinedFrame or not combinedFrame:IsShown() then return end
     if combinedFrame.mover and combinedFrame.mover.isDragging then return end
-    combinedFrame:SetScale(layoutScale)
+    -- No frame-scale shrink-to-fit here: the baseline-height layout model
+    -- keeps icons at native size instead (removed twice before: cc5b545,
+    -- baa7b82). Do not reintroduce combinedFrame:SetScale().
     BFI.funcs.LoadPosition(combinedFrame, B.config.position)
 end
 
@@ -1482,9 +1483,25 @@ local function LayoutItemsInternal(force)
     BuildItemGroups()
     local group = BuildSidebarModel()
     local viewMode = GetDisplayMode()
+
+    -- Baseline-height layout model: Combined's natural size is recomputed
+    -- from scratch on every pass (never cached) and used as the reference
+    -- for every other mode. BuildItemGroups always fills flatGroup
+    -- regardless of the active view, so this is safe to compute
+    -- unconditionally.
+    local baselineColumns, baselineWidth, baselineHeight = CalculateFlatLayoutMetrics(
+        #flatGroup.items,
+        requestedColumns,
+        spacing,
+        top,
+        footerHeight,
+        screenWidth,
+        screenHeight,
+        contentInset
+    )
+
     local width
     local height
-    local columns
     if viewMode == VIEW_MODE_INDIVIDUAL then
         width, height = CalculateIndividualLayoutMetrics(
             requestedColumns,
@@ -1495,35 +1512,29 @@ local function LayoutItemsInternal(force)
             screenHeight,
             contentInset
         )
+        -- Individual grows from the Combined baseline and shrinks back to
+        -- it automatically on the next pass (nothing here is cached). Icons
+        -- always stay at native ITEM_SIZE: do not reintroduce frame-scale
+        -- shrink-to-fit (removed twice before: cc5b545, baa7b82).
+        height = math.max(height, baselineHeight)
+        width = math.max(width, baselineWidth)
         PrepareLayoutFrame(width, height)
         BuildIndividualLayoutEntries(spacing, top, contentInset)
         FinalizeLayoutEntries(spacing, contentInset, #individualGroups)
-        layoutScale = math.min(
-            1,
-            (screenWidth - (SCREEN_EDGE_MARGIN * 2)) / width,
-            (screenHeight - (SCREEN_EDGE_MARGIN * 2)) / height
-        )
     else
-        local itemCount = group and #group.items or 0
-        columns, width, height = CalculateFlatLayoutMetrics(
-            itemCount,
-            requestedColumns,
-            spacing,
-            top,
-            footerHeight,
-            screenWidth,
-            screenHeight,
-            contentInset
-        )
+        -- Combined and category-filtered views both render at the baseline
+        -- column count and frame size. A category is always a subset of
+        -- Combined's items, so it never needs more rows at baselineColumns
+        -- than Combined does: the window stays pixel-identical across every
+        -- category selection, with no shrink and no grow.
+        width, height = baselineWidth, baselineHeight
         PrepareLayoutFrame(width, height)
-        BuildFlatLayoutEntries(columns, spacing, top, contentInset, group)
+        BuildFlatLayoutEntries(baselineColumns, spacing, top, contentInset, group)
         FinalizeLayoutEntries(spacing, contentInset, 0)
-        layoutScale = 1
     end
 
     -- Individual Bags keeps every physical slot in its own labeled section;
     -- Combined and category selections retain the compact aggregate-empty model.
-    combinedFrame:SetScale(layoutScale)
     LayoutControls(contentInset)
     RenderLayout()
     ApplyPosition()
@@ -2003,8 +2014,8 @@ local function DisableModule()
     HideUnusedSectionHeaders(1)
     ClearLayoutState()
     RestoreItemBagIndicators()
-    layoutScale = 1
-    combinedFrame:SetScale(1)
+    -- No frame-scale reset here: layout no longer scales the frame (removed
+    -- twice before: cc5b545, baa7b82). Do not reintroduce SetScale().
 
     bagSlotsButton:Hide()
     combinedFrame.BFISidebarAutoHideButton:Hide()
