@@ -81,30 +81,67 @@ local equipmentSlotOrder = {
 -- 5.1's 200-local ceiling (verified by scripts/lint.sh's byte-compile
 -- step) with no free slot to spare; equipmentSlotOrder's own INVTYPE_*
 -- keys never collide with this "categoryIconByEquipLoc" string key.
-equipmentSlotOrder.categoryIconByEquipLoc = {
-    INVTYPE_HEAD = "Bag_Slot_Head",
-    INVTYPE_NECK = "Bag_Slot_Neck",
-    INVTYPE_SHOULDER = "Bag_Slot_Shoulder",
-    INVTYPE_CLOAK = "Bag_Slot_Back",
-    INVTYPE_CHEST = "Bag_Slot_Chest",
-    INVTYPE_WRIST = "Bag_Slot_Wrist",
-    INVTYPE_HAND = "Bag_Slot_Hands",
-    INVTYPE_WAIST = "Bag_Slot_Waist",
-    INVTYPE_LEGS = "Bag_Slot_Legs",
-    INVTYPE_FEET = "Bag_Slot_Feet",
-    INVTYPE_FINGER = "Bag_Slot_Finger",
-    INVTYPE_TRINKET = "Bag_Slot_Trinket",
-    INVTYPE_WEAPONMAINHAND = "Bag_Slot_MainHand",
-    INVTYPE_WEAPONOFFHAND = "Bag_Slot_OffHand",
-    INVTYPE_WEAPON = "Bag_Slot_OneHand",
-    INVTYPE_2HWEAPON = "Bag_Slot_TwoHand",
-    INVTYPE_RANGED = "Bag_Slot_Ranged",
-    INVTYPE_BODY = "Bag_Slot_Shirt",
-    INVTYPE_TABARD = "Bag_Slot_Tabard",
-    INVTYPE_PROFESSION_TOOL = "Bag_Slot_ProfessionTool",
-    INVTYPE_PROFESSION_GEAR = "Bag_Slot_ProfessionGear",
-    INVTYPE_BAG = "Bag_Slot_Bag",
-}
+-- Populated below the do-block, not as a static literal: each entry is the
+-- client's own paper-doll slot texture, resolved once via
+-- GetInventorySlotInfo, so the sidebar matches the character pane exactly.
+-- See the evidence comment further down for the verified INVTYPE ->
+-- slot-name contract and the GetInventorySlotInfo API signature. An INVTYPE
+-- that GetInventorySlotInfo can't resolve (API unavailable in this
+-- environment, or a slot with no paper-doll frame at all, such as
+-- profession tools/gear) is simply absent here; BuildSidebarModel's
+-- child.icon or group.icon chain then falls back to the parent Equipment
+-- icon, so a nil mapping still renders something.
+equipmentSlotOrder.categoryIconByEquipLoc = {}
+do
+    -- INVTYPE -> character-pane slot-name, verified against
+    -- PaperDollFrame.xml's ItemButton names ("Character" .. slotName,
+    -- stripped by PaperDollItemSlotButton_GetSlotName) at both pinned
+    -- commits. Neither commit defines a Ranged slot frame (only
+    -- MainHandSlot/SecondaryHandSlot exist), so ranged weapons share
+    -- MainHandSlot with one- and two-handed weapons, matching how the
+    -- client itself renders them on the paper doll. INVTYPE_PROFESSION_TOOL,
+    -- INVTYPE_PROFESSION_GEAR, and INVTYPE_BAG are intentionally omitted:
+    -- neither artifact has a matching slot frame (profession tools/gear
+    -- equip through the Professions UI, not PaperDollFrame; bags have no
+    -- paper-doll button).
+    local INV_TYPE_TO_SLOT = {
+        INVTYPE_HEAD = "HeadSlot",
+        INVTYPE_NECK = "NeckSlot",
+        INVTYPE_SHOULDER = "ShoulderSlot",
+        INVTYPE_CLOAK = "BackSlot",
+        INVTYPE_CHEST = "ChestSlot",
+        INVTYPE_BODY = "ShirtSlot",
+        INVTYPE_TABARD = "TabardSlot",
+        INVTYPE_WRIST = "WristSlot",
+        INVTYPE_HAND = "HandsSlot",
+        INVTYPE_WAIST = "WaistSlot",
+        INVTYPE_LEGS = "LegsSlot",
+        INVTYPE_FEET = "FeetSlot",
+        INVTYPE_FINGER = "Finger0Slot",
+        INVTYPE_TRINKET = "Trinket0Slot",
+        INVTYPE_WEAPONMAINHAND = "MainHandSlot",
+        INVTYPE_WEAPONOFFHAND = "SecondaryHandSlot",
+        INVTYPE_WEAPON = "MainHandSlot",
+        INVTYPE_2HWEAPON = "MainHandSlot",
+        INVTYPE_RANGED = "MainHandSlot",
+    }
+    -- Retail 12.1.0.68914 moves this call behind the C_PaperDollInfo
+    -- namespace; Retail 12.0.7.68887 still exposes it as a bare global.
+    -- Prefer the namespaced form when present so slot-art resolution keeps
+    -- working after a future client migrates. See the evidence comment for
+    -- both call sites and the shared (invSlot, slotTexture, checkRelic)
+    -- return contract.
+    local getInventorySlotInfo = (_G.C_PaperDollInfo and _G.C_PaperDollInfo.GetInventorySlotInfo)
+        or _G.GetInventorySlotInfo
+    if getInventorySlotInfo then
+        for invType, slotName in next, INV_TYPE_TO_SLOT do
+            local _, textureName = getInventorySlotInfo(slotName)
+            if textureName then
+                equipmentSlotOrder.categoryIconByEquipLoc[invType] = {texture = textureName}
+            end
+        end
+    end
+end
 local categoryOrderByClass = {
     [ITEM_CLASS.Consumable] = 200,
     [ITEM_CLASS.Gem] = 300,
@@ -115,15 +152,25 @@ local categoryOrderByClass = {
     [ITEM_CLASS.Recipe] = 500,
     [ITEM_CLASS.Questitem] = 800,
 }
+-- Parent-category icons: native ContainerFrame.lua bag-type-filter atlases
+-- (BAG_FILTER_ICONS, verified identical at both pinned commits) replace the
+-- Tabler Bag_* glyphs wherever a matching filter class exists. Gem,
+-- Tradegoods, ItemEnhancement, and Profession keep BFI's pre-existing design
+-- choice of sharing one icon (order 300/400 above); "bags-icon-profession-
+-- goods" is the closest verified native equivalent for that shared bucket.
+-- Recipe has no matching bag-type filter in either artifact (only
+-- Equipment/Consumables/ProfessionGoods/Junk/QuestItems/Reagents exist), so
+-- it stays on its existing Bag_Recipes glyph fallback; see the evidence
+-- comment further down.
 local categoryIconByClass = {
-    [ITEM_CLASS.Consumable] = "Bag_Consumables",
-    [ITEM_CLASS.Gem] = "Bag_TradeGoods",
-    [ITEM_CLASS.Tradegoods] = "Bag_TradeGoods",
-    [ITEM_CLASS.Reagent] = "Bag_Reagent",
-    [ITEM_CLASS.ItemEnhancement] = "Bag_TradeGoods",
-    [ITEM_CLASS.Profession] = "Bag_TradeGoods",
+    [ITEM_CLASS.Consumable] = {atlas = "bags-icon-consumables"},
+    [ITEM_CLASS.Gem] = {atlas = "bags-icon-profession-goods"},
+    [ITEM_CLASS.Tradegoods] = {atlas = "bags-icon-profession-goods"},
+    [ITEM_CLASS.Reagent] = {atlas = "bags-icon-reagents"},
+    [ITEM_CLASS.ItemEnhancement] = {atlas = "bags-icon-profession-goods"},
+    [ITEM_CLASS.Profession] = {atlas = "bags-icon-profession-goods"},
     [ITEM_CLASS.Recipe] = "Bag_Recipes",
-    [ITEM_CLASS.Questitem] = "Bag_Quest",
+    [ITEM_CLASS.Questitem] = {atlas = "bags-icon-questitem"},
 }
 -- Retail 12.1.0.68914 ItemConstantsDocumentation.lua (wow-ui-source
 -- d3915c78aba7) adds ItemClass.Housing. Keep the nil guard for the supported
@@ -144,15 +191,19 @@ end
 -- "categoryIconBySubclass" string key. Guarded like the ITEM_CLASS.Housing
 -- block above: Enum.ItemConsumableSubclass itself is absent on some minimal
 -- test/client environments even though every member used here is present on
--- both pinned Retail artifacts.
+-- both pinned Retail artifacts. The five texture paths below are an art
+-- choice, not an API claim (no per-subclass atlas exists in either
+-- artifact): five long-standing classic Interface\Icons raster icons,
+-- chosen for their subject matter; see the evidence comment for the list
+-- and the in-game QA note.
 if _G.Enum.ItemConsumableSubclass then
     categoryOrderByClass.categoryIconBySubclass = {
         [ITEM_CLASS.Consumable] = {
-            [_G.Enum.ItemConsumableSubclass.Potion] = "Bag_Potions",
-            [_G.Enum.ItemConsumableSubclass.Flasksphials] = "Bag_Flasks",
-            [_G.Enum.ItemConsumableSubclass.Fooddrink] = "Bag_Food",
-            [_G.Enum.ItemConsumableSubclass.Bandage] = "Bag_Bandages",
-            [_G.Enum.ItemConsumableSubclass.Elixir] = "Bag_Elixirs",
+            [_G.Enum.ItemConsumableSubclass.Potion] = {texture = "Interface\\Icons\\INV_Potion_93"},
+            [_G.Enum.ItemConsumableSubclass.Flasksphials] = {texture = "Interface\\Icons\\INV_Potion_97"},
+            [_G.Enum.ItemConsumableSubclass.Fooddrink] = {texture = "Interface\\Icons\\INV_Misc_Food_15"},
+            [_G.Enum.ItemConsumableSubclass.Bandage] = {texture = "Interface\\Icons\\INV_Misc_Bandage_08"},
+            [_G.Enum.ItemConsumableSubclass.Elixir] = {texture = "Interface\\Icons\\INV_Potion_31"},
         },
     }
 end
@@ -261,8 +312,103 @@ local VIEW_MODE_INDIVIDUAL = "individual"
 -- UtilityCurio = 10, CombatCurio = 11, Relic = 12. categoryIconBySubclass
 -- below uses Potion, Flasksphials, Fooddrink, Bandage, and Elixir; the
 -- remaining subclasses (including Other) fall back to the parent
--- Bag_Consumables icon via the child.icon or group.icon chain in
--- BuildSidebarModel, since no distinct AF glyph exists for them.
+-- Consumables icon via the child.icon or group.icon chain in
+-- BuildSidebarModel, since no distinct icon is mapped for them.
+--
+-- Native icon evidence (Task 5, same two pinned commits: Retail 12.0.7.68887
+-- 4383ced30106d51b27e3e86d1987f1552f0d259d and Retail 12.1.0.68914
+-- d3915c78aba77a7a9be76acbfa35c674bbb6abe9):
+--
+-- 1. GetInventorySlotInfo(slotName) -> id/invSlot, textureName/slotTexture,
+--    checkRelic. Confirmed by direct call site in both commits'
+--    Blizzard_UIPanels_Game/Mainline/PaperDollFrame.lua
+--    (PaperDollItemSlotButton_OnLoad): 12.0.7.68887 calls the bare global
+--    `GetInventorySlotInfo(slotName)`; 12.1.0.68914 calls the same
+--    signature behind the new `C_PaperDollInfo.GetInventorySlotInfo`
+--    namespace. The three-return contract (invSlot, slotTexture,
+--    checkRelic) is also documented at 12.1.0.68914 in
+--    Blizzard_APIDocumentationGenerated/PaperDollInfoDocumentation.lua
+--    (Namespace = "C_PaperDollInfo"); that function is not yet listed in
+--    the same doc file at 12.0.7.68887, consistent with it still being a
+--    bare global there. equipmentSlotOrder.categoryIconByEquipLoc's
+--    load-time do-block above prefers the namespaced form when present and
+--    falls back to the bare global, so slot-art resolution survives the
+--    future client's migration; if neither exists (e.g. a minimal test
+--    environment) the loop is skipped entirely and every equipment child
+--    icon is absent, which BuildSidebarModel's child.icon or group.icon
+--    chain resolves to the parent Equipment icon below.
+-- 2. INVTYPE -> slot-name: verified against the ItemButton names in both
+--    commits' Blizzard_UIPanels_Game/Mainline/PaperDollFrame.xml (identical
+--    at both commits): CharacterHeadSlot, CharacterNeckSlot,
+--    CharacterShoulderSlot, CharacterBackSlot, CharacterChestSlot,
+--    CharacterShirtSlot, CharacterTabardSlot, CharacterWristSlot,
+--    CharacterHandsSlot, CharacterWaistSlot, CharacterLegsSlot,
+--    CharacterFeetSlot, CharacterFinger0Slot/Finger1Slot,
+--    CharacterTrinket0Slot/Trinket1Slot, CharacterMainHandSlot,
+--    CharacterSecondaryHandSlot (PaperDollItemSlotButton_GetSlotName strips
+--    the leading "Character"). Neither commit defines a Ranged slot frame
+--    (removed pre-Legion; retail's paper doll has only MainHandSlot and
+--    SecondaryHandSlot), so INVTYPE_WEAPON, INVTYPE_2HWEAPON, and
+--    INVTYPE_RANGED all resolve to MainHandSlot, matching how the client
+--    itself equips one-handed, two-handed, and ranged weapons.
+--    INVTYPE_PROFESSION_TOOL, INVTYPE_PROFESSION_GEAR, and INVTYPE_BAG have
+--    no matching ItemButton in either commit's PaperDollFrame.xml (searched
+--    the full file; profession tools/gear are equipped through
+--    Blizzard_Professions, not the character pane, and bags have no
+--    paper-doll slot at all) and are intentionally left out of
+--    INV_TYPE_TO_SLOT, per policy: unverifiable entries fall back to the
+--    parent Equipment icon rather than being guessed.
+-- 3. Parent-category atlases: both commits' identical
+--    Blizzard_UIPanels_Game/Mainline/ContainerFrame.lua defines a
+--    `BAG_FILTER_ICONS` table (~line 218) keyed by Enum.BagSlotFlags,
+--    consumed by `ContainerFrame_GetBestFilterIcon` to badge each
+--    container's portrait button with its configured bag-type filter:
+--      [Enum.BagSlotFlags.ClassEquipment]       = "bags-icon-equipment"
+--      [Enum.BagSlotFlags.ClassConsumables]     = "bags-icon-consumables"
+--      [Enum.BagSlotFlags.ClassProfessionGoods] = "bags-icon-profession-goods"
+--      [Enum.BagSlotFlags.ClassJunk]            = "bags-icon-junk"
+--      [Enum.BagSlotFlags.ClassQuestItems]      = "bags-icon-questitem"
+--      [Enum.BagSlotFlags.ClassReagents]        = "bags-icon-reagents"
+--    "bags-icon-reagents" additionally corroborates REAGENT_SPACE_ICON
+--    above, already in production use. categoryIconByClass and GetCategory's
+--    equipment parentIcon below use these six atlases directly (Gem,
+--    Tradegoods, ItemEnhancement, and Profession share
+--    "bags-icon-profession-goods", matching BFI's pre-existing decision to
+--    group them under one icon). No filter class exists for Recipe or
+--    Housing in either commit's BAG_FILTER_ICONS, so both stay on their
+--    existing Bag_Recipes/Bag_Housing glyph fallback.
+-- 4. Per-profession subclass atlases (Trade Goods / Recipes): both commits'
+--    ItemConstantsDocumentation.lua document ItemProfessionSubclass
+--    (0-13, one member per profession, matching ITEM_CLASS.Profession) and
+--    ItemRecipeSubclass (0-11, matching ITEM_CLASS.Recipe), but neither
+--    commit's Blizzard_Professions or Blizzard_ProfessionsBook source
+--    defines a static per-profession atlas (no `atlas=` usage tied to a
+--    profession identity in Blizzard_ProfessionsFrame.lua/.xml or
+--    Blizzard_ProfessionsBook.lua/.xml at either commit; the profession
+--    tab/spec icons those files do draw come from runtime API calls such as
+--    GetChildProfessionInfo, not a fixed literal this static Lua table could
+--    reference). No Enum.ItemTradegoodsSubclass or
+--    Enum.ItemEnhancementSubclass exists in either commit's
+--    ItemConstantsDocumentation.lua/ItemConstants_MainlineDocumentation.lua/
+--    ItemConstants_SharedDocumentation.lua either. Per policy, all of these
+--    stay unmapped at the subclass level, falling back to their parent
+--    class icon (categoryIconByClass) above.
+-- 5. Consumable subtype textures (Potion/Flask/Food/Bandage/Elixir): an art
+--    choice per the brief, not an API claim, so it is not gated on either
+--    pinned commit. Chosen paths: Interface\Icons\INV_Potion_93 (Potion),
+--    INV_Potion_97 (Flasksphials), INV_Misc_Food_15 (Fooddrink),
+--    INV_Misc_Bandage_08 (Bandage), INV_Potion_31 (Elixir) -- five
+--    long-standing classic raster icons matching their subclass's subject
+--    matter. Final visual fit is an in-game QA gate, not verified here.
+-- 6. textureTint: AbstractFramework/Widgets/TreeList.lua's ApplyNodeIcon
+--    (commit 973d708d144971970176f3fff2429cda17aaae2b on
+--    codex/bag-sidebar-foundation) resets a string/glyph icon's row.icon to
+--    `SetVertexColor(1, 1, 1, ROW_ICON_ALPHA)` -- full-white, at the row's
+--    existing baseline alpha. Modules/Bags/Sidebar.lua's textureTint =
+--    {1, 1, 1} reuses that exact RGB so the new atlas/texture category
+--    icons desaturate to the same flat white tone the rail's remaining
+--    glyph rows already render at, instead of showing their own full-color
+--    native art.
 
 local function IsEnabled()
     return moduleEnabled and B.config and B.config.enabled
@@ -373,7 +519,7 @@ local function GetCategory(itemID)
         parentKey = "parent:equipment"
         parentLabel = L["Equipment"]
         parentOrder = 100
-        parentIcon = "Bag_Equipment"
+        parentIcon = {atlas = "bags-icon-equipment"}
         childKey = "equipment:" .. itemEquipLoc
         childLabel = _G[itemEquipLoc] or itemEquipLoc
         childOrder = equipmentSlotOrder[itemEquipLoc] or 99

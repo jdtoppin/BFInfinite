@@ -224,21 +224,43 @@ end
 assertContains(sidebar, "AF.CreateSidebarRail(",
     "removing the utility row gives navigation the rail's full height")
 
+-- Task 5: native atlas/texture category icons are desaturated and tinted to
+-- match the rail's remaining glyph rows, rather than showing full-color art.
+assertContains(sidebar, "local TEXTURE_TINT = {1, 1, 1}",
+    "the tint matches TreeList.lua's own glyph-row vertex color")
+assertContains(sidebar, "textureTint = TEXTURE_TINT",
+    "Sidebar.lua passes textureTint through to AF.CreateSidebarRail's options")
+
+-- Task 5: parent-category icons use verified native ContainerFrame.lua
+-- bag-filter atlases (BAG_FILTER_ICONS) instead of Tabler Bag_* glyphs,
+-- wherever a matching filter class was found in the pinned artifacts.
 assertContains(bags,
-    '[ITEM_CLASS.Tradegoods] = "Bag_TradeGoods"',
-    "trade-skill goods retain the crossed-tools icon")
+    '[ITEM_CLASS.Tradegoods] = {atlas = "bags-icon-profession-goods"}',
+    "trade-skill goods use the native profession-goods bag-filter atlas")
 assertContains(bags,
-    '[ITEM_CLASS.Reagent] = "Bag_Reagent"',
-    "reagents use the distinct flask icon")
+    '[ITEM_CLASS.Reagent] = {atlas = "bags-icon-reagents"}',
+    "reagents use the native reagents bag-filter atlas")
 assertNotContains(bags,
-    '[ITEM_CLASS.Reagent] = "Bag_TradeGoods"',
-    "reagents must not share the trade-skill goods icon")
+    '[ITEM_CLASS.Reagent] = {atlas = "bags-icon-profession-goods"}',
+    "reagents must not share the trade-skill goods atlas")
 assertContains(bags,
     "if ITEM_CLASS.Housing then",
     "housing class support must remain compatible with clients lacking the enum")
 assertContains(bags,
     'categoryIconByClass[ITEM_CLASS.Housing] = "Bag_Housing"',
-    "housing items use a distinct furnishings icon")
+    "housing has no verified native atlas in either pinned artifact and keeps its fallback glyph")
+assertContains(bags,
+    '[ITEM_CLASS.Consumable] = {atlas = "bags-icon-consumables"}',
+    "consumables use the native consumables bag-filter atlas")
+assertContains(bags,
+    '[ITEM_CLASS.Questitem] = {atlas = "bags-icon-questitem"}',
+    "quest items use the native quest-item bag-filter atlas")
+assertContains(bags,
+    '[ITEM_CLASS.Recipe] = "Bag_Recipes"',
+    "recipes have no verified native atlas in either pinned artifact and keep their fallback glyph")
+assertContains(bags,
+    'parentIcon = {atlas = "bags-icon-equipment"}',
+    "the equipment parent category uses the native equipment bag-filter atlas")
 
 -- Category families are selectable aggregate parents with nested, concise
 -- subtype rows. In particular, equipment children read Chest/Gloves rather
@@ -321,68 +343,105 @@ assertNotContains(sidebar, 'SetScript("OnUpdate"',
 -- childIcon. Both mapping tables are nested as nonnumeric fields on an
 -- existing top-level local (rather than declared as new top-level locals)
 -- because Bags.lua's main chunk sits at Lua 5.1's 200-local ceiling.
+--
+-- Task 5: no Tabler Bag_Slot_* glyph may remain anywhere in Bags.lua --
+-- equipment slot icons are now {texture = ...} tables resolved at load time
+-- from the client's own paper-doll art via GetInventorySlotInfo, and any
+-- INVTYPE that can't be resolved (unverifiable, or no API available) is
+-- simply absent, falling back to the parent Equipment icon instead of a
+-- guessed glyph.
+assertNotContains(bags, "Bag_Slot_",
+    "no Tabler bag-slot glyph may remain; equipment icons are native slot art")
 assertContains(bags,
     "categoryOrderByClass.categoryIconBySubclass = {",
     "consumable subclass icons are keyed by classID then subclassID")
 assertContains(bags,
-    "[_G.Enum.ItemConsumableSubclass.Potion] = \"Bag_Potions\"",
-    "potions use their own icon")
+    '[_G.Enum.ItemConsumableSubclass.Potion] = {texture = "Interface\\\\Icons\\\\INV_Potion_93"}',
+    "potions use their own native icon texture")
 assertContains(bags,
-    "[_G.Enum.ItemConsumableSubclass.Flasksphials] = \"Bag_Flasks\"",
-    "flasks and phials use their own icon")
+    '[_G.Enum.ItemConsumableSubclass.Flasksphials] = {texture = "Interface\\\\Icons\\\\INV_Potion_97"}',
+    "flasks and phials use their own native icon texture")
 assertContains(bags,
-    "[_G.Enum.ItemConsumableSubclass.Fooddrink] = \"Bag_Food\"",
-    "food and drink use their own icon")
+    '[_G.Enum.ItemConsumableSubclass.Fooddrink] = {texture = "Interface\\\\Icons\\\\INV_Misc_Food_15"}',
+    "food and drink use their own native icon texture")
 assertContains(bags,
-    "[_G.Enum.ItemConsumableSubclass.Bandage] = \"Bag_Bandages\"",
-    "bandages use their own icon")
+    '[_G.Enum.ItemConsumableSubclass.Bandage] = {texture = "Interface\\\\Icons\\\\INV_Misc_Bandage_08"}',
+    "bandages use their own native icon texture")
 assertContains(bags,
-    "[_G.Enum.ItemConsumableSubclass.Elixir] = \"Bag_Elixirs\"",
-    "elixirs use their own icon")
+    '[_G.Enum.ItemConsumableSubclass.Elixir] = {texture = "Interface\\\\Icons\\\\INV_Potion_31"}',
+    "elixirs use their own native icon texture")
 assertContains(bags,
-    "equipmentSlotOrder.categoryIconByEquipLoc = {",
-    "equipment slot icons are keyed by post-alias INVTYPE")
-for _, equipSlotIcon in ipairs({
-    'INVTYPE_HEAD = "Bag_Slot_Head"',
-    'INVTYPE_NECK = "Bag_Slot_Neck"',
-    'INVTYPE_SHOULDER = "Bag_Slot_Shoulder"',
-    'INVTYPE_CLOAK = "Bag_Slot_Back"',
-    'INVTYPE_CHEST = "Bag_Slot_Chest"',
-    'INVTYPE_WRIST = "Bag_Slot_Wrist"',
-    'INVTYPE_HAND = "Bag_Slot_Hands"',
-    'INVTYPE_WAIST = "Bag_Slot_Waist"',
-    'INVTYPE_LEGS = "Bag_Slot_Legs"',
-    'INVTYPE_FEET = "Bag_Slot_Feet"',
-    'INVTYPE_FINGER = "Bag_Slot_Finger"',
-    'INVTYPE_TRINKET = "Bag_Slot_Trinket"',
-    'INVTYPE_WEAPONMAINHAND = "Bag_Slot_MainHand"',
-    'INVTYPE_WEAPONOFFHAND = "Bag_Slot_OffHand"',
-    'INVTYPE_WEAPON = "Bag_Slot_OneHand"',
-    'INVTYPE_2HWEAPON = "Bag_Slot_TwoHand"',
-    'INVTYPE_RANGED = "Bag_Slot_Ranged"',
-    'INVTYPE_BODY = "Bag_Slot_Shirt"',
-    'INVTYPE_TABARD = "Bag_Slot_Tabard"',
-    'INVTYPE_PROFESSION_TOOL = "Bag_Slot_ProfessionTool"',
-    'INVTYPE_PROFESSION_GEAR = "Bag_Slot_ProfessionGear"',
-    'INVTYPE_BAG = "Bag_Slot_Bag"',
+    "equipmentSlotOrder.categoryIconByEquipLoc = {}",
+    "equipment slot icons start empty and are populated at load time, not as static literals")
+assertContains(bags,
+    "local INV_TYPE_TO_SLOT = {",
+    "post-alias INVTYPE to character-pane slot-name table drives slot-art resolution")
+for _, invTypeToSlotName in ipairs({
+    'INVTYPE_HEAD = "HeadSlot"',
+    'INVTYPE_NECK = "NeckSlot"',
+    'INVTYPE_SHOULDER = "ShoulderSlot"',
+    'INVTYPE_CLOAK = "BackSlot"',
+    'INVTYPE_CHEST = "ChestSlot"',
+    'INVTYPE_BODY = "ShirtSlot"',
+    'INVTYPE_TABARD = "TabardSlot"',
+    'INVTYPE_WRIST = "WristSlot"',
+    'INVTYPE_HAND = "HandsSlot"',
+    'INVTYPE_WAIST = "WaistSlot"',
+    'INVTYPE_LEGS = "LegsSlot"',
+    'INVTYPE_FEET = "FeetSlot"',
+    'INVTYPE_FINGER = "Finger0Slot"',
+    'INVTYPE_TRINKET = "Trinket0Slot"',
+    'INVTYPE_WEAPONMAINHAND = "MainHandSlot"',
+    'INVTYPE_WEAPONOFFHAND = "SecondaryHandSlot"',
+    'INVTYPE_WEAPON = "MainHandSlot"',
+    'INVTYPE_2HWEAPON = "MainHandSlot"',
+    'INVTYPE_RANGED = "MainHandSlot"',
 }) do
-    assertContains(bags, equipSlotIcon,
-        "every rendered equipment slot maps to its Task 1 Bag_Slot_* icon")
+    assertContains(bags, invTypeToSlotName,
+        "every rendered equipment slot maps to its verified PaperDollFrame.xml slot name")
+end
+-- INVTYPE_PROFESSION_TOOL, INVTYPE_PROFESSION_GEAR, and INVTYPE_BAG have no
+-- matching ItemButton in either pinned PaperDollFrame.xml and must not be
+-- guessed into INV_TYPE_TO_SLOT.
+for _, unverifiedEquipSlot in ipairs({
+    'INVTYPE_PROFESSION_TOOL = "',
+    'INVTYPE_PROFESSION_GEAR = "',
+    'INVTYPE_BAG = "',
+}) do
+    assertNotContains(bags, unverifiedEquipSlot,
+        "slots with no verified paper-doll frame must fall back to the parent icon, not a guess")
 end
 -- Aliased INVTYPEs (ROBE, SHIELD, HOLDABLE, RANGEDRIGHT, THROWN) are
 -- substituted to their canonical target before childKey/childIcon lookup,
--- so they must never appear as separate icon-map keys of their own.
-for _, aliasedEquipSlotIcon in ipairs({
-    "INVTYPE_ROBE = \"Bag_Slot_",
-    "INVTYPE_SHIELD = \"Bag_Slot_",
-    "INVTYPE_HOLDABLE = \"Bag_Slot_",
-    "INVTYPE_RANGEDRIGHT = \"Bag_Slot_",
-    "INVTYPE_THROWN = \"Bag_Slot_",
-}) do
-    assertNotContains(bags, aliasedEquipSlotIcon,
-        "aliased INVTYPEs must not get their own icon-map entry; " ..
-        "they resolve through equipmentSlotAliases to a canonical slot")
-end
+-- so they must never appear as their own INV_TYPE_TO_SLOT entry (the
+-- exhaustive 19-pair whitelist above already excludes them; equipmentSlotAliases
+-- itself legitimately contains "INVTYPE_ROBE = \"INVTYPE_CHEST\"" and similar,
+-- so a substring check here would collide with that unrelated table).
+assertCount(bags, "INVTYPE_ROBE = ", 1,
+    "INVTYPE_ROBE appears only in equipmentSlotAliases, never as its own slot-art entry")
+assertCount(bags, "INVTYPE_SHIELD = ", 1,
+    "INVTYPE_SHIELD appears only in equipmentSlotAliases, never as its own slot-art entry")
+assertCount(bags, "INVTYPE_HOLDABLE = ", 1,
+    "INVTYPE_HOLDABLE appears only in equipmentSlotAliases, never as its own slot-art entry")
+assertCount(bags, "INVTYPE_RANGEDRIGHT = ", 1,
+    "INVTYPE_RANGEDRIGHT appears only in equipmentSlotAliases, never as its own slot-art entry")
+assertCount(bags, "INVTYPE_THROWN = ", 1,
+    "INVTYPE_THROWN appears only in equipmentSlotAliases, never as its own slot-art entry")
+assertContains(bags,
+    "local getInventorySlotInfo = (_G.C_PaperDollInfo and _G.C_PaperDollInfo.GetInventorySlotInfo)",
+    "the 12.1.0.68914 C_PaperDollInfo namespace is preferred when present")
+assertContains(bags,
+    "or _G.GetInventorySlotInfo",
+    "the 12.0.7.68887 bare global is the fallback when the namespace is absent")
+assertContains(bags,
+    "for invType, slotName in next, INV_TYPE_TO_SLOT do",
+    "slot art is resolved once per rendered INVTYPE at load time")
+assertContains(bags,
+    "local _, textureName = getInventorySlotInfo(slotName)",
+    "GetInventorySlotInfo's second return is the slot's texture, per its verified contract")
+assertContains(bags,
+    "equipmentSlotOrder.categoryIconByEquipLoc[invType] = {texture = textureName}",
+    "resolved slot art is stored as a texture-shaped icon table")
 
 -- GetCategory computes and caches childIcon as an eighth cache-tuple slot;
 -- every read site (the cache hit early-return) and both write sites (the
@@ -424,8 +483,8 @@ assertContains(bags,
 
 -- BuildSidebarModel child nodes fall back from an explicit child icon to
 -- the parent group's icon, so every collapsed-rail row still shows
--- something even for subclasses/slots with no distinct glyph (e.g. the
--- consumable "Other" subclass falls back to Bag_Consumables).
+-- something even for subclasses/slots with no distinct icon (e.g. the
+-- consumable "Other" subclass falls back to the Consumables parent atlas).
 assertContains(bags, "icon = child.icon or group.icon,",
     "child nodes fall back explicit child icon -> parent icon -> " ..
     "the AF widget's fallbackIcon")
