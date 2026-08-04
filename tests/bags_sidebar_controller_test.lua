@@ -62,11 +62,11 @@ for _, api in ipairs({
     "function Sidebar.SetExpanded(",
     "function Sidebar.ToggleExpanded(",
     "function Sidebar.SetShown(",
-    "function Sidebar.SetAutoHide(",
-    "function Sidebar.GetAutoHide(",
-    "function Sidebar.ToggleAutoHide(",
+    "function Sidebar.SetCollapsed(",
+    "function Sidebar.GetCollapsed(",
+    "function Sidebar.ToggleCollapsed(",
     "function Sidebar.SetOnSelected(",
-    "function Sidebar.SetOnAutoHideChanged(",
+    "function Sidebar.SetOnCollapsedChanged(",
     "function Sidebar.SetOnPresentationWidthChanged(",
     "function Sidebar.GetDesiredWidth(",
     "function Sidebar.GetContentInset(",
@@ -79,6 +79,10 @@ assertContains(
     "AF.CreateSidebarRail(",
     "the sidebar must delegate widget construction to the shared AF rail"
 )
+
+assertNotContains(source, "AutoHide",
+    "the sidebar controller uses the AF rail's manual collapse naming, not "
+        .. "the removed auto-hide naming")
 
 assertNotContains(source, "ICON_BY_ID",
     "sidebar has no icon-by-id default map; nodes carry explicit icons and "
@@ -115,11 +119,11 @@ local function makeRail(parent, options)
         parent = parent,
         options = options,
         shown = true,
-        autoHide = false,
+        collapsed = false,
         setParentCalls = 0,
         shownCalls = {},
-        autoHideCalls = {},
-        toggleAutoHideCalls = 0,
+        collapsedCalls = {},
+        toggleCollapsedCalls = 0,
     }
 
     local treeList = {
@@ -176,27 +180,33 @@ local function makeRail(parent, options)
         return true
     end
 
-    function rail:SetAutoHide(autoHide)
-        self.autoHide = autoHide
-        self.autoHideCalls[#self.autoHideCalls + 1] = autoHide
+    -- Mirrors AF_SidebarRailMixin:SetCollapsed/ToggleCollapsed exactly
+    -- (AbstractFramework/Widgets/TreeList.lua): Set returns whether the
+    -- state actually changed and only fires the callback when changed and
+    -- not silent; Toggle always fires because it always changes the state.
+    function rail:SetCollapsed(collapsed, silent)
+        if self.collapsed == collapsed then return false end
+        self.collapsed = collapsed
+        self.collapsedCalls[#self.collapsedCalls + 1] = collapsed
+        if not silent and self.onCollapsedChanged then
+            self.onCollapsedChanged(collapsed)
+        end
         return true
     end
 
-    function rail:GetAutoHide()
-        return self.autoHide
+    function rail:GetCollapsed()
+        return self.collapsed
     end
 
-    function rail:ToggleAutoHide()
-        self.toggleAutoHideCalls = self.toggleAutoHideCalls + 1
-        self:SetAutoHide(not self.autoHide)
-        if self.onAutoHideChanged then
-            self.onAutoHideChanged(self.autoHide)
-        end
-        return self.autoHide
+    function rail:ToggleCollapsed()
+        self.toggleCollapsedCalls = self.toggleCollapsedCalls + 1
+        local collapsed = not self.collapsed
+        self:SetCollapsed(collapsed)
+        return collapsed
     end
 
-    function rail:SetOnAutoHideChanged(callback)
-        self.onAutoHideChanged = callback
+    function rail:SetOnCollapsedChanged(callback)
+        self.onCollapsedChanged = callback
         return true
     end
 
@@ -209,7 +219,7 @@ local function makeRail(parent, options)
     end
 
     function rail:GetDesiredWidth()
-        return self.autoHide
+        return self.collapsed
             and (self.options.collapsedWidth or 40)
             or (self.options.expandedWidth or 170)
     end
@@ -260,8 +270,8 @@ local Sidebar = bags.Sidebar
 ---------------------------------------------------------------------
 assertEqual(Sidebar.GetDesiredWidth(), 170, "default desired width before Initialize")
 assertEqual(Sidebar.GetContentInset(), 178, "default content inset before Initialize")
-assertEqual(Sidebar.GetAutoHide(), false, "auto-hide is initially disabled")
-assertEqual(Sidebar.SetAutoHide("yes"), false, "non-boolean auto-hide state rejected")
+assertEqual(Sidebar.GetCollapsed(), false, "the sidebar is expanded by default")
+assertEqual(Sidebar.SetCollapsed("yes"), false, "non-boolean collapsed state rejected")
 
 local presentationCalls = {}
 assertEqual(Sidebar.SetOnPresentationWidthChanged("yes"), false,
@@ -274,31 +284,45 @@ assertEqual(#presentationCalls, 1,
 assertEqual(presentationCalls[1][1], 170, "initial presentation width")
 assertEqual(presentationCalls[1][2], 170, "initial reserved width")
 
-local autoHideCalls = {}
-assertEqual(Sidebar.SetOnAutoHideChanged("yes"), false,
-    "non-function auto-hide callback rejected")
-assertEqual(Sidebar.SetOnAutoHideChanged(function(enabled)
-    autoHideCalls[#autoHideCalls + 1] = enabled
-end), true, "auto-hide callback accepted")
+local collapsedCalls = {}
+assertEqual(Sidebar.SetOnCollapsedChanged("yes"), false,
+    "non-function collapsed callback rejected")
+assertEqual(Sidebar.SetOnCollapsedChanged(function(collapsed)
+    collapsedCalls[#collapsedCalls + 1] = collapsed
+end), true, "collapsed callback accepted")
 
-assertEqual(Sidebar.SetAutoHide(true), true, "auto-hide can be buffered before Initialize")
-assertEqual(#presentationCalls, 2, "buffered auto-hide republishes presentation width")
-assertEqual(presentationCalls[2][1], 40, "buffered auto-hide publishes the compact width")
-assertEqual(presentationCalls[2][2], 40, "buffered auto-hide publishes the compact reserved width")
-assertEqual(Sidebar.GetAutoHide(), true, "buffered auto-hide is queryable before Initialize")
+-- Set(changed, unsilenced) fires; Set(unchanged) never fires; Set(changed,
+-- silent) is applied but suppressed; Toggle always fires because it always
+-- changes the state. This buffered pre-Initialize path must match the AF
+-- rail's own SetCollapsed/ToggleCollapsed contract exactly.
+assertEqual(Sidebar.SetCollapsed(true), true, "collapsing can be buffered before Initialize")
+assertEqual(#presentationCalls, 2, "buffered collapse republishes presentation width")
+assertEqual(presentationCalls[2][1], 40, "buffered collapse publishes the compact width")
+assertEqual(presentationCalls[2][2], 40, "buffered collapse publishes the compact reserved width")
+assertEqual(Sidebar.GetCollapsed(), true, "buffered collapsed state is queryable before Initialize")
 assertEqual(Sidebar.GetDesiredWidth(), 40, "buffered compact desired width")
 assertEqual(Sidebar.GetContentInset(), 48, "buffered compact content inset")
-assertEqual(#autoHideCalls, 0, "programmatic auto-hide synchronization stays silent")
+assertEqual(#collapsedCalls, 1, "an unsilenced buffered change fires the callback")
+assertEqual(collapsedCalls[1], true, "the fired callback reports the new collapsed state")
 
-assertEqual(Sidebar.SetAutoHide(true), true, "reapplying the same buffered state is accepted")
-assertEqual(#presentationCalls, 2, "idempotent buffered auto-hide does not republish")
+assertEqual(Sidebar.SetCollapsed(true), false,
+    "reapplying the same buffered state reports no change")
+assertEqual(#presentationCalls, 2, "idempotent buffered collapse does not republish")
+assertEqual(#collapsedCalls, 1, "an unchanged buffered state never fires the callback")
 
-assertEqual(Sidebar.ToggleAutoHide(), false,
-    "header toggle can restore the pinned buffered state before Initialize")
-assertEqual(#presentationCalls, 3, "buffered toggle republishes presentation width")
-assertEqual(presentationCalls[3][1], 170, "pinned buffered presentation width")
-assertEqual(#autoHideCalls, 1, "buffered header toggle fires the auto-hide callback")
-assertEqual(autoHideCalls[1], false, "buffered header toggle reports the disabled state")
+assertEqual(Sidebar.SetCollapsed(false, true), true,
+    "a silent buffered change is still applied and reported as changed")
+assertEqual(#presentationCalls, 3, "a silent buffered change still republishes presentation width")
+assertEqual(presentationCalls[3][1], 170, "silently restored buffered presentation width")
+assertEqual(#collapsedCalls, 1, "a silent buffered change suppresses the callback")
+assertEqual(Sidebar.GetCollapsed(), false, "the silent change still updates the buffered state")
+
+assertEqual(Sidebar.ToggleCollapsed(), true,
+    "header toggle can collapse the buffered state before Initialize")
+assertEqual(#presentationCalls, 4, "buffered toggle republishes presentation width")
+assertEqual(presentationCalls[4][1], 40, "buffered toggle presentation width")
+assertEqual(#collapsedCalls, 2, "unlike Set, Toggle always fires the callback")
+assertEqual(collapsedCalls[2], true, "buffered toggle reports the new collapsed state")
 
 assertEqual(Sidebar.SetShown("yes"), false, "non-boolean shown state rejected")
 assertEqual(Sidebar.SetShown(false), true, "shown state can be buffered before Initialize")
@@ -342,13 +366,15 @@ assertEqual(rail.options.iconSize, 16, "icon size option")
 assertEqual(rail.options.accentColor, "BFI", "accent color option")
 assertEqual(rail.options.fallbackIcon, "Bag_Misc", "fallback icon option")
 
--- the buffered pre-Initialize state (shown=true, autoHide=false after the
--- toggle sequence above) is flushed onto the freshly created rail
+-- the buffered pre-Initialize state (shown=true, collapsed=true after the
+-- toggle sequence above) is flushed onto the freshly created rail, silently
+-- (the flush passes silent=true, and it also runs before SetOnCollapsedChanged
+-- wires the callback onto the rail, so it cannot leak into collapsedCalls)
 assertEqual(rail.shownCalls[#rail.shownCalls], true, "buffered shown state is flushed")
-assertEqual(rail.autoHideCalls[#rail.autoHideCalls], false, "buffered auto-hide state is flushed")
+assertEqual(rail.collapsedCalls[#rail.collapsedCalls], true, "buffered collapsed state is flushed")
 assertEqual(type(rail.treeList.onSelected), "function",
     "the Initialize callback is wired to the tree list")
-assertEqual(type(rail.onAutoHideChanged), "function",
+assertEqual(type(rail.onCollapsedChanged), "function",
     "a callback registered before Initialize is wired to the rail")
 assertEqual(type(rail.onPresentationWidthChanged), "function",
     "a presentation callback registered before Initialize is wired to the rail")
@@ -446,24 +472,34 @@ assertEqual(rail.treeList.toggleCalls[#rail.treeList.toggleCalls], "equipment",
 ---------------------------------------------------------------------
 -- post-Initialize: width/inset math pass-through
 ---------------------------------------------------------------------
-assertEqual(Sidebar.GetDesiredWidth(), 170, "expanded desired width pass-through")
-assertEqual(Sidebar.GetContentInset(), 178, "expanded content inset pass-through")
-assertEqual(Sidebar.SetAutoHide(true), true, "auto-hide can be enabled after Initialize")
+-- entering this block the rail is collapsed (the flushed buffered state);
+-- post-Initialize, Sidebar.SetCollapsed delegates straight to the rail,
+-- whose SetOnCollapsedChanged wiring is now live, so unsilenced changes fire
 assertEqual(Sidebar.GetDesiredWidth(), 40, "compact desired width pass-through")
 assertEqual(Sidebar.GetContentInset(), 48, "compact content inset pass-through")
-assertEqual(Sidebar.SetAutoHide(false), true, "auto-hide can be disabled after Initialize")
-assertEqual(Sidebar.GetDesiredWidth(), 170, "restored expanded desired width")
+assertEqual(Sidebar.SetCollapsed(false), true, "the sidebar can be expanded after Initialize")
+assertEqual(#collapsedCalls, 3, "the expand fires the callback")
+assertEqual(Sidebar.GetDesiredWidth(), 170, "expanded desired width pass-through")
+assertEqual(Sidebar.GetContentInset(), 178, "expanded content inset pass-through")
+assertEqual(Sidebar.SetCollapsed(true), true, "the sidebar can be collapsed after Initialize")
+assertEqual(#collapsedCalls, 4, "the collapse fires the callback")
+assertEqual(Sidebar.GetDesiredWidth(), 40, "restored compact desired width")
 
 ---------------------------------------------------------------------
--- post-Initialize: silent SetAutoHide vs. ToggleAutoHide firing the callback
+-- post-Initialize: silent SetCollapsed vs. ToggleCollapsed firing the callback
 ---------------------------------------------------------------------
-assertEqual(#autoHideCalls, 1, "no auto-hide callback fired yet from post-Initialize calls")
-assertEqual(Sidebar.SetAutoHide(true), true, "programmatic auto-hide after Initialize")
-assertEqual(#autoHideCalls, 1, "programmatic SetAutoHide after Initialize stays silent")
-assertEqual(Sidebar.ToggleAutoHide(), false, "ToggleAutoHide after Initialize flips state")
-assertEqual(#autoHideCalls, 2, "ToggleAutoHide after Initialize fires the callback")
-assertEqual(autoHideCalls[2], false, "ToggleAutoHide reports the new state")
-assertEqual(Sidebar.GetAutoHide(), false, "ToggleAutoHide's new state is queryable")
+assertEqual(#collapsedCalls, 4, "call count entering the silent-vs-toggle checks")
+assertEqual(Sidebar.SetCollapsed(true), false,
+    "reapplying the same state after Initialize reports no change")
+assertEqual(#collapsedCalls, 4, "an unchanged state after Initialize never fires the callback")
+assertEqual(Sidebar.SetCollapsed(false, true), true,
+    "a silent change after Initialize is still applied")
+assertEqual(#collapsedCalls, 4, "a silent change after Initialize suppresses the callback")
+assertEqual(Sidebar.GetCollapsed(), false, "the silent change still updates the rail's state")
+assertEqual(Sidebar.ToggleCollapsed(), true, "ToggleCollapsed after Initialize flips state")
+assertEqual(#collapsedCalls, 5, "ToggleCollapsed after Initialize always fires the callback")
+assertEqual(collapsedCalls[5], true, "ToggleCollapsed reports the new state")
+assertEqual(Sidebar.GetCollapsed(), true, "ToggleCollapsed's new state is queryable")
 
 ---------------------------------------------------------------------
 -- post-Initialize: SetOnSelected re-registration delegates directly

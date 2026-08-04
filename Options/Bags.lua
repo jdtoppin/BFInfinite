@@ -18,7 +18,7 @@ local function CreateBagsPanel()
 end
 
 local function CreateAppearancePane()
-    appearancePane = AF.CreateTitledPane(bagsPanel, L["Bags"], 350, 360)
+    appearancePane = AF.CreateTitledPane(bagsPanel, L["Bags"], 350, 380)
     AF.SetPoint(appearancePane, "TOPLEFT", bagsPanel, 15, -15)
     appearancePane:SetTips(
         L["Bags Performance Tip"]
@@ -75,8 +75,15 @@ local function CreateAppearancePane()
         B.Refresh()
     end)
 
+    local collapseSidebar = AF.CreateCheckButton(appearancePane, L["Collapse Sidebar"])
+    AF.SetPoint(collapseSidebar, "TOPLEFT", showItemLevel, "BOTTOMLEFT", 0, -18)
+    collapseSidebar:SetOnCheck(function(checked)
+        B.config.sidebarCollapsed = checked
+        B.Refresh()
+    end)
+
     local columns = AF.CreateSlider(appearancePane, L["Preferred Columns"], 150, 10, 16, 1, nil, true)
-    AF.SetPoint(columns, "TOPLEFT", showItemLevel, "BOTTOMLEFT", 0, -45)
+    AF.SetPoint(columns, "TOPLEFT", collapseSidebar, "BOTTOMLEFT", 0, -45)
     columns:SetAfterValueChanged(function(value)
         B.config.columns = value
         B.Refresh()
@@ -97,6 +104,7 @@ local function CreateAppearancePane()
         showBlizzardBagBar:SetChecked(config.showBlizzardBagBar)
         viewMode:SetSelectedValue(config.viewMode)
         showItemLevel:SetChecked(config.showItemLevel)
+        collapseSidebar:SetChecked(config.sidebarCollapsed)
         columns:SetValue(config.columns)
         spacing:SetValue(config.spacing)
 
@@ -104,6 +112,7 @@ local function CreateAppearancePane()
         showBlizzardBagBar:SetEnabled(config.enabled)
         viewMode:SetEnabled(config.enabled)
         showItemLevel:SetEnabled(config.enabled)
+        collapseSidebar:SetEnabled(config.enabled)
         columns:SetEnabled(config.enabled)
         spacing:SetEnabled(config.enabled)
     end

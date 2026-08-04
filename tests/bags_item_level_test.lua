@@ -82,8 +82,8 @@ assertEqual(defaultsBags.GetDefaults().showItemLevel, true,
     "item level default is enabled")
 assertEqual(defaultsBags.GetDefaults().viewMode, "combined",
     "combined bag view is the default")
-assertEqual(defaultsBags.GetDefaults().sidebarAutoHide, false,
-    "sidebar labels are pinned open by default")
+assertEqual(defaultsBags.GetDefaults().sidebarCollapsed, false,
+    "sidebar labels are expanded by default")
 
 local legacyCategoryProfile = {
     bags = {
@@ -136,23 +136,31 @@ local profile = {
 defaultsCallbacks.BFI_UpdateProfile(nil, profile)
 assertEqual(profile.bags.showItemLevel, true,
     "missing item level setting is normalized")
-assertEqual(profile.bags.sidebarAutoHide, false,
-    "missing sidebar auto-hide setting is normalized")
+assertEqual(profile.bags.sidebarCollapsed, false,
+    "missing sidebar collapsed setting is normalized")
 
-profile.bags.sidebarAutoHide = "yes"
+profile.bags.sidebarCollapsed = "yes"
 defaultsCallbacks.BFI_UpdateProfile(nil, profile)
-assertEqual(profile.bags.sidebarAutoHide, false,
-    "invalid sidebar auto-hide setting is normalized")
+assertEqual(profile.bags.sidebarCollapsed, false,
+    "invalid sidebar collapsed setting is normalized")
 
+profile.bags.sidebarCollapsed = true
+defaultsCallbacks.BFI_UpdateProfile(nil, profile)
+assertEqual(profile.bags.sidebarCollapsed, true,
+    "valid collapsed sidebar setting is preserved")
+
+profile.bags.sidebarCollapsed = false
+defaultsCallbacks.BFI_UpdateProfile(nil, profile)
+assertEqual(profile.bags.sidebarCollapsed, false,
+    "valid expanded sidebar setting is preserved")
+
+profile.bags.sidebarCollapsed = nil
 profile.bags.sidebarAutoHide = true
 defaultsCallbacks.BFI_UpdateProfile(nil, profile)
-assertEqual(profile.bags.sidebarAutoHide, true,
-    "valid enabled sidebar auto-hide setting is preserved")
-
-profile.bags.sidebarAutoHide = false
-defaultsCallbacks.BFI_UpdateProfile(nil, profile)
-assertEqual(profile.bags.sidebarAutoHide, false,
-    "valid pinned sidebar setting is preserved")
+assertEqual(profile.bags.sidebarCollapsed, true,
+    "legacy sidebarAutoHide true migrates to sidebarCollapsed true")
+assertEqual(profile.bags.sidebarAutoHide, nil,
+    "the legacy sidebarAutoHide key is consumed after migration")
 
 profile.bags.showItemLevel = "yes"
 defaultsCallbacks.BFI_UpdateProfile(nil, profile)

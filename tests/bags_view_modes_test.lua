@@ -50,10 +50,14 @@ local options = readFile("Options/Bags.lua")
 local style = readFile("Modules/Style/Style.lua")
 
 assertContains(defaults, 'viewMode = "combined"', "default bag view")
-assertContains(defaults, "sidebarAutoHide = false",
-    "sidebar labels are pinned open by default")
-assertContains(defaults, 'if type(config.sidebarAutoHide) ~= "boolean" then',
-    "saved auto-hide state is normalized")
+assertContains(defaults, "sidebarCollapsed = false",
+    "sidebar labels are expanded by default")
+assertContains(defaults, 'if type(config.sidebarCollapsed) ~= "boolean" then',
+    "saved collapsed state is normalized")
+assertContains(defaults, "config.sidebarCollapsed = config.sidebarAutoHide == true",
+    "the legacy auto-hide setting migrates true to collapsed true")
+assertContains(defaults, "config.sidebarAutoHide = nil",
+    "the legacy auto-hide key is consumed after migration")
 assertContains(defaults, "local validViewModes = {", "saved bag view allowlist")
 assertContains(defaults, "combined = true", "combined saved view")
 assertContains(defaults, "individual = true", "individual saved view")
@@ -72,25 +76,29 @@ assertNotContains(options, 'value = "categories"',
     "categories are selected from the sidebar")
 assertContains(options, "B.SetViewMode(value)",
     "view options use the validated bag API")
+assertContains(options, 'AF.CreateCheckButton(appearancePane, L["Collapse Sidebar"])',
+    "the sidebar collapse toggle is also exposed in options")
+assertContains(options, "B.config.sidebarCollapsed = checked",
+    "the options checkbox persists the collapsed state")
 assertContains(bags, 'AF.RegisterCallback("BFI_UpdateProfile", function()',
     "profile changes reset transient sidebar navigation")
 assertContains(bags, "activeCategoryKey = nil",
     "a new profile is not overridden by the previous category filter")
-assertContains(bags, "B.Sidebar.SetAutoHide(B.config.sidebarAutoHide)",
-    "profile and layout refreshes synchronize persisted auto-hide state")
-assertContains(bags, "B.Sidebar.SetOnAutoHideChanged(function(enabled)",
-    "the header toggle publishes user auto-hide changes")
-assertContains(bags, "B.config.sidebarAutoHide = enabled",
-    "user auto-hide changes persist in the active bag profile")
+assertContains(bags, "B.Sidebar.SetCollapsed(B.config.sidebarCollapsed, true)",
+    "profile and layout refreshes silently synchronize persisted collapsed state")
+assertContains(bags, "B.Sidebar.SetOnCollapsedChanged(function(collapsed)",
+    "the header toggle publishes user collapse changes")
+assertContains(bags, "B.config.sidebarCollapsed = collapsed",
+    "user collapse changes persist in the active bag profile")
 assertContains(bags,
-    "B.config.sidebarAutoHide = enabled\n        LayoutItems(true)",
+    "B.config.sidebarCollapsed = collapsed\n        LayoutItems(true)",
     "changing reserved sidebar width forces an item relayout")
 assertContains(bags,
-    "or B.config.sidebarAutoHide ~= snapshotSidebarAutoHide",
-    "auto-hide width participates in the layout snapshot")
+    "or B.config.sidebarCollapsed ~= snapshotSidebarCollapsed",
+    "collapsed width participates in the layout snapshot")
 assertContains(bags,
-    "snapshotSidebarAutoHide = B.config.sidebarAutoHide",
-    "captured layouts retain their auto-hide width state")
+    "snapshotSidebarCollapsed = B.config.sidebarCollapsed",
+    "captured layouts retain their collapsed width state")
 
 -- The rail is one permanent navigation model: main views first, then the
 -- independently selectable category tree. Combined never hides the rail.
@@ -183,16 +191,16 @@ assertContains(bags,
     "local function OnCombinedFrameHide()\n    B.Sidebar.SetShown(false)",
     "hiding the bag window must settle and hide the sidebar presentation")
 
--- Auto-hide is a header action beside the other bag controls. Its arrow
--- communicates the next action rather than using the old lock metaphor.
+-- Manual collapse is a header action beside the other bag controls. Its
+-- arrow communicates the next action rather than using the old lock metaphor.
 assertContains(bags,
     'local sidebarButton = AF.CreateButton(combinedFrame, nil, "gray", 24, 22)',
-    "auto-hide uses the same header button treatment as bag controls")
+    "the collapse toggle uses the same header button treatment as bag controls")
 assertContains(bags,
-    'self:SetTexture(AF.GetIcon(autoHide and "ArrowLeft1" or "ArrowRight1"))',
+    'self:SetTexture(AF.GetIcon(collapsed and "ArrowLeft1" or "ArrowRight1"))',
     "the header uses AF arrows that follow the action available from the current state")
 assertContains(bags,
-    'self:SetTooltip(autoHide and L["Keep Sidebar Open"] or L["Auto Hide Sidebar"])',
+    'self:SetTooltip(collapsed and L["Expand Sidebar"] or L["Collapse Sidebar"])',
     "the header toggle explains its current action")
 assertContains(bags,
     'searchBox:SetPoint("TOPLEFT", sidebarButton, "TOPRIGHT", 3, 0)',

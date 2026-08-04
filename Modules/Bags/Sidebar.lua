@@ -33,9 +33,9 @@ local rail
 -- Buffered until Initialize creates the rail; AF.CreateSidebarRail becomes
 -- the single source of truth for this state once it exists.
 local pendingShown = true
-local pendingAutoHide = false
+local pendingCollapsed = false
 local onSelected
-local onAutoHideChanged
+local onCollapsedChanged
 local onPresentationWidthChanged
 
 ---@param parent Frame
@@ -58,12 +58,12 @@ function Sidebar.Initialize(parent, callback)
     rail = AF.CreateSidebarRail(parent, OPTIONS)
     Sidebar.frame = rail
     rail:SetShown(pendingShown)
-    rail:SetAutoHide(pendingAutoHide)
+    rail:SetCollapsed(pendingCollapsed, true)
     if onSelected then
         rail.treeList:SetOnSelected(onSelected)
     end
-    if onAutoHideChanged then
-        rail:SetOnAutoHideChanged(onAutoHideChanged)
+    if onCollapsedChanged then
+        rail:SetOnCollapsedChanged(onCollapsedChanged)
     end
     if onPresentationWidthChanged then
         rail:SetOnPresentationWidthChanged(onPresentationWidthChanged)
@@ -110,35 +110,36 @@ function Sidebar.SetShown(nextShown)
     return true
 end
 
----@param nextAutoHide boolean
----@return boolean accepted
-function Sidebar.SetAutoHide(nextAutoHide)
-    if type(nextAutoHide) ~= "boolean" then return false end
-    if rail then return rail:SetAutoHide(nextAutoHide) end
-    if pendingAutoHide == nextAutoHide then return true end
-    pendingAutoHide = nextAutoHide
+---@param collapsed boolean
+---@param silent? boolean suppress onCollapsedChanged (presentation-width callback still fires)
+---@return boolean changed true if the collapsed state actually changed
+function Sidebar.SetCollapsed(collapsed, silent)
+    if type(collapsed) ~= "boolean" then return false end
+    if rail then return rail:SetCollapsed(collapsed, silent) end
+    if pendingCollapsed == collapsed then return false end
+    pendingCollapsed = collapsed
     if onPresentationWidthChanged then
         onPresentationWidthChanged(Sidebar.GetDesiredWidth(), Sidebar.GetDesiredWidth())
+    end
+    if not silent and onCollapsedChanged then
+        onCollapsedChanged(collapsed)
     end
     return true
 end
 
----@return boolean autoHideEnabled
-function Sidebar.GetAutoHide()
-    if rail then return rail:GetAutoHide() end
-    return pendingAutoHide
+---@return boolean collapsed
+function Sidebar.GetCollapsed()
+    if rail then return rail:GetCollapsed() end
+    return pendingCollapsed
 end
 
----@return boolean enabled
-function Sidebar.ToggleAutoHide()
-    if rail then return rail:ToggleAutoHide() end
+---@return boolean collapsed the new state
+function Sidebar.ToggleCollapsed()
+    if rail then return rail:ToggleCollapsed() end
 
-    local enabled = not pendingAutoHide
-    Sidebar.SetAutoHide(enabled)
-    if onAutoHideChanged then
-        onAutoHideChanged(enabled)
-    end
-    return enabled
+    local collapsed = not pendingCollapsed
+    Sidebar.SetCollapsed(collapsed)
+    return collapsed
 end
 
 ---@param callback? fun(id:any, entry:table)
@@ -152,13 +153,13 @@ function Sidebar.SetOnSelected(callback)
     return true
 end
 
----@param callback? fun(enabled:boolean)
+---@param callback? fun(collapsed:boolean)
 ---@return boolean accepted
-function Sidebar.SetOnAutoHideChanged(callback)
+function Sidebar.SetOnCollapsedChanged(callback)
     if callback ~= nil and type(callback) ~= "function" then return false end
-    onAutoHideChanged = callback
+    onCollapsedChanged = callback
     if rail then
-        return rail:SetOnAutoHideChanged(callback)
+        return rail:SetOnCollapsedChanged(callback)
     end
     return true
 end
@@ -180,7 +181,7 @@ end
 ---@return number width
 function Sidebar.GetDesiredWidth()
     if rail then return rail:GetDesiredWidth() end
-    return pendingAutoHide and COLLAPSED_WIDTH or DESIRED_WIDTH
+    return pendingCollapsed and COLLAPSED_WIDTH or DESIRED_WIDTH
 end
 
 ---@return number inset

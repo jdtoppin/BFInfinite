@@ -9,7 +9,7 @@ local defaults = {
     enabled = true,
     position = {"BOTTOMRIGHT", -35, 110},
     viewMode = "combined",
-    sidebarAutoHide = false,
+    sidebarCollapsed = false,
     showBagSlots = true,
     showBlizzardBagBar = false,
     showItemLevel = true,
@@ -30,9 +30,10 @@ local function NormalizeConfig(config)
         config.viewMode = defaults.viewMode
     end
     config.categories = nil
-    if type(config.sidebarAutoHide) ~= "boolean" then
-        config.sidebarAutoHide = defaults.sidebarAutoHide
+    if type(config.sidebarCollapsed) ~= "boolean" then
+        config.sidebarCollapsed = config.sidebarAutoHide == true
     end
+    config.sidebarAutoHide = nil
     if type(config.showBagSlots) ~= "boolean" then config.showBagSlots = defaults.showBagSlots end
     if type(config.showBlizzardBagBar) ~= "boolean" then
         config.showBlizzardBagBar = defaults.showBlizzardBagBar

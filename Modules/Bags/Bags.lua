@@ -178,7 +178,7 @@ local snapshotCategoryKey
 local snapshotShowBagSlots
 local snapshotColumns
 local snapshotSpacing
-local snapshotSidebarAutoHide
+local snapshotSidebarCollapsed
 local snapshotWidth
 local snapshotHeight
 local snapshotFooterHeight
@@ -799,7 +799,7 @@ local function LayoutControls(contentInset)
         bagSlotsButton:UnlockHighlight()
     end
 
-    local sidebarButton = combinedFrame.BFISidebarAutoHideButton
+    local sidebarButton = combinedFrame.BFISidebarCollapseButton
     sidebarButton:ClearAllPoints()
     sidebarButton:SetPoint(
         "TOPLEFT",
@@ -809,7 +809,7 @@ local function LayoutControls(contentInset)
         -27
     )
     sidebarButton:Show()
-    sidebarButton:UpdateAutoHideState()
+    sidebarButton:UpdateCollapsedState()
 
     if searchBox and searchBox:GetParent() == combinedFrame then
         searchBox:ClearAllPoints()
@@ -876,7 +876,7 @@ local function InvalidateLayoutSnapshot()
     snapshotShowBagSlots = nil
     snapshotColumns = nil
     snapshotSpacing = nil
-    snapshotSidebarAutoHide = nil
+    snapshotSidebarCollapsed = nil
     snapshotWidth = nil
     snapshotHeight = nil
     snapshotFooterHeight = nil
@@ -912,7 +912,7 @@ local function CaptureLayoutSnapshot(force)
         or B.config.showBagSlots ~= snapshotShowBagSlots
         or B.config.columns ~= snapshotColumns
         or B.config.spacing ~= snapshotSpacing
-        or B.config.sidebarAutoHide ~= snapshotSidebarAutoHide
+        or B.config.sidebarCollapsed ~= snapshotSidebarCollapsed
         or screenWidth ~= snapshotWidth
         or screenHeight ~= snapshotHeight
         or footerHeight ~= snapshotFooterHeight
@@ -952,7 +952,7 @@ local function CaptureLayoutSnapshot(force)
     snapshotShowBagSlots = B.config.showBagSlots
     snapshotColumns = B.config.columns
     snapshotSpacing = B.config.spacing
-    snapshotSidebarAutoHide = B.config.sidebarAutoHide
+    snapshotSidebarCollapsed = B.config.sidebarCollapsed
     snapshotWidth = screenWidth
     snapshotHeight = screenHeight
     snapshotFooterHeight = footerHeight
@@ -1462,7 +1462,7 @@ local function FinalizeLayoutEntries(spacing, contentInset, sectionCount)
 end
 
 local function LayoutItemsInternal(force)
-    B.Sidebar.SetAutoHide(B.config.sidebarAutoHide)
+    B.Sidebar.SetCollapsed(B.config.sidebarCollapsed, true)
     local changed, footerHeight, screenWidth, screenHeight = CaptureLayoutSnapshot(force)
     if not changed then return end
 
@@ -1855,30 +1855,30 @@ local function StyleCombinedFrame()
     end)
 
     local sidebarButton = AF.CreateButton(combinedFrame, nil, "gray", 24, 22)
-    combinedFrame.BFISidebarAutoHideButton = sidebarButton
+    combinedFrame.BFISidebarCollapseButton = sidebarButton
     sidebarButton:SetTexture(AF.GetIcon("ArrowRight1"), {16, 16}, {"CENTER", 0, 0})
     sidebarButton:SetTextureColor(HEADER_ICON_COLOR)
-    function sidebarButton:UpdateAutoHideState()
-        local autoHide = B.config.sidebarAutoHide
-        self:SetTexture(AF.GetIcon(autoHide and "ArrowLeft1" or "ArrowRight1"))
+    function sidebarButton:UpdateCollapsedState()
+        local collapsed = B.Sidebar.GetCollapsed()
+        self:SetTexture(AF.GetIcon(collapsed and "ArrowLeft1" or "ArrowRight1"))
         self:SetTextureColor(HEADER_ICON_COLOR)
-        self:SetTooltip(autoHide and L["Keep Sidebar Open"] or L["Auto Hide Sidebar"])
-        if autoHide then
+        self:SetTooltip(collapsed and L["Expand Sidebar"] or L["Collapse Sidebar"])
+        if collapsed then
             self:LockHighlight()
         else
             self:UnlockHighlight()
         end
     end
     sidebarButton:SetOnClick(function()
-        B.Sidebar.ToggleAutoHide()
+        B.Sidebar.ToggleCollapsed()
     end)
-    sidebarButton:UpdateAutoHideState()
+    sidebarButton:UpdateCollapsedState()
 
     CreateEmptyStateOverlays()
 
     CreateBagButtons()
 
-    B.Sidebar.SetAutoHide(B.config.sidebarAutoHide)
+    B.Sidebar.SetCollapsed(B.config.sidebarCollapsed, true)
     bagSidebar = B.Sidebar.Initialize(combinedFrame, function(_, entry)
         if entry.kind == "view" then
             activeCategoryKey = nil
@@ -1892,8 +1892,8 @@ local function StyleCombinedFrame()
     B.Sidebar.SetOnPresentationWidthChanged(function(width, reservedWidth)
         visualShell:SetSidebarPresentationWidth(width, reservedWidth)
     end)
-    B.Sidebar.SetOnAutoHideChanged(function(enabled)
-        B.config.sidebarAutoHide = enabled
+    B.Sidebar.SetOnCollapsedChanged(function(collapsed)
+        B.config.sidebarCollapsed = collapsed
         LayoutItems(true)
         AF.Fire("BFI_RefreshOptions", "bags")
     end)
@@ -2018,7 +2018,7 @@ local function DisableModule()
     -- twice before: cc5b545, baa7b82). Do not reintroduce SetScale().
 
     bagSlotsButton:Hide()
-    combinedFrame.BFISidebarAutoHideButton:Hide()
+    combinedFrame.BFISidebarCollapseButton:Hide()
     B.Sidebar.SetShown(false)
     for _, button in ipairs(bagButtons) do
         button:Hide()
@@ -2112,6 +2112,6 @@ AF.RegisterCallback("BFI_UpdateProfile", function()
     -- profile must open its own persisted Combined/Individual default.
     activeCategoryKey = nil
     if B.config then
-        B.Sidebar.SetAutoHide(B.config.sidebarAutoHide)
+        B.Sidebar.SetCollapsed(B.config.sidebarCollapsed, true)
     end
 end)
