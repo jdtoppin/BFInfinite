@@ -53,6 +53,11 @@ local controllerSource = extract(
     "function presentationController:ReleaseCombatBlock",
     "local function UpdateCooldownManager"
 )
+local activationSettlementSource = extract(
+    moduleSource,
+    "PresentationMethods.activationSettlementDelays =",
+    "methodFrame:Hide()"
+)
 
 local controller = loadHarness([[
 local state = {
@@ -73,6 +78,9 @@ function presentationController.buffVisibility:Update()
     state.buffUpdates = state.buffUpdates + 1
 end
 
+local PresentationMethods = {}
+]] .. activationSettlementSource .. [[
+
 local HighlightState = {}
 local CM = {
     config = {
@@ -82,6 +90,21 @@ local CM = {
 }
 local viewerStates = {{key = "essential"}}
 local QueuePresentationUpdate
+local presentationGeneration = 1
+local C_Timer = {}
+
+function C_Timer.After(delay, callback)
+    state.scheduled = state.scheduled or {}
+    state.scheduled[#state.scheduled + 1] = {
+        delay = delay,
+        callback = callback,
+    }
+end
+
+local function MarkPresentationDirty()
+    presentationGeneration = presentationGeneration + 1
+    QueuePresentationUpdate()
+end
 
 local function InitializeViewers()
     state.initializeCalls = state.initializeCalls + 1
@@ -105,6 +128,12 @@ local function ReconcileViewer()
     if state.redirtyDuringReconcile then
         state.redirtyDuringReconcile = nil
         QueuePresentationUpdate()
+    end
+    if state.poolReady
+        and state.lastStaticGeneration ~= presentationGeneration
+    then
+        state.lastStaticGeneration = presentationGeneration
+        state.staticApplications = (state.staticApplications or 0) + 1
     end
     return NextResult("reconcileFailures")
 end
@@ -130,6 +159,14 @@ local function Run(elapsed)
     end
 end
 
+local function RunScheduled(index)
+    local scheduled = state.scheduled and state.scheduled[index]
+    if not scheduled then
+        error("missing scheduled callback " .. tostring(index), 2)
+    end
+    scheduled.callback()
+end
+
 return {
     controller = presentationController,
     highlight = HighlightState,
@@ -137,6 +174,16 @@ return {
     queue = QueuePresentationUpdate,
     run = Run,
     state = state,
+    scheduledCount = function()
+        return state.scheduled and #state.scheduled or 0
+    end,
+    scheduledDelay = function(index)
+        return state.scheduled[index].delay
+    end,
+    runScheduled = RunScheduled,
+    getPresentationGeneration = function()
+        return presentationGeneration
+    end,
 }
 ]], "cooldown_manager_idle_controller")
 
@@ -235,6 +282,428 @@ assertEqual(controller.controller.disabledRestored, nil,
 controller.run()
 assertEqual(controller.state.reconcileCalls, combatCalls + 2,
     "re-enabled module reconciles")
+
+-- A disabled-to-enabled transition schedules a sparse, bounded ladder of
+-- one-shot verification passes. Each pass invalidates static presentation so
+-- a native pool populated several seconds after login is still styled, while
+-- successful work returns to dormancy between callbacks.
+local settlementDelays = {0, 0.2, 1, 3, 6}
+assertEqual(controller.controller:UpdateActivationSettlement(false), false,
+    "disabled activation invalidates without scheduling")
+local firstSettlement = controller.scheduledCount() + 1
+assertEqual(controller.controller:UpdateActivationSettlement(true), true,
+    "first enable arms settlement")
+assertEqual(
+    controller.scheduledCount(),
+    firstSettlement + #settlementDelays - 1,
+    "first enable schedules a finite settlement ladder"
+)
+for offset, delay in ipairs(settlementDelays) do
+    assertEqual(
+        controller.scheduledDelay(firstSettlement + offset - 1),
+        delay,
+        "activation settlement uses sparse delay " .. offset
+    )
+end
+assertEqual(controller.controller.scripts.OnUpdate, nil,
+    "scheduled settlement does not install a steady update")
+
+local activationCalls = controller.state.reconcileCalls
+local activationGeneration = controller.getPresentationGeneration()
+for offset = 0, #settlementDelays - 2 do
+    controller.runScheduled(firstSettlement + offset)
+    assertEqual(type(controller.controller.scripts.OnUpdate), "function",
+        "settlement callback wakes one finite reconciliation pass")
+    controller.run()
+    assertEqual(controller.controller.scripts.OnUpdate, nil,
+        "successful settlement pass immediately returns to dormancy")
+    assertEqual(controller.state.staticApplications, nil,
+        "empty native pools do not invent static work")
+end
+
+controller.state.poolReady = true
+controller.runScheduled(firstSettlement + #settlementDelays - 1)
+controller.run()
+assertEqual(
+    controller.state.reconcileCalls,
+    activationCalls + #settlementDelays,
+    "activation settlement verifies every sparse pass"
+)
+assertEqual(
+    controller.getPresentationGeneration(),
+    activationGeneration + #settlementDelays,
+    "every settlement callback invalidates static styling"
+)
+assertEqual(controller.state.staticApplications, 1,
+    "late native pool receives static styling on the final pass")
+assertEqual(controller.controller.scripts.OnUpdate, nil,
+    "activation settlement finishes dormant")
+
+local scheduledAfterFirstEnable = controller.scheduledCount()
+assertEqual(controller.controller:UpdateActivationSettlement(true), false,
+    "ordinary enabled update does not rearm settlement")
+assertEqual(controller.scheduledCount(), scheduledAfterFirstEnable,
+    "ordinary enabled update does not rearm settlement")
+local forcedSettlement = controller.scheduledCount() + 1
+assertEqual(controller.controller:UpdateActivationSettlement(true, true), true,
+    "forced world-entry settlement rearms while enabled")
+assertEqual(
+    controller.scheduledCount(),
+    forcedSettlement + #settlementDelays - 1,
+    "forced world-entry settlement remains finite"
+)
+assertEqual(controller.controller.scripts.OnUpdate, nil,
+    "forced settlement stays dormant until a callback fires")
+
+-- Timer cancellation is represented by a generation token: callbacks already
+-- owned by C_Timer cannot be removed, but callbacks from a disabled generation
+-- must become harmless even after a later enable arms a new ladder.
+assertEqual(controller.controller:UpdateActivationSettlement(false), false,
+    "disable invalidates forced settlement callbacks")
+local staleSettlement = controller.scheduledCount() + 1
+controller.controller:UpdateActivationSettlement(true)
+assertEqual(
+    controller.scheduledCount(),
+    staleSettlement + #settlementDelays - 1,
+    "later re-enable rearms a bounded settlement ladder"
+)
+controller.controller:UpdateActivationSettlement(false)
+local currentSettlement = controller.scheduledCount() + 1
+controller.controller:UpdateActivationSettlement(true)
+assertEqual(
+    controller.scheduledCount(),
+    currentSettlement + #settlementDelays - 1,
+    "new activation owns a distinct callback generation"
+)
+
+local callsBeforeStaleCallbacks = controller.state.reconcileCalls
+local generationBeforeStaleCallbacks = controller.getPresentationGeneration()
+for offset = 0, #settlementDelays - 1 do
+    controller.runScheduled(staleSettlement + offset)
+end
+assertEqual(controller.state.reconcileCalls, callsBeforeStaleCallbacks,
+    "stale callbacks do not reconcile after disable and re-enable")
+assertEqual(
+    controller.getPresentationGeneration(),
+    generationBeforeStaleCallbacks,
+    "stale callbacks do not invalidate static presentation"
+)
+assertEqual(controller.controller.scripts.OnUpdate, nil,
+    "stale callbacks cannot wake the presentation controller")
+
+controller.runScheduled(currentSettlement)
+assertEqual(type(controller.controller.scripts.OnUpdate), "function",
+    "current activation callback still wakes reconciliation")
+controller.run()
+assertEqual(controller.state.reconcileCalls, callsBeforeStaleCallbacks + 1,
+    "current activation callback reconciles once")
+assertEqual(controller.controller.scripts.OnUpdate, nil,
+    "current activation callback sleeps after success")
+
+controller.controller:UpdateActivationSettlement(false)
+local callsBeforeDisabledCallback = controller.state.reconcileCalls
+local generationBeforeDisabledCallback = controller.getPresentationGeneration()
+controller.runScheduled(currentSettlement + 1)
+assertEqual(controller.state.reconcileCalls, callsBeforeDisabledCallback,
+    "disable invalidates remaining current callbacks")
+assertEqual(
+    controller.getPresentationGeneration(),
+    generationBeforeDisabledCallback,
+    "disabled callback cannot invalidate static presentation"
+)
+assertEqual(controller.controller.scripts.OnUpdate, nil,
+    "disabled settlement remains dormant")
+
+---------------------------------------------------------------------
+-- Managed viewer-root integrity guard
+---------------------------------------------------------------------
+
+local rootGeometrySource = extract(
+    moduleSource,
+    "function PresentationMethods.ViewerAnchorMatches",
+    "function PresentationMethods.BindViewerGeometry"
+)
+local rootIntegritySource = extract(
+    moduleSource,
+    "function PresentationMethods.ProcessManagedRootIntegrity",
+    "-- UNIT_AURA is payload-opaque"
+)
+
+local rootIntegrity = loadHarness([[
+local SECRET = {}
+local state = {
+    dirtyMarks = 0,
+    editMode = false,
+    inCombat = false,
+    writes = 0,
+}
+local holder = {}
+local managedViewer = {
+    scale = 1,
+    points = {{"CENTER", holder, "CENTER", 0, 0}},
+}
+local unmanagedViewer = {
+    scale = 1,
+    points = {
+        {"TOPLEFT", {}, "TOPLEFT", 0, 0},
+        {"BOTTOMRIGHT", {}, "BOTTOMRIGHT", 0, 0},
+    },
+}
+local managedViewerState = {
+    definition = {managedRoot = true},
+    holder = holder,
+    viewer = managedViewer,
+    viewerGeometryApplied = true,
+    nativeViewerPoints = {{"BOTTOM", {}, "BOTTOM", 0, 100}},
+}
+local viewerStates = {
+    managedViewerState,
+    {
+        definition = {isBar = true},
+        holder = {},
+        viewer = unmanagedViewer,
+        viewerGeometryApplied = true,
+    },
+}
+local CM = {
+    config = {
+        enabled = true,
+        viewers = {},
+    },
+}
+local presentationController = {
+    rootIntegrity = {scripts = {}},
+}
+function presentationController.rootIntegrity:SetScript(script, handler)
+    self.scripts[script] = handler
+end
+
+local PresentationMethods = {}
+local function IsValueNonSecret(value)
+    return value ~= SECRET
+end
+local function IsSafeNumber(value)
+    return IsValueNonSecret(value) and type(value) == "number"
+end
+local function IsSafeString(value)
+    return IsValueNonSecret(value) and type(value) == "string"
+end
+local function NearlyEqual(left, right)
+    return math.abs(left - right) < 0.001
+end
+local function IsBlizzardEditModeActive()
+    return state.editMode
+end
+local function InCombatLockdown()
+    return state.inCombat
+end
+local function CanChangeGeometry()
+    return not state.inCombat
+end
+local function MarkPresentationDirty()
+    state.dirtyMarks = state.dirtyMarks + 1
+end
+local function FrameGetNumPoints(frame)
+    return #frame.points
+end
+local function FrameGetScale(frame)
+    return frame.scale
+end
+local function FrameGetPoint(frame, index)
+    return unpack(frame.points[index])
+end
+local function CapturePoints(frame)
+    local points = {}
+    for index, point in ipairs(frame.points) do
+        points[index] = {unpack(point)}
+    end
+    return points
+end
+local function FrameSetScale(frame, scale)
+    state.writes = state.writes + 1
+    frame.scale = scale
+end
+local function FrameClearAllPoints(frame)
+    state.writes = state.writes + 1
+    frame.points = {}
+end
+local function FrameSetPoint(frame, ...)
+    state.writes = state.writes + 1
+    frame.points = {{...}}
+end
+]] .. rootGeometrySource .. rootIntegritySource .. [[
+
+return {
+    controller = presentationController,
+    managedState = managedViewerState,
+    managedViewer = managedViewer,
+    module = CM,
+    unmanagedViewer = unmanagedViewer,
+    run = PresentationMethods.ProcessManagedRootIntegrity,
+    state = state,
+}
+]], "cooldown_manager_root_integrity")
+
+rootIntegrity.controller:UpdateRootIntegrity(true)
+assertEqual(
+    rootIntegrity.controller.rootIntegrity.scripts.OnUpdate,
+    rootIntegrity.run,
+    "enabled root integrity guard installs its worker"
+)
+rootIntegrity.run()
+assertEqual(rootIntegrity.state.writes, 0,
+    "stable managed root integrity pass performs no writes")
+assertEqual(rootIntegrity.state.dirtyMarks, 0,
+    "stable managed root integrity pass queues no presentation work")
+
+rootIntegrity.managedViewer.points = {
+    {"TOPLEFT", {}, "TOPLEFT", 0, 0},
+    {"BOTTOMRIGHT", {}, "BOTTOMRIGHT", 0, 0},
+}
+rootIntegrity.run()
+assertEqual(rootIntegrity.managedViewer.scale, 1,
+    "managed root integrity guard changed native root scale")
+assertEqual(#rootIntegrity.managedViewer.points, 1,
+    "managed root integrity guard repairs a multi-point rewrite")
+assertEqual(rootIntegrity.state.writes, 2,
+    "managed root repair performs only anchor writes")
+assertEqual(rootIntegrity.state.dirtyMarks, 1,
+    "managed root repair queues one finite presentation pass")
+assertEqual(#rootIntegrity.managedState.nativeViewerPoints, 2,
+    "managed root repair did not retain the latest native layout")
+assertTrue(rootIntegrity.managedState.nativeViewerPoints[1][2]
+    ~= rootIntegrity.managedState.holder,
+    "managed root repair captured BFI's holder as the native baseline")
+assertEqual(rootIntegritySource:find("ReconcileViewer", 1, true), nil,
+    "managed root guard references full reconciliation")
+assertEqual(rootIntegritySource:find("ApplyStaticPresentation", 1, true), nil,
+    "managed root guard references static presentation")
+rootIntegrity.run()
+assertEqual(rootIntegrity.state.writes, 2,
+    "stable guard pass after repair unexpectedly rewrites root geometry")
+assertEqual(rootIntegrity.state.dirtyMarks, 1,
+    "stable guard pass after repair unexpectedly queues duplicate work")
+
+local writesBeforeRestriction = rootIntegrity.state.writes
+rootIntegrity.managedViewer.points = {
+    {"TOPLEFT", {}, "TOPLEFT", 0, 0},
+    {"BOTTOMRIGHT", {}, "BOTTOMRIGHT", 0, 0},
+}
+rootIntegrity.state.editMode = nil
+rootIntegrity.run()
+assertEqual(rootIntegrity.state.writes, writesBeforeRestriction,
+    "unsafe edit-mode visibility did not fail closed")
+assertEqual(#rootIntegrity.managedViewer.points, 2,
+    "unsafe edit-mode visibility changed managed root geometry")
+rootIntegrity.state.editMode = true
+rootIntegrity.run()
+assertEqual(rootIntegrity.state.writes, writesBeforeRestriction,
+    "edit mode blocks managed root repair")
+assertEqual(rootIntegrity.state.dirtyMarks, 1,
+    "edit mode unexpectedly queues managed root presentation work")
+assertEqual(#rootIntegrity.managedViewer.points, 2,
+    "edit mode preserves Blizzard-managed root geometry")
+
+rootIntegrity.state.editMode = false
+rootIntegrity.state.inCombat = true
+rootIntegrity.run()
+assertEqual(rootIntegrity.state.writes, writesBeforeRestriction,
+    "combat blocks managed root repair")
+assertEqual(rootIntegrity.state.dirtyMarks, 1,
+    "combat unexpectedly queues managed root presentation work")
+assertEqual(#rootIntegrity.managedViewer.points, 2,
+    "combat leaves managed root geometry untouched")
+
+rootIntegrity.state.inCombat = false
+rootIntegrity.run()
+assertEqual(#rootIntegrity.managedViewer.points, 1,
+    "managed root repair resumes after restrictions lift")
+assertEqual(rootIntegrity.state.dirtyMarks, 2,
+    "post-restriction repair did not queue one presentation pass")
+assertEqual(rootIntegrity.unmanagedViewer.scale, 1,
+    "unmanaged tracked-bar root scale was changed")
+assertEqual(#rootIntegrity.unmanagedViewer.points, 2,
+    "unmanaged tracked-bar root anchors were changed")
+
+rootIntegrity.controller:UpdateRootIntegrity(false)
+assertEqual(rootIntegrity.controller.rootIntegrity.scripts.OnUpdate, nil,
+    "module disable removes managed root integrity worker")
+rootIntegrity.controller:UpdateRootIntegrity(true)
+rootIntegrity.module.config.enabled = false
+rootIntegrity.run()
+assertEqual(rootIntegrity.controller.rootIntegrity.scripts.OnUpdate, nil,
+    "disabled guard removes its own update script")
+
+---------------------------------------------------------------------
+-- Assisted highlight restoration hides the inactive region tree
+---------------------------------------------------------------------
+
+local restoreSource = extract(
+    moduleSource,
+    "local function RestoreItemPresentation",
+    "local function CanRestoreItemPresentation"
+)
+
+local restoredHighlight = loadHarness([[
+local state = {
+    alphaWrites = 0,
+}
+local item = {}
+local highlight = {
+    shown = true,
+}
+local HighlightState = {
+    assisted = {[item] = highlight},
+    proc = {},
+}
+function HighlightState.proc.SetShown(region, shown)
+    state.sharedShown = shown
+    region.shown = shown
+end
+function HighlightState.proc.Restore(target)
+    state.procRestoreTarget = target
+    return true
+end
+local PresentationMethods = {
+    RestoreFontStringPresentation = function() end,
+}
+local function GetSafeField(owner, key)
+    return owner[key]
+end
+local function GetCountText()
+    return nil
+end
+local function HideItemHotkey(target)
+    state.hotkeyTarget = target
+end
+local function FrameSetAlpha()
+    state.alphaWrites = state.alphaWrites + 1
+end
+]] .. restoreSource .. [[
+
+local itemState = {
+    presentationGeneration = 1,
+}
+state.restored = RestoreItemPresentation(item, {}, itemState)
+state.highlightShown = highlight.shown
+state.presentationGeneration = itemState.presentationGeneration
+return state
+]], "cooldown_manager_highlight_restore")
+
+assertEqual(restoredHighlight.restored, true,
+    "item presentation restore completes")
+assertEqual(restoredHighlight.sharedShown, false,
+    "restore routes assisted highlight through shared visibility lifecycle")
+assertEqual(restoredHighlight.highlightShown, false,
+    "restored assisted highlight tree is hidden")
+assertEqual(restoredHighlight.alphaWrites, 0,
+    "restore does not leave an alpha-muted highlight tree shown")
+assertTrue(restoredHighlight.procRestoreTarget ~= nil,
+    "restore retains native proc restoration")
+assertTrue(restoredHighlight.hotkeyTarget ~= nil,
+    "restore retains hotkey cleanup")
+assertEqual(restoredHighlight.presentationGeneration, nil,
+    "restore clears presentation generation")
 
 ---------------------------------------------------------------------
 -- Assisted fallback: scoped 5 Hz lifecycle and change-only work
@@ -604,6 +1073,7 @@ local state = {
 }
 local viewerState = {
     definition = {previewCount = 1},
+    viewer = {shown = false},
 }
 local missingItem = {}
 local itemStates = {
@@ -622,10 +1092,35 @@ local function GetOrderedItems()
 end
 local function RestoreItem()
     state.restoreCalls = (state.restoreCalls or 0) + 1
+    state.restoreOrder = state.restoreOrder or {}
+    state.restoreOrder[#state.restoreOrder + 1] = "item"
     return state.restoreResult
 end
+local PresentationMethods = {
+    RestoreViewerGeometry = function()
+        state.rootRestoreCalls = (state.rootRestoreCalls or 0) + 1
+        state.restoreOrder = state.restoreOrder or {}
+        state.restoreOrder[#state.restoreOrder + 1] = "root"
+        return true
+    end,
+    GetPixelSnappedScale = function(_, _, scale)
+        return scale
+    end,
+    GetItemLayoutScale = function()
+        return 1
+    end,
+    BindViewerGeometry = function()
+        return true, false
+    end,
+}
 local function IsBlizzardEditModeActive()
     return state.editMode
+end
+local function FrameIsShown(frame)
+    return frame.shown
+end
+local function IsSafeBoolean(value)
+    return type(value) == "boolean"
 end
 local function BuildLayout()
     return {height = 1, scale = 1}
@@ -643,12 +1138,27 @@ return {
 reconcile.state.editMode = true
 assertEqual(reconcile.reconcile(reconcile.viewerState, {}), false,
     "edit-mode missing restore failure remains incomplete")
+assertEqual(reconcile.state.rootRestoreCalls, nil,
+    "viewer root is not restored before child restoration succeeds")
 reconcile.state.editMode = false
 assertEqual(reconcile.reconcile(reconcile.viewerState, {}), false,
     "normal missing restore failure remains incomplete")
 reconcile.state.restoreResult = true
 assertEqual(reconcile.reconcile(reconcile.viewerState, {}), true,
     "successful missing restore completes reconciliation")
+reconcile.viewerState.viewer.shown = true
+assertEqual(reconcile.reconcile(reconcile.viewerState, {}), false,
+    "shown empty native viewer remains construction-incomplete")
+reconcile.viewerState.viewer.shown = false
+reconcile.state.editMode = nil
+assertEqual(reconcile.reconcile(reconcile.viewerState, {}), false,
+    "unsafe edit-mode visibility does not fail reconciliation closed")
+reconcile.state.editMode = true
+reconcile.state.restoreOrder = {}
+assertEqual(reconcile.reconcile(reconcile.viewerState, {}), true,
+    "successful edit-mode restoration completes reconciliation")
+assertEqual(table.concat(reconcile.state.restoreOrder, ","), "item,root",
+    "edit-mode restoration restores child geometry before viewer root geometry")
 
 ---------------------------------------------------------------------
 -- Structural wake coverage and absence of broad permanent polling
@@ -665,11 +1175,35 @@ assertContains(moduleSource,
     'RegisterUnitEvent("UNIT_AURA", "player", "target")',
     "aura visibility wake")
 assertContains(moduleSource,
-    'RegisterUnitEvent("UNIT_TARGET", "player")',
-    "12.0.7 target wake")
-assertContains(moduleSource,
     'RegisterEvent("PLAYER_TARGET_CHANGED")',
     "12.1 target wake")
+assertContains(moduleSource,
+    "UPDATE_SHAPESHIFT_FORM = true",
+    "12.1 active-form watch wake")
+assertContains(moduleSource,
+    "UPDATE_SHAPESHIFT_FORMS = true",
+    "12.1 form-list watch wake")
+assertContains(moduleSource,
+    "function PresentationMethods.BindViewerGeometry",
+    "native viewer root landing geometry")
+assertContains(moduleSource,
+    "presentationController:UpdateActivationSettlement(",
+    "module enable arms bounded native construction settlement")
+assertContains(moduleSource,
+    "presentationController:UpdateActivationSettlement(true, true)",
+    "world entry force-rearms bounded native construction settlement")
+assertContains(moduleSource,
+    "C_Timer.After(delay, function()",
+    "activation settlement uses finite one-shot callbacks")
+assertEqual(moduleSource:find("activationPassesRemaining", 1, true), nil,
+    "dense frame-driven activation passes removed")
+assertContains(moduleSource,
+    'FrameSetPoint(item, "CENTER", state.holder, "CENTER"',
+    "exact item layout is relative to the persistent BFI holder")
+assertEqual(moduleSource:find("targetObserver", 1, true), nil,
+    "opaque aura observer transaction removed")
+assertEqual(moduleSource:find("CurtainTargetTransition", 1, true), nil,
+    "form and target wakes do not hide viewers")
 assertContains(moduleSource,
     "PLAYER_REGEN_ENABLED = true",
     "combat-denied regeneration wake")
@@ -698,6 +1232,9 @@ assertEqual(
 assertContains(moduleSource,
     '"CooldownViewerSettings.OnDataChanged"',
     "viewer assignment wake")
+assertContains(moduleSource,
+    "PresentationMethods.OnCooldownDataChanged",
+    "viewer assignment rebuild wake")
 assertContains(moduleSource,
     '"AssistedCombatManager.OnAssistedHighlightSpellChange"',
     "assisted recommendation wake")

@@ -72,7 +72,10 @@ local function CreateModulePanes(parent)
     local skinPane = CreateOptionRow(parent, 30)
     panes[#panes + 1] = skinPane
 
-    local skin = AF.CreateCheckButton(skinPane, L["Skin Cooldown Manager Icons"])
+    local skin = AF.CreateCheckButton(
+        skinPane,
+        L["Skin Cooldown Manager Icons and Tracked Bars"]
+    )
     AF.SetPoint(skin, "LEFT", 15, 0)
     skin:SetOnCheck(function(checked)
         CM.config.skin = checked
@@ -301,8 +304,9 @@ local viewerInfo = {
         },
     },
     buffBar = {
-        label = L["Buff Bars"],
+        label = L["Tracked Bars"],
         hasBarSettings = true,
+        scaleLabel = L["Bar Scale"],
         textStyles = {
             {"barText", L["Bar Text"]},
             {"durationText", L["Duration Text"], true},
@@ -392,7 +396,16 @@ local function CreateViewerPanes(parent, viewerKey)
         end)
     end
 
-    local scale = AF.CreateSlider(scalePane, L["Icon Scale"], CONTROL_WIDTH, 0.5, 2, 0.05, true, true)
+    local scale = AF.CreateSlider(
+        scalePane,
+        info.scaleLabel or L["Icon Scale"],
+        CONTROL_WIDTH,
+        0.5,
+        2,
+        0.05,
+        true,
+        true
+    )
     scaleWidgets[#scaleWidgets + 1] = scale
     if iconLimit then
         AF.SetPoint(scale, "TOPLEFT", iconLimit, COLUMN_OFFSET, 0)
