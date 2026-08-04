@@ -3,8 +3,11 @@
 -- AbstractFramework/Widgets/TreeList.lua and is covered by
 -- AbstractFramework/tests/tree_list_test.lua. This file only covers what
 -- Sidebar.lua itself is responsible for: the B.Sidebar.* API surface,
--- delegating to AF.CreateSidebarRail/rail.treeList, the ICON_BY_ID default
--- mapping, and pre-Initialize buffering.
+-- delegating to AF.CreateSidebarRail/rail.treeList, and pre-Initialize
+-- buffering. Every model node BuildSidebarModel produces already carries an
+-- explicit icon (see Modules/Bags/Bags.lua), and AF.CreateSidebarRail's
+-- fallbackIcon option covers any iconless node, so Sidebar.lua has no
+-- icon-by-id default logic of its own to test.
 
 local function readFile(path)
     local file, openError = io.open(path, "r")
@@ -77,22 +80,9 @@ assertContains(
     "the sidebar must delegate widget construction to the shared AF rail"
 )
 
-for _, icon in ipairs({
-    "Bag_All",
-    "Bag_Equipment",
-    "Bag_Consumables",
-    "Bag_TradeGoods",
-    "Bag_Recipes",
-    "Bag_Quest",
-    "Bag_Misc",
-    "Bag_Housing",
-    "Bag_Empty",
-    "Bag_Backpack",
-    "Bag_Reagent",
-    "Bag_IndividualBags",
-}) do
-    assertContains(source, icon, "sidebar icon-by-id allowlist")
-end
+assertNotContains(source, "ICON_BY_ID",
+    "sidebar has no icon-by-id default map; nodes carry explicit icons and "
+        .. "the AF widget's fallbackIcon covers any iconless node")
 
 for _, machineryRemnant in ipairs({
     'CreateFrame("ScrollFrame"',
@@ -385,37 +375,42 @@ assertEqual(frameLevelCalls[1][2], 30, "frame level matches the rail's stacking 
 assertEqual(frameLevelCalls[1][3], otherParent, "frame level is relative to the new parent")
 
 ---------------------------------------------------------------------
--- post-Initialize: model pass-through and the ICON_BY_ID default map
+-- post-Initialize: model pass-through
 ---------------------------------------------------------------------
-assertEqual(Sidebar.SetModel({
+-- fixtures mirror production ids/icons: BuildSidebarModel (Modules/Bags/Bags.lua)
+-- always prefixes ids (view:combined, category:parent:equipment, ...) and
+-- always sets an explicit icon, so Sidebar.lua has nothing to fill in.
+local suppliedModel = {
     {kind = "heading", label = "Views"},
-    {id = "combined", label = "Combined View"},
-    {id = "custom", label = "Custom", icon = "Bag_Housing"},
+    {id = "view:combined", label = "Combined View", icon = "Bag_All"},
+    {id = "view:individual", label = "Individual Bags View", icon = "Bag_IndividualBags"},
     {kind = "heading", label = "Categories"},
     {
-        id = "equipment",
+        id = "category:equipment",
         label = "Equipment",
+        icon = "Bag_Equipment",
         expanded = true,
         children = {
-            {id = "misc", label = "Misc Children"},
-            {id = "equipment:chest", label = "Chest", icon = "Custom_Icon"},
+            {id = "category:equipment:misc", label = "Misc Children", icon = "Bag_Misc"},
+            {id = "category:equipment:chest", label = "Chest", icon = "Custom_Icon"},
         },
     },
-}), true, "hierarchical model with icon-by-id defaults accepted")
+}
+assertEqual(Sidebar.SetModel(suppliedModel), true, "hierarchical model accepted")
 
 assertEqual(#rail.treeList.modelCalls, 1, "SetModel delegates to the tree list exactly once")
 local appliedModel = rail.treeList.modelCalls[1]
+assertEqual(appliedModel, suppliedModel,
+    "SetModel passes the caller's model straight through, unmodified")
 assertEqual(appliedModel[1].kind, "heading", "headings pass through unchanged")
 assertEqual(appliedModel[1].label, "Views", "heading label pass-through")
-assertEqual(appliedModel[2].icon, "Bag_All", "icon-by-id default fills a missing icon (combined)")
-assertEqual(appliedModel[3].icon, "Bag_Housing", "an explicit icon is never overwritten")
+assertEqual(appliedModel[2].icon, "Bag_All", "explicit icon pass-through (combined)")
 local equipment = appliedModel[5]
-assertEqual(equipment.id, "equipment", "nested parent entry pass-through")
-assertEqual(equipment.icon, "Bag_Equipment", "icon-by-id default reaches top-level entries")
+assertEqual(equipment.id, "category:equipment", "nested parent entry pass-through")
+assertEqual(equipment.icon, "Bag_Equipment", "explicit icon pass-through (top-level entry)")
 assertEqual(equipment.expanded, true, "non-icon fields pass through untouched")
-assertEqual(equipment.children[1].icon, "Bag_Misc", "icon-by-id default recurses into children")
-assertEqual(equipment.children[2].icon, "Custom_Icon",
-    "an explicit nested icon is never overwritten")
+assertEqual(equipment.children[1].icon, "Bag_Misc", "explicit icon pass-through (nested child)")
+assertEqual(equipment.children[2].icon, "Custom_Icon", "explicit nested icon pass-through")
 
 assertEqual(Sidebar.SetModel("not a table"), false,
     "non-table models are rejected after Initialize too")

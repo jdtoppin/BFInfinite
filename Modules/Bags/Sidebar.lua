@@ -6,8 +6,6 @@ local B = BFI.modules.Bags
 local AF = _G.AbstractFramework
 
 local type = type
-local pairs = pairs
-local ipairs = ipairs
 
 local DESIRED_WIDTH = 170
 local COLLAPSED_WIDTH = 40
@@ -17,26 +15,6 @@ local HEADING_HEIGHT = 22
 local ICON_SIZE = 16
 local ACCENT_COLOR = "BFI"
 local FALLBACK_ICON = "Bag_Misc"
-
--- AF's shared tree list has no built-in icon-by-id mapping: it only ever
--- renders entry.icon. This allowlist is BFI's own product mapping, applied
--- before every model handoff to AF.CreateSidebarRail.
-local ICON_BY_ID = {
-    all = "Bag_All",
-    combined = "Bag_All",
-    equipment = "Bag_Equipment",
-    consumables = "Bag_Consumables",
-    tradeGoods = "Bag_TradeGoods",
-    tradegoods = "Bag_TradeGoods",
-    recipes = "Bag_Recipes",
-    quest = "Bag_Quest",
-    misc = "Bag_Misc",
-    housing = "Bag_Housing",
-    empty = "Bag_Empty",
-    backpack = "Bag_Backpack",
-    reagent = "Bag_Reagent",
-    individual = "Bag_IndividualBags",
-}
 
 local OPTIONS = {
     expandedWidth = DESIRED_WIDTH,
@@ -59,29 +37,6 @@ local pendingAutoHide = false
 local onSelected
 local onAutoHideChanged
 local onPresentationWidthChanged
-
--- Shallow-copies every id entry (recursively, headings pass through
--- untouched) to fill in a missing icon from ICON_BY_ID without mutating the
--- caller's model table.
-local function ApplyIconDefaults(entries)
-    local output = {}
-    for index, source in ipairs(entries) do
-        if type(source) == "table" and source.kind ~= "heading" and source.id ~= nil then
-            local entry = {}
-            for key, value in pairs(source) do
-                entry[key] = value
-            end
-            entry.icon = entry.icon or ICON_BY_ID[entry.id]
-            if type(source.children) == "table" then
-                entry.children = ApplyIconDefaults(source.children)
-            end
-            output[index] = entry
-        else
-            output[index] = source
-        end
-    end
-    return output
-end
 
 ---@param parent Frame
 ---@param callback? fun(id:any, entry:table)
@@ -121,7 +76,7 @@ end
 function Sidebar.SetModel(nextModel)
     if type(nextModel) ~= "table" then return false end
     if not rail then return false end
-    return rail.treeList:SetModel(ApplyIconDefaults(nextModel))
+    return rail.treeList:SetModel(nextModel)
 end
 
 ---@param id any
