@@ -72,6 +72,39 @@ local equipmentSlotOrder = {
     INVTYPE_PROFESSION_GEAR = 21,
     INVTYPE_BAG = 22,
 }
+-- categoryIconByEquipLoc: childIcon lookups for equipment slots, keyed by
+-- the post-alias INVTYPE (see equipmentSlotAliases above); aliased INVTYPEs
+-- share their target slot's icon since GetCategory substitutes the alias
+-- before building childKey. Nested as a nonnumeric field on the existing
+-- equipmentSlotOrder local, rather than declared as its own top-level
+-- local, because Modules/Bags/Bags.lua's main chunk is already at Lua
+-- 5.1's 200-local ceiling (verified by scripts/lint.sh's byte-compile
+-- step) with no free slot to spare; equipmentSlotOrder's own INVTYPE_*
+-- keys never collide with this "categoryIconByEquipLoc" string key.
+equipmentSlotOrder.categoryIconByEquipLoc = {
+    INVTYPE_HEAD = "Bag_Slot_Head",
+    INVTYPE_NECK = "Bag_Slot_Neck",
+    INVTYPE_SHOULDER = "Bag_Slot_Shoulder",
+    INVTYPE_CLOAK = "Bag_Slot_Back",
+    INVTYPE_CHEST = "Bag_Slot_Chest",
+    INVTYPE_WRIST = "Bag_Slot_Wrist",
+    INVTYPE_HAND = "Bag_Slot_Hands",
+    INVTYPE_WAIST = "Bag_Slot_Waist",
+    INVTYPE_LEGS = "Bag_Slot_Legs",
+    INVTYPE_FEET = "Bag_Slot_Feet",
+    INVTYPE_FINGER = "Bag_Slot_Finger",
+    INVTYPE_TRINKET = "Bag_Slot_Trinket",
+    INVTYPE_WEAPONMAINHAND = "Bag_Slot_MainHand",
+    INVTYPE_WEAPONOFFHAND = "Bag_Slot_OffHand",
+    INVTYPE_WEAPON = "Bag_Slot_OneHand",
+    INVTYPE_2HWEAPON = "Bag_Slot_TwoHand",
+    INVTYPE_RANGED = "Bag_Slot_Ranged",
+    INVTYPE_BODY = "Bag_Slot_Shirt",
+    INVTYPE_TABARD = "Bag_Slot_Tabard",
+    INVTYPE_PROFESSION_TOOL = "Bag_Slot_ProfessionTool",
+    INVTYPE_PROFESSION_GEAR = "Bag_Slot_ProfessionGear",
+    INVTYPE_BAG = "Bag_Slot_Bag",
+}
 local categoryOrderByClass = {
     [ITEM_CLASS.Consumable] = 200,
     [ITEM_CLASS.Gem] = 300,
@@ -98,6 +131,30 @@ local categoryIconByClass = {
 if ITEM_CLASS.Housing then
     categoryOrderByClass[ITEM_CLASS.Housing] = 600
     categoryIconByClass[ITEM_CLASS.Housing] = "Bag_Housing"
+end
+
+-- categoryIconBySubclass: childIcon lookups for consumable subclasses. See
+-- the API evidence comment below for the pinned artifacts: Retail
+-- 12.0.7.68887 and PTR 12.1.0.68914 both list the same 13
+-- Enum.ItemConsumableSubclass members, including the five used here
+-- (Potion = 1, Elixir = 2, Flasksphials = 3, Fooddrink = 5, Bandage = 7).
+-- Nested as a nonnumeric field on the existing categoryOrderByClass local
+-- (same 200-local-ceiling reason as equipmentSlotOrder.categoryIconByEquipLoc
+-- above); categoryOrderByClass's own classID keys never collide with this
+-- "categoryIconBySubclass" string key. Guarded like the ITEM_CLASS.Housing
+-- block above: Enum.ItemConsumableSubclass itself is absent on some minimal
+-- test/client environments even though every member used here is present on
+-- both pinned Retail artifacts.
+if _G.Enum.ItemConsumableSubclass then
+    categoryOrderByClass.categoryIconBySubclass = {
+        [ITEM_CLASS.Consumable] = {
+            [_G.Enum.ItemConsumableSubclass.Potion] = "Bag_Potions",
+            [_G.Enum.ItemConsumableSubclass.Flasksphials] = "Bag_Flasks",
+            [_G.Enum.ItemConsumableSubclass.Fooddrink] = "Bag_Food",
+            [_G.Enum.ItemConsumableSubclass.Bandage] = "Bag_Bandages",
+            [_G.Enum.ItemConsumableSubclass.Elixir] = "Bag_Elixirs",
+        },
+    }
 end
 
 local inventoryConstants = _G.Constants.InventoryConstants
@@ -195,6 +252,18 @@ local VIEW_MODE_INDIVIDUAL = "individual"
 -- ContainerFrame.lua waits on ContinuableContainer before UpdateItems.
 -- ItemButtonTemplate.xml gives stack counts NumberFontNormal, while
 -- ItemButtonTemplate.lua applies HIGHLIGHT_FONT_COLOR; item levels mirror both.
+-- Child-category icon evidence: the same two pinned commits'
+-- Blizzard_APIDocumentationGenerated/ItemConstantsDocumentation.lua
+-- enumerate Enum.ItemConsumableSubclass identically on both 12.0.7.68887
+-- (4383ced30106d51b27e3e86d1987f1552f0d259d) and 12.1.0.68914
+-- (d3915c78aba77a7a9be76acbfa35c674bbb6abe9): Generic = 0, Potion = 1,
+-- Elixir = 2, Flasksphials = 3, Scroll = 4, Fooddrink = 5,
+-- Itemenhancement = 6, Bandage = 7, Other = 8, VantusRune = 9,
+-- UtilityCurio = 10, CombatCurio = 11, Relic = 12. categoryIconBySubclass
+-- below uses Potion, Flasksphials, Fooddrink, Bandage, and Elixir; the
+-- remaining subclasses (including Other) fall back to the parent
+-- Bag_Consumables icon via the child.icon or group.icon chain in
+-- BuildSidebarModel, since no distinct AF glyph exists for them.
 
 local function IsEnabled()
     return moduleEnabled and B.config and B.config.enabled
@@ -276,7 +345,7 @@ end
 local function GetCategory(itemID)
     local cached = categoryCache[itemID]
     if cached then
-        return cached[1], cached[2], cached[3], cached[4], cached[5], cached[6], cached[7]
+        return cached[1], cached[2], cached[3], cached[4], cached[5], cached[6], cached[7], cached[8]
     end
 
     local _, itemType, itemSubType, itemEquipLoc, _, classID, subclassID =
@@ -293,6 +362,7 @@ local function GetCategory(itemID)
     local childKey
     local childLabel
     local childOrder
+    local childIcon
 
     -- Retail 12.0.7 uses this non-empty sentinel for non-equippable items.
     if itemEquipLoc
@@ -306,6 +376,7 @@ local function GetCategory(itemID)
         childKey = "equipment:" .. itemEquipLoc
         childLabel = _G[itemEquipLoc] or itemEquipLoc
         childOrder = equipmentSlotOrder[itemEquipLoc] or 99
+        childIcon = equipmentSlotOrder.categoryIconByEquipLoc[itemEquipLoc]
     else
         parentKey = classID == ITEM_CLASS.Questitem
             and "parent:quest"
@@ -327,6 +398,9 @@ local function GetCategory(itemID)
             childLabel = L["Other"]
         end
         childOrder = subclassID or 0
+        local subclassIcons = categoryOrderByClass.categoryIconBySubclass
+            and categoryOrderByClass.categoryIconBySubclass[classID]
+        childIcon = subclassIcons and subclassIcons[subclassID] or nil
     end
 
     cached = {
@@ -337,9 +411,10 @@ local function GetCategory(itemID)
         childKey,
         childLabel,
         childOrder,
+        childIcon,
     }
     categoryCache[itemID] = cached
-    return parentKey, parentLabel, parentOrder, parentIcon, childKey, childLabel, childOrder
+    return parentKey, parentLabel, parentOrder, parentIcon, childKey, childLabel, childOrder, childIcon
 end
 
 local function ResetCategoryGroups()
@@ -385,7 +460,7 @@ end
 
 local function AddItemToCategoryGroups(itemButton, itemID)
     local parentKey, parentLabel, parentOrder, parentIcon,
-        childKey, childLabel, childOrder = GetCategory(itemID)
+        childKey, childLabel, childOrder, childIcon = GetCategory(itemID)
     local parent = AcquireCategoryGroup(
         parentKey,
         parentLabel,
@@ -398,7 +473,7 @@ local function AddItemToCategoryGroups(itemButton, itemID)
         childKey,
         childLabel,
         childOrder,
-        nil,
+        childIcon,
         parent
     )
     child.items[#child.items + 1] = itemButton
@@ -1170,6 +1245,7 @@ local function BuildSidebarModel()
                     kind = "category",
                     categoryKey = child.key,
                     label = child.label,
+                    icon = child.icon or group.icon,
                 }
             end
         end

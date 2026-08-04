@@ -308,4 +308,118 @@ assertNotContains(bags, 'SetScript("OnUpdate"',
 assertNotContains(sidebar, 'SetScript("OnUpdate"',
     "sidebar presentation remains event-driven")
 
+-- Child-category rows in the collapsed rail are icon-only, so every
+-- consumable subclass and equipment slot BFI renders needs a distinct
+-- childIcon. Both mapping tables are nested as nonnumeric fields on an
+-- existing top-level local (rather than declared as new top-level locals)
+-- because Bags.lua's main chunk sits at Lua 5.1's 200-local ceiling.
+assertContains(bags,
+    "categoryOrderByClass.categoryIconBySubclass = {",
+    "consumable subclass icons are keyed by classID then subclassID")
+assertContains(bags,
+    "[_G.Enum.ItemConsumableSubclass.Potion] = \"Bag_Potions\"",
+    "potions use their own icon")
+assertContains(bags,
+    "[_G.Enum.ItemConsumableSubclass.Flasksphials] = \"Bag_Flasks\"",
+    "flasks and phials use their own icon")
+assertContains(bags,
+    "[_G.Enum.ItemConsumableSubclass.Fooddrink] = \"Bag_Food\"",
+    "food and drink use their own icon")
+assertContains(bags,
+    "[_G.Enum.ItemConsumableSubclass.Bandage] = \"Bag_Bandages\"",
+    "bandages use their own icon")
+assertContains(bags,
+    "[_G.Enum.ItemConsumableSubclass.Elixir] = \"Bag_Elixirs\"",
+    "elixirs use their own icon")
+assertContains(bags,
+    "equipmentSlotOrder.categoryIconByEquipLoc = {",
+    "equipment slot icons are keyed by post-alias INVTYPE")
+for _, equipSlotIcon in ipairs({
+    'INVTYPE_HEAD = "Bag_Slot_Head"',
+    'INVTYPE_NECK = "Bag_Slot_Neck"',
+    'INVTYPE_SHOULDER = "Bag_Slot_Shoulder"',
+    'INVTYPE_CLOAK = "Bag_Slot_Back"',
+    'INVTYPE_CHEST = "Bag_Slot_Chest"',
+    'INVTYPE_WRIST = "Bag_Slot_Wrist"',
+    'INVTYPE_HAND = "Bag_Slot_Hands"',
+    'INVTYPE_WAIST = "Bag_Slot_Waist"',
+    'INVTYPE_LEGS = "Bag_Slot_Legs"',
+    'INVTYPE_FEET = "Bag_Slot_Feet"',
+    'INVTYPE_FINGER = "Bag_Slot_Finger"',
+    'INVTYPE_TRINKET = "Bag_Slot_Trinket"',
+    'INVTYPE_WEAPONMAINHAND = "Bag_Slot_MainHand"',
+    'INVTYPE_WEAPONOFFHAND = "Bag_Slot_OffHand"',
+    'INVTYPE_WEAPON = "Bag_Slot_OneHand"',
+    'INVTYPE_2HWEAPON = "Bag_Slot_TwoHand"',
+    'INVTYPE_RANGED = "Bag_Slot_Ranged"',
+    'INVTYPE_BODY = "Bag_Slot_Shirt"',
+    'INVTYPE_TABARD = "Bag_Slot_Tabard"',
+    'INVTYPE_PROFESSION_TOOL = "Bag_Slot_ProfessionTool"',
+    'INVTYPE_PROFESSION_GEAR = "Bag_Slot_ProfessionGear"',
+    'INVTYPE_BAG = "Bag_Slot_Bag"',
+}) do
+    assertContains(bags, equipSlotIcon,
+        "every rendered equipment slot maps to its Task 1 Bag_Slot_* icon")
+end
+-- Aliased INVTYPEs (ROBE, SHIELD, HOLDABLE, RANGEDRIGHT, THROWN) are
+-- substituted to their canonical target before childKey/childIcon lookup,
+-- so they must never appear as separate icon-map keys of their own.
+for _, aliasedEquipSlotIcon in ipairs({
+    "INVTYPE_ROBE = \"Bag_Slot_",
+    "INVTYPE_SHIELD = \"Bag_Slot_",
+    "INVTYPE_HOLDABLE = \"Bag_Slot_",
+    "INVTYPE_RANGEDRIGHT = \"Bag_Slot_",
+    "INVTYPE_THROWN = \"Bag_Slot_",
+}) do
+    assertNotContains(bags, aliasedEquipSlotIcon,
+        "aliased INVTYPEs must not get their own icon-map entry; " ..
+        "they resolve through equipmentSlotAliases to a canonical slot")
+end
+
+-- GetCategory computes and caches childIcon as an eighth cache-tuple slot;
+-- every read site (the cache hit early-return) and both write sites (the
+-- table constructor and the fresh-computation return) must agree on the
+-- new arity, or a cached lookup silently drops the icon.
+assertContains(bags,
+    "return cached[1], cached[2], cached[3], cached[4], cached[5], cached[6], cached[7], cached[8]",
+    "the cache-hit path returns all eight GetCategory values, including childIcon")
+assertContains(bags, "    local childIcon\n",
+    "GetCategory declares childIcon alongside the other per-item fields")
+assertContains(bags,
+    "childIcon = equipmentSlotOrder.categoryIconByEquipLoc[itemEquipLoc]",
+    "the equipment path resolves childIcon from the post-alias INVTYPE")
+assertContains(bags,
+    "local subclassIcons = categoryOrderByClass.categoryIconBySubclass\n"
+        .. "            and categoryOrderByClass.categoryIconBySubclass[classID]",
+    "the class path guards the two-level subclass lookup by table presence, " ..
+    "then by classID")
+assertContains(bags,
+    'if _G.Enum.ItemConsumableSubclass then',
+    "the subclass icon map itself is nil-guarded like ITEM_CLASS.Housing " ..
+    "for clients/environments lacking the enum entirely")
+assertContains(bags,
+    "childIcon = subclassIcons and subclassIcons[subclassID] or nil",
+    "classes without a subclass icon table (or subclass) fall back to nil, " ..
+    "not an index-nil error")
+assertContains(bags,
+    "childKey,\n        childLabel,\n        childOrder,\n        childIcon,\n    }",
+    "the cache table constructor stores childIcon as its eighth field")
+assertContains(bags,
+    "return parentKey, parentLabel, parentOrder, parentIcon, childKey, childLabel, childOrder, childIcon",
+    "the fresh-computation return also carries the new eighth childIcon value")
+assertContains(bags,
+    "childKey, childLabel, childOrder, childIcon = GetCategory(itemID)",
+    "AddItemToCategoryGroups destructures the new eighth childIcon return")
+assertContains(bags,
+    "local child = AcquireCategoryGroup(\n        childKey,\n        childLabel,\n        childOrder,\n        childIcon,\n        parent\n    )",
+    "AddItemToCategoryGroups passes childIcon as the child group's icon parameter")
+
+-- BuildSidebarModel child nodes fall back from an explicit child icon to
+-- the parent group's icon, so every collapsed-rail row still shows
+-- something even for subclasses/slots with no distinct glyph (e.g. the
+-- consumable "Other" subclass falls back to Bag_Consumables).
+assertContains(bags, "icon = child.icon or group.icon,",
+    "child nodes fall back explicit child icon -> parent icon -> " ..
+    "the AF widget's fallbackIcon")
+
 print("bags_view_modes_test.lua: ok")
