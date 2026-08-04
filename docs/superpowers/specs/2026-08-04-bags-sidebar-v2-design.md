@@ -30,8 +30,10 @@ New list option `textureTint = {r, g, b}`: every `{atlas}`/`{texture}` icon rend
 - **Equipment slots (22)**: `categoryIconByEquipLoc` values become `{ texture = ... }` using the paper-doll empty-slot textures resolved at load via `GetInventorySlotInfo("<SlotName>")` (the same icons the character pane shows). Requires an `INVTYPE_* → slot name` table (aliased slots resolve post-alias, e.g. `INVTYPE_ROBE` → ChestSlot). The API contract (name, return values, Retail 12.x availability) must be verified against the pinned client artifacts per CONTRIBUTING.md before use, and recorded in the evidence comment.
 - **Trade Goods / Recipe subtypes**: new `categoryIconBySubclass` entries for `ITEM_CLASS.Tradegoods` and `ITEM_CLASS.Recipe` mapping subclasses to `{ atlas = ... }` profession icons (Blacksmithing, Tailoring, Alchemy, …). Every atlas name must be verified against the pinned artifacts; any subtype without a verified, sensible native fit stays unmapped and inherits the parent icon (existing fallback chain — no guesses).
 - **Consumable subtypes**: replace the five Tabler icons with `{ texture = ... }` representative native item icons (potion, flask/phial, food, bandage, elixir). Icon art choices are eyeballed in-game (art selection is not an API claim); the file references are runtime-only — no Blizzard art is ever copied into either repo.
+- **Parent categories go native too** (owner decision: the rail is one column — mixing icon styles there is jarring). Every parent row with a verifiable native equivalent switches to `{atlas}`/`{texture}` art: Equipment, Consumables, Trade Goods, Recipes, Quest, Housing, Reagent, Backpack. Each mapping follows the same evidence rule as the subtypes: verified against the pinned artifacts or left on its current glyph — no guesses.
+- **Abstract rows keep Tabler glyphs** — All, Individual Bags, Empty, Misc, and the Categories heading have no native equivalent. They render in the same tone the `textureTint` targets, so the column stays cohesive.
 - BFI passes `textureTint` matched to the tone its Tabler glyphs render at in the rail.
-- **AF asset removal**: the 22 `Bag_Slot_*` and 5 consumable `Bag_*` Tabler assets added earlier on this unreleased branch are removed from the generator `ICONS` table and `Media/Icons/` (SVG+TGA), along with their test assertions. `Bag_Misc` fallback and all other `Bag_*` icons stay.
+- **AF asset removal**: after the mappings land, every `Bag_*` Tabler asset no longer referenced by BFI is removed from the generator `ICONS` table and `Media/Icons/` (SVG+TGA), with test assertions updated. That definitely covers the 22 `Bag_Slot_*` and 5 consumable icons added earlier on this unreleased branch, plus whichever parent glyphs the native swap orphans. `Bag_Misc` (fallback) and the abstract-row glyphs stay.
 
 ### QA gate
 
@@ -72,7 +74,7 @@ The rail anchors flush to the styled shell's left/top/bottom inner border at ful
 
 ## Out of scope
 
-- Recolor/redesign of remaining Tabler icons.
+- Recolor/redesign of the remaining abstract-row Tabler glyphs.
 - Any change to baseline-height layout, item-level display, or the expansion-persistence contract.
 - Backfilling BFI changelog entries for r3/r4-alpha.
 
