@@ -1,3 +1,11 @@
+-- Consumer-contract tests for Modules/Bags/Sidebar.lua. As of the AF
+-- CreateSidebarRail migration, all row/scroll/animation machinery lives in
+-- AbstractFramework/Widgets/TreeList.lua and is covered by
+-- AbstractFramework/tests/tree_list_test.lua. This file only covers what
+-- Sidebar.lua itself is responsible for: the B.Sidebar.* API surface,
+-- delegating to AF.CreateSidebarRail/rail.treeList, the ICON_BY_ID default
+-- mapping, and pre-Initialize buffering.
+
 local function readFile(path)
     local file, openError = io.open(path, "r")
     if not file then
@@ -38,25 +46,11 @@ local function assertEqual(actual, expected, message)
     end
 end
 
+---------------------------------------------------------------------
+-- source-level contracts
+---------------------------------------------------------------------
 local source = readFile("Modules/Bags/Sidebar.lua")
 local loadOrder = readFile("Modules/Bags/Load.xml")
-
-for _, icon in ipairs({
-    "Bag_All",
-    "Bag_Equipment",
-    "Bag_Consumables",
-    "Bag_TradeGoods",
-    "Bag_Recipes",
-    "Bag_Quest",
-    "Bag_Misc",
-    "Bag_Housing",
-    "Bag_Empty",
-    "Bag_Backpack",
-    "Bag_Reagent",
-    "Bag_IndividualBags",
-}) do
-    assertContains(source, icon, "sidebar adaptive icon allowlist")
-end
 
 for _, api in ipairs({
     "function Sidebar.Initialize(",
@@ -79,528 +73,40 @@ end
 
 assertContains(
     source,
-    "local COLLAPSED_WIDTH = 40",
-    "auto-hide must retain a compact icon rail"
-)
-assertContains(
-    source,
-    "return autoHide and COLLAPSED_WIDTH or DESIRED_WIDTH",
-    "the reserved rail width must follow the persisted auto-hide state"
-)
-assertContains(
-    source,
-    "return Sidebar.GetDesiredWidth() + CONTENT_GAP",
-    "the item inset must include the current rail width and content gap"
-)
-assertContains(
-    source,
-    'local row = _G.CreateFrame("Button", nil, scrollContent)',
-    "pooled rows must use template-free buttons"
-)
-assertContains(
-    source,
-    'scrollFrame = _G.CreateFrame("ScrollFrame", nil, rail)',
-    "many category rows must use a clipped scroll frame"
-)
-assertContains(
-    source,
-    "local function AcquireRow(index)",
-    "hierarchical rows must be pooled"
-)
-assertContains(
-    source,
-    'source.kind == "heading"',
-    "the permanent model must support separate section headings"
-)
-assertContains(
-    source,
-    "entry.children",
-    "the permanent model must support nested category children"
-)
-assertContains(
-    source,
-    "expandedById[entry.id]",
-    "expanded parents must reveal their nested children"
-)
-assertContains(
-    source,
-    'row.toggle:SetScript("OnClick"',
-    "parent expansion must have an independent chevron target"
-)
-assertContains(
-    source,
-    "local hasChildren = entry and entry.hasChildren",
-    "the full parent row must recognize expandable categories"
-)
-assertContains(
-    source,
-    "end\n\n    if hasChildren then\n        Sidebar.ToggleExpanded(id)",
-    "a category title must toggle even when it is already selected"
-)
-assertBefore(
-    source,
-    "onSelected(id, entry)",
-    "Sidebar.ToggleExpanded(id)",
-    "a parent title click must select before it toggles the category"
-)
-assertContains(
-    source,
-    "local function IsSelectedRow(row)",
-    "parents must surface an active child selection"
-)
-assertContains(
-    source,
-    "if IsNestedTreeShown() and expandedById[row.id] then return false end",
-    "expanded labeled parents leave the active treatment on their visible child"
-)
-assertContains(
-    source,
-    "while selected and selected.parentId do",
-    "compact and collapsed parents must walk the active child's ancestry"
-)
-assertContains(
-    source,
-    "if selected.parentId == row.id then",
-    "active descendants must highlight their compact or collapsed parent"
-)
-assertContains(
-    source,
-    'and "ArrowDown1" or "ArrowRight1"',
-    "chevrons must communicate expanded state"
-)
-assertContains(
-    source,
-    "row.highlight = AF.CreateGradientTexture(",
-    "rows must use the main BFI navigation accent gradient"
-)
-assertContains(
-    source,
-    'AF.GetColorTable("BFI", 0.9)',
-    "the navigation gradient must use the BFI accent color"
-)
-assertContains(
-    source,
-    'local targetWidth = state == "selected" and DESIRED_WIDTH',
-    "active rows must fill the labeled navigation width"
-)
-assertContains(
-    source,
-    'or state == "hover" and 7',
-    "hovered rows must use the main menu's narrow accent treatment"
-)
-assertContains(
-    source,
-    'local shouldShow = state ~= "idle"',
-    "idle rows must not retain a left accent line"
-)
-assertContains(
-    source,
-    "AF.AnimatedResize(",
-    "hover and active navigation changes must animate like the main BFI menu"
-)
-assertContains(
-    source,
-    "if AF.hasBagIcons and AF.SetAdaptiveIcon then",
-    "row icons must use AF's adaptive icon helper"
-)
-assertContains(
-    source,
-    "AF.SetAdaptiveIcon(row.icon, icon)",
-    "available bag icons must use AF's adaptive icon helper"
-)
-assertContains(
-    source,
-    'row.icon:SetTexture(AF.GetIcon("Menu4"))',
-    "older AF versions must retain a safe generic icon"
-)
-assertContains(
-    source,
-    "if selectionId ~= nil and not entriesById[selectionId] then",
-    "removed entries must silently clear stale selection"
-)
-assertNotContains(
-    source,
-    "expandedById = nextExpandedById",
-    "temporarily absent category parents must retain expansion state"
+    "AF.CreateSidebarRail(",
+    "the sidebar must delegate widget construction to the shared AF rail"
 )
 
-assertContains(
-    source,
-    'scrollFrame:SetPoint("TOPLEFT")',
-    "the scrolling view/category list must use the rail's full height"
-)
-for _, removedUtilityContract in ipairs({
-    "CreateAutoHideControl",
-    "autoHideClip",
-    "autoHideButton",
-    "UTILITY_HEIGHT",
-    "UTILITY_GAP",
-    'local icon = autoHide and "Unlock" or "Lock"',
+for _, icon in ipairs({
+    "Bag_All",
+    "Bag_Equipment",
+    "Bag_Consumables",
+    "Bag_TradeGoods",
+    "Bag_Recipes",
+    "Bag_Quest",
+    "Bag_Misc",
+    "Bag_Housing",
+    "Bag_Empty",
+    "Bag_Backpack",
+    "Bag_Reagent",
+    "Bag_IndividualBags",
+}) do
+    assertContains(source, icon, "sidebar icon-by-id allowlist")
+end
+
+for _, machineryRemnant in ipairs({
+    'CreateFrame("ScrollFrame"',
+    'CreateFrame("Slider"',
+    "AnimateExpandedChange",
+    "showNestedEntries",
+    'SetScript("OnUpdate"',
 }) do
     assertNotContains(
         source,
-        removedUtilityContract,
-        "auto-hide belongs in the bag header rather than the navigation rail"
+        machineryRemnant,
+        "row/scroll/animation machinery now belongs to AF.CreateSidebarRail"
     )
 end
-
-assertContains(
-    source,
-    "local function IsNestedTreeShown()",
-    "auto-hide must distinguish its stable top-level view from an opened tree"
-)
-assertContains(
-    source,
-    "if entry.hasChildren and IsNestedTreeShown() and expandedById[entry.id] then",
-    "nested children must stay closed until the labeled tree is explicitly opened"
-)
-assertContains(
-    source,
-    "row.label:SetShown(not compact)",
-    "compact mode must hide navigation labels"
-)
-assertContains(
-    source,
-    "row.label:SetShown(not IsCompact())",
-    "compact mode must hide section headings"
-)
-assertContains(
-    source,
-    "if entry.hasChildren and not compact then",
-    "compact mode must hide nested expansion targets"
-)
-
-assertContains(
-    source,
-    'scrollBar = _G.CreateFrame("Slider", nil, rail)',
-    "overflow navigation must use a template-free native slider"
-)
-assertContains(
-    source,
-    'scrollBar:SetOrientation("VERTICAL")',
-    "the overflow control must be a vertical scrollbar"
-)
-assertContains(
-    source,
-    "scrollBar:SetThumbTexture(scrollThumb)",
-    "the sidebar scrollbar must expose a draggable thumb"
-)
-assertContains(
-    source,
-    "AF.SetFrameLevel(scrollBar, 10, scrollContent)",
-    "the scrollbar must remain above pooled navigation rows for hit testing"
-)
-assertContains(
-    source,
-    "local ROW_RIGHT_INSET = SCROLLBAR_WIDTH + 4",
-    "navigation rows must reserve a dedicated scrollbar lane"
-)
-assertContains(
-    source,
-    "local COMPACT_ICON_AREA_WIDTH = COLLAPSED_WIDTH - ROW_RIGHT_INSET",
-    "compact icons must be centered outside the scrollbar lane"
-)
-assertContains(
-    source,
-    "compact and ((COMPACT_ICON_AREA_WIDTH - ICON_SIZE) / 2)",
-    "compact icons must remain clear of the visible scrollbar"
-)
-assertContains(
-    source,
-    'scrollBar:SetPoint("TOPRIGHT", rail, "TOPRIGHT")',
-    "the scrollbar lane must stay beside the compact icon column"
-)
-assertContains(
-    source,
-    'scrollBar:SetPoint("BOTTOMRIGHT", rail, "BOTTOMRIGHT")',
-    "the scrollbar lane must span the rail beside its icons"
-)
-assertContains(
-    source,
-    'row.toggle:SetPoint("RIGHT", -(SCROLLBAR_WIDTH + 2), 0)',
-    "nested chevrons must not overlap the visible scrollbar"
-)
-assertContains(
-    source,
-    "AF.CreateFadeInOutAnimation(scrollBar, 0.18)",
-    "the scrollbar must use the shared fade animation"
-)
-assertContains(
-    source,
-    "local needed = range > 0",
-    "the scrollbar must only be required when content overflows"
-)
-assertNotContains(
-    source,
-    "if needed == scrollBarNeeded then return end",
-    "overflow geometry must keep updating after the transient thumb fades"
-)
-assertContains(
-    source,
-    "local SCROLLBAR_FADE_DELAY = 0.9",
-    "overflow feedback must linger briefly after interaction"
-)
-assertContains(
-    source,
-    "local function ScheduleScrollBarFadeOut()",
-    "visible overflow feedback must schedule a transient fade"
-)
-assertContains(
-    source,
-    "local generation = scrollBarFadeGeneration",
-    "new scrollbar activity must invalidate stale fade timers"
-)
-assertContains(
-    source,
-    "_G.C_Timer.After(SCROLLBAR_FADE_DELAY, function()",
-    "the transient scrollbar must use an event-driven delayed fade"
-)
-assertContains(
-    source,
-    "generation ~= scrollBarFadeGeneration",
-    "stale scrollbar fade callbacks must be ignored"
-)
-assertContains(
-    source,
-    "or scrollBar:IsMouseOver() then",
-    "the transient thumb must remain visible while directly hovered"
-)
-assertContains(
-    source,
-    "scrollBar:EnableMouse(false)",
-    "a faded scrollbar must not retain invisible hit testing"
-)
-assertContains(
-    source,
-    "scrollBar:EnableMouse(true)",
-    "revealing the scrollbar must restore drag hit testing"
-)
-assertContains(source, "scrollBar:FadeIn()",
-    "overflow must reveal the scrollbar")
-assertContains(source, "scrollBar:FadeOut()",
-    "inactive or resolved overflow must fade the scrollbar away")
-assertContains(
-    source,
-    "if scheduleFade ~= false then\n        ScheduleScrollBarFadeOut()",
-    "revealed overflow must fade again after interaction ends"
-)
-assertContains(
-    source,
-    'scrollBar:SetScript("OnMouseDown", function()',
-    "dragging the thumb must enter a persistent interaction state"
-)
-assertContains(
-    source,
-    "SetScrollBarDragging(true)",
-    "thumb dragging must hold the transient scrollbar open"
-)
-assertContains(
-    source,
-    "SetScrollBarDragging(false)",
-    "releasing the thumb must resume the transient fade"
-)
-assertContains(
-    source,
-    "local wasDragging = scrollBarDragging",
-    "a hidden thumb must remember whether it interrupted a drag"
-)
-assertContains(
-    source,
-    "if wasDragging then\n            PointerLeave()",
-    "overflow resolution during a drag must retry auto-hide collapse"
-)
-assertContains(
-    source,
-    "scrollBar:EnableMouseWheel(true)",
-    "the dedicated scrollbar lane must accept wheel input"
-)
-assertContains(
-    source,
-    'scrollBar:SetScript("OnMouseWheel", function(_, delta)',
-    "wheel input over the scrollbar lane must scroll the category list"
-)
-assertContains(
-    source,
-    "RevealScrollBar()\n    SetScroll(scrollFrame:GetVerticalScroll()",
-    "wheel input must reveal the scrollbar before changing its offset"
-)
-assertContains(
-    source,
-    "expandedScrollOffset = offset",
-    "expanded navigation must preserve its own scroll offset"
-)
-assertContains(
-    source,
-    "compactScrollOffset = offset",
-    "the icon rail must preserve an independent useful scroll offset"
-)
-assertContains(
-    source,
-    "expandedScrollOffset = compactScrollOffset",
-    "hover expansion must keep the icon under the pointer stable"
-)
-assertContains(
-    source,
-    "showNestedEntries = false",
-    "automatic collapse must return to a compact top-level category list"
-)
-
-assertContains(
-    source,
-    "local function AnimateExpandedChange(id, expanded)",
-    "nested category changes must use a dedicated transition"
-)
-assertContains(
-    source,
-    "local oldRowsByKey = {}",
-    "category transitions must reuse the existing pooled rows by identity"
-)
-assertContains(
-    source,
-    "row = AcquireRow(nextPoolIndex)",
-    "category transitions must acquire only missing pooled rows"
-)
-assertContains(
-    source,
-    "local function PositionAnimatedRows(animation, progress)",
-    "category transitions must smoothly interpolate row positions"
-)
-assertContains(
-    source,
-    "row:SetAlpha(alpha)",
-    "category transitions must fade nested rows in and out"
-)
-assertContains(
-    source,
-    "fromAlpha = incoming and 0 or 1",
-    "new nested rows must fade in from the parent branch"
-)
-assertContains(
-    source,
-    "local parent = oldLayout[entry.parentId]",
-    "each incoming branch must animate from its own parent"
-)
-assertContains(
-    source,
-    "survivingParent = targetLayout[parentId]",
-    "outgoing descendants must find their nearest surviving parent"
-)
-assertContains(
-    source,
-    "survivingParent.bottom + ROW_SPACING",
-    "outgoing branches must converge on their own parent origin"
-)
-assertContains(
-    source,
-    "toAlpha = 0",
-    "removed nested rows must fade out toward the parent branch"
-)
-assertContains(
-    source,
-    "AF.AnimatedResize(\n        scrollContent",
-    "the shared timer animation must interpolate category content height"
-)
-assertContains(
-    source,
-    "if modelAnimation then return false end",
-    "rapid category toggles must not corrupt an active pooled-row transition"
-)
-assertContains(
-    source,
-    "FinishModelAnimation = function()",
-    "external model changes must be able to settle an active transition"
-)
-assertContains(
-    source,
-    "row:SetAlpha(1)",
-    "normal pooled-row binding must clear transient animation alpha"
-)
-assertContains(
-    source,
-    "SetScroll(animation.targetOffset)",
-    "chevron-only transitions must retain the user's category scroll position"
-)
-
-assertContains(
-    source,
-    "local function PublishPresentationWidth(width)",
-    "rail presentation changes must be published to the bag shell"
-)
-assertContains(
-    source,
-    "onPresentationWidthChanged(\n            width,",
-    "presentation callbacks must receive the animated rail width"
-)
-assertContains(
-    source,
-    "autoHide and COLLAPSED_WIDTH or DESIRED_WIDTH",
-    "presentation callbacks must also report the reserved layout width"
-)
-assertContains(
-    source,
-    "function(width)\n            PublishPresentationWidth(width)",
-    "each rail resize tick must drive the visible bag shell"
-)
-assertBefore(
-    source,
-    "StopResize(rail)\n\n    if not hoverExpanded then",
-    "if presentationWidth >= DESIRED_WIDTH then return end",
-    "re-entering before the first collapse tick must cancel the stale resize"
-)
-assertContains(
-    source,
-    "if scrollBarDragging or IsRailMouseOver() then\n                ExpandRail()",
-    "a guarded collapse completion must reverse toward the open rail"
-)
-
-assertContains(
-    source,
-    "local function IsRailMouseOver()",
-    "auto-hide collapse must share one pointer-boundary check"
-)
-assertContains(
-    source,
-    "_G.C_Timer.After(0, function()",
-    "pointer exit must defer collapse until child enter events settle"
-)
-assertContains(
-    source,
-    "if generation ~= leaveGeneration then return end",
-    "a newer pointer transition must cancel a stale deferred collapse"
-)
-assertContains(
-    source,
-    "if scrollBarDragging or IsRailMouseOver() then return end",
-    "the rail must remain expanded while hovered or dragging its scrollbar"
-)
-assertContains(
-    source,
-    "if shown == nextShown then return true end",
-    "routine bag layouts must not interrupt hover or category animations"
-)
-
-for _, forbidden in ipairs({
-    "BackdropTemplate",
-    "NineSlice",
-    "OnUpdate",
-    "row.indicator",
-    "AF.CreateButton(",
-    "AF.CreateButtonGroup(",
-    "InCombatLockdown",
-    "PLAYER_REGEN_ENABLED",
-}) do
-    assertNotContains(
-        source,
-        forbidden,
-        "sidebar must stay on the lightweight event-driven path"
-    )
-end
-
-assertNotContains(
-    source,
-    "row.highlight:SetColorTexture",
-    "rows must not fall back to the lost neutral hover/active treatment"
-)
 
 assertBefore(
     loadOrder,
@@ -609,17 +115,144 @@ assertBefore(
     "sidebar controller must load before its Bags.lua integrator"
 )
 
-local bags = {}
+---------------------------------------------------------------------
+-- recording AF.CreateSidebarRail stub
+---------------------------------------------------------------------
+local railInstances = {}
+
+local function makeRail(parent, options)
+    local rail = {
+        parent = parent,
+        options = options,
+        shown = true,
+        autoHide = false,
+        setParentCalls = 0,
+        shownCalls = {},
+        autoHideCalls = {},
+        toggleAutoHideCalls = 0,
+    }
+
+    local treeList = {
+        modelCalls = {},
+        selectionCallCount = 0,
+        expandedCalls = {},
+        toggleCalls = {},
+        nextSelectionReturn = true,
+    }
+    rail.treeList = treeList
+
+    function treeList:SetModel(model)
+        self.modelCalls[#self.modelCalls + 1] = model
+        return true
+    end
+
+    -- id may legitimately be nil (a clear); track the last call with an
+    -- explicit flag/count rather than an array (a trailing nil is invisible
+    -- to the # operator)
+    function treeList:SetSelection(id)
+        self.selectionCallCount = self.selectionCallCount + 1
+        self.lastSelectionId = id
+        if id == nil then return false end
+        return self.nextSelectionReturn
+    end
+
+    function treeList:SetExpanded(id, expanded)
+        self.expandedCalls[#self.expandedCalls + 1] = {id, expanded}
+        return true
+    end
+
+    function treeList:ToggleExpanded(id)
+        self.toggleCalls[#self.toggleCalls + 1] = id
+        return true
+    end
+
+    function treeList:SetOnSelected(callback)
+        self.onSelected = callback
+        return true
+    end
+
+    function rail:GetParent()
+        return self.parent
+    end
+
+    function rail:SetParent(newParent)
+        self.setParentCalls = self.setParentCalls + 1
+        self.parent = newParent
+    end
+
+    function rail:SetShown(shown)
+        self.shown = shown
+        self.shownCalls[#self.shownCalls + 1] = shown
+        return true
+    end
+
+    function rail:SetAutoHide(autoHide)
+        self.autoHide = autoHide
+        self.autoHideCalls[#self.autoHideCalls + 1] = autoHide
+        return true
+    end
+
+    function rail:GetAutoHide()
+        return self.autoHide
+    end
+
+    function rail:ToggleAutoHide()
+        self.toggleAutoHideCalls = self.toggleAutoHideCalls + 1
+        self:SetAutoHide(not self.autoHide)
+        if self.onAutoHideChanged then
+            self.onAutoHideChanged(self.autoHide)
+        end
+        return self.autoHide
+    end
+
+    function rail:SetOnAutoHideChanged(callback)
+        self.onAutoHideChanged = callback
+        return true
+    end
+
+    function rail:SetOnPresentationWidthChanged(callback)
+        self.onPresentationWidthChanged = callback
+        if callback then
+            callback(self:GetDesiredWidth(), self:GetDesiredWidth())
+        end
+        return true
+    end
+
+    function rail:GetDesiredWidth()
+        return self.autoHide
+            and (self.options.collapsedWidth or 40)
+            or (self.options.expandedWidth or 170)
+    end
+
+    function rail:GetContentInset(gap)
+        return self:GetDesiredWidth() + (gap or 8)
+    end
+
+    railInstances[#railInstances + 1] = rail
+    return rail
+end
+
+local frameLevelCalls = {}
+local AF = {
+    CreateSidebarRail = function(parent, options)
+        return makeRail(parent, options)
+    end,
+    SetFrameLevel = function(frame, level, relativeTo)
+        frameLevelCalls[#frameLevelCalls + 1] = {frame, level, relativeTo}
+    end,
+}
+
 local environment = {
-    AbstractFramework = {},
-    math = math,
-    pairs = pairs,
-    select = select,
+    AbstractFramework = AF,
     type = type,
+    pairs = pairs,
+    ipairs = ipairs,
+    select = select,
 }
 setmetatable(environment, {__index = _G})
 environment._G = environment
 
+local bags = {}
 local chunk, loadError = loadfile("Modules/Bags/Sidebar.lua")
 assertEqual(type(chunk), "function", loadError or "sidebar module load")
 setfenv(chunk, environment)
@@ -630,117 +263,222 @@ chunk("BFInfinite", {
     },
 })
 
-assertEqual(bags.Sidebar.GetDesiredWidth(), 170, "rail desired width")
-assertEqual(bags.Sidebar.GetContentInset(), 178, "persistent content inset")
-assertEqual(bags.Sidebar.GetAutoHide(), false, "auto-hide is initially disabled")
-assertEqual(bags.Sidebar.SetAutoHide("yes"), false,
-    "non-boolean auto-hide state rejected")
+local Sidebar = bags.Sidebar
+
+---------------------------------------------------------------------
+-- pre-Initialize: safe buffering, no rail created yet
+---------------------------------------------------------------------
+assertEqual(Sidebar.GetDesiredWidth(), 170, "default desired width before Initialize")
+assertEqual(Sidebar.GetContentInset(), 178, "default content inset before Initialize")
+assertEqual(Sidebar.GetAutoHide(), false, "auto-hide is initially disabled")
+assertEqual(Sidebar.SetAutoHide("yes"), false, "non-boolean auto-hide state rejected")
 
 local presentationCalls = {}
-assertEqual(bags.Sidebar.SetOnPresentationWidthChanged("yes"), false,
+assertEqual(Sidebar.SetOnPresentationWidthChanged("yes"), false,
     "non-function presentation callback rejected")
-assertEqual(bags.Sidebar.SetOnPresentationWidthChanged(function(width, reservedWidth)
+assertEqual(Sidebar.SetOnPresentationWidthChanged(function(width, reservedWidth)
     presentationCalls[#presentationCalls + 1] = {width, reservedWidth}
 end), true, "presentation callback accepted")
 assertEqual(#presentationCalls, 1,
-    "presentation callback immediately synchronizes the current rail")
-assertEqual(presentationCalls[1][1], 170,
-    "initial presentation width is the labeled rail width")
-assertEqual(presentationCalls[1][2], 170,
-    "initial reserved width is the labeled rail width")
+    "presentation callback immediately synchronizes even without a rail")
+assertEqual(presentationCalls[1][1], 170, "initial presentation width")
+assertEqual(presentationCalls[1][2], 170, "initial reserved width")
 
 local autoHideCalls = {}
-assertEqual(bags.Sidebar.SetOnAutoHideChanged("yes"), false,
+assertEqual(Sidebar.SetOnAutoHideChanged("yes"), false,
     "non-function auto-hide callback rejected")
-assertEqual(bags.Sidebar.SetOnAutoHideChanged(function(enabled)
+assertEqual(Sidebar.SetOnAutoHideChanged(function(enabled)
     autoHideCalls[#autoHideCalls + 1] = enabled
 end), true, "auto-hide callback accepted")
-assertEqual(bags.Sidebar.SetAutoHide(true), true,
-    "auto-hide can be enabled programmatically")
-assertEqual(presentationCalls[2][1], 40,
-    "auto-hide publishes the compact presentation width")
-assertEqual(presentationCalls[2][2], 40,
-    "auto-hide publishes the compact reserved width")
-assertEqual(bags.Sidebar.GetAutoHide(), true, "auto-hide state is queryable")
-assertEqual(bags.Sidebar.GetDesiredWidth(), 40, "compact rail desired width")
-assertEqual(bags.Sidebar.GetContentInset(), 48, "compact content inset")
-assertEqual(#autoHideCalls, 0,
-    "programmatic auto-hide synchronization is silent")
-assertEqual(bags.Sidebar.SetAutoHide(true), true,
-    "reapplying the current auto-hide state is accepted")
-assertEqual(#presentationCalls, 2,
-    "idempotent auto-hide state does not republish its width")
-assertEqual(#autoHideCalls, 0,
-    "idempotent auto-hide synchronization stays silent")
-assertEqual(bags.Sidebar.ToggleAutoHide(), false,
-    "header toggle can pin the labeled rail open")
-assertEqual(presentationCalls[3][1], 170,
-    "pinning the rail publishes the labeled presentation width")
-assertEqual(presentationCalls[3][2], 170,
-    "pinning the rail publishes the labeled reserved width")
-assertEqual(autoHideCalls[1], false,
-    "header toggle reports the disabled auto-hide state")
-assertEqual(bags.Sidebar.GetDesiredWidth(), 170,
-    "pinned rail restores its full desired width")
-assertEqual(bags.Sidebar.GetContentInset(), 178,
-    "pinned rail restores its full content inset")
-assertEqual(bags.Sidebar.ToggleAutoHide(), true,
-    "header toggle can restore compact auto-hide")
-assertEqual(presentationCalls[4][1], 40,
-    "restoring auto-hide republishes the compact presentation width")
-assertEqual(presentationCalls[4][2], 40,
-    "restoring auto-hide republishes the compact reserved width")
-assertEqual(autoHideCalls[2], true,
-    "header toggle reports the enabled auto-hide state")
-assertEqual(bags.Sidebar.SetAutoHide(false), true,
-    "profile synchronization can restore pinned mode")
-assertEqual(presentationCalls[5][1], 170,
-    "profile synchronization republishes the pinned presentation width")
-assertEqual(presentationCalls[5][2], 170,
-    "profile synchronization republishes the pinned reserved width")
-assertEqual(#autoHideCalls, 2,
-    "programmatic profile synchronization does not emit a header callback")
-assertEqual(bags.Sidebar.SetShown("yes"), false, "non-boolean shown state rejected")
-assertEqual(bags.Sidebar.SetShown(false), true, "rail can be explicitly disabled")
-assertEqual(bags.Sidebar.SetShown(true), true, "rail can be explicitly enabled")
 
-local callbackCalls = 0
-assertEqual(bags.Sidebar.SetOnSelected(function()
-    callbackCalls = callbackCalls + 1
-end), true, "selected callback accepted")
-assertEqual(bags.Sidebar.SetModel({
+assertEqual(Sidebar.SetAutoHide(true), true, "auto-hide can be buffered before Initialize")
+assertEqual(#presentationCalls, 2, "buffered auto-hide republishes presentation width")
+assertEqual(presentationCalls[2][1], 40, "buffered auto-hide publishes the compact width")
+assertEqual(presentationCalls[2][2], 40, "buffered auto-hide publishes the compact reserved width")
+assertEqual(Sidebar.GetAutoHide(), true, "buffered auto-hide is queryable before Initialize")
+assertEqual(Sidebar.GetDesiredWidth(), 40, "buffered compact desired width")
+assertEqual(Sidebar.GetContentInset(), 48, "buffered compact content inset")
+assertEqual(#autoHideCalls, 0, "programmatic auto-hide synchronization stays silent")
+
+assertEqual(Sidebar.SetAutoHide(true), true, "reapplying the same buffered state is accepted")
+assertEqual(#presentationCalls, 2, "idempotent buffered auto-hide does not republish")
+
+assertEqual(Sidebar.ToggleAutoHide(), false,
+    "header toggle can restore the pinned buffered state before Initialize")
+assertEqual(#presentationCalls, 3, "buffered toggle republishes presentation width")
+assertEqual(presentationCalls[3][1], 170, "pinned buffered presentation width")
+assertEqual(#autoHideCalls, 1, "buffered header toggle fires the auto-hide callback")
+assertEqual(autoHideCalls[1], false, "buffered header toggle reports the disabled state")
+
+assertEqual(Sidebar.SetShown("yes"), false, "non-boolean shown state rejected")
+assertEqual(Sidebar.SetShown(false), true, "shown state can be buffered before Initialize")
+assertEqual(Sidebar.SetShown(true), true, "shown state can be buffered before Initialize")
+
+assertEqual(Sidebar.SetModel({{kind = "heading", label = "x"}}), false,
+    "SetModel is a safe no-op before Initialize")
+assertEqual(Sidebar.SetModel("not a table"), false,
+    "non-table models are always rejected")
+assertEqual(Sidebar.SetSelection("anything"), false,
+    "SetSelection is a safe no-op before Initialize")
+assertEqual(Sidebar.SetExpanded("anything", true), false,
+    "SetExpanded is a safe no-op before Initialize")
+assertEqual(Sidebar.ToggleExpanded("anything"), false,
+    "ToggleExpanded is a safe no-op before Initialize")
+
+assertEqual(Sidebar.Initialize(nil, function() end), nil,
+    "Initialize without a parent frame is a safe no-op")
+assertEqual(#railInstances, 0, "no rail is created without a parent frame")
+
+---------------------------------------------------------------------
+-- Initialize: rail creation, options, and buffered-state flush
+---------------------------------------------------------------------
+local selectedCalls = {}
+local parent = {name = "combinedFrame"}
+local returnedRail = Sidebar.Initialize(parent, function(id, entry)
+    selectedCalls[#selectedCalls + 1] = {id, entry}
+end)
+
+assertEqual(#railInstances, 1, "Initialize creates exactly one AF sidebar rail")
+local rail = railInstances[1]
+assertEqual(returnedRail, rail, "Initialize returns the AF rail frame")
+assertEqual(Sidebar.frame, rail, "Sidebar.frame exposes the AF rail frame")
+assertEqual(rail.parent, parent, "the rail is parented to the caller's frame")
+
+assertEqual(rail.options.expandedWidth, 170, "expanded width option")
+assertEqual(rail.options.collapsedWidth, 40, "collapsed width option")
+assertEqual(rail.options.rowHeight, 26, "row height option")
+assertEqual(rail.options.headingHeight, 22, "heading height option")
+assertEqual(rail.options.iconSize, 16, "icon size option")
+assertEqual(rail.options.accentColor, "BFI", "accent color option")
+assertEqual(rail.options.fallbackIcon, "Bag_Misc", "fallback icon option")
+
+-- the buffered pre-Initialize state (shown=true, autoHide=false after the
+-- toggle sequence above) is flushed onto the freshly created rail
+assertEqual(rail.shownCalls[#rail.shownCalls], true, "buffered shown state is flushed")
+assertEqual(rail.autoHideCalls[#rail.autoHideCalls], false, "buffered auto-hide state is flushed")
+assertEqual(type(rail.treeList.onSelected), "function",
+    "the Initialize callback is wired to the tree list")
+assertEqual(type(rail.onAutoHideChanged), "function",
+    "a callback registered before Initialize is wired to the rail")
+assertEqual(type(rail.onPresentationWidthChanged), "function",
+    "a presentation callback registered before Initialize is wired to the rail")
+
+rail.treeList.onSelected("view:combined", {kind = "view"})
+assertEqual(#selectedCalls, 1, "Initialize's callback argument fires through the tree list")
+assertEqual(selectedCalls[1][1], "view:combined", "selected id pass-through")
+
+---------------------------------------------------------------------
+-- re-Initialize: reparent without creating a second rail
+---------------------------------------------------------------------
+assertEqual(Sidebar.Initialize(parent), rail, "re-Initializing with the same parent is a no-op")
+assertEqual(#railInstances, 1, "no additional rail is created for the same parent")
+assertEqual(rail.setParentCalls, 0, "SetParent is skipped when the parent is unchanged")
+
+local otherParent = {name = "otherFrame"}
+assertEqual(Sidebar.Initialize(otherParent), rail, "reparenting reuses the existing rail")
+assertEqual(#railInstances, 1, "reparenting does not create a second rail")
+assertEqual(rail.setParentCalls, 1, "SetParent is called when the parent changes")
+assertEqual(rail.parent, otherParent, "the rail is reparented")
+assertEqual(#frameLevelCalls, 1, "reparenting resets the rail's frame level")
+assertEqual(frameLevelCalls[1][1], rail, "frame level is applied to the rail")
+assertEqual(frameLevelCalls[1][2], 30, "frame level matches the rail's stacking order")
+assertEqual(frameLevelCalls[1][3], otherParent, "frame level is relative to the new parent")
+
+---------------------------------------------------------------------
+-- post-Initialize: model pass-through and the ICON_BY_ID default map
+---------------------------------------------------------------------
+assertEqual(Sidebar.SetModel({
     {kind = "heading", label = "Views"},
-    {id = "combined", label = "Combined View", icon = "Bag_All"},
-    {id = "individual", label = "Individual Bags", icon = "Bag_IndividualBags"},
+    {id = "combined", label = "Combined View"},
+    {id = "custom", label = "Custom", icon = "Bag_Housing"},
     {kind = "heading", label = "Categories"},
     {
         id = "equipment",
         label = "Equipment",
-        icon = "Bag_Equipment",
         expanded = true,
         children = {
-            {id = "equipment:chest", label = "Chest"},
-            {id = "equipment:gloves", label = "Gloves"},
+            {id = "misc", label = "Misc Children"},
+            {id = "equipment:chest", label = "Chest", icon = "Custom_Icon"},
         },
     },
-}), true, "hierarchical model accepted")
-assertEqual(bags.Sidebar.SetSelection("equipment"), true,
-    "aggregate parent selection accepted")
-assertEqual(bags.Sidebar.SetSelection("equipment:chest"), true,
-    "nested short-label selection accepted")
-assertEqual(callbackCalls, 0, "programmatic selection is silent")
-assertEqual(bags.Sidebar.SetExpanded("equipment", false), true,
-    "known parent can collapse")
-assertEqual(bags.Sidebar.ToggleExpanded("equipment"), true,
-    "known parent can toggle")
-assertEqual(bags.Sidebar.SetExpanded("combined", false), false,
-    "leaf expansion rejected")
-assertEqual(bags.Sidebar.SetSelection("missing"), false,
-    "unknown selection rejected")
+}), true, "hierarchical model with icon-by-id defaults accepted")
 
-assertEqual(bags.Sidebar.SetModel({}), true, "model can be cleared")
-assertEqual(bags.Sidebar.SetSelection("equipment"), false,
-    "removed selection is no longer accepted")
-assertEqual(callbackCalls, 0, "entry removal is silent")
+assertEqual(#rail.treeList.modelCalls, 1, "SetModel delegates to the tree list exactly once")
+local appliedModel = rail.treeList.modelCalls[1]
+assertEqual(appliedModel[1].kind, "heading", "headings pass through unchanged")
+assertEqual(appliedModel[1].label, "Views", "heading label pass-through")
+assertEqual(appliedModel[2].icon, "Bag_All", "icon-by-id default fills a missing icon (combined)")
+assertEqual(appliedModel[3].icon, "Bag_Housing", "an explicit icon is never overwritten")
+local equipment = appliedModel[5]
+assertEqual(equipment.id, "equipment", "nested parent entry pass-through")
+assertEqual(equipment.icon, "Bag_Equipment", "icon-by-id default reaches top-level entries")
+assertEqual(equipment.expanded, true, "non-icon fields pass through untouched")
+assertEqual(equipment.children[1].icon, "Bag_Misc", "icon-by-id default recurses into children")
+assertEqual(equipment.children[2].icon, "Custom_Icon",
+    "an explicit nested icon is never overwritten")
+
+assertEqual(Sidebar.SetModel("not a table"), false,
+    "non-table models are rejected after Initialize too")
+
+---------------------------------------------------------------------
+-- post-Initialize: selection/expansion pass-through
+---------------------------------------------------------------------
+rail.treeList.nextSelectionReturn = true
+assertEqual(Sidebar.SetSelection("equipment"), true, "selection accepted pass-through")
+assertEqual(rail.treeList.lastSelectionId, "equipment", "the selected id reaches the tree list")
+
+rail.treeList.nextSelectionReturn = false
+assertEqual(Sidebar.SetSelection("missing"), false, "selection rejection pass-through")
+
+-- rail.treeList:SetSelection(nil) returns false on a successful silent
+-- clear; Sidebar.SetSelection must pass that through as-is, not special-case it
+local selectionCallsBefore = rail.treeList.selectionCallCount
+assertEqual(Sidebar.SetSelection(nil), false, "clearing the selection returns false, not an error")
+assertEqual(rail.treeList.selectionCallCount, selectionCallsBefore + 1,
+    "nil selection still reaches the tree list")
+assertEqual(rail.treeList.lastSelectionId, nil, "nil selection reaches the tree list")
+
+assertEqual(Sidebar.SetExpanded("equipment", false), true, "SetExpanded pass-through")
+assertEqual(rail.treeList.expandedCalls[#rail.treeList.expandedCalls][1], "equipment",
+    "SetExpanded id pass-through")
+assertEqual(rail.treeList.expandedCalls[#rail.treeList.expandedCalls][2], false,
+    "SetExpanded value pass-through")
+
+assertEqual(Sidebar.ToggleExpanded("equipment"), true, "ToggleExpanded pass-through")
+assertEqual(rail.treeList.toggleCalls[#rail.treeList.toggleCalls], "equipment",
+    "ToggleExpanded id pass-through")
+
+---------------------------------------------------------------------
+-- post-Initialize: width/inset math pass-through
+---------------------------------------------------------------------
+assertEqual(Sidebar.GetDesiredWidth(), 170, "expanded desired width pass-through")
+assertEqual(Sidebar.GetContentInset(), 178, "expanded content inset pass-through")
+assertEqual(Sidebar.SetAutoHide(true), true, "auto-hide can be enabled after Initialize")
+assertEqual(Sidebar.GetDesiredWidth(), 40, "compact desired width pass-through")
+assertEqual(Sidebar.GetContentInset(), 48, "compact content inset pass-through")
+assertEqual(Sidebar.SetAutoHide(false), true, "auto-hide can be disabled after Initialize")
+assertEqual(Sidebar.GetDesiredWidth(), 170, "restored expanded desired width")
+
+---------------------------------------------------------------------
+-- post-Initialize: silent SetAutoHide vs. ToggleAutoHide firing the callback
+---------------------------------------------------------------------
+assertEqual(#autoHideCalls, 1, "no auto-hide callback fired yet from post-Initialize calls")
+assertEqual(Sidebar.SetAutoHide(true), true, "programmatic auto-hide after Initialize")
+assertEqual(#autoHideCalls, 1, "programmatic SetAutoHide after Initialize stays silent")
+assertEqual(Sidebar.ToggleAutoHide(), false, "ToggleAutoHide after Initialize flips state")
+assertEqual(#autoHideCalls, 2, "ToggleAutoHide after Initialize fires the callback")
+assertEqual(autoHideCalls[2], false, "ToggleAutoHide reports the new state")
+assertEqual(Sidebar.GetAutoHide(), false, "ToggleAutoHide's new state is queryable")
+
+---------------------------------------------------------------------
+-- post-Initialize: SetOnSelected re-registration delegates directly
+---------------------------------------------------------------------
+local laterSelected = {}
+assertEqual(Sidebar.SetOnSelected(function(id)
+    laterSelected[#laterSelected + 1] = id
+end), true, "SetOnSelected after Initialize is accepted")
+rail.treeList.onSelected("custom")
+assertEqual(#laterSelected, 1, "re-registering SetOnSelected rewires the tree list callback")
+assertEqual(laterSelected[1], "custom", "the new callback receives the tree list's call")
 
 print("bags_sidebar_controller_test.lua: ok")

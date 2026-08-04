@@ -210,7 +210,10 @@ for _, removedUtilityContract in ipairs({
     assertNotContains(sidebar, removedUtilityContract,
         "the rail must not retain the old lock utility row")
 end
-assertContains(sidebar, 'scrollFrame:SetPoint("TOPLEFT")',
+-- The rail is a single AF.CreateSidebarRail widget with no separate utility
+-- row anchored above it, so navigation always spans the rail's full height
+-- (AbstractFramework/tests/tree_list_test.lua covers the rail's own layout).
+assertContains(sidebar, "AF.CreateSidebarRail(",
     "removing the utility row gives navigation the rail's full height")
 
 assertContains(bags,
