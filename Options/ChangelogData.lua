@@ -17,8 +17,8 @@ BFI.changelog = {
                 zhCN = "侧栏收起时，侧栏分类的展开状态现在会保留",
             },
             {
-                enUS = "Sidebar category icons for consumable subclasses and equipment slots now use native in-game art instead of custom glyphs",
-                zhCN = "侧栏消耗品子类和装备部位的分类图标现在使用游戏内原生素材，而非自定义图形",
+                enUS = "Sidebar category icons across every category (equipment, consumables, trade goods, recipes, reagents, quest items, and housing) now render as larger, full-color native in-game art on plated backgrounds",
+                zhCN = "侧栏所有分类（装备、消耗品、贸易物品、配方、材料、任务物品和房屋）的图标现在都以更大尺寸的全彩游戏内原生素材呈现，并带有底板背景",
             },
             {
                 enUS = "Sidebar toggle now collapses and expands the sidebar instantly, replacing the old auto-hide behavior",
