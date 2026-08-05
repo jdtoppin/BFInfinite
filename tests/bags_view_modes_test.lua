@@ -176,11 +176,13 @@ assertContains(bags,
     "maxFrameWidth - HORIZONTAL_PADDING - 1 - contentInset + spacing",
     "the max-column fit subtracts the same flush left inset plus the unchanged right padding")
 
--- The reserved compact rail keeps item layout stable while a right-anchored
--- presentation proxy grows the full styled bag shell left with the hover rail.
+-- The rail is manual-collapse only, so its presentation width always equals
+-- its reserved width; the styled shell mirrors the Blizzard container's
+-- width 1:1 (right-anchored) rather than growing to fit a transient rail
+-- width, since there is no transient width to fit.
 assertContains(bags,
     'local visualShell = _G.CreateFrame("Frame", nil, combinedFrame)',
-    "auto-hide expansion must use a template-free visual shell")
+    "the styled shell must use a template-free visual shell")
 assertContains(bags,
     'visualShell:SetPoint("TOPRIGHT", combinedFrame, "TOPRIGHT")',
     "the visual shell must preserve the bag window's right edge")
@@ -188,29 +190,26 @@ assertContains(bags,
     'visualShell:SetPoint("BOTTOMRIGHT", combinedFrame, "BOTTOMRIGHT")',
     "the visual shell must span the full bag window height")
 assertContains(bags,
-    "combinedFrame:GetWidth() + (self.sidebarExtension or 0)",
-    "the shell must add only transient rail width to the container width")
-assertContains(bags,
-    "self.sidebarExtension = math.max(0, width - reservedWidth)",
-    "the shell must exclude the sidebar width already reserved by layout")
+    "AF.SetWidth(self, combinedFrame:GetWidth())",
+    "the shell mirrors the container's width directly, with no extension")
+assertNotContains(bags, "sidebarExtension",
+    "the inert presentation-proxy extension must not be reintroduced")
+assertNotContains(bags, "SetSidebarPresentationWidth",
+    "the inert presentation-proxy method must not be reintroduced")
+assertNotContains(bags, "B.Sidebar.SetOnPresentationWidthChanged",
+    "the shell no longer needs presentation-width updates it can't act on")
 assertContains(bags,
     "combinedFrame.BFIBg:SetAllPoints(visualShell)",
-    "the full lightweight background must expand with the hover rail")
+    "the lightweight background anchors to the visual shell")
 assertContains(bags,
     'combinedFrame.BFIHeader:SetPoint("TOPLEFT", visualShell, "TOPLEFT")',
-    "the title strip must expand left with the visual shell")
+    "the title strip anchors to the visual shell")
 assertContains(bags,
     'combinedFrame.BFIHeader:SetPoint("TOPRIGHT", visualShell, "TOPRIGHT")',
     "the title strip must retain the bag window's right edge")
 assertContains(bags,
     'combinedFrame:HookScript("OnSizeChanged", function()',
     "the visual shell must follow later Blizzard container resizes")
-assertContains(bags,
-    "B.Sidebar.SetOnPresentationWidthChanged(function(width, reservedWidth)",
-    "the sidebar must publish animated width changes to the visual shell")
-assertContains(bags,
-    "visualShell:SetSidebarPresentationWidth(width, reservedWidth)",
-    "the presentation callback must resize the complete styled shell")
 assertContains(bags,
     "local function OnCombinedFrameShow()\n    if not IsEnabled() then return end\n    B.Sidebar.SetShown(true)",
     "showing the bag window must restore sidebar presentation updates")
@@ -231,7 +230,7 @@ assertContains(bags,
     "the header toggle explains its current action")
 assertContains(bags,
     'searchBox:SetPoint("TOPLEFT", sidebarButton, "TOPRIGHT", 3, 0)',
-    "the auto-hide toggle sits immediately left of search")
+    "the collapse toggle sits immediately left of search")
 assertBefore(bags,
     "sidebarButton:SetPoint(",
     'searchBox:SetPoint("TOPLEFT", sidebarButton',

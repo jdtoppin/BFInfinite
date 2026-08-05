@@ -2030,23 +2030,18 @@ local function StyleCombinedFrame()
     -- and OnSizeChanged texture-coordinate work.
     S.StyleTitledFrame(combinedFrame, nil, true)
 
-    -- Auto-hide reserves only the compact icon rail in the item layout. While
-    -- hovered, expand the styled shell left with the rail without resizing the
-    -- Blizzard container or moving its items, controls, or saved anchor.
+    -- The rail is manual-collapse only (see AF_SidebarRailMixin), so it
+    -- always reports presentation width == reserved width: the styled
+    -- shell never needs to grow past the Blizzard container's own width.
+    -- It still exists as a template-free layer (right-anchored, mirroring
+    -- the container's width 1:1) so the background/header/rail can anchor
+    -- to it instead of the fixed Blizzard frame.
     local visualShell = _G.CreateFrame("Frame", nil, combinedFrame)
     combinedFrame.BFIVisualShell = visualShell
     visualShell:SetPoint("TOPRIGHT", combinedFrame, "TOPRIGHT")
     visualShell:SetPoint("BOTTOMRIGHT", combinedFrame, "BOTTOMRIGHT")
-    visualShell.sidebarExtension = 0
     function visualShell:SyncWidth()
-        AF.SetWidth(
-            self,
-            combinedFrame:GetWidth() + (self.sidebarExtension or 0)
-        )
-    end
-    function visualShell:SetSidebarPresentationWidth(width, reservedWidth)
-        self.sidebarExtension = math.max(0, width - reservedWidth)
-        self:SyncWidth()
+        AF.SetWidth(self, combinedFrame:GetWidth())
     end
     visualShell:SyncWidth()
 
@@ -2117,9 +2112,6 @@ local function StyleCombinedFrame()
             activeCategoryKey = entry.categoryKey
         end
         LayoutItems(true)
-    end)
-    B.Sidebar.SetOnPresentationWidthChanged(function(width, reservedWidth)
-        visualShell:SetSidebarPresentationWidth(width, reservedWidth)
     end)
     B.Sidebar.SetOnCollapsedChanged(function(collapsed)
         B.config.sidebarCollapsed = collapsed

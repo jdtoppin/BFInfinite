@@ -111,6 +111,10 @@ function Sidebar.ToggleExpanded(id)
     return rail.treeList:ToggleExpanded(id)
 end
 
+-- Deliberate return asymmetry: SetShown's boolean means "accepted" (true
+-- even when nextShown matches the current state), while SetCollapsed's
+-- boolean means "state changed" (false on a no-op call) -- callers must
+-- not treat the two return values interchangeably.
 ---@param nextShown boolean
 ---@return boolean accepted
 function Sidebar.SetShown(nextShown)
