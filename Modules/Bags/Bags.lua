@@ -216,18 +216,24 @@ if ITEM_CLASS.Housing then
     -- verified identically at both commits for this task -- so Housing
     -- children get the same evidence-bar treatment as Consumable/Recipe
     -- below (a verified enum key, hand-picked texture value), not the Trade
-    -- Goods exemption. Nested inside this same nil guard, since
-    -- categoryOrderByClass.categoryIconBySubclass[ITEM_CLASS.Housing] would
-    -- otherwise index with a nil key on a client/environment lacking
-    -- ITEM_CLASS.Housing itself.
-    categoryOrderByClass.categoryIconBySubclass[ITEM_CLASS.Housing] = {
-        [_G.Enum.ItemHousingSubclass.Decor] = {texture = "Interface\\Icons\\INV_Misc_Statue_02"},
-        [_G.Enum.ItemHousingSubclass.Dye] = {texture = "Interface\\Icons\\INV_Potion_162"},
-        [_G.Enum.ItemHousingSubclass.Room] = {texture = "Interface\\Icons\\INV_Misc_Map_01"},
-        [_G.Enum.ItemHousingSubclass.RoomCustomization] = {texture = "Interface\\Icons\\INV_Misc_Ribbon_01"},
-        [_G.Enum.ItemHousingSubclass.ExteriorCustomization] = {texture = "Interface\\Icons\\INV_Misc_Shovel_01"},
-        [_G.Enum.ItemHousingSubclass.ServiceItem] = {texture = "Interface\\Icons\\INV_Misc_Bell_01"},
-    }
+    -- Goods exemption. Guarded by two nested checks: the outer
+    -- ITEM_CLASS.Housing check above (categoryOrderByClass.categoryIconBySubclass[ITEM_CLASS.Housing]
+    -- would otherwise index with a nil key on a client/environment lacking
+    -- ITEM_CLASS.Housing itself) and this inner Enum.ItemHousingSubclass
+    -- check, guarded like Consumable/Recipe below because the enum table
+    -- itself -- not just a member on it -- can be absent on some minimal
+    -- test/client environments even though every member used here is
+    -- present on both pinned Retail artifacts.
+    if _G.Enum.ItemHousingSubclass then
+        categoryOrderByClass.categoryIconBySubclass[ITEM_CLASS.Housing] = {
+            [_G.Enum.ItemHousingSubclass.Decor] = {texture = "Interface\\Icons\\INV_Misc_Statue_02"},
+            [_G.Enum.ItemHousingSubclass.Dye] = {texture = "Interface\\Icons\\INV_Potion_162"},
+            [_G.Enum.ItemHousingSubclass.Room] = {texture = "Interface\\Icons\\INV_Misc_Map_01"},
+            [_G.Enum.ItemHousingSubclass.RoomCustomization] = {texture = "Interface\\Icons\\INV_Misc_Ribbon_01"},
+            [_G.Enum.ItemHousingSubclass.ExteriorCustomization] = {texture = "Interface\\Icons\\INV_Misc_Shovel_01"},
+            [_G.Enum.ItemHousingSubclass.ServiceItem] = {texture = "Interface\\Icons\\INV_Misc_Bell_01"},
+        }
+    end
 end
 
 -- Consumable: see the API evidence comment below for the pinned artifacts:

@@ -394,6 +394,11 @@ end
 -- Goods above), so they get the same artifact-verified-key treatment as
 -- Consumable/Recipe, not the exemption.
 assertContains(bags,
+    "if _G.Enum.ItemHousingSubclass then",
+    "the housing subclass icon map is nil-guarded like Consumable/Recipe, for clients/environments " ..
+    "lacking the enum itself -- the outer ITEM_CLASS.Housing check alone only guards the nil key, " ..
+    "not a nil Enum.ItemHousingSubclass value")
+assertContains(bags,
     "categoryOrderByClass.categoryIconBySubclass[ITEM_CLASS.Housing] = {",
     "housing subclasses are populated behind the verified ItemHousingSubclass enum")
 for _, housingSubclassIcon in ipairs({
