@@ -10,30 +10,26 @@ local type = type
 local DESIRED_WIDTH = 170
 local COLLAPSED_WIDTH = 40
 local CONTENT_GAP = 8
-local ROW_HEIGHT = 26
 local HEADING_HEIGHT = 22
-local ICON_SIZE = 16
 local ACCENT_COLOR = "BFI"
 local FALLBACK_ICON = "Bag_Misc"
--- Match the RGB TreeList.lua's ApplyNodeIcon already renders string/glyph
--- row icons at: the "else" (glyph) branch resets row.icon to
--- SetVertexColor(1, 1, 1, ROW_ICON_ALPHA) -- full white at the row's
--- existing baseline alpha (AbstractFramework/Widgets/TreeList.lua, commit
--- 973d708d144971970176f3fff2429cda17aaae2b on codex/bag-sidebar-foundation).
--- Reusing that exact RGB here means the new native atlas/texture category
--- icons desaturate to the same flat white tone as the rail's remaining
--- Bag_* glyph rows, instead of showing their own full-color native art.
-local TEXTURE_TINT = {1, 1, 1}
 
+-- Task 3 (sidebar v3): rowHeight/iconSize and textureTint are no longer
+-- passed here. AbstractFramework/Widgets/TreeList.lua (codex/bag-sidebar-
+-- foundation) now renders every row's icon at full native color on a
+-- squared plate -- textureTint has been deleted from the widget entirely
+-- (passing it would be inert), and texture-shaped icons are auto-cropped to
+-- the plate by ApplyNodeIcon/AF.ApplyDefaultTexCoord, so BFI no longer
+-- desaturates category icons to the rail's flat glyph-row white. rowHeight/
+-- iconSize are also dropped so AF's own defaults govern (DEFAULT_ROW_HEIGHT
+-- = 28, DEFAULT_ICON_SIZE = 20 in TreeList.lua), matching Task 2's sizing
+-- baseline instead of this module's previous 26/16 override.
 local OPTIONS = {
     expandedWidth = DESIRED_WIDTH,
     collapsedWidth = COLLAPSED_WIDTH,
-    rowHeight = ROW_HEIGHT,
     headingHeight = HEADING_HEIGHT,
-    iconSize = ICON_SIZE,
     accentColor = ACCENT_COLOR,
     fallbackIcon = FALLBACK_ICON,
-    textureTint = TEXTURE_TINT,
 }
 
 local Sidebar = B.Sidebar or {}

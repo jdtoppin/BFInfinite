@@ -250,54 +250,74 @@ end
 assertContains(sidebar, "AF.CreateSidebarRail(",
     "removing the utility row gives navigation the rail's full height")
 
--- Task 5: native atlas/texture category icons are desaturated and tinted to
--- match the rail's remaining glyph rows, rather than showing full-color art.
-assertContains(sidebar, "local TEXTURE_TINT = {1, 1, 1}",
-    "the tint matches TreeList.lua's own glyph-row vertex color")
-assertContains(sidebar, "textureTint = TEXTURE_TINT",
-    "Sidebar.lua passes textureTint through to AF.CreateSidebarRail's options")
+-- Task 3 (sidebar v3): AF's TreeList.lua deletes textureTint entirely and
+-- renders every row icon at full native color, so Sidebar.lua no longer
+-- desaturates category icons -- and no longer overrides rowHeight/iconSize,
+-- letting AF's own defaults (28/20) govern per Task 2.
+assertNotContains(sidebar, "TEXTURE_TINT",
+    "the tint local is removed along with the option it fed")
+assertNotContains(sidebar, "textureTint = ",
+    "Sidebar.lua must not pass the deleted textureTint option through")
+assertNotContains(sidebar, "rowHeight = ",
+    "Sidebar.lua must not override AF's default row height")
+assertNotContains(sidebar, "iconSize = ",
+    "Sidebar.lua must not override AF's default icon size")
 
--- Task 5: parent-category icons use verified native ContainerFrame.lua
--- bag-filter atlases (BAG_FILTER_ICONS) instead of Tabler Bag_* glyphs,
--- wherever a matching filter class was found in the pinned artifacts.
-assertContains(bags,
+-- Task 3: every parent-category icon retires its "bags-icon-*"
+-- BAG_FILTER_ICONS atlas (Task 5's choice) in favor of a hand-picked
+-- Interface\Icons texture, now that AF renders full-color plated art
+-- instead of desaturating atlas/texture icons to the rail's flat glyph
+-- tone. REAGENT_SPACE_ICON (a different UI element -- the item-grid
+-- empty-reagent-slot overlay, unrelated to the sidebar rail) is
+-- intentionally exempt and keeps "bags-icon-reagents".
+for _, retiredParentAtlas in ipairs({
+    '[ITEM_CLASS.Consumable] = {atlas = "bags-icon-consumables"}',
     '[ITEM_CLASS.Tradegoods] = {atlas = "bags-icon-profession-goods"}',
-    "trade-skill goods use the native profession-goods bag-filter atlas")
-assertContains(bags,
     '[ITEM_CLASS.Reagent] = {atlas = "bags-icon-reagents"}',
-    "reagents use the native reagents bag-filter atlas")
-assertNotContains(bags,
-    '[ITEM_CLASS.Reagent] = {atlas = "bags-icon-profession-goods"}',
-    "reagents must not share the trade-skill goods atlas")
+    '[ITEM_CLASS.Questitem] = {atlas = "bags-icon-questitem"}',
+    'parentIcon = {atlas = "bags-icon-equipment"}',
+}) do
+    assertNotContains(bags, retiredParentAtlas,
+        "no parent-category icon may still use a bags-icon-* atlas")
+end
+assertContains(bags,
+    '[ITEM_CLASS.Consumable] = {texture = "Interface\\\\Icons\\\\INV_Potion_51"}',
+    "consumables use a hand-picked bottle texture")
+assertContains(bags,
+    '[ITEM_CLASS.Tradegoods] = {texture = "Interface\\\\Icons\\\\INV_Crate_01"}',
+    "trade goods use a hand-picked bundle texture")
+assertContains(bags,
+    '[ITEM_CLASS.Reagent] = {texture = "Interface\\\\Icons\\\\INV_Misc_Bag_11"}',
+    "reagents use a hand-picked pouch texture")
+assertContains(bags,
+    '[ITEM_CLASS.Questitem] = {texture = "Interface\\\\Icons\\\\INV_Misc_Note_01"}',
+    "quest items use a hand-picked scroll/note texture")
+assertContains(bags,
+    'parentIcon = {texture = "Interface\\\\Icons\\\\INV_Chest_Plate04"}',
+    "the equipment parent category uses a hand-picked armor texture")
 assertContains(bags,
     "if ITEM_CLASS.Housing then",
     "housing class support must remain compatible with clients lacking the enum")
-assertContains(bags,
-    '[ITEM_CLASS.Consumable] = {atlas = "bags-icon-consumables"}',
-    "consumables use the native consumables bag-filter atlas")
-assertContains(bags,
-    '[ITEM_CLASS.Questitem] = {atlas = "bags-icon-questitem"}',
-    "quest items use the native quest-item bag-filter atlas")
-assertContains(bags,
-    'parentIcon = {atlas = "bags-icon-equipment"}',
-    "the equipment parent category uses the native equipment bag-filter atlas")
 
--- Fix round 1: Recipe and Housing have no matching BAG_FILTER_ICONS entry
--- in either pinned artifact, so their parent icons (like the Recipe
--- subtypes below) are hand-picked art-choice textures per the owner's
--- ruling, not a verified atlas -- but ItemClass.Housing (EnumValue = 20)
--- itself is documented identically at both pinned commits, so no comment
--- may claim it is a 12.1.0-only addition.
-assertContains(bags,
-    '[ITEM_CLASS.Recipe] = {texture = "Interface\\\\Icons\\\\INV_Misc_Book_09"}',
-    "recipes use a hand-picked book texture (no verified native atlas exists)")
-assertContains(bags,
-    'categoryIconByClass[ITEM_CLASS.Housing] = {texture = "Interface\\\\Icons\\\\INV_Misc_GarrisonHearthstone"}',
-    "housing uses a hand-picked house-themed texture (no verified native atlas exists)")
+-- Fix round 1 (still true): ItemClass.Housing (EnumValue = 20) is
+-- documented identically at both pinned commits, so no comment may claim it
+-- is a 12.1.0-only addition or otherwise unavailable at 12.0.7.
 assertNotContains(bags, "adds ItemClass.Housing",
     "no comment may claim Housing is a 12.1.0-only addition; it is documented identically at both pinned commits")
 assertNotContains(bags, "not available",
     "no comment may claim ItemClass.Housing is unavailable at the 12.0.7 pinned commit")
+
+-- Task 3: the Recipe parent icon is unchanged (already a hand-picked
+-- texture before this task); the Housing parent's texture name is corrected
+-- from a nonexistent Misc-prefixed spelling to the real icon file.
+assertContains(bags,
+    '[ITEM_CLASS.Recipe] = {texture = "Interface\\\\Icons\\\\INV_Misc_Book_09"}',
+    "recipes use a hand-picked book texture (no verified native atlas exists)")
+assertContains(bags,
+    'categoryIconByClass[ITEM_CLASS.Housing] = {texture = "Interface\\\\Icons\\\\INV_Garrison_Hearthstone"}',
+    "housing uses the corrected, real hand-picked house-themed texture")
+assertNotContains(bags, 'texture = "Interface\\\\Icons\\\\INV_Misc_GarrisonHearthstone"',
+    "the nonexistent Misc-prefixed Housing texture spelling must not reappear as an actual icon value")
 
 -- Fix round 1: Recipe subtypes get the same art-choice texture treatment as
 -- Consumable subtypes, keyed by the verified Enum.ItemRecipeSubclass
@@ -318,9 +338,9 @@ assertContains(bags,
     "recipe subclass icons are populated behind their own enum guard")
 for _, recipeSubclassIcon in ipairs({
     '[_G.Enum.ItemRecipeSubclass.Book] = {texture = "Interface\\\\Icons\\\\INV_Misc_Book_09"}',
-    '[_G.Enum.ItemRecipeSubclass.Leatherworking] = {texture = "Interface\\\\Icons\\\\INV_Misc_Book_09"}',
-    '[_G.Enum.ItemRecipeSubclass.Tailoring] = {texture = "Interface\\\\Icons\\\\INV_Misc_Book_09"}',
-    '[_G.Enum.ItemRecipeSubclass.Engineering] = {texture = "Interface\\\\Icons\\\\INV_Misc_Gizmo_02"}',
+    '[_G.Enum.ItemRecipeSubclass.Leatherworking] = {texture = "Interface\\\\Icons\\\\INV_Weapon_ShortBlade_05"}',
+    '[_G.Enum.ItemRecipeSubclass.Tailoring] = {texture = "Interface\\\\Icons\\\\INV_Misc_Thread_01"}',
+    '[_G.Enum.ItemRecipeSubclass.Engineering] = {texture = "Interface\\\\Icons\\\\INV_Misc_Wrench_01"}',
     '[_G.Enum.ItemRecipeSubclass.Blacksmithing] = {texture = "Interface\\\\Icons\\\\INV_Hammer_01"}',
     '[_G.Enum.ItemRecipeSubclass.Cooking] = {texture = "Interface\\\\Icons\\\\INV_Misc_Food_15"}',
     '[_G.Enum.ItemRecipeSubclass.Alchemy] = {texture = "Interface\\\\Icons\\\\INV_Potion_92"}',
@@ -328,20 +348,65 @@ for _, recipeSubclassIcon in ipairs({
     '[_G.Enum.ItemRecipeSubclass.Enchanting] = {texture = "Interface\\\\Icons\\\\INV_Enchant_Disenchant"}',
     '[_G.Enum.ItemRecipeSubclass.Fishing] = {texture = "Interface\\\\Icons\\\\INV_Fishingpole_01"}',
     '[_G.Enum.ItemRecipeSubclass.Jewelcrafting] = {texture = "Interface\\\\Icons\\\\INV_Misc_Gem_01"}',
-    '[_G.Enum.ItemRecipeSubclass.Inscription] = {texture = "Interface\\\\Icons\\\\INV_Misc_Book_09"}',
+    '[_G.Enum.ItemRecipeSubclass.Inscription] = {texture = "Interface\\\\Icons\\\\INV_Inscription_Scroll"}',
 }) do
     assertContains(bags, recipeSubclassIcon,
         "every verified Enum.ItemRecipeSubclass member maps to a hand-picked art-choice texture")
 end
+-- Task 3 fix: Leatherworking, Tailoring, and Inscription no longer share
+-- the generic Book texture -- only the Book member itself may still use it.
+assertCount(bags, 'Interface\\\\Icons\\\\INV_Misc_Book_09"}', 2,
+    "INV_Misc_Book_09 must appear exactly twice: the Recipe parent icon and the Book subclass, never a second profession")
+assertNotContains(bags, 'texture = "Interface\\\\Icons\\\\INV_Misc_Gizmo_02"',
+    "the nonexistent Misc-prefixed Engineering texture spelling must not reappear as an actual icon value")
 
--- Fix round 1: Trade Goods subclasses stay unmapped -- no verified
--- subclass-ID/name key exists in either pinned artifact (checked
--- ItemConstantsDocumentation.lua x3 files, GlobalStrings absence, and
--- Blizzard_AuctionHouseUI's dynamic category generation) -- so no
--- ITEM_CLASS.Tradegoods entry may appear in the subclass icon host table.
-assertNotContains(bags,
-    "categoryOrderByClass.categoryIconBySubclass[ITEM_CLASS.Tradegoods]",
-    "trade goods subclasses have no verified key and must stay on the parent icon")
+-- Task 3: Trade Goods subclasses get an OWNER-GRANTED POLICY EXEMPTION --
+-- runtime-observed numeric subclass IDs are now allowed for this one table,
+-- in place of the artifact-verified key Consumable/Recipe/Housing use,
+-- because neither pinned commit documents any such enum (re-verified for
+-- this task, same result as v2). The exemption maintenance comment must be
+-- present alongside the table.
+assertContains(bags,
+    "categoryOrderByClass.categoryIconBySubclass[ITEM_CLASS.Tradegoods] = {",
+    "trade goods subclasses are now populated under the owner-granted exemption")
+assertContains(bags, "OWNER-GRANTED POLICY\n-- EXEMPTION",
+    "the exemption maintenance comment marker must be present")
+assertContains(bags, "still recommended before relying on this table",
+    "the comment must flag that in-game confirmation is still outstanding")
+for _, tradeGoodsSubclassIcon in ipairs({
+    '[1] = {texture = "Interface\\\\Icons\\\\INV_Gizmo_02"}, -- Parts',
+    '[4] = {texture = "Interface\\\\Icons\\\\INV_Misc_Gem_Variety_01"}, -- Jewelcrafting',
+    '[5] = {texture = "Interface\\\\Icons\\\\INV_Fabric_Wool_01"}, -- Cloth',
+    '[6] = {texture = "Interface\\\\Icons\\\\INV_Misc_LeatherScrap_01"}, -- Leather',
+    '[7] = {texture = "Interface\\\\Icons\\\\INV_Ore_Copper_01"}, -- Metal & Stone',
+    '[8] = {texture = "Interface\\\\Icons\\\\INV_Misc_Food_15"}, -- Cooking',
+    '[9] = {texture = "Interface\\\\Icons\\\\INV_Misc_Herb_01"}, -- Herb',
+    '[10] = {texture = "Interface\\\\Icons\\\\INV_Elemental_Mote_Fire01"}, -- Elemental',
+    '[11] = {texture = "Interface\\\\Icons\\\\INV_Misc_Bag_09"}, -- Other',
+    '[12] = {texture = "Interface\\\\Icons\\\\INV_Enchant_Dust"}, -- Enchanting',
+    '[16] = {texture = "Interface\\\\Icons\\\\INV_Inscription_Tradeskill01"}, -- Inscription',
+}) do
+    assertContains(bags, tradeGoodsSubclassIcon,
+        "every Trade Goods exemption subclass ID maps to its own hand-picked texture")
+end
+
+-- Task 3: Housing subclasses are a fully documented enum (unlike Trade
+-- Goods above), so they get the same artifact-verified-key treatment as
+-- Consumable/Recipe, not the exemption.
+assertContains(bags,
+    "categoryOrderByClass.categoryIconBySubclass[ITEM_CLASS.Housing] = {",
+    "housing subclasses are populated behind the verified ItemHousingSubclass enum")
+for _, housingSubclassIcon in ipairs({
+    '[_G.Enum.ItemHousingSubclass.Decor] = {texture = "Interface\\\\Icons\\\\INV_Misc_Statue_02"}',
+    '[_G.Enum.ItemHousingSubclass.Dye] = {texture = "Interface\\\\Icons\\\\INV_Potion_162"}',
+    '[_G.Enum.ItemHousingSubclass.Room] = {texture = "Interface\\\\Icons\\\\INV_Misc_Map_01"}',
+    '[_G.Enum.ItemHousingSubclass.RoomCustomization] = {texture = "Interface\\\\Icons\\\\INV_Misc_Ribbon_01"}',
+    '[_G.Enum.ItemHousingSubclass.ExteriorCustomization] = {texture = "Interface\\\\Icons\\\\INV_Misc_Shovel_01"}',
+    '[_G.Enum.ItemHousingSubclass.ServiceItem] = {texture = "Interface\\\\Icons\\\\INV_Misc_Bell_01"}',
+}) do
+    assertContains(bags, housingSubclassIcon,
+        "every verified Enum.ItemHousingSubclass member maps to a hand-picked art-choice texture")
+end
 
 -- Category families are selectable aggregate parents with nested, concise
 -- subtype rows. In particular, equipment children read Chest/Gloves rather

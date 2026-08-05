@@ -360,11 +360,16 @@ assertEqual(rail.parent, parent, "the rail is parented to the caller's frame")
 
 assertEqual(rail.options.expandedWidth, 170, "expanded width option")
 assertEqual(rail.options.collapsedWidth, 40, "collapsed width option")
-assertEqual(rail.options.rowHeight, 26, "row height option")
 assertEqual(rail.options.headingHeight, 22, "heading height option")
-assertEqual(rail.options.iconSize, 16, "icon size option")
 assertEqual(rail.options.accentColor, "BFI", "accent color option")
 assertEqual(rail.options.fallbackIcon, "Bag_Misc", "fallback icon option")
+-- Task 3 (sidebar v3): rowHeight/iconSize are no longer passed, so AF's own
+-- TreeList.lua defaults govern (DEFAULT_ROW_HEIGHT = 28, DEFAULT_ICON_SIZE
+-- = 20), and textureTint is gone entirely (AF deleted the option; passing
+-- it would be inert).
+assertEqual(rail.options.rowHeight, nil, "row height option is no longer overridden")
+assertEqual(rail.options.iconSize, nil, "icon size option is no longer overridden")
+assertEqual(rail.options.textureTint, nil, "the deleted textureTint option is never passed")
 
 -- the buffered pre-Initialize state (shown=true, collapsed=true after the
 -- toggle sequence above) is flushed onto the freshly created rail, silently
