@@ -160,8 +160,10 @@ local categoryOrderByClass = {
 -- goods" is the closest verified native equivalent for that shared bucket.
 -- Recipe has no matching bag-type filter in either artifact (only
 -- Equipment/Consumables/ProfessionGoods/Junk/QuestItems/Reagents exist), so
--- it stays on its existing Bag_Recipes glyph fallback; see the evidence
--- comment further down.
+-- its parent icon (like Housing's below, and both classes' subclass icons
+-- further down) is a hand-picked Interface\Icons texture instead -- an art
+-- choice, not an API claim; see the evidence comment further down for the
+-- chosen paths and the in-game QA note.
 local categoryIconByClass = {
     [ITEM_CLASS.Consumable] = {atlas = "bags-icon-consumables"},
     [ITEM_CLASS.Gem] = {atlas = "bags-icon-profession-goods"},
@@ -169,44 +171,99 @@ local categoryIconByClass = {
     [ITEM_CLASS.Reagent] = {atlas = "bags-icon-reagents"},
     [ITEM_CLASS.ItemEnhancement] = {atlas = "bags-icon-profession-goods"},
     [ITEM_CLASS.Profession] = {atlas = "bags-icon-profession-goods"},
-    [ITEM_CLASS.Recipe] = "Bag_Recipes",
+    [ITEM_CLASS.Recipe] = {texture = "Interface\\Icons\\INV_Misc_Book_09"},
     [ITEM_CLASS.Questitem] = {atlas = "bags-icon-questitem"},
 }
--- Retail 12.1.0.68914 ItemConstantsDocumentation.lua (wow-ui-source
--- d3915c78aba7) adds ItemClass.Housing. Keep the nil guard for the supported
--- 12.0.7 client, where that enum member is not available.
+-- ItemConstantsDocumentation.lua lists ItemClass.Housing (EnumValue = 20)
+-- identically at both pinned commits (Retail 12.0.7.68887
+-- 4383ced30106d51b27e3e86d1987f1552f0d259d and Retail 12.1.0.68914
+-- d3915c78aba77a7a9be76acbfa35c674bbb6abe9) -- it is not a 12.1.0-only
+-- addition. Keep the nil guard anyway for clients/environments older or
+-- more minimal than either pinned artifact, where this enum member has not
+-- been verified present. The icon itself is a hand-picked house-themed
+-- Interface\Icons texture (art choice, not an API claim; see the evidence
+-- comment further down), same as Recipe's above.
 if ITEM_CLASS.Housing then
     categoryOrderByClass[ITEM_CLASS.Housing] = 600
-    categoryIconByClass[ITEM_CLASS.Housing] = "Bag_Housing"
+    categoryIconByClass[ITEM_CLASS.Housing] = {texture = "Interface\\Icons\\INV_Misc_GarrisonHearthstone"}
 end
 
--- categoryIconBySubclass: childIcon lookups for consumable subclasses. See
--- the API evidence comment below for the pinned artifacts: Retail
--- 12.0.7.68887 and PTR 12.1.0.68914 both list the same 13
+-- categoryIconBySubclass: childIcon lookups for consumable and recipe
+-- subclasses. Nested as a nonnumeric field on the existing
+-- categoryOrderByClass local (same 200-local-ceiling reason as
+-- equipmentSlotOrder.categoryIconByEquipLoc above); categoryOrderByClass's
+-- own classID keys never collide with this "categoryIconBySubclass" string
+-- key. The host table itself is created unconditionally (never nil), so
+-- GetCategory's "categoryOrderByClass.categoryIconBySubclass and
+-- categoryOrderByClass.categoryIconBySubclass[classID]" guard always finds
+-- a table to index (possibly with no entry for a given classID); each
+-- classID's own entry is populated only behind its own enum-presence guard,
+-- independently, matching the ITEM_CLASS.Housing guard above.
+categoryOrderByClass.categoryIconBySubclass = {}
+
+-- Consumable: see the API evidence comment below for the pinned artifacts:
+-- Retail 12.0.7.68887 and PTR 12.1.0.68914 both list the same 13
 -- Enum.ItemConsumableSubclass members, including the five used here
 -- (Potion = 1, Elixir = 2, Flasksphials = 3, Fooddrink = 5, Bandage = 7).
--- Nested as a nonnumeric field on the existing categoryOrderByClass local
--- (same 200-local-ceiling reason as equipmentSlotOrder.categoryIconByEquipLoc
--- above); categoryOrderByClass's own classID keys never collide with this
--- "categoryIconBySubclass" string key. Guarded like the ITEM_CLASS.Housing
--- block above: Enum.ItemConsumableSubclass itself is absent on some minimal
--- test/client environments even though every member used here is present on
--- both pinned Retail artifacts. The five texture paths below are an art
--- choice, not an API claim (no per-subclass atlas exists in either
+-- Guarded because Enum.ItemConsumableSubclass itself is absent on some
+-- minimal test/client environments even though every member used here is
+-- present on both pinned Retail artifacts. The five texture paths below are
+-- an art choice, not an API claim (no per-subclass atlas exists in either
 -- artifact): five long-standing classic Interface\Icons raster icons,
 -- chosen for their subject matter; see the evidence comment for the list
 -- and the in-game QA note.
 if _G.Enum.ItemConsumableSubclass then
-    categoryOrderByClass.categoryIconBySubclass = {
-        [ITEM_CLASS.Consumable] = {
-            [_G.Enum.ItemConsumableSubclass.Potion] = {texture = "Interface\\Icons\\INV_Potion_93"},
-            [_G.Enum.ItemConsumableSubclass.Flasksphials] = {texture = "Interface\\Icons\\INV_Potion_97"},
-            [_G.Enum.ItemConsumableSubclass.Fooddrink] = {texture = "Interface\\Icons\\INV_Misc_Food_15"},
-            [_G.Enum.ItemConsumableSubclass.Bandage] = {texture = "Interface\\Icons\\INV_Misc_Bandage_08"},
-            [_G.Enum.ItemConsumableSubclass.Elixir] = {texture = "Interface\\Icons\\INV_Potion_31"},
-        },
+    categoryOrderByClass.categoryIconBySubclass[ITEM_CLASS.Consumable] = {
+        [_G.Enum.ItemConsumableSubclass.Potion] = {texture = "Interface\\Icons\\INV_Potion_93"},
+        [_G.Enum.ItemConsumableSubclass.Flasksphials] = {texture = "Interface\\Icons\\INV_Potion_97"},
+        [_G.Enum.ItemConsumableSubclass.Fooddrink] = {texture = "Interface\\Icons\\INV_Misc_Food_15"},
+        [_G.Enum.ItemConsumableSubclass.Bandage] = {texture = "Interface\\Icons\\INV_Misc_Bandage_08"},
+        [_G.Enum.ItemConsumableSubclass.Elixir] = {texture = "Interface\\Icons\\INV_Potion_31"},
     }
 end
+
+-- Recipe: both pinned artifacts' ItemConstantsDocumentation.lua list the
+-- same 12 Enum.ItemRecipeSubclass members (Book = 0, Leatherworking = 1,
+-- Tailoring = 2, Engineering = 3, Blacksmithing = 4, Cooking = 5,
+-- Alchemy = 6, FirstAid = 7, Enchanting = 8, Fishing = 9,
+-- Jewelcrafting = 10, Inscription = 11) -- all twelve keys below are
+-- verified against that enum. The texture values are an art choice, not an
+-- API claim (no per-profession atlas exists in either artifact, see the
+-- evidence comment further down): a distinct Interface\Icons texture per
+-- profession where a confidently-real, thematically fitting classic icon
+-- exists, otherwise the same generic book texture as the Recipe parent
+-- icon above. Guarded like Consumable above, for the same reason.
+if _G.Enum.ItemRecipeSubclass then
+    categoryOrderByClass.categoryIconBySubclass[ITEM_CLASS.Recipe] = {
+        [_G.Enum.ItemRecipeSubclass.Book] = {texture = "Interface\\Icons\\INV_Misc_Book_09"},
+        [_G.Enum.ItemRecipeSubclass.Leatherworking] = {texture = "Interface\\Icons\\INV_Misc_Book_09"},
+        [_G.Enum.ItemRecipeSubclass.Tailoring] = {texture = "Interface\\Icons\\INV_Misc_Book_09"},
+        [_G.Enum.ItemRecipeSubclass.Engineering] = {texture = "Interface\\Icons\\INV_Misc_Gizmo_02"},
+        [_G.Enum.ItemRecipeSubclass.Blacksmithing] = {texture = "Interface\\Icons\\INV_Hammer_01"},
+        [_G.Enum.ItemRecipeSubclass.Cooking] = {texture = "Interface\\Icons\\INV_Misc_Food_15"},
+        [_G.Enum.ItemRecipeSubclass.Alchemy] = {texture = "Interface\\Icons\\INV_Potion_92"},
+        [_G.Enum.ItemRecipeSubclass.FirstAid] = {texture = "Interface\\Icons\\INV_Misc_Bandage_08"},
+        [_G.Enum.ItemRecipeSubclass.Enchanting] = {texture = "Interface\\Icons\\INV_Enchant_Disenchant"},
+        [_G.Enum.ItemRecipeSubclass.Fishing] = {texture = "Interface\\Icons\\INV_Fishingpole_01"},
+        [_G.Enum.ItemRecipeSubclass.Jewelcrafting] = {texture = "Interface\\Icons\\INV_Misc_Gem_01"},
+        [_G.Enum.ItemRecipeSubclass.Inscription] = {texture = "Interface\\Icons\\INV_Misc_Book_09"},
+    }
+end
+
+-- Trade Goods (ITEM_CLASS.Tradegoods) subclasses are intentionally left
+-- unmapped at the subclass level, unlike Consumable/Recipe above: neither
+-- pinned artifact documents an Enum.ItemTradeGoodsSubclass (or similarly
+-- named) enum anywhere in ItemConstantsDocumentation.lua,
+-- ItemConstants_MainlineDocumentation.lua, or
+-- ItemConstants_SharedDocumentation.lua, no GlobalStrings-style source file
+-- exists in the mirror to verify the classic subclass name strings
+-- ("Cloth", "Leather", etc.) either, and
+-- Blizzard_AuctionHouseUI/Mainline/Blizzard_AuctionData.lua's own Trade
+-- Goods category (`tradeGoodsCategory:GenerateSubCategoriesAndFiltersFromSubClass(
+-- Enum.ItemClass.Tradegoods)`) builds its subclass list dynamically at
+-- runtime rather than from any static, checkable table. Without a verified
+-- key, per policy this stays on the parent categoryIconByClass entry above
+-- rather than guessing numeric subclassIDs from memory.
 
 local inventoryConstants = _G.Constants.InventoryConstants
 local REAGENT_BAG_ID = inventoryConstants.NumBagSlots + inventoryConstants.NumReagentBagSlots
@@ -375,31 +432,58 @@ local VIEW_MODE_INDIVIDUAL = "individual"
 --    Tradegoods, ItemEnhancement, and Profession share
 --    "bags-icon-profession-goods", matching BFI's pre-existing decision to
 --    group them under one icon). No filter class exists for Recipe or
---    Housing in either commit's BAG_FILTER_ICONS, so both stay on their
---    existing Bag_Recipes/Bag_Housing glyph fallback.
--- 4. Per-profession subclass atlases (Trade Goods / Recipes): both commits'
---    ItemConstantsDocumentation.lua document ItemProfessionSubclass
+--    Housing in either commit's BAG_FILTER_ICONS; both use a hand-picked
+--    Interface\Icons texture instead (item 5 below), not an atlas claim.
+-- 4. Per-profession subclass keys and atlases (Trade Goods / Recipes): both
+--    commits' ItemConstantsDocumentation.lua document ItemProfessionSubclass
 --    (0-13, one member per profession, matching ITEM_CLASS.Profession) and
---    ItemRecipeSubclass (0-11, matching ITEM_CLASS.Recipe), but neither
---    commit's Blizzard_Professions or Blizzard_ProfessionsBook source
---    defines a static per-profession atlas (no `atlas=` usage tied to a
---    profession identity in Blizzard_ProfessionsFrame.lua/.xml or
+--    ItemRecipeSubclass (0-11, matching ITEM_CLASS.Recipe) identically.
+--    Neither commit's Blizzard_Professions or Blizzard_ProfessionsBook
+--    source defines a static per-profession atlas (no `atlas=` usage tied
+--    to a profession identity in Blizzard_ProfessionsFrame.lua/.xml or
 --    Blizzard_ProfessionsBook.lua/.xml at either commit; the profession
 --    tab/spec icons those files do draw come from runtime API calls such as
---    GetChildProfessionInfo, not a fixed literal this static Lua table could
---    reference). No Enum.ItemTradegoodsSubclass or
---    Enum.ItemEnhancementSubclass exists in either commit's
---    ItemConstantsDocumentation.lua/ItemConstants_MainlineDocumentation.lua/
---    ItemConstants_SharedDocumentation.lua either. Per policy, all of these
---    stay unmapped at the subclass level, falling back to their parent
+--    GetChildProfessionInfo, not a fixed literal a static Lua table could
+--    reference), so Recipe's subclass icons use hand-picked textures
+--    instead (item 5 below), keyed by the verified ItemRecipeSubclass
+--    members. No Enum.ItemTradegoodsSubclass or Enum.ItemEnhancementSubclass
+--    exists in either commit's ItemConstantsDocumentation.lua/
+--    ItemConstants_MainlineDocumentation.lua/
+--    ItemConstants_SharedDocumentation.lua either -- confirmed by grepping
+--    all three files at both commits for any "*Subclass" enumeration tied
+--    to Trade Goods. No GlobalStrings-equivalent source file exists in the
+--    mirror to verify the classic Trade Goods subclass name strings
+--    ("Cloth", "Leather", etc.) as an alternative string key either.
+--    Blizzard_AuctionHouseUI/Mainline/Blizzard_AuctionData.lua's own Trade
+--    Goods browse category
+--    (`tradeGoodsCategory:GenerateSubCategoriesAndFiltersFromSubClass(
+--    Enum.ItemClass.Tradegoods)`) builds its subclass list dynamically at
+--    runtime, not from any static literal this file could cite either. Per
+--    policy, ITEM_CLASS.Tradegoods therefore stays unmapped at the subclass
+--    level (no numeric subclassID is guessed), falling back to its parent
 --    class icon (categoryIconByClass) above.
--- 5. Consumable subtype textures (Potion/Flask/Food/Bandage/Elixir): an art
---    choice per the brief, not an API claim, so it is not gated on either
---    pinned commit. Chosen paths: Interface\Icons\INV_Potion_93 (Potion),
---    INV_Potion_97 (Flasksphials), INV_Misc_Food_15 (Fooddrink),
---    INV_Misc_Bandage_08 (Bandage), INV_Potion_31 (Elixir) -- five
---    long-standing classic raster icons matching their subclass's subject
---    matter. Final visual fit is an in-game QA gate, not verified here.
+-- 5. Art-choice textures (Consumable/Recipe subtypes, Recipe/Housing
+--    parents): hand-picked per the brief/owner ruling, not an API claim, so
+--    none of the following are gated on either pinned commit -- only the
+--    *keys* above (Enum.ItemConsumableSubclass/Enum.ItemRecipeSubclass
+--    members, or the classID itself) carry an artifact-verification
+--    requirement, which items 1-4 already satisfy. Consumable subtypes:
+--    Interface\Icons\INV_Potion_93 (Potion), INV_Potion_97 (Flasksphials),
+--    INV_Misc_Food_15 (Fooddrink), INV_Misc_Bandage_08 (Bandage),
+--    INV_Potion_31 (Elixir). Recipe subtypes: INV_Misc_Book_09
+--    (Book/Leatherworking/Tailoring/Inscription -- shared generic book,
+--    per the owner's explicit "one shared book icon" fallback allowance,
+--    used where a distinct per-profession book/scroll filename could not be
+--    picked with confidence), INV_Misc_Gizmo_02 (Engineering), INV_Hammer_01
+--    (Blacksmithing), INV_Misc_Food_15 (Cooking, reused from the consumable
+--    Fooddrink pick above), INV_Potion_92 (Alchemy), INV_Misc_Bandage_08
+--    (FirstAid, reused from the consumable Bandage pick above),
+--    INV_Enchant_Disenchant (Enchanting), INV_Fishingpole_01 (Fishing),
+--    INV_Misc_Gem_01 (Jewelcrafting). Recipe parent: INV_Misc_Book_09 (same
+--    generic book as its Book/Leatherworking/Tailoring/Inscription
+--    subtypes). Housing parent: INV_Misc_GarrisonHearthstone (a real,
+--    literally house-shaped classic item icon). Final visual fit for all of
+--    the above is an in-game QA gate, not verified here.
 -- 6. textureTint: AbstractFramework/Widgets/TreeList.lua's ApplyNodeIcon
 --    (commit 973d708d144971970176f3fff2429cda17aaae2b on
 --    codex/bag-sidebar-foundation) resets a string/glyph icon's row.icon to

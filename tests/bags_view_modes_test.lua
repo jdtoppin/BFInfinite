@@ -247,20 +247,75 @@ assertContains(bags,
     "if ITEM_CLASS.Housing then",
     "housing class support must remain compatible with clients lacking the enum")
 assertContains(bags,
-    'categoryIconByClass[ITEM_CLASS.Housing] = "Bag_Housing"',
-    "housing has no verified native atlas in either pinned artifact and keeps its fallback glyph")
-assertContains(bags,
     '[ITEM_CLASS.Consumable] = {atlas = "bags-icon-consumables"}',
     "consumables use the native consumables bag-filter atlas")
 assertContains(bags,
     '[ITEM_CLASS.Questitem] = {atlas = "bags-icon-questitem"}',
     "quest items use the native quest-item bag-filter atlas")
 assertContains(bags,
-    '[ITEM_CLASS.Recipe] = "Bag_Recipes"',
-    "recipes have no verified native atlas in either pinned artifact and keep their fallback glyph")
-assertContains(bags,
     'parentIcon = {atlas = "bags-icon-equipment"}',
     "the equipment parent category uses the native equipment bag-filter atlas")
+
+-- Fix round 1: Recipe and Housing have no matching BAG_FILTER_ICONS entry
+-- in either pinned artifact, so their parent icons (like the Recipe
+-- subtypes below) are hand-picked art-choice textures per the owner's
+-- ruling, not a verified atlas -- but ItemClass.Housing (EnumValue = 20)
+-- itself is documented identically at both pinned commits, so no comment
+-- may claim it is a 12.1.0-only addition.
+assertContains(bags,
+    '[ITEM_CLASS.Recipe] = {texture = "Interface\\\\Icons\\\\INV_Misc_Book_09"}',
+    "recipes use a hand-picked book texture (no verified native atlas exists)")
+assertContains(bags,
+    'categoryIconByClass[ITEM_CLASS.Housing] = {texture = "Interface\\\\Icons\\\\INV_Misc_GarrisonHearthstone"}',
+    "housing uses a hand-picked house-themed texture (no verified native atlas exists)")
+assertNotContains(bags, "adds ItemClass.Housing",
+    "no comment may claim Housing is a 12.1.0-only addition; it is documented identically at both pinned commits")
+assertNotContains(bags, "not available",
+    "no comment may claim ItemClass.Housing is unavailable at the 12.0.7 pinned commit")
+
+-- Fix round 1: Recipe subtypes get the same art-choice texture treatment as
+-- Consumable subtypes, keyed by the verified Enum.ItemRecipeSubclass
+-- members (same evidence bar as Consumable's Enum.ItemConsumableSubclass
+-- keys). The host table is now created unconditionally so a missing
+-- Consumable or Recipe enum never leaves the whole map nil.
+assertContains(bags,
+    "categoryOrderByClass.categoryIconBySubclass = {}",
+    "the subclass icon host table exists unconditionally, independent of either enum's availability")
+assertContains(bags,
+    "categoryOrderByClass.categoryIconBySubclass[ITEM_CLASS.Consumable] = {",
+    "consumable subclass icons are populated behind their own enum guard")
+assertContains(bags,
+    "if _G.Enum.ItemRecipeSubclass then",
+    "the recipe subclass icon map is nil-guarded like Consumable, for clients/environments lacking the enum")
+assertContains(bags,
+    "categoryOrderByClass.categoryIconBySubclass[ITEM_CLASS.Recipe] = {",
+    "recipe subclass icons are populated behind their own enum guard")
+for _, recipeSubclassIcon in ipairs({
+    '[_G.Enum.ItemRecipeSubclass.Book] = {texture = "Interface\\\\Icons\\\\INV_Misc_Book_09"}',
+    '[_G.Enum.ItemRecipeSubclass.Leatherworking] = {texture = "Interface\\\\Icons\\\\INV_Misc_Book_09"}',
+    '[_G.Enum.ItemRecipeSubclass.Tailoring] = {texture = "Interface\\\\Icons\\\\INV_Misc_Book_09"}',
+    '[_G.Enum.ItemRecipeSubclass.Engineering] = {texture = "Interface\\\\Icons\\\\INV_Misc_Gizmo_02"}',
+    '[_G.Enum.ItemRecipeSubclass.Blacksmithing] = {texture = "Interface\\\\Icons\\\\INV_Hammer_01"}',
+    '[_G.Enum.ItemRecipeSubclass.Cooking] = {texture = "Interface\\\\Icons\\\\INV_Misc_Food_15"}',
+    '[_G.Enum.ItemRecipeSubclass.Alchemy] = {texture = "Interface\\\\Icons\\\\INV_Potion_92"}',
+    '[_G.Enum.ItemRecipeSubclass.FirstAid] = {texture = "Interface\\\\Icons\\\\INV_Misc_Bandage_08"}',
+    '[_G.Enum.ItemRecipeSubclass.Enchanting] = {texture = "Interface\\\\Icons\\\\INV_Enchant_Disenchant"}',
+    '[_G.Enum.ItemRecipeSubclass.Fishing] = {texture = "Interface\\\\Icons\\\\INV_Fishingpole_01"}',
+    '[_G.Enum.ItemRecipeSubclass.Jewelcrafting] = {texture = "Interface\\\\Icons\\\\INV_Misc_Gem_01"}',
+    '[_G.Enum.ItemRecipeSubclass.Inscription] = {texture = "Interface\\\\Icons\\\\INV_Misc_Book_09"}',
+}) do
+    assertContains(bags, recipeSubclassIcon,
+        "every verified Enum.ItemRecipeSubclass member maps to a hand-picked art-choice texture")
+end
+
+-- Fix round 1: Trade Goods subclasses stay unmapped -- no verified
+-- subclass-ID/name key exists in either pinned artifact (checked
+-- ItemConstantsDocumentation.lua x3 files, GlobalStrings absence, and
+-- Blizzard_AuctionHouseUI's dynamic category generation) -- so no
+-- ITEM_CLASS.Tradegoods entry may appear in the subclass icon host table.
+assertNotContains(bags,
+    "categoryOrderByClass.categoryIconBySubclass[ITEM_CLASS.Tradegoods]",
+    "trade goods subclasses have no verified key and must stay on the parent icon")
 
 -- Category families are selectable aggregate parents with nested, concise
 -- subtype rows. In particular, equipment children read Chest/Gloves rather
