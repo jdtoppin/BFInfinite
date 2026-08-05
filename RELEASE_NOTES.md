@@ -6,11 +6,17 @@ Released: 2026-08-04 00:00 GMT+8
 ### English (enUS)
 
 - Individual Bags view keeps full-size icons and grows from the Combined View baseline height
-- Sidebar category expansion now persists when the auto-hide sidebar collapses
-- Added distinct icons for consumable subclasses and equipment slots in the collapsed sidebar
+- Sidebar category expansion now persists when the sidebar collapses
+- Sidebar category icons for consumable subclasses and equipment slots now use native in-game art instead of custom glyphs
+- Sidebar toggle now collapses and expands the sidebar instantly, replacing the old auto-hide behavior
+- The collapsed sidebar rail now shows expand/collapse chevrons next to each category icon
+- The sidebar rail now sits flush with the bag window's edge
 
 ### 简体中文 (zhCN)
 
 - 独立背包视图保留完整大小的图标，并以合并视图的基准高度为起点向上增长
-- 自动隐藏侧栏收起时，侧栏分类的展开状态现在会保留
-- 为收起状态下的侧栏消耗品子类和装备部位新增了独立图标
+- 侧栏收起时，侧栏分类的展开状态现在会保留
+- 侧栏消耗品子类和装备部位的分类图标现在使用游戏内原生素材，而非自定义图形
+- 侧栏切换按钮现在可以立即收起或展开侧栏，取代了原有的自动隐藏方式
+- 收起状态下的侧栏现在会在每个分类图标旁显示展开/收起箭头
+- 侧栏现在与背包窗口边缘对齐

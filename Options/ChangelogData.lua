@@ -13,12 +13,24 @@ BFI.changelog = {
                 zhCN = "独立背包视图保留完整大小的图标，并以合并视图的基准高度为起点向上增长",
             },
             {
-                enUS = "Sidebar category expansion now persists when the auto-hide sidebar collapses",
-                zhCN = "自动隐藏侧栏收起时，侧栏分类的展开状态现在会保留",
+                enUS = "Sidebar category expansion now persists when the sidebar collapses",
+                zhCN = "侧栏收起时，侧栏分类的展开状态现在会保留",
             },
             {
-                enUS = "Added distinct icons for consumable subclasses and equipment slots in the collapsed sidebar",
-                zhCN = "为收起状态下的侧栏消耗品子类和装备部位新增了独立图标",
+                enUS = "Sidebar category icons for consumable subclasses and equipment slots now use native in-game art instead of custom glyphs",
+                zhCN = "侧栏消耗品子类和装备部位的分类图标现在使用游戏内原生素材，而非自定义图形",
+            },
+            {
+                enUS = "Sidebar toggle now collapses and expands the sidebar instantly, replacing the old auto-hide behavior",
+                zhCN = "侧栏切换按钮现在可以立即收起或展开侧栏，取代了原有的自动隐藏方式",
+            },
+            {
+                enUS = "The collapsed sidebar rail now shows expand/collapse chevrons next to each category icon",
+                zhCN = "收起状态下的侧栏现在会在每个分类图标旁显示展开/收起箭头",
+            },
+            {
+                enUS = "The sidebar rail now sits flush with the bag window's edge",
+                zhCN = "侧栏现在与背包窗口边缘对齐",
             },
         },
     },
