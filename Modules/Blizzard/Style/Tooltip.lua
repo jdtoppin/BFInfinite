@@ -7,6 +7,18 @@ local AF = _G.AbstractFramework
 ---------------------------------------------------------------------
 -- style
 ---------------------------------------------------------------------
+-- Retail 12.1.0.68914 (wow-ui-source d3915c78aba7) defines CompareHeader's
+-- rounded background in GameTooltip.xml. TooltipComparisonManager.lua owns
+-- its label, dynamic width, and visibility, so only replace the artwork.
+local function StyleCompareHeader(header)
+    if not header or header._BFIStyled then return end
+    header._BFIStyled = true
+
+    S.RemoveTextures(header, true)
+    AF.ApplyDefaultBackdropWithColors(header, "widget")
+    AF.AddToPixelUpdater_CustomGroup("BFIStyled", header)
+end
+
 local function Style(tooltip, _, embedded)
     if not tooltip or tooltip:IsForbidden() or not tooltip.NineSlice then return end
     if embedded or tooltip.IsEmbedded then return end -- Interface/AddOns/Blizzard_SharedXML/SharedTooltipTemplates.lua#L44
@@ -16,6 +28,8 @@ local function Style(tooltip, _, embedded)
 
     AF.ApplyDefaultBackdropWithColors(tooltip.NineSlice)
     AF.SetOnePixelInside(tooltip.NineSlice, tooltip)
+
+    StyleCompareHeader(tooltip.CompareHeader)
 end
 
 ---------------------------------------------------------------------
