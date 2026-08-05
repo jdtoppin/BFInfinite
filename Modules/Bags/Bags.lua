@@ -997,7 +997,7 @@ local function LayoutBagButtons(spacing, contentInset)
                 "TOPLEFT",
                 combinedFrame,
                 "TOPLEFT",
-                HORIZONTAL_PADDING + contentInset + ((index - 1) * (size + spacing)),
+                1 + contentInset + ((index - 1) * (size + spacing)),
                 -58
             )
             UpdateBagButton(button)
@@ -1035,7 +1035,7 @@ local function LayoutControls(contentInset)
         "TOPLEFT",
         combinedFrame,
         "TOPLEFT",
-        HORIZONTAL_PADDING + contentInset,
+        1 + contentInset,
         -27
     )
     sidebarButton:Show()
@@ -1505,7 +1505,7 @@ local function GetGridHeight(itemCount, columnCount, spacing)
 end
 
 local function GetLayoutConstraints(spacing, screenWidth, screenHeight, contentInset)
-    local minimumFrameWidth = ITEM_SIZE + (HORIZONTAL_PADDING * 2) + contentInset
+    local minimumFrameWidth = ITEM_SIZE + HORIZONTAL_PADDING + 1 + contentInset
     local maxFrameWidth = math.max(
         minimumFrameWidth,
         screenWidth - (SCREEN_EDGE_MARGIN * 2)
@@ -1513,7 +1513,7 @@ local function GetLayoutConstraints(spacing, screenWidth, screenHeight, contentI
     local maxColumns = math.max(
         1,
         floor(
-            (maxFrameWidth - (HORIZONTAL_PADDING * 2) - contentInset + spacing)
+            (maxFrameWidth - HORIZONTAL_PADDING - 1 - contentInset + spacing)
                 / (ITEM_SIZE + spacing)
         )
     )
@@ -1554,7 +1554,7 @@ local function CalculateFlatLayoutMetrics(
 
     local width = math.max(
         minFrameWidth,
-        (HORIZONTAL_PADDING * 2) + contentInset + GetGridWidth(columns, spacing)
+        HORIZONTAL_PADDING + 1 + contentInset + GetGridWidth(columns, spacing)
     )
     return columns, width, height
 end
@@ -1615,7 +1615,7 @@ local function CalculateIndividualLayoutMetrics(
     )
     local width = math.max(
         minFrameWidth,
-        (HORIZONTAL_PADDING * 2) + contentInset + contentWidth
+        HORIZONTAL_PADDING + 1 + contentInset + contentWidth
     )
     return width, height
 end
@@ -1649,7 +1649,7 @@ local function BuildFlatLayoutEntries(columns, spacing, top, contentInset, group
         local entryIndex = AddLayoutEntry(
             itemButton,
             false,
-            HORIZONTAL_PADDING + contentInset + (column * (ITEM_SIZE + spacing)),
+            1 + contentInset + (column * (ITEM_SIZE + spacing)),
             cursorY - (row * (ITEM_SIZE + spacing))
         )
         RecordEmptyEntryIndex(itemButton, entryIndex)
@@ -1658,7 +1658,7 @@ end
 
 local function BuildIndividualLayoutEntries(spacing, top, contentInset)
     for groupIndex, group in ipairs(individualGroups) do
-        local groupX = HORIZONTAL_PADDING + contentInset
+        local groupX = 1 + contentInset
         local headerY = -top - group.layoutY
         local header = GetSectionHeader(groupIndex)
         header:SetText(group.label)
@@ -1702,11 +1702,10 @@ local function LayoutItemsInternal(force)
 
     B.Sidebar.SetShown(true)
     local contentInset = B.Sidebar.GetContentInset()
-    if bagSidebar then
-        local sidebarRight = HORIZONTAL_PADDING + B.Sidebar.GetDesiredWidth()
+    if bagSidebar and combinedFrame.BFIVisualShell then
         bagSidebar:ClearAllPoints()
-        bagSidebar:SetPoint("TOPRIGHT", combinedFrame, "TOPLEFT", sidebarRight, -SIDEBAR_TOP)
-        bagSidebar:SetPoint("BOTTOMRIGHT", combinedFrame, "BOTTOMLEFT", sidebarRight, footerHeight)
+        AF.SetPoint(bagSidebar, "TOPLEFT", combinedFrame.BFIVisualShell, "TOPLEFT", 1, -1)
+        AF.SetPoint(bagSidebar, "BOTTOMLEFT", combinedFrame.BFIVisualShell, "BOTTOMLEFT", 1, 1)
     end
 
     ResetLayoutModel()

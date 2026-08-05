@@ -125,8 +125,7 @@ assertContains(bags, "local contentInset = B.Sidebar.GetContentInset()",
 assertContains(sidebar, "return Sidebar.GetDesiredWidth() + CONTENT_GAP",
     "the sidebar inset follows pinned or compact width, not selected view")
 
--- Narrow category filters retain a useful navigation viewport. The rail is
--- right-anchored so hover expansion grows left into the pinned rail's space.
+-- Narrow category filters retain a useful navigation viewport.
 assertContains(bags, "local SIDEBAR_MIN_HEIGHT = 320",
     "narrow category results retain a useful minimum bag height")
 assertContains(bags, "function B.GetMinimumFrameHeight(maxFrameHeight, footerHeight)",
@@ -136,18 +135,46 @@ assertContains(bags,
     "the minimum remains footer-aware and screen-capped")
 assertCount(bags, "B.GetMinimumFrameHeight(maxFrameHeight, footerHeight)", 3,
     "the minimum helper must be defined and used by both layout paths")
+
+-- Task 7: the rail sits flush against the styled shell's inner border
+-- (left/top/bottom, full height) instead of inset like other panel content.
+-- It anchors to the visual shell -- not the fixed Blizzard combinedFrame --
+-- with the same 1px pixel-perfect offset the shell's own flush children use
+-- (AF.SetOnePixelInside's TOPLEFT +1,-1 / bottom +1,+1 convention).
 assertContains(bags,
+    'AF.SetPoint(bagSidebar, "TOPLEFT", combinedFrame.BFIVisualShell, "TOPLEFT", 1, -1)',
+    "the rail's top-left corner sits flush inside the shell's border")
+assertContains(bags,
+    'AF.SetPoint(bagSidebar, "BOTTOMLEFT", combinedFrame.BFIVisualShell, "BOTTOMLEFT", 1, 1)',
+    "the rail's bottom-left corner sits flush inside the shell's border, spanning full height")
+assertNotContains(bags,
     "local sidebarRight = HORIZONTAL_PADDING + B.Sidebar.GetDesiredWidth()",
-    "the rail's fixed right edge follows its reserved pinned or compact width")
-assertContains(bags,
-    'bagSidebar:SetPoint("TOPRIGHT", combinedFrame, "TOPLEFT", sidebarRight, -SIDEBAR_TOP)',
-    "the rail expands left from its top-right anchor")
-assertContains(bags,
-    'bagSidebar:SetPoint("BOTTOMRIGHT", combinedFrame, "BOTTOMLEFT", sidebarRight, footerHeight)',
-    "the rail expands left from its bottom-right anchor")
+    "the rail no longer needs a computed right edge now that it anchors flush left")
+assertNotContains(bags,
+    'bagSidebar:SetPoint("TOPRIGHT", combinedFrame, "TOPLEFT"',
+    "the rail no longer anchors a right edge to the fixed Blizzard frame")
 assertNotContains(bags,
     'bagSidebar:SetPoint("TOPLEFT", combinedFrame, "TOPLEFT"',
-    "hover expansion must not grow right across bag items")
+    "the rail must anchor to the visual shell, not the fixed Blizzard frame")
+
+-- The item grid, header controls, and section groups all originate from the
+-- same flush 1px inset the rail now anchors with (not HORIZONTAL_PADDING),
+-- so the 8px gap between the rail and the grid stays exactly 8px: the two
+-- shift left together instead of leaving an 11px dead zone at the rail's
+-- old inset. GetContentInset() itself (rail width + 8) is unchanged.
+assertContains(bags, "1 + contentInset + ((index - 1) * (size + spacing)),",
+    "the bag-slot row originates flush with the rail")
+assertContains(bags, "1 + contentInset,\n        -27",
+    "the collapse toggle originates flush with the rail")
+assertContains(bags, "1 + contentInset + (column * (ITEM_SIZE + spacing)),",
+    "the flat grid originates flush with the rail")
+assertContains(bags, "local groupX = 1 + contentInset",
+    "individual section groups originate flush with the rail")
+assertCount(bags, "HORIZONTAL_PADDING + 1 + contentInset", 3,
+    "total frame width keeps the shell's right-side padding alongside the rail's flush left inset")
+assertContains(bags,
+    "maxFrameWidth - HORIZONTAL_PADDING - 1 - contentInset + spacing",
+    "the max-column fit subtracts the same flush left inset plus the unchanged right padding")
 
 -- The reserved compact rail keeps item layout stable while a right-anchored
 -- presentation proxy grows the full styled bag shell left with the hover rail.
