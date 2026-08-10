@@ -103,7 +103,7 @@ taint error. Then delete both addon folders before installing AF #39/r39.
     circular swipe only, never a second vertical fill.
 18. Current AF `main` at `f31772e0733b3fdf22063c8bcda28dfe11236848`
    with BFInfinite #118 at
-   `24c26df850ee0730982a1263e0770d5a5e7296c4`. Test the native tooltip
+   `7e917de6bb31d345f5fa7177140a084b530ee013`. Test the native tooltip
    shell on Blizzard's TargetFrame with BFI Unit Frames disabled, then on any
    upper-right native AuraButtons available to the fixture.
 19. Current AF `main` at `f31772e0733b3fdf22063c8bcda28dfe11236848`
@@ -200,7 +200,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Upper-right shared BFI mover (#127; includes #103) | `codex/upper-aura-debuff-follower` | `625144a3aab87c95005de6b1930caf9d765a3e59` |
 | Upper-right native Debuff container (#143; includes #127/#103) | `codex/upper-aura-native-debuff-container` | `d88d674e7f1e1401c57bdc6d2ad6c37da60e4818` |
 | Tooltip/status safety (#85) | `codex/combat-secret-tooltip-fixes` | `b13a19842e7db7c19a447a97c009a4c968757d18` |
-| Native AuraButton tooltip skin (#118) | `codex/native-aura-tooltip-skin` | `24c26df850ee0730982a1263e0770d5a5e7296c4` |
+| Native AuraButton tooltip skin (#118) | `codex/native-aura-tooltip-skin` | `7e917de6bb31d345f5fa7177140a084b530ee013` |
 | Secret identity (#100) | `codex/unitframe-secret-identity` | `b8e1671ed8a1c11657416357875f9c8277051654` |
 | Unit Frame options preview safety (#114) | `codex/unitframe-options-preview-aura-safety` | `296667d9681c07ab1a7293ea8922561c44e9cb08` |
 | Objective Tracker taint boundary (#115) | `codex/objective-tracker-taint-boundary` | `b829efaffd45939e268cfa6c0c1e167ce17312fe` |
