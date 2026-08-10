@@ -452,9 +452,9 @@ assertEqual(nativeObjectiveTrackerHeightWrites, 1,
 assertEqual(objectiveInfo.cfg.height, nil,
     "native height is not stored in the BFI profile")
 local nativeHeightStatus = findByText(fontStrings,
-    "Saved. Reload UI if the tracker does not resize immediately.")
+    "Saved. Open and close Blizzard Edit Mode to apply it.")
 assertTrue(nativeHeightStatus,
-    "native height explains when Blizzard needs a layout refresh")
+    "native height explains the no-reload Blizzard layout refresh")
 assertEqual(nativeHeightStatus.shown, true,
     "native height refresh guidance is visible")
 

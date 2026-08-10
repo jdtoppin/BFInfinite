@@ -679,7 +679,7 @@ builder["objectiveTrackerNativeHeight"] = function(parent)
         local statusText = reason and (
             unavailableStatus[reason] or unavailableStatus.unavailable
         ) or nativeHeightSaved and L[
-            "Saved. Reload UI if the tracker does not resize immediately."
+            "Saved. Open and close Blizzard Edit Mode to apply it."
         ]
         status:SetText(statusText or "")
         status:SetShown(statusText ~= nil)
