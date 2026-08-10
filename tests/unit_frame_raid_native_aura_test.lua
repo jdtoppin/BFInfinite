@@ -51,6 +51,7 @@ local function makeHarness(
         createIndicatorCalls = {},
         disableIndicatorCalls = {},
         driverRegistrations = {},
+        dispelCalls = {},
         events = {},
         framesByName = {},
         groupAuraCalls = {},
@@ -443,18 +444,47 @@ local function makeHarness(
         return indicator
     end
 
+    function UF.CreateGroupNativeDispelHighlight(
+        parent,
+        name,
+        containerKey
+    )
+        local call = {
+            containerKey = containerKey,
+            name = name,
+            parent = parent,
+        }
+        harness.dispelCalls[#harness.dispelCalls + 1] = call
+        record("group-native.dispel-builder", parent, name, containerKey)
+
+        if not UF.HasNativeAuraContainerBackend() then
+            return newIndicator(name, "unavailable-dispel")
+        end
+
+        local containers = parent._nativeAuraContainers
+        local seed = containers and containers[containerKey]
+        assertTrue(seed, "native group dispel seed is missing")
+        call.seed = seed
+        local indicator = newIndicator(name, "native-dispel")
+        indicator.containerKey = containerKey
+        indicator.seed = seed
+        return indicator
+    end
+
     function UF.CreateIndicators(frame, descriptors)
         local containers =
             rawget(frame, "_nativeAuraContainers")
         if hasNativeBackend then
             assertTrue(containers,
                 "Raid native map must precede indicator construction")
-            assertEqual(countKeys(containers), 2,
+            assertEqual(countKeys(containers), 3,
                 "Raid native map size at indicator construction")
             assertTrue(containers.buffs,
                 "Raid buff seed before indicator construction")
             assertTrue(containers.debuffs,
                 "Raid debuff seed before indicator construction")
+            assertTrue(containers.dispels,
+                "Raid dispel seed before indicator construction")
         else
             assertEqual(containers, nil,
                 "legacy Raid gained native map before construction")
@@ -465,6 +495,7 @@ local function makeHarness(
         ] = {
             buffs = containers and containers.buffs,
             debuffs = containers and containers.debuffs,
+            dispels = containers and containers.dispels,
             frame = frame,
             indicators = descriptors,
         }
@@ -474,16 +505,26 @@ local function makeHarness(
             if type(descriptor) == "table" then
                 local builder = descriptor[1]
                 local name = descriptor[2]
-                assertEqual(builder, "groupNativeAuras",
-                    "unexpected Raid aura builder")
-                frame.indicators[name] =
-                    UF.CreateGroupNativeAuras(
+                if builder == "groupNativeAuras" then
+                    frame.indicators[name] = UF.CreateGroupNativeAuras(
                         frame,
                         frame:GetName() .. "_"
                             .. AF.UpperFirst(name),
                         descriptor[3],
                         descriptor[4]
                     )
+                elseif builder == "groupNativeDispels" then
+                    frame.indicators[name] =
+                        UF.CreateGroupNativeDispelHighlight(
+                            frame,
+                            frame:GetName() .. "_"
+                                .. AF.UpperFirst(name),
+                            descriptor[3]
+                        )
+                else
+                    error("unexpected Raid aura builder: "
+                        .. tostring(builder), 2)
+                end
             else
                 frame.indicators[descriptor] =
                     newIndicator(descriptor, "ordinary")
@@ -650,6 +691,16 @@ end
 
 local function findGroupAuraCall(harness, parent, containerKey)
     for _, call in ipairs(harness.groupAuraCalls) do
+        if call.parent == parent
+            and call.containerKey == containerKey
+        then
+            return call
+        end
+    end
+end
+
+local function findDispelCall(harness, parent, containerKey)
+    for _, call in ipairs(harness.dispelCalls) do
         if call.parent == parent
             and call.containerKey == containerKey
         then
@@ -869,14 +920,16 @@ local function testNativeHeaderSeedsAndBuilderArguments()
     )
 
     assertEqual(#header.children, 40, "Raid child count")
-    assertEqual(#harness.nativeSeeds, 40,
-        "eager helpful seed count")
+    assertEqual(#harness.nativeSeeds, 80,
+        "eager helpful and dispel seed count")
     assertEqual(#harness.createIndicatorCalls, 40,
         "Raid indicator construction count")
     assertEqual(#harness.groupAuraCalls, 80,
         "group aura builder call count")
     assertEqual(#harness.nativeAuraCalls, 80,
         "native aura selection count")
+    assertEqual(#harness.dispelCalls, 40,
+        "native dispel builder call count")
     assertEqual(#harness.legacyAuraCalls, 0,
         "native Raid legacy selection count")
 
@@ -884,6 +937,7 @@ local function testNativeHeaderSeedsAndBuilderArguments()
         harness.createIndicatorCalls[1].indicators
     local buffsTuple = findAuraTuple(descriptors, "buffs")
     local debuffsTuple = findAuraTuple(descriptors, "debuffs")
+    local dispelsTuple = findAuraTuple(descriptors, "dispels")
     assertTrue(buffsTuple, "Raid buffs tuple")
     assertEqual(#buffsTuple, 4, "Raid buffs tuple size")
     assertEqual(buffsTuple[1], "groupNativeAuras",
@@ -904,6 +958,15 @@ local function testNativeHeaderSeedsAndBuilderArguments()
         "Raid debuffs filter")
     assertEqual(debuffsTuple[4], "debuffs",
         "Raid debuffs seed key")
+    assertTrue(dispelsTuple, "Raid dispels tuple")
+    assertEqual(#dispelsTuple, 3,
+        "Raid dispels tuple size")
+    assertEqual(dispelsTuple[1], "groupNativeDispels",
+        "Raid dispels builder")
+    assertEqual(dispelsTuple[2], "dispels",
+        "Raid dispels name")
+    assertEqual(dispelsTuple[3], "dispels",
+        "Raid dispels seed key")
 
     local claimedSeeds = {}
     for index, button in ipairs(header.children) do
@@ -911,7 +974,7 @@ local function testNativeHeaderSeedsAndBuilderArguments()
             rawget(button, "_nativeAuraContainers")
         assertTrue(containers,
             "Raid child native container map " .. index)
-        assertEqual(countKeys(containers), 2,
+        assertEqual(countKeys(containers), 3,
             "Raid child explicit seed count " .. index)
         assertEqual(containers.debuffs, button.AuraContainer,
             "Raid header-born harmful seed " .. index)
@@ -921,16 +984,28 @@ local function testNativeHeaderSeedsAndBuilderArguments()
             "Raid helpful seed origin " .. index)
         assertEqual(containers.buffs.child, button,
             "Raid helpful seed parent " .. index)
+        assertEqual(containers.dispels.origin, "eager",
+            "Raid dispel seed origin " .. index)
+        assertEqual(containers.dispels.child, button,
+            "Raid dispel seed parent " .. index)
         assertTrue(
             containers.buffs ~= containers.debuffs,
             "Raid aura seeds must be distinct " .. index
+        )
+        assertTrue(
+            containers.dispels ~= containers.buffs
+                and containers.dispels ~= containers.debuffs,
+            "Raid dispel seed must be independent " .. index
         )
         assertTrue(not claimedSeeds[containers.buffs],
             "duplicate Raid helpful seed " .. index)
         assertTrue(not claimedSeeds[containers.debuffs],
             "duplicate Raid harmful seed " .. index)
+        assertTrue(not claimedSeeds[containers.dispels],
+            "duplicate Raid dispel seed " .. index)
         claimedSeeds[containers.buffs] = true
         claimedSeeds[containers.debuffs] = true
+        claimedSeeds[containers.dispels] = true
 
         local construction =
             harness.createIndicatorCalls[index]
@@ -940,11 +1015,15 @@ local function testNativeHeaderSeedsAndBuilderArguments()
             "Raid helpful seed before construction " .. index)
         assertEqual(construction.debuffs, containers.debuffs,
             "Raid harmful seed before construction " .. index)
+        assertEqual(construction.dispels, containers.dispels,
+            "Raid dispel seed before construction " .. index)
 
         local buffsCall =
             findGroupAuraCall(harness, button, "buffs")
         local debuffsCall =
             findGroupAuraCall(harness, button, "debuffs")
+        local dispelsCall =
+            findDispelCall(harness, button, "dispels")
         assertTrue(buffsCall,
             "Raid helpful builder call " .. index)
         assertEqual(
@@ -967,6 +1046,15 @@ local function testNativeHeaderSeedsAndBuilderArguments()
             "Raid harmful builder filter " .. index)
         assertEqual(debuffsCall.seed, containers.debuffs,
             "Raid harmful forwarded seed " .. index)
+        assertTrue(dispelsCall,
+            "Raid dispel builder call " .. index)
+        assertEqual(
+            dispelsCall.name,
+            button:GetName() .. "_Dispels",
+            "Raid dispel builder name " .. index
+        )
+        assertEqual(dispelsCall.seed, containers.dispels,
+            "Raid dispel forwarded seed " .. index)
 
         assertEqual(button._updateOnGroupUpdate, true,
             "Raid group-update flag " .. index)
@@ -975,8 +1063,12 @@ local function testNativeHeaderSeedsAndBuilderArguments()
         assertEqual(button._enableUnitButtonMapping, true,
             "Raid unit mapping flag " .. index)
     end
-    assertEqual(countKeys(claimedSeeds), 80,
+    assertEqual(countKeys(claimedSeeds), 120,
         "distinct Raid native seed count")
+    -- The compiled shipped contract is covered by the contract/scale tests;
+    -- integration owns the fixed child and one-slot multiplicity.
+    assertEqual(#header.children * (10 + 30 + 1),
+        1640, "Raid initial native button reservations")
 end
 
 local function testUnavailableBackendIsExactLegacyPath()
@@ -999,6 +1091,8 @@ local function testUnavailableBackendIsExactLegacyPath()
         "12.0.7 group builder dispatch count")
     assertEqual(#harness.legacyAuraCalls, 80,
         "12.0.7 legacy builder selection count")
+    assertEqual(#harness.dispelCalls, 40,
+        "unavailable dispel builder dispatch count")
 
     for index, button in ipairs(header.children) do
         assertEqual(
@@ -1017,6 +1111,11 @@ local function testUnavailableBackendIsExactLegacyPath()
             harness.createIndicatorCalls[index].debuffs,
             nil,
             "12.0.7 construction debuff seed " .. index
+        )
+        assertEqual(
+            harness.createIndicatorCalls[index].dispels,
+            nil,
+            "12.0.7 construction dispel seed " .. index
         )
 
         local helpful =

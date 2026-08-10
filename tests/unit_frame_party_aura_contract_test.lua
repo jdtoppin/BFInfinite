@@ -102,7 +102,9 @@ local environment = {
         },
     },
     CustomAuraContainerAuraProcessingPolicy = PROCESSING_POLICY,
-    GetCVar = function() return nil end,
+    GetCVar = function()
+        return "0"
+    end,
     assert = assert,
     error = error,
     ipairs = ipairs,
@@ -202,9 +204,10 @@ local function assertPartyContract(preset)
     assertEqual(debuffDescriptor.empty, false,
         preset.id .. " debuff empty")
 
-    local expectedFilters = {
-        "HARMFUL",
-    }
+    -- The current production resolver treats the shipped legacy
+    -- castByUnit=true setting as the full harmful set. Keep this replayed
+    -- Party contract aligned with the canonical migration used by BFI #137.
+    local expectedFilters = {"HARMFUL"}
     assertEqual(#debuffDescriptor.completeSpec.groups, #expectedFilters,
         preset.id .. " debuff group count")
     for index, expectedFilter in ipairs(expectedFilters) do
@@ -263,8 +266,9 @@ assertEqual(firstBuffs.numTotal, secondBuffs.numTotal,
 assertEqual(firstDebuffs.numTotal, secondDebuffs.numTotal,
     "shared Party debuff contract")
 
--- Five fixed Party children prebuild one 10-button buff group and three
--- 10-button debuff groups apiece.
-assertEqual(5 * (10 + 30), 200, "Party initial restricted buttons")
+-- Five fixed Party children prebuild one 10-button buff group, one 10-button
+-- debuff group, and one dispel-overlay AuraSlot apiece.
+assertEqual(5 * (10 + 10 + 1), 105,
+    "Party initial restricted buttons")
 
 print("unit_frame_party_aura_contract_test.lua: ok")

@@ -24,6 +24,7 @@ local indicators = {
     "threatGlow",
     {"groupNativeAuras", "buffs", "HELPFUL", "buffs"},
     {"groupNativeAuras", "debuffs", "HARMFUL", "debuffs"},
+    {"groupNativeDispels", "dispels", "dispels"},
 }
 
 -- bottom_to_top_then_left
@@ -78,10 +79,14 @@ local function CreateRaid()
                 -- Blizzard supplies one header-born shell. Raid's displays
                 -- have independent anchors/flows, so eagerly allocate the
                 -- second bounded shell before indicator construction. The
-                -- shipped four-group contract intentionally prebuilds 1,600
-                -- restricted buttons across this fixed 40-child header.
+                -- dispel tint needs a third independent shell because its
+                -- single slot has a separate lifecycle from the icon rows.
+                -- The shipped topology reserves 1,640 restricted buttons
+                -- across this fixed 40-child header: ten helpful, thirty
+                -- harmful, and one dispel slot per child.
                 buffs = UF.CreateNativeGroupAuraContainerSeed(button),
                 debuffs = button.AuraContainer,
+                dispels = UF.CreateNativeGroupAuraContainerSeed(button),
             }
         end
 

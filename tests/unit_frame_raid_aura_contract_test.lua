@@ -84,6 +84,7 @@ local FLOW_DIRECTION = {
 }
 local SORT_METHOD = {
     Default = 301,
+    UnitFrameDebuff = 302,
 }
 local SORT_DIRECTION = {
     Normal = 401,
@@ -199,6 +200,10 @@ function AF.GetColorTable(_, alpha)
     return {1, 1, 1, alpha == nil and 1 or alpha}
 end
 
+function AF.GetTexture(name)
+    return "texture:" .. name
+end
+
 function AF.Merge(target, source)
     return deepMerge(target, source)
 end
@@ -217,12 +222,14 @@ local environment = {
     AuraContainerSortMethod = SORT_METHOD,
     AuraUtil = {
         AuraFilters = {
-            Important = "IMPORTANT",
             Dispellable = "DISPELLABLE",
+            Important = "IMPORTANT",
         },
     },
     CustomAuraContainerAuraProcessingPolicy = PROCESSING_POLICY,
-    GetCVar = function() return nil end,
+    GetCVar = function()
+        return "0"
+    end,
     assert = assert,
     error = error,
     ipairs = ipairs,
@@ -248,6 +255,7 @@ for _, path in ipairs({
     "Utils.lua",
     "Modules/UnitFrames/AuraPolicy.lua",
     "Modules/UnitFrames/AuraSpec.lua",
+    "Modules/UnitFrames/DispelSpec.lua",
     "Modules/UnitFrames/Presets.lua",
 }) do
     local chunk, loadError = loadfile(path)
@@ -269,6 +277,14 @@ local function spellIDMap(list)
         map[spellID] = true
     end
     return map
+end
+
+local function tableCount(value)
+    local count = 0
+    for _ in pairs(value) do
+        count = count + 1
+    end
+    return count
 end
 
 local function assertIndependentCandidateFilters(
@@ -367,6 +383,7 @@ local function assertRaidContract(preset)
     local raid = preset.get().raid
     local buffs = raid.indicators.buffs
     local debuffs = raid.indicators.debuffs
+    local dispels = raid.indicators.dispels
 
     assertEqual(buffs.mode, "whitelist",
         preset.id .. " Raid buff list mode")
@@ -460,7 +477,12 @@ local function assertRaidContract(preset)
         false
     )
     local expectedDebuffGroups = {
-        {"all", "HARMFUL"},
+        {"player", "HARMFUL|PLAYER"},
+        {"raidInCombat", "HARMFUL|RAID_IN_COMBAT|!PLAYER"},
+        {
+            "raidPlayerDispellable",
+            "HARMFUL|RAID_PLAYER_DISPELLABLE|!PLAYER|!RAID_IN_COMBAT",
+        },
     }
     assertEqual(
         #debuffDescriptor.completeSpec.groups,
@@ -483,7 +505,11 @@ local function assertRaidContract(preset)
     assertIndependentCandidateFilters(
         {
             debuffDescriptor.completeSpec.groups[1],
+            debuffDescriptor.completeSpec.groups[2],
+            debuffDescriptor.completeSpec.groups[3],
             debuffDescriptor.tuningSpec.groups[1],
+            debuffDescriptor.tuningSpec.groups[2],
+            debuffDescriptor.tuningSpec.groups[3],
         },
         "excludeSpellIDs",
         spellIDMap(RAID_DEBUFF_BLACKLIST),
@@ -507,20 +533,20 @@ local function assertRaidContract(preset)
     )
     assertEqual(debuffDescriptor.completeSpec.holder.width, 48,
         preset.id .. " Raid debuff holder width")
-    assertEqual(debuffDescriptor.completeSpec.holder.height, 12,
+    assertEqual(debuffDescriptor.completeSpec.holder.height, 36,
         preset.id .. " Raid debuff holder height")
-    assertEqual(debuffDescriptor.metrics.nativeVisibleCapacity, 4,
+    assertEqual(debuffDescriptor.metrics.nativeVisibleCapacity, 12,
         preset.id .. " Raid debuff native capacity")
-    assertEqual(debuffDescriptor.metrics.initialRestrictedButtonCount, 10,
+    assertEqual(debuffDescriptor.metrics.initialRestrictedButtonCount, 30,
         preset.id .. " Raid debuff initial buttons")
     assertEqual(
         debuffDescriptor.metrics.freshContainerRestrictedButtonCountCeiling,
-        10,
+        30,
         preset.id .. " Raid debuff button ceiling"
     )
-    assertEqual(debuffDescriptor.degradations.perGroupLimit, false,
+    assertEqual(debuffDescriptor.degradations.perGroupLimit, true,
         preset.id .. " Raid debuff per-group limit")
-    assertEqual(debuffDescriptor.degradations.perGroupSort, false,
+    assertEqual(debuffDescriptor.degradations.perGroupSort, true,
         preset.id .. " Raid debuff per-group sort")
     assertEqual(
         debuffDescriptor.degradations.auraTypeColorSourceRulesIgnored,
@@ -535,12 +561,82 @@ local function assertRaidContract(preset)
         preset.id .. " Raid debuff source-color diagnostic"
     )
 
-    return raid, {buffDescriptor, debuffDescriptor}
+    assertEqual(dispels.enabled, true,
+        preset.id .. " Raid dispel default enabled")
+    assertEqual(dispels.scope, "player",
+        preset.id .. " Raid dispel default scope")
+    assertEqual(dispels.appearance, "bottom_gradient",
+        preset.id .. " Raid dispel default appearance")
+    assertEqual(dispels.alpha, 0.5,
+        preset.id .. " Raid dispel default alpha")
+    assertEqual(dispels.blendMode, "ADD",
+        preset.id .. " Raid dispel default blend")
+
+    local healthBar = raid.indicators.healthBar
+    local anchor = {}
+    local dispelDescriptor = UF.CompileNativeDispelHighlightSpec(
+        "raid1",
+        dispels,
+        anchor,
+        healthBar.frameLevel
+    )
+    assertEqual(#dispelDescriptor.completeSpec.groups, 0,
+        preset.id .. " Raid dispel group count")
+    assertEqual(#dispelDescriptor.completeSpec.slots, 1,
+        preset.id .. " Raid dispel slot count")
+    assertEqual(#dispelDescriptor.tuning.groups, 0,
+        preset.id .. " Raid dispel tuning group count")
+    assertEqual(#dispelDescriptor.tuning.slots, 1,
+        preset.id .. " Raid dispel tuning slot count")
+    local dispelSlot = dispelDescriptor.completeSpec.slots[1]
+    assertEqual(dispelSlot.key, "dispelHighlight",
+        preset.id .. " Raid dispel slot key")
+    assertEqual(dispelSlot.kind, "dispelOverlay",
+        preset.id .. " Raid dispel slot kind")
+    assertEqual(dispelSlot.filterString, "HARMFUL|RAID",
+        preset.id .. " Raid dispel filter")
+    assertEqual(dispelSlot.anchorTarget, anchor,
+        preset.id .. " Raid dispel anchor identity")
+    assertEqual(dispelSlot.sortMethod, SORT_METHOD.UnitFrameDebuff,
+        preset.id .. " Raid dispel sort")
+    assertEqual(dispelSlot.sortDirection, SORT_DIRECTION.Normal,
+        preset.id .. " Raid dispel sort direction")
+    assertEqual(tableCount(
+        dispelSlot.candidateFilters.includeDispelTypes
+    ), 5, preset.id .. " Raid dispel type count")
+    for _, dispelType in ipairs({
+        "Magic", "Curse", "Disease", "Poison", "Bleed",
+    }) do
+        assertEqual(
+            dispelSlot.candidateFilters.includeDispelTypes[dispelType],
+            true,
+            preset.id .. " Raid dispel type " .. dispelType
+        )
+    end
+    assertEqual(
+        dispelSlot.overlayStyle.texture,
+        "texture:Gradient_Linear_Bottom",
+        preset.id .. " Raid dispel texture"
+    )
+    assertEqual(dispelSlot.overlayStyle.alpha, 0.5,
+        preset.id .. " Raid dispel overlay alpha")
+    assertEqual(dispelSlot.overlayStyle.blendMode, "ADD",
+        preset.id .. " Raid dispel overlay blend")
+    assertEqual(
+        dispelDescriptor.constructionKey.anchorFrameLevel,
+        healthBar.frameLevel,
+        preset.id .. " Raid dispel Health Bar level"
+    )
+    assertEqual(dispelDescriptor.tuning.slots[1].kind, nil,
+        preset.id .. " Raid tuning does not reconstruct overlay")
+
+    return raid, {buffDescriptor, debuffDescriptor}, dispelDescriptor
 end
 
 local presets = UF.GetPresets()
 assertEqual(#presets, 2, "shipped preset count")
-local firstRaid, firstDescriptors = assertRaidContract(presets[1])
+local firstRaid, firstDescriptors, firstDispelDescriptor =
+    assertRaidContract(presets[1])
 local secondRaid = assertRaidContract(presets[2])
 assertDeepEqual(firstRaid, secondRaid, "shared shipped Raid config")
 
@@ -567,17 +663,24 @@ for _ = 1, 40 do
         totals.freshContainerCeiling = totals.freshContainerCeiling
             + descriptor.metrics.freshContainerRestrictedButtonCountCeiling
     end
+    totals.containers = totals.containers + 1
+    totals.slots = totals.slots
+        + #firstDispelDescriptor.completeSpec.slots
+    totals.nativeVisibleCapacity = totals.nativeVisibleCapacity + 1
+    totals.initialRestrictedButtons =
+        totals.initialRestrictedButtons + 1
+    totals.freshContainerCeiling = totals.freshContainerCeiling + 1
 end
 
-assertEqual(totals.containers, 80, "Raid native containers")
-assertEqual(totals.groups, 80, "Raid native groups")
-assertEqual(totals.slots, 0, "Raid native slots")
+assertEqual(totals.containers, 120, "Raid native containers")
+assertEqual(totals.groups, 160, "Raid native groups")
+assertEqual(totals.slots, 40, "Raid native slots")
 assertEqual(totals.legacyCapacity, 320, "Raid legacy visible capacity")
-assertEqual(totals.nativeVisibleCapacity, 320,
+assertEqual(totals.nativeVisibleCapacity, 680,
     "Raid native visible capacity")
-assertEqual(totals.initialRestrictedButtons, 800,
+assertEqual(totals.initialRestrictedButtons, 1640,
     "Raid initial restricted buttons")
-assertEqual(totals.freshContainerCeiling, 800,
+assertEqual(totals.freshContainerCeiling, 1640,
     "Raid fresh-container restricted-button ceiling")
 
 print("unit_frame_raid_aura_contract_test.lua: ok")

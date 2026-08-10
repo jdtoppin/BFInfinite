@@ -85,6 +85,7 @@ local builders = {
     nativeAuras = UF.CreateNativeAuras,
     groupNativeAuras = UF.CreateGroupNativeAuras,
     nativePartitionedAuras = UF.CreateNativePartitionedAuras,
+    groupNativeDispels = UF.CreateGroupNativeDispelHighlight,
 }
 
 function UF.CreateIndicators(frame, indicators)

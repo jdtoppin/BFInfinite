@@ -97,6 +97,45 @@ local function newFrame(harness, name, parent)
 
     function frame:SetAlpha(alpha)
         self.alpha = alpha
+        record(harness, "holder.alpha", self, alpha)
+    end
+
+    function frame:EnableMouse(enabled)
+        self.mouseEnabled = enabled
+    end
+
+    function frame:SetAllPoints(target)
+        self.allPointsTarget = target
+    end
+
+    function frame.CreateTexture(frameObject, _, drawLayer, _, subLevel)
+        local texture = {
+            drawLayer = drawLayer,
+            subLevel = subLevel,
+        }
+        function texture:SetAllPoints(target)
+            texture.allPointsTarget = target
+        end
+        function texture:SetTexture(value)
+            texture.texture = value
+            texture.solidColor = nil
+        end
+        function texture:SetColorTexture(...)
+            texture.solidColor = {...}
+            texture.texture = nil
+        end
+        function texture:SetVertexColor(...)
+            texture.vertexColor = {...}
+        end
+        function texture:SetAlpha(value)
+            texture.alpha = value
+        end
+        function texture:SetBlendMode(value)
+            texture.blendMode = value
+        end
+        frameObject.textures = frameObject.textures or {}
+        frameObject.textures[#frameObject.textures + 1] = texture
+        return texture
     end
 
     function frame:IsShown()
@@ -136,6 +175,7 @@ local function newContainer(harness, parent)
 
     function container:SetAlpha(alpha)
         self.alpha = alpha
+        record(harness, "container.alpha", self, alpha)
     end
 
     function container:ClearAllPoints()
@@ -169,13 +209,23 @@ local function totalGroupCount(harness)
     return count
 end
 
+local function totalSlotCount(harness)
+    local count = 0
+    for _, container in ipairs(harness.containers) do
+        count = count + tableCount(container.slots)
+    end
+    return count
+end
+
 local function assertNoNativeConstruction(
     harness,
     expectedContainers,
     expectedGroups,
     expectedRestrictedButtons,
-    message
+    message,
+    expectedSlots
 )
+    expectedSlots = expectedSlots or 0
     assertEqual(
         #harness.containers,
         expectedContainers,
@@ -185,6 +235,11 @@ local function assertNoNativeConstruction(
         totalGroupCount(harness),
         expectedGroups,
         message .. " group count"
+    )
+    assertEqual(
+        totalSlotCount(harness),
+        expectedSlots,
+        message .. " slot count"
     )
     assertEqual(
         harness.staticRestrictedButtonCount,
@@ -200,6 +255,11 @@ local function assertNoNativeConstruction(
         countEvents(harness, "af.add-group"),
         0,
         message .. " group declarations"
+    )
+    assertEqual(
+        countEvents(harness, "af.add-dispel-overlay-slot"),
+        0,
+        message .. " dispel slot declarations"
     )
 end
 
@@ -227,7 +287,7 @@ local function makeHarness()
     }
     local AF = {
         isRetail = true,
-        versionNum = 37,
+        versionNum = 38,
     }
     local UF = {}
     local F = {}
@@ -236,16 +296,26 @@ local function makeHarness()
         return copy(value)
     end
 
+    AF.noop = function()
+    end
+
+    function AF.Fire(event, ...)
+        record(harness, "af.fire", event, ...)
+    end
+
+    function AF.GetTexture(name)
+        return "texture:" .. name
+    end
+
+    function AF.GetColorRGB()
+        return 0.2, 0.6, 1
+    end
+
+    function AF.RegisterCallback()
+    end
+
     function AF.HasCustomAuraContainer()
         return true
-    end
-
-    function AF.GetCustomAuraContainerConstructionStats()
-        return {}
-    end
-
-    function AF.GetCustomAuraContainerConstructionTotals()
-        return {}
     end
 
     function AF.CreateCustomAuraContainer(parent)
@@ -254,6 +324,37 @@ local function makeHarness()
         container.seedOrigin = "eager"
         record(harness, "af.create-container", container, parent)
         return container
+    end
+
+    function AF.GetCustomAuraContainerConstructionTotals()
+        return {
+            containerCreateAttempts = 0,
+            containerAllocations = 0,
+            containerCreateCompletions = 0,
+            trackedContainers = #harness.containers,
+            externalContainersObserved = 0,
+            groupAddAttempts = 0,
+            groupsAdded = totalGroupCount(harness),
+            slotAddAttempts = totalSlotCount(harness),
+            slotsAdded = totalSlotCount(harness),
+            itemEnchantmentAddAttempts = 0,
+            itemEnchantmentsAdded = 0,
+            initialFrameReservationsAttempted =
+                harness.staticRestrictedButtonCount,
+            initialFrameReservationsCompleted =
+                harness.staticRestrictedButtonCount,
+        }
+    end
+
+    function AF.GetCustomAuraContainerConstructionStats(container)
+        local groups = tableCount(container.groups)
+        local slots = tableCount(container.slots)
+        return {
+            groupsAdded = groups,
+            slotsAdded = slots,
+            initialFrameReservationsCompleted =
+                groups * NATIVE_BUTTON_BATCH_SIZE + slots,
+        }
     end
 
     function AF.SetSize(frame, width, height)
@@ -366,16 +467,60 @@ local function makeHarness()
         error("Raid aura scale test did not expect native slots", 2)
     end
 
-    function AF.SetCustomAuraSlotFilterString()
-        error("Raid aura scale test did not expect native slots", 2)
+    function AF.AddCustomAuraDispelOverlaySlot(
+        container,
+        key,
+        filterString,
+        slotOptions,
+        overlayStyle
+    )
+        assertOutOfCombat(harness, "dispel slot declaration")
+        assertTrue(container.slots[key] == nil,
+            "duplicate native dispel slot")
+        assertEqual(slotOptions.anchor.matchAnchorBounds, true,
+            "dispel overlay bounds mode")
+        assertTrue(slotOptions.anchor.relativeTo ~= nil,
+            "dispel overlay bounds target")
+        container.slots[key] = {
+            filterString = filterString,
+            options = copy(slotOptions),
+            overlayStyle = copy(overlayStyle),
+        }
+        harness.staticRestrictedButtonCount =
+            harness.staticRestrictedButtonCount + 1
+        record(harness, "af.add-dispel-overlay-slot", container, key)
     end
 
-    function AF.SetCustomAuraSlotCandidateFilters()
-        error("Raid aura scale test did not expect native slots", 2)
+    function AF.SetCustomAuraSlotFilterString(
+        container,
+        key,
+        filterString
+    )
+        assertOutOfCombat(harness, "dispel slot filter tuning")
+        container.slots[key].filterString = filterString
+        record(harness, "af.slot-filter", container, key)
     end
 
-    function AF.SetCustomAuraSlotSortMethod()
-        error("Raid aura scale test did not expect native slots", 2)
+    function AF.SetCustomAuraSlotCandidateFilters(
+        container,
+        key,
+        filters
+    )
+        assertOutOfCombat(harness, "dispel slot candidate tuning")
+        container.slots[key].options.candidateFilters = copy(filters)
+        record(harness, "af.slot-candidates", container, key)
+    end
+
+    function AF.SetCustomAuraSlotSortMethod(
+        container,
+        key,
+        method,
+        direction
+    )
+        assertOutOfCombat(harness, "dispel slot sort tuning")
+        container.slots[key].options.sortMethod = method
+        container.slots[key].options.sortDirection = direction
+        record(harness, "af.slot-sort", container, key)
     end
 
     function AF.AddToPixelUpdater_Auto(frame, callback, combatSafeOnly)
@@ -389,9 +534,6 @@ local function makeHarness()
 
     function AF.RePoint()
         error("unexpected pixel reposition in Raid aura scale test", 2)
-    end
-
-    function AF.RegisterCallback()
     end
 
     function F.isValueNonSecret(value)
@@ -437,6 +579,7 @@ local function makeHarness()
         }),
         funcs = F,
         modules = {
+            Auras = {},
             UnitFrames = UF,
         },
     }
@@ -460,11 +603,12 @@ local function makeHarness()
         },
         AuraContainerSortMethod = {
             Default = "DEFAULT",
+            UnitFrameDebuff = "UNIT_FRAME_DEBUFF",
         },
         AuraUtil = {
             AuraFilters = {
-                Important = "IMPORTANT",
                 Dispellable = "DISPELLABLE",
+                Important = "IMPORTANT",
             },
         },
         C_Timer = {
@@ -475,17 +619,34 @@ local function makeHarness()
                 }
             end,
         },
+        AuraData = setmetatable({}, {
+            __index = function()
+                error("forbidden Raid scale aura-data access", 2)
+            end,
+        }),
+        C_UnitAuras = setmetatable({}, {
+            __index = function()
+                error("forbidden Raid scale UnitAura access", 2)
+            end,
+        }),
+        C_TooltipInfo = setmetatable({}, {
+            __index = function()
+                error("forbidden Raid scale tooltip aura access", 2)
+            end,
+        }),
         CustomAuraContainerAuraProcessingPolicy = {
             None = "NONE",
         },
-        GetCVar = function() return nil end,
+        GetBuildInfo = function()
+            return "test", "test", "test", 120100
+        end,
+        GetCVar = function()
+            return "0"
+        end,
         CreateFrame = function(frameType, name, parent)
             assertOutOfCombat(harness, "aura holder creation")
             assertEqual(frameType, "Frame", "aura holder frame type")
             return newFrame(harness, name, parent)
-        end,
-        GetBuildInfo = function()
-            return nil, nil, nil, 120100
         end,
         InCombatLockdown = function()
             return harness.inCombat
@@ -528,6 +689,8 @@ local function makeHarness()
         "Modules/UnitFrames/AuraPolicy.lua",
         "Modules/UnitFrames/AuraSpec.lua",
         "Modules/UnitFrames/AuraRuntime.lua",
+        "Modules/UnitFrames/DispelSpec.lua",
+        "Modules/UnitFrames/DispelRuntime.lua",
     }) do
         local chunk, loadError = loadfile(path)
         assertTrue(chunk, loadError)
@@ -634,6 +797,23 @@ local function newAuraConfig(auraFilter, revision, constructionRevision)
     }
 end
 
+local function newDispelConfig(scope)
+    return {
+        enabled = true,
+        scope = scope or "player",
+        types = {
+            magic = true,
+            curse = true,
+            disease = true,
+            poison = true,
+            bleed = true,
+        },
+        appearance = "bottom_gradient",
+        alpha = 0.5,
+        blendMode = "ADD",
+    }
+end
+
 local function assertNoStructuralConfiguration(harness, message)
     for _, eventName in ipairs({
         "af.frame-level",
@@ -710,6 +890,7 @@ local function testRaidAuraScaleLockdown()
 
         for _, runtime in ipairs({buffs, debuffs}) do
             local state = runtime:GetNativeAuraState()
+            assertEqual(state.error, nil, "initial Raid aura compile error")
             assertEqual(state.state, "READY", "initial Raid aura state")
             assertEqual(state.unit, "none", "initial group-empty unit")
             assertEqual(state.built, true, "initial Raid aura build")
@@ -920,10 +1101,10 @@ local function testRaidAuraScaleLockdown()
                 "combat construction reload state")
             assertEqual(state.pending, true,
                 "combat construction quiesce pending state")
-            assertEqual(runtime:IsShown(), true,
-                "combat construction protected visibility remains unchanged")
-            assertEqual(runtime.alpha, 0,
+            assertEqual(runtime._controller.frame.alpha, 0,
                 "combat construction holder curtain")
+            assertEqual(runtime._controller._container.alpha, 0,
+                "combat construction native curtain")
             assertEqual(runtime._controller._container.enabled, true,
                 "combat deferred native enabled state")
         end
@@ -1232,6 +1413,295 @@ local function testRaidAuraScaleLockdown()
     end
 end
 
+-- Add the reusable one-slot dispel runtime to the same fixed Raid topology.
+-- This independently proves the aggregate 120-container / 1,640-reservation
+-- budget and that live scope/type, config-mode, unit, and anchor changes do
+-- not allocate another native shell, group, slot, or restricted button.
+local function testRaidDispelScaleLockdown()
+    local harness = makeHarness()
+    local entries = {}
+    local seenSeeds = {}
+    local initialRestrictedButtons = 0
+
+    for index = 1, 40 do
+        local unit = "raid" .. index
+        local healthBar = {
+            _configuredFrameLevel = 3,
+            enabled = true,
+        }
+        local root = {
+            effectiveUnit = unit,
+            enabled = true,
+            inConfigMode = false,
+            indicators = {
+                healthBar = healthBar,
+            },
+            name = "RaidDispel" .. index,
+            unit = unit,
+        }
+
+        local debuffSeed = newHeaderBornContainer(harness, root)
+        local buffSeed = harness.UF.CreateNativeGroupAuraContainerSeed(root)
+        local dispelSeed =
+            harness.UF.CreateNativeGroupAuraContainerSeed(root)
+        for _, seed in ipairs({buffSeed, debuffSeed, dispelSeed}) do
+            assertTrue(seed ~= nil, "Raid dispel scale seed")
+            assertTrue(not seenSeeds[seed],
+                "Raid dispel scale seed was reused")
+            seenSeeds[seed] = true
+        end
+
+        root._nativeAuraContainers = {
+            buffs = buffSeed,
+            debuffs = debuffSeed,
+            dispels = dispelSeed,
+        }
+        local buffs = harness.UF.CreateGroupNativeAuras(
+            root,
+            root.name .. "_Buffs",
+            "HELPFUL",
+            "buffs"
+        )
+        local debuffs = harness.UF.CreateGroupNativeAuras(
+            root,
+            root.name .. "_Debuffs",
+            "HARMFUL",
+            "debuffs"
+        )
+        local dispels = harness.UF.CreateGroupNativeDispelHighlight(
+            root,
+            root.name .. "_Dispels",
+            "dispels"
+        )
+        root.indicators.buffs = buffs
+        root.indicators.debuffs = debuffs
+        root.indicators.dispels = dispels
+        buffs.enabled = true
+        debuffs.enabled = true
+        dispels.enabled = true
+
+        buffs:LoadConfig(newAuraConfig("HELPFUL", 0))
+        debuffs:LoadConfig(newAuraConfig("HARMFUL", 0))
+        dispels:LoadConfig(newDispelConfig("player"))
+        buffs:Enable()
+        debuffs:Enable()
+        dispels:Enable()
+
+        for _, runtime in ipairs({buffs, debuffs}) do
+            local state = runtime:GetNativeAuraState()
+            assertEqual(state.error, nil,
+                "aggregate Raid aura compile error")
+            assertEqual(state.state, "READY",
+                "aggregate Raid aura state")
+            assertEqual(state.built, true,
+                "aggregate Raid aura build")
+            initialRestrictedButtons = initialRestrictedButtons
+                + state.metrics.initialRestrictedButtonCount
+        end
+        local dispelState = dispels:GetNativeDispelState()
+        assertEqual(dispelState.built, true,
+            "aggregate Raid dispel build")
+        assertEqual(dispelState.unit, unit,
+            "aggregate Raid dispel unit")
+        assertEqual(dispelState.reloadRequired, false,
+            "aggregate Raid dispel reload state")
+        initialRestrictedButtons = initialRestrictedButtons + 1
+
+        entries[#entries + 1] = {
+            buffs = buffs,
+            debuffs = debuffs,
+            dispels = dispels,
+            dispelSeed = dispelSeed,
+            healthBar = healthBar,
+            root = root,
+            unit = unit,
+        }
+    end
+
+    assertEqual(#entries, 40, "aggregate Raid child count")
+    assertEqual(tableCount(seenSeeds), 120,
+        "aggregate Raid distinct container count")
+    assertEqual(#harness.containers, 120,
+        "aggregate Raid native containers")
+    assertEqual(totalGroupCount(harness), 160,
+        "aggregate Raid native groups")
+    assertEqual(totalSlotCount(harness), 40,
+        "aggregate Raid native slots")
+    assertEqual(initialRestrictedButtons, 1640,
+        "aggregate compiled restricted-button contract")
+    assertEqual(harness.staticRestrictedButtonCount, 1640,
+        "aggregate declared restricted-button contract")
+    assertEqual(countEvents(harness, "header.container"), 40,
+        "aggregate header-born container count")
+    assertEqual(countEvents(harness, "af.create-container"), 80,
+        "aggregate eager container count")
+    assertEqual(countEvents(harness, "af.add-dispel-overlay-slot"), 40,
+        "aggregate dispel slot declaration count")
+
+    for _, entry in ipairs(entries) do
+        local controller = entry.dispels._controller
+        assertEqual(controller._container, entry.dispelSeed,
+            "Raid dispel seed adoption")
+        assertEqual(tableCount(controller._container.groups), 0,
+            "Raid dispel container group count")
+        assertEqual(tableCount(controller._container.slots), 1,
+            "Raid dispel container slot count")
+        assertTrue(controller._container.slots.dispelHighlight,
+            "Raid dispel slot key")
+    end
+
+    local fixedContainerCount = #harness.containers
+    local fixedGroupCount = totalGroupCount(harness)
+    local fixedSlotCount = totalSlotCount(harness)
+    local fixedRestrictedButtons = harness.staticRestrictedButtonCount
+
+    ------------------------------------------------------------------
+    -- Scope and type maps tune the existing native slot without growth.
+    ------------------------------------------------------------------
+    harness:ClearEvents()
+    for _, entry in ipairs(entries) do
+        local config = newDispelConfig("group")
+        config.types.magic = false
+        config.types.bleed = false
+        entry.dispels:LoadConfig(config)
+    end
+    assertNoNativeConstruction(
+        harness,
+        fixedContainerCount,
+        fixedGroupCount,
+        fixedRestrictedButtons,
+        "Raid dispel dynamic tuning",
+        fixedSlotCount
+    )
+    assertEqual(countEvents(harness, "af.slot-filter"), 40,
+        "Raid dispel filter tuning count")
+    assertEqual(countEvents(harness, "af.slot-candidates"), 40,
+        "Raid dispel candidate tuning count")
+    assertEqual(countEvents(harness, "af.slot-sort"), 40,
+        "Raid dispel sort tuning count")
+    for _, entry in ipairs(entries) do
+        local slot = entry.dispelSeed.slots.dispelHighlight
+        assertEqual(slot.filterString,
+            "HARMFUL|RAID_PLAYER_DISPELLABLE",
+            "Raid dispel group-scope filter")
+        assertEqual(slot.options.candidateFilters
+            .includeDispelTypes.Magic, nil,
+            "Raid dispel Magic exclusion")
+        assertEqual(slot.options.candidateFilters
+            .includeDispelTypes.Bleed, nil,
+            "Raid dispel Bleed exclusion")
+    end
+
+    ------------------------------------------------------------------
+    -- Config mode substitutes a BFI preview and keeps native state inert.
+    ------------------------------------------------------------------
+    harness:ClearEvents()
+    for _, entry in ipairs(entries) do
+        entry.dispels:EnableConfigMode()
+        assertEqual(entry.dispels._controller._container.enabled, false,
+            "Raid config-mode native dispel disabled")
+        assertEqual(entry.dispels._preview.shown, true,
+            "Raid config-mode dispel preview")
+        assertEqual(entry.dispels._preview.mouseEnabled, false,
+            "Raid config-mode preview mouse state")
+        assertEqual(entry.dispels._preview.allPointsTarget,
+            entry.healthBar,
+            "Raid config-mode preview bounds")
+        entry.dispels:DisableConfigMode()
+        entry.dispels:Enable()
+    end
+    assertNoNativeConstruction(
+        harness,
+        fixedContainerCount,
+        fixedGroupCount,
+        fixedRestrictedButtons,
+        "Raid dispel config mode",
+        fixedSlotCount
+    )
+
+    ------------------------------------------------------------------
+    -- Secret unit identity fails closed without reaching Lua type/compare.
+    ------------------------------------------------------------------
+    harness:ClearEvents()
+    local secretUnit = {secret = true}
+    for _, entry in ipairs(entries) do
+        entry.dispels:SetUnit(secretUnit)
+        local state = entry.dispels:GetNativeDispelState()
+        assertEqual(state.unit, "none",
+            "Raid secret dispel unit")
+        assertEqual(entry.dispelSeed.unit, "none",
+            "Raid secret native dispel unit")
+        assertEqual(entry.dispelSeed.enabled, false,
+            "Raid secret native dispel enabled state")
+    end
+    assertNoNativeConstruction(
+        harness,
+        fixedContainerCount,
+        fixedGroupCount,
+        fixedRestrictedButtons,
+        "Raid dispel secret retarget",
+        fixedSlotCount
+    )
+
+    for _, entry in ipairs(entries) do
+        entry.root.effectiveUnit = entry.unit
+        entry.root.unit = entry.unit
+        entry.dispels:SetUnit(entry.unit)
+    end
+
+    ------------------------------------------------------------------
+    -- Health Bar level is construction-owned: quiesce, reload, no growth.
+    ------------------------------------------------------------------
+    harness:ClearEvents()
+    for _, entry in ipairs(entries) do
+        entry.healthBar._configuredFrameLevel = 4
+        entry.dispels:LoadConfig(newDispelConfig("group"))
+        local state = entry.dispels:GetNativeDispelState()
+        assertEqual(state.reloadRequired, true,
+            "Raid Health Bar level reload state")
+        assertEqual(entry.dispelSeed.enabled, false,
+            "Raid Health Bar level quiesce")
+    end
+    assertNoNativeConstruction(
+        harness,
+        fixedContainerCount,
+        fixedGroupCount,
+        fixedRestrictedButtons,
+        "Raid dispel Health Bar level change",
+        fixedSlotCount
+    )
+
+    harness:ClearEvents()
+    for _, entry in ipairs(entries) do
+        entry.healthBar._configuredFrameLevel = 3
+        entry.dispels:LoadConfig(newDispelConfig("any"))
+        local state = entry.dispels:GetNativeDispelState()
+        assertEqual(state.reloadRequired, false,
+            "Raid Health Bar level exact reversion")
+        assertEqual(entry.dispelSeed.enabled, true,
+            "Raid Health Bar level resumed state")
+        assertEqual(
+            entry.dispelSeed.slots.dispelHighlight.filterString,
+            "HARMFUL|DISPELLABLE",
+            "Raid resumed any-dispel tuning"
+        )
+    end
+    assertNoNativeConstruction(
+        harness,
+        fixedContainerCount,
+        fixedGroupCount,
+        fixedRestrictedButtons,
+        "Raid dispel Health Bar level reversion",
+        fixedSlotCount
+    )
+
+    for _, unit in ipairs(harness.nativeUnitValues) do
+        assertEqual(type(unit), "string",
+            "aggregate native SetUnit values remain clean strings")
+    end
+end
+
 testRaidAuraScaleLockdown()
+testRaidDispelScaleLockdown()
 
 print("unit_frame_raid_aura_scale_test.lua: ok")

@@ -309,7 +309,6 @@ local function CreateGeneralOptionsPane()
             self.healAbsorb:Hide()
             self.healAbsorbExcessGlow:Hide()
             self.healPrediction:Hide()
-            self.dispelHighlight:Hide()
         end,
 
         healthText = function(self)
@@ -638,7 +637,7 @@ local settings = {
             "general_party",
             "healthBar", "powerBar", "portrait", "castBar",
             "nameText", "healthText", "powerText", "leaderText", "levelText", "targetCounter", "statusTimer",
-            "buffs", "debuffs",
+            "buffs", "debuffs", "dispels",
             "raidIcon", "leaderIcon", "roleIcon", "combatIcon", "readyCheckIcon", "factionIcon", "statusIcon",
             "targetHighlight", "mouseoverHighlight", "threatGlow",
         },
@@ -646,7 +645,7 @@ local settings = {
             "general_raid",
             "healthBar", "powerBar",
             "nameText", "healthText", "statusTimer",
-            "buffs", "debuffs",
+            "buffs", "debuffs", "dispels",
             "raidIcon", "leaderIcon", "roleIcon", "readyCheckIcon", "statusIcon",
             "targetHighlight", "mouseoverHighlight", "threatGlow",
         },
