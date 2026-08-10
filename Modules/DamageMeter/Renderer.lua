@@ -1785,10 +1785,11 @@ local function ApplyAllAnchors(config)
         then
             local tracker = _G.ObjectiveTrackerFrame
             -- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit
-            -- d3915c78: ObjectiveTrackerContainerMixin updates visible content
-            -- after each native layout. BFI's owned dock frame follows that
-            -- content, so a declarative anchor keeps one right-side lane
-            -- without taking ownership of the tracker or its height.
+            -- d3915c78: ObjectiveTrackerContainerMixin owns native custom
+            -- height. BFI's owned dock frame observes that extent while the
+            -- tracker is expanded/custom-positioned, and otherwise follows
+            -- its compact content surface. A declarative anchor keeps one
+            -- right-side lane without taking ownership of native geometry.
             relativeTo = GetObjectiveTrackerDockTarget(tracker)
             point = "TOPRIGHT"
             relativePoint = "BOTTOMRIGHT"

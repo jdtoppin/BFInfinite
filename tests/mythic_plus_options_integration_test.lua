@@ -35,6 +35,7 @@ local panes = {}
 local buttons = {}
 local checkButtons = {}
 local sliders = {}
+local fontStrings = {}
 local dropdowns = {}
 local dialogs = {}
 local fires = {}
@@ -206,6 +207,7 @@ function AF.CreateFontString(_, text)
     function fontString:SetWordWrap(value)
         self.wordWrap = value
     end
+    fontStrings[#fontStrings + 1] = fontString
     return fontString
 end
 
@@ -414,6 +416,12 @@ local function findByLabel(widgets, label)
     end
 end
 
+local function findByText(widgets, text)
+    for _, widget in ipairs(widgets) do
+        if widget.text == text then return widget end
+    end
+end
+
 local objectiveInfo = {
     cfg = partialProfile.uiWidgets.objectiveTracker,
     id = "objectiveTracker",
@@ -443,6 +451,12 @@ assertEqual(nativeObjectiveTrackerHeightWrites, 1,
     "native height writes once per completed slider edit")
 assertEqual(objectiveInfo.cfg.height, nil,
     "native height is not stored in the BFI profile")
+local nativeHeightStatus = findByText(fontStrings,
+    "Saved. Reload UI if the tracker does not resize immediately.")
+assertTrue(nativeHeightStatus,
+    "native height explains when Blizzard needs a layout refresh")
+assertEqual(nativeHeightStatus.shown, true,
+    "native height refresh guidance is visible")
 
 nativeObjectiveTrackerHeightReason = "customPosition"
 for _, pane in ipairs(objectiveOptionPanes) do
@@ -477,8 +491,17 @@ assertEqual(autoAcceptQuests.checked, false,
     "auto-accept loads the profile value")
 assertEqual(autoTurnInQuests.checked, false,
     "auto-turn-in loads the profile value")
-assertTrue(autoAcceptQuests.tooltip and autoTurnInQuests.tooltip,
-    "quest automation safety guidance")
+local questAutomationTooltip = "Hold Shift to pause quest automation. "
+    .. "Item-started and remote completions, multiple reward choices, "
+    .. "PvP confirmations, and payments stay manual."
+assertEqual(autoAcceptQuests.tooltip[1], "Auto Accept Quests",
+    "auto-accept tooltip title")
+assertEqual(autoAcceptQuests.tooltip[2], questAutomationTooltip,
+    "auto-accept tooltip body")
+assertEqual(autoTurnInQuests.tooltip[1], "Auto Turn In Quests",
+    "auto-turn-in tooltip title")
+assertEqual(autoTurnInQuests.tooltip[2], questAutomationTooltip,
+    "auto-turn-in tooltip body")
 autoAcceptQuests.onCheck(true)
 autoTurnInQuests.onCheck(true)
 assertEqual(objectiveInfo.cfg.autoAcceptQuests, true,

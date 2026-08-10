@@ -16,6 +16,7 @@ local trackerStyled
 local trackerLayoutObserved
 local trackerBackgroundStyled
 local trackerBackground
+local trackerDockFrame
 
 local TRACKER_NATIVE_BOTTOM_PADDING = 10
 local TRACKER_BACKGROUND_PADDING = 6
@@ -68,11 +69,37 @@ local function LayoutTrackerBackground()
     )
 end
 
+local function LayoutTrackerDockFrame()
+    if not trackerDockFrame or not trackerBackground then return end
+
+    trackerDockFrame:ClearAllPoints()
+    local isCustomPosition = type(tracker.IsInDefaultPosition) == "function"
+        and tracker:IsInDefaultPosition() == false
+    if isCustomPosition and not tracker:IsCollapsed() then
+        -- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit d3915c78:
+        -- ObjectiveTrackerContainerMixin:UpdateHeight() owns the custom
+        -- tracker height and applies max(editModeHeight, mustFitContent).
+        -- Reserve that native extent for docked meters without changing any
+        -- Blizzard frame geometry. The visible BFI surface remains bounded by
+        -- current content below, while default-positioned or collapsed
+        -- trackers keep the compact content-bound dock target.
+        trackerDockFrame:SetPoint("TOPLEFT", tracker, "TOPLEFT")
+        trackerDockFrame:SetPoint("BOTTOMRIGHT", tracker, "BOTTOMRIGHT")
+    else
+        trackerDockFrame:SetPoint("TOPLEFT", trackerBackground, "TOPLEFT")
+        trackerDockFrame:SetPoint(
+            "BOTTOMRIGHT",
+            trackerBackground,
+            "BOTTOMRIGHT"
+        )
+    end
+end
+
 local function UpdateTrackerBackgroundLayout()
     LayoutTrackerBackground()
-    -- Meter windows use the BFI surface when enabled and native NineSlice
-    -- geometry otherwise. Reflow them whenever native objective content
-    -- changes without mutating the protected tracker height.
+    LayoutTrackerDockFrame()
+    -- Meter windows follow the BFI-owned dock reservation, which observes
+    -- Blizzard's custom height without taking ownership of it.
     AF.Fire("BFI_ObjectiveTrackerDockFrameChanged")
 end
 
@@ -81,6 +108,7 @@ local function SetupTrackerLayoutObserver()
 
     trackerLayoutObserved = true
     hooksecurefunc(tracker, "Update", UpdateTrackerBackgroundLayout)
+    hooksecurefunc(tracker, "UpdateHeight", UpdateTrackerBackgroundLayout)
 end
 
 local function SetupTrackerBackground()
@@ -99,6 +127,8 @@ local function SetupTrackerBackground()
     -- the native background opacity to zero.
     trackerBackgroundStyled = true
     S.RemoveTextures(tracker.NineSlice, true)
+    trackerDockFrame = AF.CreateFrame(tracker)
+    W.objectiveTrackerDockFrame = trackerDockFrame
     trackerBackground = AF.CreateBorderedFrame(
         tracker,
         nil,
@@ -108,7 +138,6 @@ local function SetupTrackerBackground()
         "border"
     )
     AF.SetFrameLevel(trackerBackground, -1)
-    W.objectiveTrackerDockFrame = trackerBackground
     UpdateTrackerBackgroundLayout()
 end
 

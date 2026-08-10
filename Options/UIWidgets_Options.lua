@@ -644,6 +644,7 @@ builder["objectiveTrackerNativeHeight"] = function(parent)
     AF.SetPoint(status, "RIGHT", -15, 0)
     status:SetJustifyH("LEFT")
     status:SetWordWrap(true)
+    local nativeHeightSaved
 
     local unavailableTips = {
         busy = L["Objective Tracker height is temporarily busy."],
@@ -675,12 +676,15 @@ builder["objectiveTrackerNativeHeight"] = function(parent)
         height:SetValue(value or 800)
         height:SetEnabled(reason == nil
             and type(W.SetObjectiveTrackerNativeHeight) == "function")
-        status:SetText(reason and (
+        local statusText = reason and (
             unavailableStatus[reason] or unavailableStatus.unavailable
-        ) or "")
-        status:SetShown(reason ~= nil)
+        ) or nativeHeightSaved and L[
+            "Saved. Reload UI if the tracker does not resize immediately."
+        ]
+        status:SetText(statusText or "")
+        status:SetShown(statusText ~= nil)
 
-        local tooltip = L["Height is saved to the active Blizzard Edit Mode layout, not to a BFI profile. Blizzard can expand it for required objective content."]
+        local tooltip = L["Height is saved to the active Blizzard Edit Mode layout, not to a BFI profile. It reserves the right-side lane for the tracker, but Blizzard can expand it for required objective content."]
         if reason then
             tooltip = tooltip .. "\n\n" .. (
                 unavailableTips[reason] or unavailableTips.unavailable
@@ -691,13 +695,14 @@ builder["objectiveTrackerNativeHeight"] = function(parent)
 
     height:SetAfterValueChanged(function(value)
         if type(W.SetObjectiveTrackerNativeHeight) == "function" then
-            W.SetObjectiveTrackerNativeHeight(value)
+            nativeHeightSaved = W.SetObjectiveTrackerNativeHeight(value) == true
         end
         Refresh()
     end)
 
     function pane.Load(t)
         pane.t = t
+        nativeHeightSaved = nil
         Refresh()
     end
 
@@ -772,7 +777,7 @@ builder["objectiveTrackerQuestAutomation"] = function(parent)
     local function CreateToggle(key, label, x)
         local control = AF.CreateCheckButton(pane, label)
         AF.SetPoint(control, "LEFT", x, 0)
-        control:SetTooltip(tooltip)
+        control:SetTooltip(label, tooltip)
         control:SetOnCheck(function(checked)
             pane.t.cfg[key] = checked
         end)

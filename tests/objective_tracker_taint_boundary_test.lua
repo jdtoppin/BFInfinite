@@ -49,7 +49,10 @@ local function forbiddenCall(name)
 end
 
 local callback
-local originalPositionCheck = function() return true end
+local trackerInDefaultPosition = true
+local originalPositionCheck = function()
+    return trackerInDefaultPosition
+end
 local trackerNineSlice = {}
 local trackerHeader = {}
 local trackerCollapsed = false
@@ -102,6 +105,16 @@ local backdropParent
 local backdropColor
 local backdropBorderColor
 local dockFrameEvents = 0
+local dockReservationCreates = 0
+local dockReservationAnchors = {}
+local trackerDockFrame = {
+    ClearAllPoints = function()
+        dockReservationAnchors = {}
+    end,
+    SetPoint = function(_, ...)
+        dockReservationAnchors[#dockReservationAnchors + 1] = {...}
+    end,
+}
 local trackerBackdrop = {
     ClearAllPoints = function()
         backdropAnchors = {}
@@ -117,6 +130,14 @@ local trackerBackdrop = {
     end,
 }
 local AF = {
+    CreateFrame = function(parent, name, width, height)
+        assertEqual(parent, tracker, "Objective Tracker dock reservation parent")
+        assertEqual(name, nil, "anonymous tracker dock reservation")
+        assertEqual(width, nil, "tracker dock reservation has no owned size")
+        assertEqual(height, nil, "tracker dock reservation has no owned size")
+        dockReservationCreates = dockReservationCreates + 1
+        return trackerDockFrame
+    end,
     CreateBorderedFrame = function(
         parent,
         name,
@@ -174,6 +195,7 @@ local W = {
     },
 }
 local trackerUpdateHook
+local trackerHeightUpdateHook
 local environment = {
     _G = false,
     AbstractFramework = AF,
@@ -190,10 +212,18 @@ local environment = {
     debug = debug,
     hooksecurefunc = function(target, method, hook)
         assertEqual(target, tracker, "Objective Tracker update hook target")
-        assertEqual(method, "Update", "Objective Tracker update hook method")
         assertEqual(type(hook), "function", "Objective Tracker update hook")
-        assertEqual(trackerUpdateHook, nil, "Objective Tracker update hooked once")
-        trackerUpdateHook = hook
+        if method == "Update" then
+            assertEqual(trackerUpdateHook, nil,
+                "Objective Tracker update hooked once")
+            trackerUpdateHook = hook
+        elseif method == "UpdateHeight" then
+            assertEqual(trackerHeightUpdateHook, nil,
+                "Objective Tracker height update hooked once")
+            trackerHeightUpdateHook = hook
+        else
+            error("unexpected Objective Tracker hook: " .. tostring(method), 2)
+        end
     end,
     ipairs = ipairs,
     math = math,
@@ -267,6 +297,11 @@ assertEqual(type(disabledReturnAt), "number",
     "Objective Tracker disabled guard remains available")
 assertEqual(observerAt < disabledReturnAt, true,
     "native layout observer also covers an unstyled tracker")
+assertContains(
+    trackerSource,
+    'hooksecurefunc(tracker, "UpdateHeight", UpdateTrackerBackgroundLayout)',
+    "native height changes refresh only the BFI dock reservation"
+)
 
 local optionsSource = readFile("Options/UIWidgets_Options.lua")
 local objectiveSettings = optionsSource:match(
@@ -318,6 +353,8 @@ assertEqual(backdropParent, tracker,
     "shared backdrop inherits Objective Tracker visibility")
 assertEqual(type(trackerUpdateHook), "function",
     "shared backdrop follows native Objective Tracker updates")
+assertEqual(type(trackerHeightUpdateHook), "function",
+    "dock reservation follows native Objective Tracker height updates")
 assertEqual(#backdropAnchors, 3,
     "shared backdrop uses explicit content bounds")
 assertEqual(backdropAnchors[1][1], "TOPLEFT",
@@ -346,8 +383,20 @@ assertEqual(backdropAnchors[3][5], -16,
     "shared backdrop includes native and extra bottom padding")
 assertEqual(backdropRelativeLevel, -1,
     "shared backdrop remains behind tracker content")
-assertEqual(W.objectiveTrackerDockFrame, trackerBackdrop,
-    "shared backdrop is published as the meter dock target")
+assertEqual(dockReservationCreates, 1,
+    "separate Objective Tracker dock reservation created once")
+assertEqual(W.objectiveTrackerDockFrame, trackerDockFrame,
+    "separate reservation is published as the meter dock target")
+assertEqual(#dockReservationAnchors, 2,
+    "default tracker dock reservation uses compact surface bounds")
+assertEqual(dockReservationAnchors[1][1], "TOPLEFT",
+    "default dock reservation top-left point")
+assertEqual(dockReservationAnchors[1][2], trackerBackdrop,
+    "default dock reservation follows compact surface")
+assertEqual(dockReservationAnchors[2][1], "BOTTOMRIGHT",
+    "default dock reservation bottom-right point")
+assertEqual(dockReservationAnchors[2][2], trackerBackdrop,
+    "default dock reservation keeps compact surface bottom")
 assertEqual(dockFrameEvents, 1,
     "meter docking refreshes when the tracker surface becomes ready")
 
@@ -381,6 +430,31 @@ assertEqual(backdropAnchors[3][2], secondModule,
     "expanded tracker background follows restored objective content")
 assertEqual(backdropAnchors[3][5], -16,
     "expanded tracker restores objective bottom padding")
+trackerInDefaultPosition = false
+local dockEventsBeforeNativeHeight = dockFrameEvents
+trackerHeightUpdateHook()
+assertEqual(dockFrameEvents, dockEventsBeforeNativeHeight + 1,
+    "native height updates reflow the docked meter lane")
+assertEqual(backdropAnchors[3][2], secondModule,
+    "custom native height leaves the visible background content-bound")
+assertEqual(#dockReservationAnchors, 2,
+    "custom tracker dock reservation uses native extent")
+assertEqual(dockReservationAnchors[1][1], "TOPLEFT",
+    "custom dock reservation top-left point")
+assertEqual(dockReservationAnchors[1][2], tracker,
+    "custom dock reservation follows native tracker top")
+assertEqual(dockReservationAnchors[2][1], "BOTTOMRIGHT",
+    "custom dock reservation bottom-right point")
+assertEqual(dockReservationAnchors[2][2], tracker,
+    "custom dock reservation follows native tracker height")
+trackerCollapsed = true
+trackerHeightUpdateHook()
+assertEqual(dockReservationAnchors[1][2], trackerBackdrop,
+    "collapsed custom tracker returns dock reservation to compact surface")
+assertEqual(dockReservationAnchors[2][2], trackerBackdrop,
+    "collapsed custom tracker does not reserve empty native height")
+trackerCollapsed = false
+trackerInDefaultPosition = true
 assertEqual(backdropColor[1], 0.1,
     "shared backdrop uses the BFI background color")
 assertEqual(backdropColor[4], 0.73,
