@@ -590,6 +590,9 @@ local function NewButtonStyle(
     tooltip,
     blockColor
 )
+    -- Retail 12.1.0.69189 (wow-ui-source a520b6c27bb8) lets Blizzard
+    -- privately apply typed and None/red colors to AF's square PreserveAsset
+    -- border. The compiler supplies only ordinary saved configuration.
     local style = {
         noBorder = true,
         width = config.width,
@@ -598,7 +601,7 @@ local function NewButtonStyle(
         cooldownStyle = config.cooldownStyle,
         durationText = NormalizeDurationText(config.durationText),
         stackText = NormalizeStackText(config.stackText),
-        dispelColor = baseFilter == "HARMFUL"
+        nativeDispelColor = baseFilter == "HARMFUL"
             and config.auraTypeColor ~= nil
             and config.auraTypeColor.debuffType == true,
         tooltip = Copy(tooltip),

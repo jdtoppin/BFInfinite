@@ -14,9 +14,9 @@ local ipairs, next, pairs, type = ipairs, next, pairs, type
 -- groups/slots add-only and restricts their buttons after initialization.
 -- This controller owns only configuration-derived state and never reads aura
 -- data, live buttons, native container geometry, or native visibility.
--- AF r38 adds native dispel-overlay slots whose selection and color stay
--- entirely inside Blizzard's 12.1 AuraContainer implementation.
-local REQUIRED_AF_VERSION = 38
+-- AF r39 lets native harmful aura buttons use BFI's square border while
+-- Blizzard privately applies Magic/Curse/Disease/Poison/Bleed/None colors.
+local REQUIRED_AF_VERSION = 39
 local NATIVE_GROUP_AURA_TEMPLATE = "CustomAuraContainerTemplate"
 -- CustomAuraContainerConstants.FrameCreationBatchSize in the pinned build.
 local NATIVE_INITIAL_GROUP_RESERVATIONS = 10
@@ -28,6 +28,7 @@ local REQUIRED_AF_METHODS = {
     "GetCustomAuraContainerConstructionStats",
     "GetCustomAuraContainerConstructionTotals",
     "HasCustomAuraContainer",
+    "HasNativeDispelColorTexture",
     "SetCustomAuraContainerEnabled",
     "SetCustomAuraContainerFlowLayout",
     "SetCustomAuraContainerProcessingPolicy",
@@ -126,6 +127,7 @@ function UF.HasNativeAuraContainerBackend()
     end
 
     return AF.HasCustomAuraContainer()
+        and AF.HasNativeDispelColorTexture()
 end
 
 -- Retail 12.1 SecureGroupHeaderTemplate creates one unconfigured

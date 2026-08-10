@@ -5,9 +5,9 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF r38 adds native dispel-overlay slots whose selection and color stay
--- entirely inside Blizzard's 12.1 AuraContainer implementation.
-local REQUIRED_AF_VERSION = 38
+-- AF r39 lets native harmful aura buttons use BFI's square border while
+-- Blizzard privately applies Magic/Curse/Disease/Poison/Bleed/None colors.
+local REQUIRED_AF_VERSION = 39
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar
