@@ -2940,6 +2940,15 @@ local function RunObjectiveTrackerLaneFitTests()
     local firstWindow = fitState.namedFrames.BFIDamageMeterWindow1
     local secondWindow = fitState.namedFrames.BFIDamageMeterWindow2
     local thirdWindow = fitState.namedFrames.BFIDamageMeterWindow3
+    local editModeEventFrame
+    for _, frame in ipairs(fitState.frames) do
+        if frame.events.EDIT_MODE_LAYOUTS_UPDATED then
+            editModeEventFrame = frame
+            break
+        end
+    end
+    assertEqual(type(editModeEventFrame), "table",
+        "tracker-lane renderer listens for native Edit Mode saves")
     assertEqual(firstWindow.visibleRowCount, 3,
         "constrained first meter keeps three rows")
     assertEqual(secondWindow.visibleRowCount, 3,
@@ -2964,21 +2973,21 @@ local function RunObjectiveTrackerLaneFitTests()
         "runtime fitting preserves the second saved height")
 
     dockFrame.bottom = 400
-    fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
+    editModeEventFrame:RunScript("OnEvent", "EDIT_MODE_LAYOUTS_UPDATED")
     assertEqual(firstWindow.visibleRowCount, 5,
-        "more tracker-lane space restores first rows")
+        "native height change restores first rows")
     assertEqual(secondWindow.visibleRowCount, 4,
-        "more tracker-lane space restores stacked rows")
+        "native height change restores stacked rows")
     assertEqual(firstWindow.height, 124,
-        "more tracker-lane space restores saved first height")
+        "native height change restores saved first height")
     assertEqual(secondWindow.height, 104,
-        "more tracker-lane space restores saved second height")
+        "native height change restores saved second height")
     assertEqual(firstWindow.resizable, true,
         "restored saved height can be resized")
     local unchangedSizeCount = firstWindow.sizeChangeCount
-    fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
+    editModeEventFrame:RunScript("OnEvent", "EDIT_MODE_LAYOUTS_UPDATED")
     assertEqual(firstWindow.sizeChangeCount, unchangedSizeCount,
-        "unchanged tracker geometry does not reflow the meters")
+        "unchanged native height does not reflow the meters")
 
     dockFrame.bottom = 80
     fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()

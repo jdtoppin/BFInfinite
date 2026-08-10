@@ -40,6 +40,9 @@ local dialogs = {}
 local fires = {}
 local previewCalls = {}
 local clearHistoryCalls = 0
+local nativeObjectiveTrackerHeight = 650
+local nativeObjectiveTrackerHeightReason
+local nativeObjectiveTrackerHeightWrites = 0
 
 local AF = {
     noop = function()
@@ -159,6 +162,9 @@ function AF.CreateSlider(_, label, width, minimum, maximum, step)
     function slider:SetValue(value)
         self.value = value
     end
+    function slider:SetEnabled(value)
+        self.enabled = value
+    end
     function slider:SetTooltip(...)
         self.tooltip = {...}
     end
@@ -190,6 +196,15 @@ function AF.CreateFontString(_, text)
     }
     function fontString:SetJustifyH(value)
         self.justifyH = value
+    end
+    function fontString:SetText(value)
+        self.text = value
+    end
+    function fontString:SetShown(value)
+        self.shown = value
+    end
+    function fontString:SetWordWrap(value)
+        self.wordWrap = value
     end
     return fontString
 end
@@ -228,6 +243,10 @@ function AF.LSM_GetFontOutlineDropdownItems()
 end
 
 local W = {
+    GetObjectiveTrackerNativeHeight = function()
+        return nativeObjectiveTrackerHeight,
+            nativeObjectiveTrackerHeightReason
+    end,
     MythicPlus = {
         SetPreview = function(shown)
             previewCalls[#previewCalls + 1] = shown
@@ -236,6 +255,12 @@ local W = {
             clearHistoryCalls = clearHistoryCalls + 1
         end,
     },
+    SetObjectiveTrackerNativeHeight = function(value)
+        nativeObjectiveTrackerHeight = value
+        nativeObjectiveTrackerHeightWrites =
+            nativeObjectiveTrackerHeightWrites + 1
+        return true
+    end,
 }
 local F = {}
 local L = setmetatable({}, {
@@ -401,6 +426,34 @@ assertTrue(#objectiveOptionPanes >= 5, "Objective Tracker options panes")
 for _, pane in ipairs(objectiveOptionPanes) do
     pane.Load(objectiveInfo)
 end
+
+local nativeHeight = findByLabel(sliders, "Objective Tracker Height")
+assertTrue(nativeHeight, "Objective Tracker native height slider")
+assertEqual(nativeHeight.minimum, 400, "native height minimum")
+assertEqual(nativeHeight.maximum, 1000, "native height maximum")
+assertEqual(nativeHeight.step, 10, "native height step")
+assertEqual(nativeHeight.value, 650,
+    "native height loads the active Blizzard layout value")
+assertEqual(nativeHeight.enabled, true,
+    "writable native height remains enabled")
+nativeHeight.afterValueChanged(500)
+assertEqual(nativeObjectiveTrackerHeight, 500,
+    "native height writes through the Blizzard adapter")
+assertEqual(nativeObjectiveTrackerHeightWrites, 1,
+    "native height writes once per completed slider edit")
+assertEqual(objectiveInfo.cfg.height, nil,
+    "native height is not stored in the BFI profile")
+
+nativeObjectiveTrackerHeightReason = "customPosition"
+for _, pane in ipairs(objectiveOptionPanes) do
+    if pane.name == "BFI_UIWidgetOption_ObjectiveTrackerNativeHeight" then
+        pane.Load(objectiveInfo)
+        break
+    end
+end
+assertEqual(nativeHeight.enabled, false,
+    "default-position tracker disables the native height slider")
+nativeObjectiveTrackerHeightReason = nil
 
 local backgroundOpacity = findByLabel(sliders, "Background Opacity")
 assertTrue(backgroundOpacity, "Objective Tracker background opacity slider")

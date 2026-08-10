@@ -68,6 +68,7 @@ local settings = {
         "markerSpacing",
     },
     objectiveTracker = {
+        "objectiveTrackerNativeHeight",
         "objectiveTrackerBackground",
         "objectiveTrackerQuestAutomation",
         "font",
@@ -605,6 +606,99 @@ builder["alpha"] = function(parent)
     function pane.Load(t)
         pane.t = t
         alpha:SetValue(t.cfg.alpha)
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- objectiveTrackerNativeHeight
+---------------------------------------------------------------------
+builder["objectiveTrackerNativeHeight"] = function(parent)
+    if created["objectiveTrackerNativeHeight"] then
+        return created["objectiveTrackerNativeHeight"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_ObjectiveTrackerNativeHeight",
+        nil,
+        70
+    )
+    created["objectiveTrackerNativeHeight"] = pane
+
+    local height = AF.CreateSlider(
+        pane,
+        L["Objective Tracker Height"],
+        200,
+        400,
+        1000,
+        10,
+        nil,
+        true
+    )
+    AF.SetPoint(height, "LEFT", 15, 0)
+
+    local status = AF.CreateFontString(pane, nil, "disabled")
+    AF.SetPoint(status, "LEFT", height, "RIGHT", 25, 0)
+    AF.SetPoint(status, "RIGHT", -15, 0)
+    status:SetJustifyH("LEFT")
+    status:SetWordWrap(true)
+
+    local unavailableTips = {
+        busy = L["Objective Tracker height is temporarily busy."],
+        combat = L["Leave combat before changing the Objective Tracker height."],
+        customLayout = L["Select an Account or Character Blizzard Edit Mode layout before changing the Objective Tracker height."],
+        customPosition = L["Move the Objective Tracker out of its default position in Blizzard Edit Mode before changing its height."],
+        editMode = L["Close Blizzard Edit Mode before changing the Objective Tracker height."],
+        invalid = L["Objective Tracker height is unavailable on this client."],
+        unavailable = L["Objective Tracker height is unavailable on this client."],
+    }
+    local unavailableStatus = {
+        busy = L["Saving Objective Tracker height..."],
+        combat = L["Unavailable in combat."],
+        customLayout = L["Use a custom Blizzard Edit Mode layout first."],
+        customPosition = L["Move it in Blizzard Edit Mode first."],
+        editMode = L["Finish editing in Blizzard Edit Mode first."],
+        invalid = L["Unavailable on this client."],
+        unavailable = L["Unavailable on this client."],
+    }
+
+    local function Refresh()
+        local value, reason
+        if type(W.GetObjectiveTrackerNativeHeight) == "function" then
+            value, reason = W.GetObjectiveTrackerNativeHeight()
+        else
+            reason = "unavailable"
+        end
+
+        height:SetValue(value or 800)
+        height:SetEnabled(reason == nil
+            and type(W.SetObjectiveTrackerNativeHeight) == "function")
+        status:SetText(reason and (
+            unavailableStatus[reason] or unavailableStatus.unavailable
+        ) or "")
+        status:SetShown(reason ~= nil)
+
+        local tooltip = L["Height is saved to the active Blizzard Edit Mode layout, not to a BFI profile. Blizzard can expand it for required objective content."]
+        if reason then
+            tooltip = tooltip .. "\n\n" .. (
+                unavailableTips[reason] or unavailableTips.unavailable
+            )
+        end
+        height:SetTooltip(L["Objective Tracker Height"], tooltip)
+    end
+
+    height:SetAfterValueChanged(function(value)
+        if type(W.SetObjectiveTrackerNativeHeight) == "function" then
+            W.SetObjectiveTrackerNativeHeight(value)
+        end
+        Refresh()
+    end)
+
+    function pane.Load(t)
+        pane.t = t
+        Refresh()
     end
 
     return pane

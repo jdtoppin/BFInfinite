@@ -276,6 +276,8 @@ assertEqual(type(objectiveSettings), "string",
     "Objective Tracker options block")
 assertContains(objectiveSettings, '"objectiveTrackerBackground"',
     "Objective Tracker background controls must remain available")
+assertContains(objectiveSettings, '"objectiveTrackerNativeHeight"',
+    "Objective Tracker native height proxy must remain available")
 assertContains(objectiveSettings, '"objectiveTrackerQuestAutomation"',
     "Objective Tracker quest automation controls must remain available")
 assertNotContains(objectiveSettings, '"height"',
