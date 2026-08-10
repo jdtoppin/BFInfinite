@@ -8,7 +8,9 @@ local AF = _G.AbstractFramework
 local type = type
 
 local DESIRED_WIDTH = 170
-local COLLAPSED_WIDTH = 40
+-- 40px carries the compact icon + chevron; the extra 10px is AF's dedicated
+-- transient-scrollbar lane, preventing it from covering a parent chevron.
+local COLLAPSED_WIDTH = 50
 local CONTENT_GAP = 8
 local HEADING_HEIGHT = 22
 local ACCENT_COLOR = "BFI"

@@ -68,80 +68,61 @@ local equipmentSlotOrder = {
     INVTYPE_RANGED = 17,
     INVTYPE_BODY = 18,
     INVTYPE_TABARD = 19,
-    INVTYPE_PROFESSION_TOOL = 20,
-    INVTYPE_PROFESSION_GEAR = 21,
-    INVTYPE_BAG = 22,
 }
--- categoryIconByEquipLoc: childIcon lookups for equipment slots, keyed by
--- the post-alias INVTYPE (see equipmentSlotAliases above); aliased INVTYPEs
--- share their target slot's icon since GetCategory substitutes the alias
--- before building childKey. Nested as a nonnumeric field on the existing
--- equipmentSlotOrder local, rather than declared as its own top-level
--- local, because Modules/Bags/Bags.lua's main chunk is already at Lua
--- 5.1's 200-local ceiling (verified by scripts/lint.sh's byte-compile
--- step) with no free slot to spare; equipmentSlotOrder's own INVTYPE_*
--- keys never collide with this "categoryIconByEquipLoc" string key.
--- Populated below the do-block, not as a static literal: each entry is the
--- client's own paper-doll slot texture, resolved once via
--- GetInventorySlotInfo, so the sidebar matches the character pane exactly.
--- See the evidence comment further down for the verified INVTYPE ->
--- slot-name contract and the GetInventorySlotInfo API signature. An INVTYPE
--- that GetInventorySlotInfo can't resolve (API unavailable in this
--- environment, or a slot with no paper-doll frame at all, such as
--- profession tools/gear) is simply absent here; BuildSidebarModel's
--- child.icon or group.icon chain then falls back to the parent Equipment
--- icon, so a nil mapping still renders something.
-equipmentSlotOrder.categoryIconByEquipLoc = {}
-do
-    -- INVTYPE -> character-pane slot-name, verified against
-    -- PaperDollFrame.xml's ItemButton names ("Character" .. slotName,
-    -- stripped by PaperDollItemSlotButton_GetSlotName) at both pinned
-    -- commits. Neither commit defines a Ranged slot frame (only
-    -- MainHandSlot/SecondaryHandSlot exist), so ranged weapons share
-    -- MainHandSlot with one- and two-handed weapons, matching how the
-    -- client itself renders them on the paper doll. INVTYPE_PROFESSION_TOOL,
-    -- INVTYPE_PROFESSION_GEAR, and INVTYPE_BAG are intentionally omitted:
-    -- neither artifact has a matching slot frame (profession tools/gear
-    -- equip through the Professions UI, not PaperDollFrame; bags have no
-    -- paper-doll button).
-    local INV_TYPE_TO_SLOT = {
-        INVTYPE_HEAD = "HeadSlot",
-        INVTYPE_NECK = "NeckSlot",
-        INVTYPE_SHOULDER = "ShoulderSlot",
-        INVTYPE_CLOAK = "BackSlot",
-        INVTYPE_CHEST = "ChestSlot",
-        INVTYPE_BODY = "ShirtSlot",
-        INVTYPE_TABARD = "TabardSlot",
-        INVTYPE_WRIST = "WristSlot",
-        INVTYPE_HAND = "HandsSlot",
-        INVTYPE_WAIST = "WaistSlot",
-        INVTYPE_LEGS = "LegsSlot",
-        INVTYPE_FEET = "FeetSlot",
-        INVTYPE_FINGER = "Finger0Slot",
-        INVTYPE_TRINKET = "Trinket0Slot",
-        INVTYPE_WEAPONMAINHAND = "MainHandSlot",
-        INVTYPE_WEAPONOFFHAND = "SecondaryHandSlot",
-        INVTYPE_WEAPON = "MainHandSlot",
-        INVTYPE_2HWEAPON = "MainHandSlot",
-        INVTYPE_RANGED = "MainHandSlot",
-    }
-    -- Retail 12.1.0.68914 moves this call behind the C_PaperDollInfo
-    -- namespace; Retail 12.0.7.68887 still exposes it as a bare global.
-    -- Prefer the namespaced form when present so slot-art resolution keeps
-    -- working after a future client migrates. See the evidence comment for
-    -- both call sites and the shared (invSlot, slotTexture, checkRelic)
-    -- return contract.
-    local getInventorySlotInfo = (_G.C_PaperDollInfo and _G.C_PaperDollInfo.GetInventorySlotInfo)
-        or _G.GetInventorySlotInfo
-    if getInventorySlotInfo then
-        for invType, slotName in next, INV_TYPE_TO_SLOT do
-            local _, textureName = getInventorySlotInfo(slotName)
-            if textureName then
-                equipmentSlotOrder.categoryIconByEquipLoc[invType] = {texture = textureName}
-            end
-        end
-    end
-end
+-- categoryIconByEquipLoc: childIcon lookups for ordinary equipment slots,
+-- keyed by the post-alias INVTYPE (see equipmentSlotAliases above). These
+-- are full-color representative item icons rather than the monochrome
+-- paper-doll empty-slot art: the latter reads poorly in a collapsed rail.
+-- The texture selections are presentation choices, subject to in-game QA,
+-- not API claims. The nested tables avoid a new top-level local because this
+-- chunk remains at Lua 5.1's 200-local limit.
+equipmentSlotOrder.categoryIconByEquipLoc = {
+    INVTYPE_HEAD = {texture = "Interface\\Icons\\INV_Helmet_03"},
+    INVTYPE_NECK = {texture = "Interface\\Icons\\INV_Jewelry_Necklace_03"},
+    INVTYPE_SHOULDER = {texture = "Interface\\Icons\\INV_Shoulder_25"},
+    INVTYPE_CLOAK = {texture = "Interface\\Icons\\INV_Misc_Cape_11"},
+    INVTYPE_CHEST = {texture = "Interface\\Icons\\INV_Chest_Chain"},
+    INVTYPE_WRIST = {texture = "Interface\\Icons\\INV_Bracer_07"},
+    INVTYPE_HAND = {texture = "Interface\\Icons\\INV_Gauntlets_05"},
+    INVTYPE_WAIST = {texture = "Interface\\Icons\\INV_Belt_03"},
+    INVTYPE_LEGS = {texture = "Interface\\Icons\\INV_Pants_06"},
+    INVTYPE_FEET = {texture = "Interface\\Icons\\INV_Boots_05"},
+    INVTYPE_FINGER = {texture = "Interface\\Icons\\INV_Jewelry_Ring_04"},
+    INVTYPE_TRINKET = {texture = "Interface\\Icons\\INV_Misc_Orb_05"},
+    INVTYPE_WEAPONMAINHAND = {texture = "Interface\\Icons\\INV_Sword_04"},
+    INVTYPE_WEAPONOFFHAND = {texture = "Interface\\Icons\\INV_Shield_06"},
+    INVTYPE_WEAPON = {texture = "Interface\\Icons\\INV_Mace_01"},
+    INVTYPE_2HWEAPON = {texture = "Interface\\Icons\\INV_Axe_09"},
+    INVTYPE_RANGED = {texture = "Interface\\Icons\\INV_Weapon_Rifle_01"},
+    INVTYPE_BODY = {texture = "Interface\\Icons\\INV_Shirt_02"},
+    INVTYPE_TABARD = {texture = "Interface\\Icons\\INV_Shirt_GuildTabard_01"},
+}
+-- Profession tools, profession equipment, and equippable bags are not
+-- conventional paper-doll equipment. Keep them together under the one
+-- Miscellaneous parent and give each compact row a purpose-built AF icon.
+-- childKey is separately namespaced in GetCategory, so it cannot collide
+-- with a real item-class fallback that shares this parent.
+equipmentSlotOrder.miscellaneous = {
+    icon = "Bag_Miscellaneous",
+    order = 700,
+    byEquipLoc = {
+        INVTYPE_PROFESSION_TOOL = {
+            label = "Profession Tool",
+            order = 1,
+            icon = "Bag_ProfessionTool",
+        },
+        INVTYPE_PROFESSION_GEAR = {
+            label = "Profession Equipment",
+            order = 2,
+            icon = "Bag_ProfessionEquipment",
+        },
+        INVTYPE_BAG = {
+            label = "Bag",
+            order = 3,
+            icon = "Bag_Bag",
+        },
+    },
+}
 local categoryOrderByClass = {
     [ITEM_CLASS.Consumable] = 200,
     [ITEM_CLASS.Gem] = 300,
@@ -461,45 +442,15 @@ local VIEW_MODE_INDIVIDUAL = "individual"
 -- 4383ced30106d51b27e3e86d1987f1552f0d259d and Retail 12.1.0.68914
 -- d3915c78aba77a7a9be76acbfa35c674bbb6abe9):
 --
--- 1. GetInventorySlotInfo(slotName) -> id/invSlot, textureName/slotTexture,
---    checkRelic. Confirmed by direct call site in both commits'
---    Blizzard_UIPanels_Game/Mainline/PaperDollFrame.lua
---    (PaperDollItemSlotButton_OnLoad): 12.0.7.68887 calls the bare global
---    `GetInventorySlotInfo(slotName)`; 12.1.0.68914 calls the same
---    signature behind the new `C_PaperDollInfo.GetInventorySlotInfo`
---    namespace. The three-return contract (invSlot, slotTexture,
---    checkRelic) is also documented at 12.1.0.68914 in
---    Blizzard_APIDocumentationGenerated/PaperDollInfoDocumentation.lua
---    (Namespace = "C_PaperDollInfo"); that function is not yet listed in
---    the same doc file at 12.0.7.68887, consistent with it still being a
---    bare global there. equipmentSlotOrder.categoryIconByEquipLoc's
---    load-time do-block above prefers the namespaced form when present and
---    falls back to the bare global, so slot-art resolution survives the
---    future client's migration; if neither exists (e.g. a minimal test
---    environment) the loop is skipped entirely and every equipment child
---    icon is absent, which BuildSidebarModel's child.icon or group.icon
---    chain resolves to the parent Equipment icon below.
--- 2. INVTYPE -> slot-name: verified against the ItemButton names in both
---    commits' Blizzard_UIPanels_Game/Mainline/PaperDollFrame.xml (identical
---    at both commits): CharacterHeadSlot, CharacterNeckSlot,
---    CharacterShoulderSlot, CharacterBackSlot, CharacterChestSlot,
---    CharacterShirtSlot, CharacterTabardSlot, CharacterWristSlot,
---    CharacterHandsSlot, CharacterWaistSlot, CharacterLegsSlot,
---    CharacterFeetSlot, CharacterFinger0Slot/Finger1Slot,
---    CharacterTrinket0Slot/Trinket1Slot, CharacterMainHandSlot,
---    CharacterSecondaryHandSlot (PaperDollItemSlotButton_GetSlotName strips
---    the leading "Character"). Neither commit defines a Ranged slot frame
---    (removed pre-Legion; retail's paper doll has only MainHandSlot and
---    SecondaryHandSlot), so INVTYPE_WEAPON, INVTYPE_2HWEAPON, and
---    INVTYPE_RANGED all resolve to MainHandSlot, matching how the client
---    itself equips one-handed, two-handed, and ranged weapons.
---    INVTYPE_PROFESSION_TOOL, INVTYPE_PROFESSION_GEAR, and INVTYPE_BAG have
---    no matching ItemButton in either commit's PaperDollFrame.xml (searched
---    the full file; profession tools/gear are equipped through
---    Blizzard_Professions, not the character pane, and bags have no
---    paper-doll slot at all) and are intentionally left out of
---    INV_TYPE_TO_SLOT, per policy: unverifiable entries fall back to the
---    parent Equipment icon rather than being guessed.
+-- 1. Equipment child rows use hand-picked full-color representative item
+--    textures rather than PaperDollFrame's monochrome empty-slot art. This
+--    is a presentation decision, not an API claim; the complete mapping is
+--    declared next to equipmentSlotOrder and remains subject to in-game QA.
+-- 2. INVTYPE_PROFESSION_TOOL, INVTYPE_PROFESSION_GEAR, and INVTYPE_BAG are
+--    deliberately outside the Equipment parent. They share the dedicated
+--    Miscellaneous aggregate with actual unknown-class items, and use the
+--    purpose-built Bag_ProfessionTool, Bag_ProfessionEquipment, Bag_Bag,
+--    and Bag_Miscellaneous adaptive icons supplied by AbstractFramework.
 -- 3. Parent-category atlases (SUPERSEDED by Task 3, sidebar v3): both
 --    commits' identical Blizzard_UIPanels_Game/Mainline/ContainerFrame.lua
 --    define a `BAG_FILTER_ICONS` table (~line 218) keyed by
@@ -713,37 +664,60 @@ local function GetCategory(itemID)
     local childLabel
     local childOrder
     local childIcon
+    local miscellaneous = equipmentSlotOrder.miscellaneous
 
     -- Retail 12.0.7 uses this non-empty sentinel for non-equippable items.
     if itemEquipLoc
         and itemEquipLoc ~= ""
         and itemEquipLoc ~= NON_EQUIPMENT_LOCATION then
         itemEquipLoc = equipmentSlotAliases[itemEquipLoc] or itemEquipLoc
-        parentKey = "parent:equipment"
-        parentLabel = L["Equipment"]
-        parentOrder = 100
-        -- Task 3: was {atlas = "bags-icon-equipment"} (BAG_FILTER_ICONS);
-        -- retired along with every other "bags-icon-*" parent atlas, see
-        -- categoryIconByClass's comment above for why.
-        parentIcon = {texture = "Interface\\Icons\\INV_Chest_Plate04"}
-        childKey = "equipment:" .. itemEquipLoc
-        childLabel = _G[itemEquipLoc] or itemEquipLoc
-        childOrder = equipmentSlotOrder[itemEquipLoc] or 99
-        childIcon = equipmentSlotOrder.categoryIconByEquipLoc[itemEquipLoc]
-    else
-        parentKey = classID == ITEM_CLASS.Questitem
-            and "parent:quest"
-            or "parent:class:" .. classID
-        if classID == ITEM_CLASS.Questitem then
-            parentLabel = _G.BAG_FILTER_QUEST_ITEMS or itemType or L["Quest Items"]
+        local specialEquipment = miscellaneous.byEquipLoc[itemEquipLoc]
+        if specialEquipment then
+            parentKey = "parent:miscellaneous"
+            parentLabel = L["Miscellaneous"]
+            parentOrder = miscellaneous.order
+            parentIcon = miscellaneous.icon
+            childKey = "miscellaneous:equipment:" .. itemEquipLoc
+            childLabel = _G[itemEquipLoc] or L[specialEquipment.label]
+            childOrder = specialEquipment.order
+            childIcon = specialEquipment.icon
         else
-            parentLabel = itemType
-            if not parentLabel or parentLabel == "" then
-                parentLabel = L["Miscellaneous"]
-            end
+            parentKey = "parent:equipment"
+            parentLabel = L["Equipment"]
+            parentOrder = 100
+            -- Task 3: was {atlas = "bags-icon-equipment"} (BAG_FILTER_ICONS);
+            -- retired along with every other "bags-icon-*" parent atlas, see
+            -- categoryIconByClass's comment above for why.
+            parentIcon = {texture = "Interface\\Icons\\INV_Chest_Plate04"}
+            childKey = "equipment:" .. itemEquipLoc
+            childLabel = _G[itemEquipLoc] or itemEquipLoc
+            childOrder = equipmentSlotOrder[itemEquipLoc] or 99
+            childIcon = equipmentSlotOrder.categoryIconByEquipLoc[itemEquipLoc]
         end
-        parentOrder = categoryOrderByClass[classID] or 600
-        parentIcon = categoryIconByClass[classID] or "Bag_Misc"
+    else
+        if classID == ITEM_CLASS.Questitem then
+            parentKey = "parent:quest"
+            parentLabel = _G.BAG_FILTER_QUEST_ITEMS or itemType or L["Quest Items"]
+        elseif classID == ITEM_CLASS.Miscellaneous or not itemType or itemType == "" then
+            -- The special inventory locations above, the actual Miscellaneous
+            -- item class, and unknown-class items intentionally share one
+            -- Miscellaneous parent. Use the enum rather than a localized
+            -- itemType label so this stays one category in every client locale.
+            -- Their child keys retain distinct namespaces below.
+            parentKey = "parent:miscellaneous"
+            parentLabel = L["Miscellaneous"]
+        else
+            parentKey = "parent:class:" .. classID
+            parentLabel = itemType
+        end
+
+        if parentKey == "parent:miscellaneous" then
+            parentOrder = miscellaneous.order
+            parentIcon = miscellaneous.icon
+        else
+            parentOrder = categoryOrderByClass[classID] or 600
+            parentIcon = categoryIconByClass[classID] or miscellaneous.icon
+        end
         childKey = "class:" .. classID .. ":" .. (subclassID or -1)
         if itemSubType and itemSubType ~= "" and itemSubType ~= parentLabel then
             childLabel = itemSubType
