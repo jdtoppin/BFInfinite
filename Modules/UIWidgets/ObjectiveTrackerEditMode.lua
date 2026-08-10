@@ -11,6 +11,9 @@ local AF = _G.AbstractFramework
 -- displayed as 400-1000 pixels in 10-pixel steps. Blizzard applies it only
 -- after the tracker leaves its default/right-managed position; required
 -- objective content may still expand past the requested height.
+-- GetLayouts contains saved layouts only, but activeLayout keeps its global
+-- index after Blizzard's preset layouts. Convert it to a saved-layout index
+-- before reading or changing the active custom layout.
 local NATIVE_HEIGHT_MIN = 400
 local NATIVE_HEIGHT_MAX = 1000
 local NATIVE_HEIGHT_STEP = 10
@@ -36,16 +39,19 @@ local function GetObjectiveTrackerEditModeContext()
     local systems = enums and enums.EditModeSystem
     local settings = enums and enums.EditModeObjectiveTrackerSetting
     local layoutTypes = enums and enums.EditModeLayoutType
+    local presetLayouts = enums and enums.EditModePresetLayoutsMeta
     if type(editMode) ~= "table"
         or type(editMode.GetLayouts) ~= "function"
         or type(editMode.SaveLayouts) ~= "function"
         or type(systems) ~= "table"
         or type(settings) ~= "table"
         or type(layoutTypes) ~= "table"
+        or type(presetLayouts) ~= "table"
         or systems.ObjectiveTracker == nil
         or settings.Height == nil
         or layoutTypes.Account == nil
         or layoutTypes.Character == nil
+        or type(presetLayouts.NumValues) ~= "number"
     then
         return nil, "unavailable"
     end
@@ -58,7 +64,13 @@ local function GetObjectiveTrackerEditModeContext()
         return nil, "unavailable"
     end
 
-    local activeLayout = layouts.layouts[layouts.activeLayout]
+    local presetLayoutCount = presetLayouts.NumValues
+    if layouts.activeLayout <= presetLayoutCount then
+        return nil, "customLayout"
+    end
+
+    local activeLayoutIndex = layouts.activeLayout - presetLayoutCount
+    local activeLayout = layouts.layouts[activeLayoutIndex]
     if type(activeLayout) ~= "table"
         or type(activeLayout.systems) ~= "table"
     then
@@ -84,7 +96,7 @@ local function GetObjectiveTrackerEditModeContext()
             end
 
             return {
-                activeLayoutIndex = layouts.activeLayout,
+                activeLayoutIndex = activeLayoutIndex,
                 editMode = editMode,
                 heightSetting = settings.Height,
                 layouts = layouts,

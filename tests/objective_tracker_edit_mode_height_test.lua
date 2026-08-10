@@ -53,6 +53,9 @@ local Enum = {
         Height = 0,
         Opacity = 1,
     },
+    EditModePresetLayoutsMeta = {
+        NumValues = 2,
+    },
     EditModeSystem = {
         ObjectiveTracker = 12,
     },
@@ -66,21 +69,10 @@ local editModeActive
 
 local function resetLayouts()
     sourceLayouts = {
-        activeLayout = 2,
+        -- C_EditMode.GetLayouts returns saved layouts only. activeLayout keeps
+        -- the global index that includes Blizzard's two preset layouts.
+        activeLayout = 3,
         layouts = {
-            {
-                layoutName = "Preset",
-                layoutType = Enum.EditModeLayoutType.Preset,
-                systems = {
-                    {
-                        isInDefaultPosition = true,
-                        settings = {
-                            {setting = Enum.EditModeObjectiveTrackerSetting.Height, value = 40},
-                        },
-                        system = Enum.EditModeSystem.ObjectiveTracker,
-                    },
-                },
-            },
             {
                 layoutName = "My Layout",
                 layoutType = Enum.EditModeLayoutType.Account,
@@ -152,6 +144,8 @@ assertContains(source, "editMode.GetLayouts()",
     "native height adapter reads the documented layout snapshot")
 assertContains(source, "editMode.SaveLayouts(layouts)",
     "native height adapter persists through the documented API")
+assertContains(source, "EditModePresetLayoutsMeta",
+    "native height adapter maps the global active layout index")
 for _, forbidden in ipairs({
     "ObjectiveTrackerFrame",
     "OnSystemSettingChange",
@@ -198,22 +192,22 @@ assertEqual(saveCalls, 1, "one layout save for one setting change")
 assertTrue(savedLayouts ~= originalLayouts,
     "native height save uses a copied layout snapshot")
 assertEqual(
-    originalLayouts.layouts[2].systems[1].settings[1].value,
+    originalLayouts.layouts[1].systems[1].settings[1].value,
     40,
     "source layout remains untouched before the native save"
 )
 assertEqual(
-    savedLayouts.layouts[2].systems[1].settings[1].value,
+    savedLayouts.layouts[1].systems[1].settings[1].value,
     25,
     "650 pixels converts to Blizzard raw height index"
 )
 assertEqual(
-    savedLayouts.layouts[2].systems[1].settings[2].value,
+    savedLayouts.layouts[1].systems[1].settings[2].value,
     13,
     "Objective Tracker opacity remains unchanged"
 )
 assertEqual(
-    savedLayouts.layouts[2].systems[2].settings[1].value,
+    savedLayouts.layouts[1].systems[2].settings[1].value,
     17,
     "unrelated Edit Mode systems remain unchanged"
 )
@@ -227,13 +221,13 @@ assertTrue(W.SetObjectiveTrackerNativeHeight(557),
     "native height rounds to Blizzard's step")
 assertEqual(saveCalls, 2, "rounded native height saves once")
 assertEqual(
-    savedLayouts.layouts[2].systems[1].settings[1].value,
+    savedLayouts.layouts[1].systems[1].settings[1].value,
     16,
     "557 pixels rounds to 560 native height"
 )
 
 resetLayouts()
-table.remove(sourceLayouts.layouts[2].systems[1].settings, 1)
+table.remove(sourceLayouts.layouts[1].systems[1].settings, 1)
 height, reason = W.GetObjectiveTrackerNativeHeight()
 assertEqual(height, 800, "missing native setting uses Blizzard default")
 assertEqual(reason, nil, "missing native setting can be created")
@@ -241,18 +235,18 @@ assertTrue(W.SetObjectiveTrackerNativeHeight(500),
     "missing native height setting is added")
 assertEqual(saveCalls, 1, "created native height saves once")
 assertEqual(
-    savedLayouts.layouts[2].systems[1].settings[2].setting,
+    savedLayouts.layouts[1].systems[1].settings[2].setting,
     Enum.EditModeObjectiveTrackerSetting.Height,
     "created setting uses Blizzard's height enum"
 )
 assertEqual(
-    savedLayouts.layouts[2].systems[1].settings[2].value,
+    savedLayouts.layouts[1].systems[1].settings[2].value,
     10,
     "500 pixels uses raw index 10"
 )
 
 resetLayouts()
-sourceLayouts.layouts[2].systems[1].isInDefaultPosition = true
+sourceLayouts.layouts[1].systems[1].isInDefaultPosition = true
 height, reason = W.GetObjectiveTrackerNativeHeight()
 assertEqual(height, nil, "default-position tracker exposes no native height")
 assertEqual(reason, "customPosition",
@@ -262,7 +256,7 @@ assertEqual(W.SetObjectiveTrackerNativeHeight(500), false,
 assertEqual(saveCalls, 0, "default-position tracker does not save layouts")
 
 resetLayouts()
-sourceLayouts.layouts[2].layoutType = Enum.EditModeLayoutType.Preset
+sourceLayouts.activeLayout = 1
 height, reason = W.GetObjectiveTrackerNativeHeight()
 assertEqual(height, nil, "preset layout exposes no writable native height")
 assertEqual(reason, "customLayout",
@@ -272,7 +266,7 @@ assertEqual(W.SetObjectiveTrackerNativeHeight(500), false,
 assertEqual(saveCalls, 0, "preset layout does not save")
 
 resetLayouts()
-sourceLayouts.layouts[2].layoutType = Enum.EditModeLayoutType.Override
+sourceLayouts.layouts[1].layoutType = Enum.EditModeLayoutType.Override
 height, reason = W.GetObjectiveTrackerNativeHeight()
 assertEqual(height, nil, "override layout exposes no writable native height")
 assertEqual(reason, "customLayout",

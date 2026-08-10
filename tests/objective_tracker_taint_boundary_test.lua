@@ -353,8 +353,8 @@ assertEqual(dockFrameEvents, 1,
 
 secondModule.leftMargin = -20
 trackerUpdateHook()
-assertEqual(backdropAnchors[1][4], -26,
-    "shown Scenario content receives only its required left overhang")
+assertEqual(backdropAnchors[1][4], -6,
+    "internal Scenario layout margin does not create blank left background")
 secondModule.leftMargin = nil
 trackerUpdateHook()
 assertEqual(backdropAnchors[1][4], -6,

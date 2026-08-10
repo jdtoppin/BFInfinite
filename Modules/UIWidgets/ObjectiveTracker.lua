@@ -29,7 +29,6 @@ local function LayoutTrackerBackground()
     if not trackerBackground or not tracker.Header then return end
 
     local bottomRegion = tracker.Header
-    local leftOverhang = 0
     if not tracker:IsCollapsed() then
         for _, module in ipairs(tracker.modules) do
             -- Retail collapse leaves GetContentsHeight() populated while
@@ -38,14 +37,6 @@ local function LayoutTrackerBackground()
             -- protected geometry.
             if module:IsShown() then
                 bottomRegion = module
-                -- ScenarioObjectiveTrackerMixin uses a -20 left margin in the
-                -- pinned source. Preserve space only while content actually
-                -- extends left; normal quests and the collapsed header stay
-                -- compact.
-                leftOverhang = math.max(
-                    leftOverhang,
-                    math.max(0, -(module.leftMargin or 0))
-                )
             end
         end
     end
@@ -55,7 +46,7 @@ local function LayoutTrackerBackground()
         "TOPLEFT",
         tracker.Header,
         "TOPLEFT",
-        -TRACKER_BACKGROUND_PADDING - leftOverhang,
+        -TRACKER_BACKGROUND_PADDING,
         TRACKER_BACKGROUND_PADDING
     )
     trackerBackground:SetPoint(
@@ -100,8 +91,10 @@ local function SetupTrackerBackground()
     -- left overhang and 10 pixels below the last module. Container collapse
     -- hides modules but deliberately leaves their content heights (and
     -- NineSlice's expanded bottom anchor) intact. Follow the last shown module
-    -- instead, falling back to the resized header, and use compact, symmetrical
-    -- BFI-owned surface padding without retaining that unused left space.
+    -- instead, falling back to the resized header. Module left margins are
+    -- internal layout canvas (Scenario reserves -20 pixels for its decoration),
+    -- not persistent content bounds, so the BFI surface stays compact against
+    -- the header while retaining its own symmetric padding.
     -- Blizzard_ObjectiveTrackerManager.lua still owns the tracker and defaults
     -- the native background opacity to zero.
     trackerBackgroundStyled = true
