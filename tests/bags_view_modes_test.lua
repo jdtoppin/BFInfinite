@@ -567,12 +567,12 @@ assertNotContains(bags, "C_PaperDollInfo",
     "the retired slot-art API path must not return")
 
 -- Profession tools, profession equipment, and equippable bags have a shared
--- Miscellaneous parent. The parent uses the same native item-art treatment as
--- other top-level categories; children retain purpose-specific adaptive icons.
+-- Miscellaneous parent. Every one uses full-color native item art; no BFI
+-- sidebar row should depend on an AF adaptive glyph.
 assertContains(bags, "equipmentSlotOrder.miscellaneous = {",
     "special inventory locations have a dedicated Miscellaneous definition")
-assertContains(bags, 'icon = {texture = "Interface\\\\Icons\\\\INV_Misc_QuestionMark"}',
-    "Miscellaneous uses a native item icon like the other category parents")
+assertContains(bags, 'icon = {texture = "Interface\\\\Icons\\\\INV_Misc_Gear_01"}',
+    "Miscellaneous uses a colored native item icon rather than a question mark")
 for _, retiredEquipmentOrder in ipairs({
     "INVTYPE_PROFESSION_TOOL = 20,",
     "INVTYPE_PROFESSION_GEAR = 21,",
@@ -582,13 +582,43 @@ for _, retiredEquipmentOrder in ipairs({
         "special inventory locations no longer participate in the Equipment slot order")
 end
 for _, specialEquipment in ipairs({
-    'label = "Profession Tool",\n            order = 1,\n            icon = "Bag_ProfessionTool",',
-    'label = "Profession Equipment",\n            order = 2,\n            icon = "Bag_ProfessionEquipment",',
-    'label = "Bag",\n            order = 3,\n            icon = "Bag_Bag",',
+    'label = "Profession Tool",\n            order = 1,\n            icon = {texture = "Interface\\\\Icons\\\\INV_Hammer_01"},',
+    'label = "Profession Equipment",\n            order = 2,\n            icon = {texture = "Interface\\\\Icons\\\\INV_Chest_Cloth_17"},',
+    'label = "Bag",\n            order = 3,\n            icon = {texture = "Interface\\\\Icons\\\\INV_Misc_Bag_08"},',
 }) do
     assertContains(bags, specialEquipment,
-        "each special Miscellaneous child keeps an unambiguous label and icon")
+        "each special Miscellaneous child keeps an unambiguous colored native icon")
 end
+assertNotContains(bags, '"Bag_',
+    "BFI sidebar rows no longer supply AF adaptive glyph names")
+assertNotContains(sidebar, '"Bag_',
+    "the sidebar fallback no longer supplies an AF adaptive glyph name")
+assertContains(sidebar,
+    'local FALLBACK_ICON = {texture = "Interface\\\\Icons\\\\INV_Misc_Gear_01"}',
+    "the sidebar fallback uses the same colored native Miscellaneous art")
+
+-- Retail's documented ItemMiscellaneousSubclass exposes Junk, CompanionPet,
+-- and Other. Explicit colored child art prevents the collapsed rail from
+-- showing question marks for those visible buckets, while every remaining
+-- Miscellaneous subclass inherits the colored gear parent. Battlepet gets a
+-- separate native parent for the client-labelled Companion Pets category.
+assertContains(bags,
+    "if ITEM_CLASS.Miscellaneous and _G.Enum.ItemMiscellaneousSubclass then",
+    "Miscellaneous subtype art is guarded for minimal environments")
+assertContains(bags,
+    '[_G.Enum.ItemMiscellaneousSubclass.Junk] = {\n            texture = "Interface\\\\Icons\\\\INV_Misc_Bone_HumanSkull_01",',
+    "Junk uses a colored native item icon")
+assertContains(bags,
+    '[_G.Enum.ItemMiscellaneousSubclass.CompanionPet] = {\n            texture = "Interface\\\\Icons\\\\INV_Box_PetCarrier_01",',
+    "Companion Pet uses a colored native item icon")
+assertContains(bags,
+    '[_G.Enum.ItemMiscellaneousSubclass.Other] = {\n            texture = "Interface\\\\Icons\\\\INV_Misc_EngGizmos_19",',
+    "Miscellaneous Other uses a colored native item icon")
+assertContains(bags, "if ITEM_CLASS.Battlepet then",
+    "Battlepet parent art is guarded for minimal environments")
+assertContains(bags,
+    'categoryIconByClass[ITEM_CLASS.Battlepet] = {\n        texture = "Interface\\\\Icons\\\\INV_Box_PetCarrier_01",',
+    "Companion Pets parent uses native pet-carrier art")
 -- Aliased INVTYPEs (ROBE, SHIELD, HOLDABLE, RANGEDRIGHT, THROWN) are
 -- substituted to their canonical target before childKey/childIcon lookup,
 -- so they must never appear as their own full-color mapping entry.

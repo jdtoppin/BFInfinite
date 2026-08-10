@@ -362,7 +362,8 @@ assertEqual(rail.options.expandedWidth, 170, "expanded width option")
 assertEqual(rail.options.collapsedWidth, 58, "collapsed width reserves compact icon clearance and the scrollbar lane")
 assertEqual(rail.options.headingHeight, 22, "heading height option")
 assertEqual(rail.options.accentColor, "BFI", "accent color option")
-assertEqual(rail.options.fallbackIcon, "Bag_Misc", "fallback icon option")
+assertEqual(rail.options.fallbackIcon.texture, "Interface\\Icons\\INV_Misc_Gear_01",
+    "fallback icon is native colored item art")
 -- Task 3 (sidebar v3): rowHeight/iconSize are no longer passed, so AF's own
 -- TreeList.lua defaults govern (DEFAULT_ROW_HEIGHT = 28, DEFAULT_ICON_SIZE
 -- = 20), and textureTint is gone entirely (AF deleted the option; passing
@@ -408,22 +409,39 @@ assertEqual(frameLevelCalls[1][3], otherParent, "frame level is relative to the 
 ---------------------------------------------------------------------
 -- post-Initialize: model pass-through
 ---------------------------------------------------------------------
--- fixtures mirror production ids/icons: BuildSidebarModel (Modules/Bags/Bags.lua)
+-- Fixtures mirror production ids/icons: BuildSidebarModel (Modules/Bags/Bags.lua)
 -- always prefixes ids (view:combined, category:parent:equipment, ...) and
--- always sets an explicit icon, so Sidebar.lua has nothing to fill in.
+-- always supplies an explicit native texture table, so Sidebar.lua has
+-- nothing to fill in or transform.
 local suppliedModel = {
     {kind = "heading", label = "Views"},
-    {id = "view:combined", label = "Combined View", icon = "Bag_All"},
-    {id = "view:individual", label = "Individual Bags View", icon = "Bag_IndividualBags"},
+    {
+        id = "view:combined",
+        label = "Combined View",
+        icon = {texture = "Interface\\Icons\\INV_Misc_Bag_10_Blue"},
+    },
+    {
+        id = "view:individual",
+        label = "Individual Bags View",
+        icon = {texture = "Interface\\Icons\\INV_Misc_Bag_08"},
+    },
     {kind = "heading", label = "Categories"},
     {
         id = "category:equipment",
         label = "Equipment",
-        icon = "Bag_Equipment",
+        icon = {texture = "Interface\\Icons\\INV_Chest_Plate04"},
         expanded = true,
         children = {
-            {id = "category:equipment:misc", label = "Misc Children", icon = "Bag_Misc"},
-            {id = "category:equipment:chest", label = "Chest", icon = "Custom_Icon"},
+            {
+                id = "category:equipment:misc",
+                label = "Misc Children",
+                icon = {texture = "Interface\\Icons\\INV_Misc_Gear_01"},
+            },
+            {
+                id = "category:equipment:chest",
+                label = "Chest",
+                icon = {texture = "Interface\\Icons\\INV_Chest_Chain"},
+            },
         },
     },
 }
@@ -435,13 +453,17 @@ assertEqual(appliedModel, suppliedModel,
     "SetModel passes the caller's model straight through, unmodified")
 assertEqual(appliedModel[1].kind, "heading", "headings pass through unchanged")
 assertEqual(appliedModel[1].label, "Views", "heading label pass-through")
-assertEqual(appliedModel[2].icon, "Bag_All", "explicit icon pass-through (combined)")
+assertEqual(appliedModel[2].icon.texture, "Interface\\Icons\\INV_Misc_Bag_10_Blue",
+    "explicit native icon pass-through (combined)")
 local equipment = appliedModel[5]
 assertEqual(equipment.id, "category:equipment", "nested parent entry pass-through")
-assertEqual(equipment.icon, "Bag_Equipment", "explicit icon pass-through (top-level entry)")
+assertEqual(equipment.icon.texture, "Interface\\Icons\\INV_Chest_Plate04",
+    "explicit native icon pass-through (top-level entry)")
 assertEqual(equipment.expanded, true, "non-icon fields pass through untouched")
-assertEqual(equipment.children[1].icon, "Bag_Misc", "explicit icon pass-through (nested child)")
-assertEqual(equipment.children[2].icon, "Custom_Icon", "explicit nested icon pass-through")
+assertEqual(equipment.children[1].icon.texture, "Interface\\Icons\\INV_Misc_Gear_01",
+    "explicit native icon pass-through (nested child)")
+assertEqual(equipment.children[2].icon.texture, "Interface\\Icons\\INV_Chest_Chain",
+    "explicit native nested icon pass-through")
 
 assertEqual(Sidebar.SetModel("not a table"), false,
     "non-table models are rejected after Initialize too")

@@ -15,7 +15,10 @@ local COLLAPSED_WIDTH = 58
 local CONTENT_GAP = 8
 local HEADING_HEIGHT = 22
 local ACCENT_COLOR = "BFI"
-local FALLBACK_ICON = "Bag_Misc"
+-- Keep the last-resort compact icon on the same full-color Blizzard-art path
+-- as every icon BFI supplies to this sidebar. TreeList also accepts this
+-- texture-table shape for an explicit model icon.
+local FALLBACK_ICON = {texture = "Interface\\Icons\\INV_Misc_Gear_01"}
 
 -- Task 3 (sidebar v3): rowHeight/iconSize and textureTint are no longer
 -- passed here. AbstractFramework/Widgets/TreeList.lua (codex/bag-sidebar-

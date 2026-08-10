@@ -100,28 +100,28 @@ equipmentSlotOrder.categoryIconByEquipLoc = {
 -- Profession tools, profession equipment, and equippable bags are not
 -- conventional paper-doll equipment. Keep them together under the one
 -- Miscellaneous parent, which follows the same native-item-art treatment as
--- the other category parents. Its compact child rows retain purpose-built AF
--- icons.
+-- the other category parents. Its compact child rows use distinct native item
+-- art as well, so the sidebar never falls back to monochrome glyphs.
 -- childKey is separately namespaced in GetCategory, so it cannot collide
 -- with a real item-class fallback that shares this parent.
 equipmentSlotOrder.miscellaneous = {
-    icon = {texture = "Interface\\Icons\\INV_Misc_QuestionMark"},
+    icon = {texture = "Interface\\Icons\\INV_Misc_Gear_01"},
     order = 700,
     byEquipLoc = {
         INVTYPE_PROFESSION_TOOL = {
             label = "Profession Tool",
             order = 1,
-            icon = "Bag_ProfessionTool",
+            icon = {texture = "Interface\\Icons\\INV_Hammer_01"},
         },
         INVTYPE_PROFESSION_GEAR = {
             label = "Profession Equipment",
             order = 2,
-            icon = "Bag_ProfessionEquipment",
+            icon = {texture = "Interface\\Icons\\INV_Chest_Cloth_17"},
         },
         INVTYPE_BAG = {
             label = "Bag",
             order = 3,
-            icon = "Bag_Bag",
+            icon = {texture = "Interface\\Icons\\INV_Misc_Bag_08"},
         },
     },
 }
@@ -173,6 +173,17 @@ local categoryIconByClass = {
     [ITEM_CLASS.Recipe] = {texture = "Interface\\Icons\\INV_Misc_Book_09"},
     [ITEM_CLASS.Questitem] = {texture = "Interface\\Icons\\INV_Misc_Note_01"},
 }
+
+-- Battlepet has existed in the documented ItemClass enum on both supported
+-- Retail builds (12.0.7.68887 / 4383ced30106d51b27e3e86d1987f1552f0d259d
+-- and 12.1.0.68914 / d3915c78aba77a7a9be76acbfa35c674bbb6abe9). Keep the
+-- guard for minimal test/legacy environments that do not provide the member.
+if ITEM_CLASS.Battlepet then
+    categoryOrderByClass[ITEM_CLASS.Battlepet] = 750
+    categoryIconByClass[ITEM_CLASS.Battlepet] = {
+        texture = "Interface\\Icons\\INV_Box_PetCarrier_01",
+    }
+end
 -- ItemConstantsDocumentation.lua lists ItemClass.Housing (EnumValue = 20)
 -- identically at both pinned commits (Retail 12.0.7.68887
 -- 4383ced30106d51b27e3e86d1987f1552f0d259d and Retail 12.1.0.68914
@@ -237,6 +248,26 @@ if _G.Enum.ItemConsumableSubclass then
         [_G.Enum.ItemConsumableSubclass.Fooddrink] = {texture = "Interface\\Icons\\INV_Misc_Food_15"},
         [_G.Enum.ItemConsumableSubclass.Bandage] = {texture = "Interface\\Icons\\INV_Misc_Bandage_08"},
         [_G.Enum.ItemConsumableSubclass.Elixir] = {texture = "Interface\\Icons\\INV_Potion_31"},
+    }
+end
+
+-- ItemMiscellaneousSubclass is present on both supported Retail builds
+-- (12.0.7.68887 / 4383ced30106d51b27e3e86d1987f1552f0d259d and
+-- 12.1.0.68914 / d3915c78aba77a7a9be76acbfa35c674bbb6abe9). The native
+-- art is a presentation choice: explicit rows get a recognizable colored
+-- item texture, while the remaining subclasses inherit Miscellaneous'
+-- colored gear parent rather than a question-mark fallback.
+if ITEM_CLASS.Miscellaneous and _G.Enum.ItemMiscellaneousSubclass then
+    categoryOrderByClass.categoryIconBySubclass[ITEM_CLASS.Miscellaneous] = {
+        [_G.Enum.ItemMiscellaneousSubclass.Junk] = {
+            texture = "Interface\\Icons\\INV_Misc_Bone_HumanSkull_01",
+        },
+        [_G.Enum.ItemMiscellaneousSubclass.CompanionPet] = {
+            texture = "Interface\\Icons\\INV_Box_PetCarrier_01",
+        },
+        [_G.Enum.ItemMiscellaneousSubclass.Other] = {
+            texture = "Interface\\Icons\\INV_Misc_EngGizmos_19",
+        },
     }
 end
 
@@ -452,9 +483,7 @@ local VIEW_MODE_INDIVIDUAL = "individual"
 --    deliberately outside the Equipment parent. They share the dedicated
 --    Miscellaneous aggregate with actual unknown-class items, and use the
 --    same full-color native parent art as the other top-level categories.
---    Their child rows use the purpose-built Bag_ProfessionTool,
---    Bag_ProfessionEquipment, and Bag_Bag adaptive icons supplied by
---    AbstractFramework.
+--    Their child rows use distinct full-color native item textures too.
 -- 3. Parent-category atlases (SUPERSEDED by Task 3, sidebar v3): both
 --    commits' identical Blizzard_UIPanels_Game/Mainline/ContainerFrame.lua
 --    define a `BAG_FILTER_ICONS` table (~line 218) keyed by
@@ -1524,7 +1553,7 @@ local function BuildItemGroups()
                 "locked",
                 L["Bag Slots"],
                 900,
-                "Bag_Empty"
+                {texture = BACKPACK_ICON}
             )
             lockedGroup.items[#lockedGroup.items + 1] = itemButton
         else
@@ -1545,14 +1574,14 @@ local function BuildSidebarModel()
         kind = "view",
         viewMode = VIEW_MODE_COMBINED,
         label = L["Combined View"],
-        icon = "Bag_All",
+        icon = {texture = "Interface\\Icons\\INV_Misc_Bag_10_Blue"},
     }
     sidebarModel[3] = {
         id = "view:" .. VIEW_MODE_INDIVIDUAL,
         kind = "view",
         viewMode = VIEW_MODE_INDIVIDUAL,
         label = L["Individual Bags View"],
-        icon = "Bag_IndividualBags",
+        icon = {texture = BACKPACK_ICON},
     }
     sidebarModel[4] = {kind = "heading", label = L["Categories"]}
 
