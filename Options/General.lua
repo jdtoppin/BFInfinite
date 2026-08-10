@@ -344,7 +344,12 @@ end
 
 local cvarLineFormatLeft, cvarLineFormatRight = AF.WrapTextInColor("\"%s\"", "yellow_text"), AF.WrapTextInColor(L["Default Value: %s"], "softlime")
 local function GetCVarTooltipLine(cvar)
-    return {format(cvarLineFormatLeft, cvar), format(cvarLineFormatRight, AF.WrapTextInColor(GetCVarDefault(cvar), "white"))}
+    local cvarName = format(cvarLineFormatLeft, cvar)
+    local default = GetCVarDefault(cvar)
+    if default == nil then
+        return cvarName
+    end
+    return {cvarName, format(cvarLineFormatRight, AF.WrapTextInColor(default, "white"))}
 end
 
 local function Option_OnEnter(self)
@@ -463,6 +468,12 @@ local cvarOptions = {
     end,
 }
 
+local function ResolveCVar(cvar)
+    local versioned = cvar .. "_v2"
+    return GetCVar(versioned) ~= nil and versioned or cvar
+end
+
+local directionalScaleCVar = ResolveCVar("floatingCombatTextCombatDamageDirectionalScale")
 local cvars = {
     {name = "scriptErrors", type = "toggle", label = SHOW_LUA_ERRORS, tooltip = OPTION_TOOLTIP_SHOW_LUA_ERRORS},
     {name = "cameraDistanceMaxZoomFactor", type = "slider", min = 1, max = 2.6, step = 0.1, label = MAX_FOLLOW_DIST, tooltip = OPTION_TOOLTIP_MAX_FOLLOW_DIST},
@@ -472,21 +483,21 @@ local cvars = {
     {name = "mapFade", type = "toggle", label = MAP_FADE_TEXT, tooltip = OPTION_TOOLTIP_MAP_FADE},
     {name = "UnitNamePlayerGuild", type = "toggle", label = SHOW_PLAYER_NAMES .. " - " .. UNIT_NAME_GUILD, tooltip = OPTION_TOOLTIP_UNIT_NAME_GUILD},
     {name = "UnitNamePlayerPVPTitle", type = "toggle", label = SHOW_PLAYER_NAMES .. " - " .. UNIT_NAME_PLAYER_TITLE, tooltip = OPTION_TOOLTIP_UNIT_NAME_PLAYER_TITLE},
-    {name = "WorldTextScale", type = "slider", min = 0.5, max = 2.5, step = 0.1, label = L["Combat Text Scale"], tooltip = L["Adjust the size of floating combat text"]},
+    {name = ResolveCVar("WorldTextScale"), type = "slider", min = 0.5, max = 2.5, step = 0.1, label = L["Combat Text Scale"], tooltip = L["Adjust the size of floating combat text"]},
     {
-        name = {"floatingCombatTextCombatDamage", "floatingCombatTextCombatLogPeriodicSpells"},
+        name = {ResolveCVar("floatingCombatTextCombatDamage"), ResolveCVar("floatingCombatTextCombatLogPeriodicSpells")},
         type = "toggle", label = L["Combat Text - Player Damage"], tooltip = OPTION_TOOLTIP_SHOW_DAMAGE
     },
     {
-        name = {"floatingCombatTextPetMeleeDamage", "floatingCombatTextPetSpellDamage"},
+        name = {ResolveCVar("floatingCombatTextPetMeleeDamage"), ResolveCVar("floatingCombatTextPetSpellDamage")},
         type = "toggle", label = L["Combat Text - Pet Damage"], tooltip = OPTION_TOOLTIP_SHOW_PET_MELEE_DAMAGE
     },
     {
-        name = {"floatingCombatTextCombatHealing", "floatingCombatTextCombatHealingAbsorbTarget"},
+        name = {ResolveCVar("floatingCombatTextCombatHealing"), ResolveCVar("floatingCombatTextCombatHealingAbsorbTarget")},
         type = "toggle", label = L["Combat Text - Healing"], tooltip = OPTION_TOOLTIP_SHOW_COMBAT_HEALING
     },
-    {name = "floatingCombatTextCombatDamageDirectionalScale", type = "slider", min = 0, max = 5, step = 1, label = L["Combat Text - Damage Directional Scale"], tooltip = L["Directional damage number motion scale (0 = disabled)"]},
-    {name = "floatingCombatTextCombatDamageDirectionalOffset", parent = "floatingCombatTextCombatDamageDirectionalScale", type = "slider", min = 0, max = 15, step = 1, label = L["Combat Text - Damage Directional Offset"], tooltip = L["Initial offset for directional damage numbers"]},
+    {name = directionalScaleCVar, type = "slider", min = 0, max = 5, step = 1, label = L["Combat Text - Damage Directional Scale"], tooltip = L["Directional damage number motion scale (0 = disabled)"]},
+    {name = ResolveCVar("floatingCombatTextCombatDamageDirectionalOffset"), parent = directionalScaleCVar, type = "slider", min = 0, max = 15, step = 1, label = L["Combat Text - Damage Directional Offset"], tooltip = L["Initial offset for directional damage numbers"]},
     {name = "cameraIndirectVisibility", type = "toggle", label = L["Camera Occlusion Tolerance"], tooltip = L["Allow minor occlusion before the camera moves closer"]},
     {name = "cameraIndirectOffset", parent = "cameraIndirectVisibility", type = "slider", min = 1, max = 10, step = 0.5, label = L["Camera Occlusion Offset"], tooltip = L["Offset used when avoiding occlusion (1 = most sensitive, 10 = least)"]},
     {name = "stopAutoAttackOnTargetChange", type = "toggle", label = STOP_AUTO_ATTACK, tooltip = OPTION_TOOLTIP_STOP_AUTO_ATTACK},
