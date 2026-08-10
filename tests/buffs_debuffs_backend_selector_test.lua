@@ -149,6 +149,11 @@ local function NewHarness(options)
             return options.hasCustomAuraContainer ~= false
         end
     end
+    if options.nativeDispelColor ~= nil then
+        AF.HasNativeDispelColorTexture = function()
+            return options.nativeDispelColor == true
+        end
+    end
     if options.missingCustomMethod then
         AF[options.missingCustomMethod] = nil
     end
@@ -326,6 +331,59 @@ do
         "12.1 custom Debuffs disable pane")
     assertEqual(harness.getBlizzardStyleDisableCalls(), 0,
         "12.1 active style is not restored")
+end
+
+do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 39,
+        nativeDispelColor = true,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+    })
+    local BD = harness.BD
+
+    assertEqual(
+        BD.HasCustomHarmfulAuraContainerCapability(),
+        true,
+        "AF r39 native-colour harmful capability"
+    )
+    assertEqual(
+        BD.GetAuraBackend("debuffs"),
+        BD.CUSTOM_AURA_CONTAINER_BACKEND,
+        "AF r39 harmful custom backend"
+    )
+    harness.update("debuffs")
+    assertEqual(#harness.customUpdateCalls, 1,
+        "AF r39 custom Debuffs update count")
+    assertEqual(harness.customUpdateCalls[1].which, "debuffs",
+        "AF r39 custom Debuffs update pane")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 0,
+        "AF r39 does not style Blizzard Debuffs")
+    assertEqual(harness.getBlizzardStyleDisableCalls(), 1,
+        "AF r39 restores the legacy style before custom replacement")
+end
+
+do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 39,
+        nativeDispelColor = false,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+    })
+    local BD = harness.BD
+
+    assertEqual(
+        BD.HasCustomHarmfulAuraContainerCapability(),
+        false,
+        "AF r39 without native colour fails harmful capability"
+    )
+    assertEqual(
+        BD.GetAuraBackend("debuffs"),
+        BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
+        "missing native colour keeps Blizzard Debuff fallback"
+    )
 end
 
 do

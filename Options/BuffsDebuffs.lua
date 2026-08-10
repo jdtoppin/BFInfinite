@@ -10,9 +10,8 @@ local type = type
 local LoadOptions, UpdateStatus
 local selected, currentConfig, currentTextConfig, currentTextKind
 
-local function IsCustomBuffsBackend(which)
-    return which == "buffs"
-        and BD.GetAuraBackend(which) == BD.CUSTOM_AURA_CONTAINER_BACKEND
+local function IsCustomAuraBackend(which)
+    return BD.GetAuraBackend(which) == BD.CUSTOM_AURA_CONTAINER_BACKEND
 end
 
 local function IsBlizzardDebuffStyleBackend(which)
@@ -23,7 +22,7 @@ local function IsBlizzardDebuffStyleBackend(which)
 end
 
 local function IsSharedAuraMoverActive()
-    if not IsCustomBuffsBackend("buffs")
+    if not IsCustomAuraBackend("buffs")
         or not BD.config
         or not BD.config.buffs
         or BD.config.buffs.enabled ~= true
@@ -40,9 +39,9 @@ end
 
 function BD.GetBuffsDebuffsOptionsPolicy(which)
     local backend = BD.GetAuraBackend(which)
-    local custom = IsCustomBuffsBackend(which)
+    local custom = IsCustomAuraBackend(which)
     local blizzardDebuffStyle = IsBlizzardDebuffStyleBackend(which)
-    local positionOwnedByBFI = custom and which == "buffs"
+    local positionOwnedByBFI = custom
     return {
         available = backend ~= nil,
         backend = backend,
@@ -65,8 +64,12 @@ function BD.GetBuffsDebuffsOptionsPolicy(which)
             },
         },
         constructionOwnedStyle = custom,
-        fixedArrangement = positionOwnedByBFI
-            and "right_to_left_then_up"
+        fixedArrangement = custom
+            and (
+                which == "buffs"
+                    and "right_to_left_then_up"
+                    or "right_to_left_then_down"
+            )
             or nil,
         arrangementControls = not blizzardDebuffStyle
             and not positionOwnedByBFI,
@@ -129,11 +132,18 @@ function BD.GetBuffsDebuffsOptionsStatus(which)
     elseif policy.positionOwnedByBFI
         and config
         and config.enabled == true
-        and IsSharedAuraMoverActive()
+        and state
+        and state.active == true
     then
-        return {
-            code = "BFI_SHARED_AURA_MOVER",
-        }
+        if IsSharedAuraMoverActive() then
+            return {
+                code = "BFI_SHARED_AURA_MOVER",
+            }
+        elseif which == "debuffs" then
+            return {
+                code = "BLIZZARD_DEBUFF_POSITION",
+            }
+        end
     end
 end
 
@@ -258,12 +268,12 @@ local function CreateNormalPane()
     local width = AF.CreateSlider(iconsPane, L["Width"], 150, 10, 100, nil, nil, true)
     AF.SetPoint(width, "TOPLEFT", sortMethod, "BOTTOMLEFT", 0, -30)
     width:SetOnValueChanged(function(value)
-        if IsCustomBuffsBackend(selected) then return end
+        if IsCustomAuraBackend(selected) then return end
         currentConfig.width = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
     width:SetAfterValueChanged(function(value)
-        if not IsCustomBuffsBackend(selected) then return end
+        if not IsCustomAuraBackend(selected) then return end
         currentConfig.width = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
@@ -271,12 +281,12 @@ local function CreateNormalPane()
     local height = AF.CreateSlider(iconsPane, L["Height"], 150, 10, 100, nil, nil, true)
     AF.SetPoint(height, "TOPLEFT", width, "BOTTOMLEFT", 0, -45)
     height:SetOnValueChanged(function(value)
-        if IsCustomBuffsBackend(selected) then return end
+        if IsCustomAuraBackend(selected) then return end
         currentConfig.height = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
     height:SetAfterValueChanged(function(value)
-        if not IsCustomBuffsBackend(selected) then return end
+        if not IsCustomAuraBackend(selected) then return end
         currentConfig.height = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
@@ -311,8 +321,9 @@ local function CreateNormalPane()
     local enchantmentCapHelp = L[
         "Temporary Main-Hand and Off-Hand enchants share this layout and may add up to two icons beyond the aura cap."
     ]
-    maxWraps:SetTooltip(enchantmentCapHelp)
-    wrapAfter:SetTooltip(enchantmentCapHelp)
+    local combinedDebuffCapHelp = L[
+        "Ordinary and private Debuffs share this native row and icon limit."
+    ]
 
     local statusText = AF.CreateFontString(
         iconsPane,
@@ -376,12 +387,12 @@ local function CreateNormalPane()
     local size = AF.CreateSlider(textsPane, L["Size"], 150, 5, 50, 1, nil, true)
     AF.SetPoint(size, "TOPLEFT", font, "BOTTOMLEFT", 0, -30)
     size:SetOnValueChanged(function(value)
-        if IsCustomBuffsBackend(selected) then return end
+        if IsCustomAuraBackend(selected) then return end
         currentTextConfig.font[2] = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
     size:SetAfterValueChanged(function(value)
-        if not IsCustomBuffsBackend(selected) then return end
+        if not IsCustomAuraBackend(selected) then return end
         currentTextConfig.font[2] = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
@@ -414,12 +425,12 @@ local function CreateNormalPane()
     local xOffset = AF.CreateSlider(textsPane, L["X Offset"], 150, -100, 100, 1, nil, true)
     AF.SetPoint(xOffset, "TOPLEFT", anchorPoint, "BOTTOMLEFT", 0, -30)
     xOffset:SetOnValueChanged(function(value)
-        if IsCustomBuffsBackend(selected) then return end
+        if IsCustomAuraBackend(selected) then return end
         currentTextConfig.position[3] = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
     xOffset:SetAfterValueChanged(function(value)
-        if not IsCustomBuffsBackend(selected) then return end
+        if not IsCustomAuraBackend(selected) then return end
         currentTextConfig.position[3] = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
@@ -427,12 +438,12 @@ local function CreateNormalPane()
     local yOffset = AF.CreateSlider(textsPane, L["Y Offset"], 150, -100, 100, 1, nil, true)
     AF.SetPoint(yOffset, "TOPLEFT", xOffset, "TOPRIGHT", 35, 0)
     yOffset:SetOnValueChanged(function(value)
-        if IsCustomBuffsBackend(selected) then return end
+        if IsCustomAuraBackend(selected) then return end
         currentTextConfig.position[4] = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
     yOffset:SetAfterValueChanged(function(value)
-        if not IsCustomBuffsBackend(selected) then return end
+        if not IsCustomAuraBackend(selected) then return end
         currentTextConfig.position[4] = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
@@ -448,7 +459,7 @@ local function CreateNormalPane()
     local normalColor = AF.CreateColorPicker(textsPane, L["Normal"])
     AF.SetPoint(normalColor, "TOPLEFT", enabled, "BOTTOMLEFT", 0, -15)
     normalColor:SetOnChange(function(r, g, b)
-        if IsCustomBuffsBackend(selected) then return end
+        if IsCustomAuraBackend(selected) then return end
         if textSwitch:GetSelectedValue() == "stack" then
             currentTextConfig.color[1] = r
             currentTextConfig.color[2] = g
@@ -461,7 +472,7 @@ local function CreateNormalPane()
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
     normalColor:SetOnConfirm(function(r, g, b)
-        if not IsCustomBuffsBackend(selected) then return end
+        if not IsCustomAuraBackend(selected) then return end
         if textSwitch:GetSelectedValue() == "stack" then
             currentTextConfig.color[1] = r
             currentTextConfig.color[2] = g
@@ -595,6 +606,14 @@ local function CreateNormalPane()
         spacingY:SetValue(currentConfig.spacingY)
         maxWraps:SetValue(currentConfig.maxWraps)
         wrapAfter:SetValue(currentConfig.wrapAfter)
+        local capHelp
+        if selected == "debuffs" and policy.custom then
+            capHelp = combinedDebuffCapHelp
+        elseif selected == "buffs" then
+            capHelp = enchantmentCapHelp
+        end
+        maxWraps:SetTooltip(capHelp)
+        wrapAfter:SetTooltip(capHelp)
 
         -- texts
         if not textSwitch:GetSelectedValue() then
@@ -633,9 +652,15 @@ UpdateStatus = function()
     end
 
     if status.code == "UNSUPPORTED_SEPARATE_OWN" then
-        statusText:SetText(L[
-            "Separate Own is unavailable in 12.1. Blizzard Buffs remain active."
-        ])
+        statusText:SetText(
+            selected == "debuffs"
+                and L[
+                    "Separate Own is unavailable in 12.1. Blizzard Debuffs remain active."
+                ]
+                or L[
+                    "Separate Own is unavailable in 12.1. Blizzard Buffs remain active."
+                ]
+        )
         statusButton:SetText(L["Use supported sorting"])
         statusButton:SetOnClick(function()
             local config = BD.config and BD.config[selected]
@@ -646,9 +671,15 @@ UpdateStatus = function()
         end)
         statusButton:Show()
     elseif status.code == "RELOAD_REQUIRED" then
-        statusText:SetText(L[
-            "Reload UI to apply Buffs styling. Blizzard Buffs remain active."
-        ])
+        statusText:SetText(
+            selected == "debuffs"
+                and L[
+                    "Reload UI to apply Debuffs styling. Blizzard Debuffs remain active."
+                ]
+                or L[
+                    "Reload UI to apply Buffs styling. Blizzard Buffs remain active."
+                ]
+        )
         statusButton:SetText(L["Reload UI"])
         statusButton:SetOnClick(_G.ReloadUI)
         statusButton:Show()
@@ -657,7 +688,7 @@ UpdateStatus = function()
         statusText:SetText(
             selected == "debuffs"
                 and L[
-                    "Debuffs styling is waiting for combat to end."
+                    "Debuffs update will apply when it is safe."
                 ]
                 or L[
                     "Buffs update is waiting for combat to end."
@@ -667,12 +698,25 @@ UpdateStatus = function()
     elseif status.code == "BFI_SHARED_AURA_MOVER" then
         AF.SetWidth(statusText, 350)
         statusText:SetTextColor(AF.GetColorRGB("gray"))
-        statusText:SetText(L[
-            "Both rows move together with the BFI Buff Frame mover. Movement is unavailable in combat."
-        ])
+        statusText:SetText(
+            selected == "debuffs" and IsCustomAuraBackend("debuffs")
+                and L[
+                    "Both rows share the BFI mover. Ordinary and private Debuffs share one native icon limit. Movement is unavailable in combat."
+                ]
+                or L[
+                    "Both rows move together with the BFI Buff Frame mover. Movement is unavailable in combat."
+                ]
+        )
         statusButton:SetText(L["Open BFI Edit Mode"])
         statusButton:SetOnClick(OpenBFIEditMode)
         statusButton:Show()
+    elseif status.code == "BLIZZARD_DEBUFF_POSITION" then
+        AF.SetWidth(statusText, 530)
+        statusText:SetTextColor(AF.GetColorRGB("gray"))
+        statusText:SetText(L[
+            "Debuffs follow Blizzard's position until Buffs are enabled. Ordinary and private Debuffs share one native icon limit."
+        ])
+        statusButton:Hide()
     elseif status.code == "BLIZZARD_DEBUFF_STYLE" then
         AF.SetWidth(statusText, 530)
         statusText:SetTextColor(AF.GetColorRGB("gray"))
@@ -682,9 +726,15 @@ UpdateStatus = function()
         statusButton:Hide()
     else
         AF.SetWidth(statusText, 530)
-        statusText:SetText(L[
-            "Blizzard Buffs remain active because the native replacement could not be applied."
-        ])
+        statusText:SetText(
+            selected == "debuffs"
+                and L[
+                    "Blizzard Debuffs remain active because the native replacement could not be applied."
+                ]
+                or L[
+                    "Blizzard Buffs remain active because the native replacement could not be applied."
+                ]
+        )
         statusButton:Hide()
     end
     if statusButton:IsShown() then

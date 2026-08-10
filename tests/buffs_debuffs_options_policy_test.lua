@@ -111,6 +111,22 @@ local function SetCustomBuffsBackend()
     BD.config.debuffs.separateOwn = 0
 end
 
+local function SetCustomBothBackend()
+    backendByPane.buffs = BD.CUSTOM_AURA_CONTAINER_BACKEND
+    backendByPane.debuffs = BD.CUSTOM_AURA_CONTAINER_BACKEND
+    stateByPane.buffs = {
+        active = true,
+        nativeFollowerActive = true,
+    }
+    stateByPane.debuffs = {
+        active = true,
+    }
+    dispatchPendingByPane.buffs = nil
+    dispatchPendingByPane.debuffs = nil
+    BD.config.buffs.separateOwn = 0
+    BD.config.debuffs.separateOwn = 0
+end
+
 SetLegacyBackend()
 do
     local buffsPolicy = BD.GetBuffsDebuffsOptionsPolicy("buffs")
@@ -172,6 +188,42 @@ do
     assertTrue(buffsPolicy.retiredDurationControls,
         "retired duration controls are declared")
 end
+
+SetCustomBothBackend()
+do
+    local policy = BD.GetBuffsDebuffsOptionsPolicy("debuffs")
+    assertTrue(policy.available, "custom Debuffs available")
+    assertTrue(policy.custom, "custom Debuffs policy")
+    assertFalse(policy.blizzardDebuffStyle,
+        "custom Debuffs do not use legacy styling")
+    assertEqual(policy.label, "Debuffs", "custom Debuffs label")
+    assertTrue(policy.constructionOwnedStyle,
+        "custom Debuff button styling is construction-owned")
+    assertTrue(policy.positionOwnedByBFI,
+        "custom Debuffs use the shared root seam")
+    assertEqual(policy.fixedArrangement, "right_to_left_then_down",
+        "custom Debuffs fixed arrangement")
+    assertFalse(policy.arrangementControls,
+        "custom Debuff arrangement follows the shared seam")
+    assertTrue(policy.layoutControls,
+        "custom Debuff spacing and wrapping stay available")
+    assertEqual(policy.maximumIconSize, 100,
+        "custom Debuff icons are not capped to Blizzard cells")
+    assertTrue(policy.durationAppearanceControls,
+        "custom Debuff duration appearance is available")
+    assertTrue(policy.separateOwnItems[2].disabled,
+        "custom Debuffs disable Separate Own")
+
+    local status = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(status.code, "BFI_SHARED_AURA_MOVER",
+        "active Buff follower shares the BFI mover")
+    stateByPane.buffs.nativeFollowerActive = false
+    status = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(status.code, "BLIZZARD_DEBUFF_POSITION",
+        "custom Debuffs follow Blizzard position without Buff follower")
+end
+
+SetCustomBuffsBackend()
 
 do
     BD.config.buffs.separateOwn = 1
@@ -253,11 +305,15 @@ do
     dispatchPendingByPane.debuffs = true
     debuffsStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
     assertEqual(debuffsStatus.code, "PENDING_SAFE_UPDATE",
-        "Debuffs combat deferral is visible")
+        "Debuffs safe-update deferral is visible")
     dispatchPendingByPane.debuffs = nil
 end
 
-local function NewOptionsUIHarness(customBackend, afVersion)
+local function NewOptionsUIHarness(
+    customBackend,
+    afVersion,
+    customDebuffsBackend
+)
     local records = {
         callbacks = {},
         checkButtonsByLabel = {},
@@ -603,7 +659,9 @@ local function NewOptionsUIHarness(customBackend, afVersion)
             if which == "buffs" then
                 return uiBD.CUSTOM_AURA_CONTAINER_BACKEND
             elseif which == "debuffs" then
-                return uiBD.BLIZZARD_DEBUFF_STYLE_BACKEND
+                return customDebuffsBackend
+                    and uiBD.CUSTOM_AURA_CONTAINER_BACKEND
+                    or uiBD.BLIZZARD_DEBUFF_STYLE_BACKEND
             end
         end
         if which == "buffs" or which == "debuffs" then
@@ -796,6 +854,29 @@ do
         "Debuffs icon width updates live")
     assertEqual(#custom.events, 1,
         "Debuffs icon width queues one safe update")
+end
+
+do
+    local custom = NewOptionsUIHarness(true, 39, true)
+    custom.topSwitch:SetSelectedValue("debuffs")
+
+    assertEqual(custom.topSwitch.labels[2].text, "Debuffs",
+        "native Debuffs use the full settings label")
+    assertTrue(custom.dropdownsByLabel["Sort Method"].enabled,
+        "native Debuff sorting is editable")
+    assertEqual(custom.dropdownsByLabel.Arrangement.selected,
+        "right_to_left_then_down", "native Debuff arrangement is fixed")
+    assertEqual(custom.slidersByLabel.Width.maximum, 100,
+        "native Debuff size is not limited by Blizzard's legacy cell")
+    assertEqual(custom.slidersByLabel["Icons Per Line"].tooltip,
+        "Ordinary and private Debuffs share this native row and icon limit.",
+        "native Debuff cap explains its combined source")
+    assertEqual(custom.slidersByLabel["Aura Lines"].tooltip,
+        "Ordinary and private Debuffs share this native row and icon limit.",
+        "native Debuff line count explains its combined source")
+    assertEqual(custom.statusText.textValue,
+        "Both rows share the BFI mover. Ordinary and private Debuffs share one native icon limit. Movement is unavailable in combat.",
+        "native Debuff status explains movement and the shared cap")
 end
 
 do

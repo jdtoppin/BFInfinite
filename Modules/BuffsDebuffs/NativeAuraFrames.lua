@@ -6,6 +6,7 @@ local BD = BFI.modules.BuffsDebuffs
 local hooksecurefunc = hooksecurefunc
 local InCombatLockdown = InCombatLockdown
 local hasRestrictedAuraButtons = _G.C_AuraContainerUtil ~= nil
+local EXPECTED_DEBUFF_PRIVATE_ANCHOR_COUNT = 6
 
 local suppressedStates = {}
 local suppressedRoots = {}
@@ -24,19 +25,37 @@ local function IsVisualControl(frame)
         and type(frame.GetParent) == "function"
 end
 
-local function HasRootPrivateAuraAnchors(frame)
+local function ResolveRootPrivateAuraAnchors(frame)
     local anchors = frame.PrivateAuraAnchors
-    if type(anchors) ~= "table" or #anchors == 0 then return false end
+    if type(anchors) ~= "table" then return end
 
-    for _, anchor in ipairs(anchors) do
+    local anchorCount = 0
+    for key in pairs(anchors) do
+        if type(key) ~= "number"
+            or key % 1 ~= 0
+            or key < 1
+            or key > EXPECTED_DEBUFF_PRIVATE_ANCHOR_COUNT
+        then
+            return
+        end
+        anchorCount = anchorCount + 1
+    end
+    if anchorCount ~= EXPECTED_DEBUFF_PRIVATE_ANCHOR_COUNT then return end
+
+    local resolved = {}
+    for index = 1, EXPECTED_DEBUFF_PRIVATE_ANCHOR_COUNT do
+        local anchor = anchors[index]
         if not anchor
+            or frame["privateAuraAnchor" .. index] ~= anchor
             or type(anchor.GetParent) ~= "function"
+            or type(anchor.SetShown) ~= "function"
             or anchor:GetParent() ~= frame
         then
-            return false
+            return
         end
+        resolved[#resolved + 1] = anchor
     end
-    return true
+    return resolved
 end
 
 local function ResolveNativePublicAuraFrame(which)
@@ -83,12 +102,14 @@ local function ResolveNativePublicAuraFrame(which)
     elseif which == "debuffs" then
         local frame = _G.DebuffFrame
         local container = frame and frame.AuraContainer
+        local privateAuraAnchors = frame
+            and ResolveRootPrivateAuraAnchors(frame)
         if not frame
             or type(frame.UpdateAuraButtons) ~= "function"
             or type(frame.auraFrames) ~= "table"
             or not IsAuraContainer(container)
             or container:GetParent() ~= frame
-            or not HasRootPrivateAuraAnchors(frame)
+            or not privateAuraAnchors
         then
             return
         end
@@ -97,6 +118,7 @@ local function ResolveNativePublicAuraFrame(which)
             frame = frame,
             container = container,
             controls = {},
+            privateAuraAnchors = privateAuraAnchors,
         }
     end
 end
@@ -137,6 +159,18 @@ local function HideTargetOverlays(target)
     end
 end
 
+local function ApplySuppressedConstants(target)
+    HideTargetOverlays(target)
+    target.container:SetShown(false)
+    for _, anchor in ipairs(target.privateAuraAnchors or {}) do
+        anchor:SetShown(false)
+    end
+    for _, control in ipairs(target.controls) do
+        control:SetAlpha(0)
+        control:EnableMouse(false)
+    end
+end
+
 local function InstallOverlayCleanupHook(target)
     if hasRestrictedAuraButtons then return end
 
@@ -160,6 +194,41 @@ function BD.AreNativePublicAurasSuppressed(which)
     return suppressedStates[which] ~= nil
 end
 
+function BD.ReassertNativePublicAuraSuppression(which)
+    if InCombatLockdown() then return false end
+    local state = suppressedStates[which]
+    if not state then return false end
+
+    -- AuraFrameEditModeMixin explicitly shows all six private anchors when
+    -- Edit Mode ends. Reapply the same write-only constants on the queued
+    -- lifecycle tick; never inspect whether Blizzard changed visibility.
+    ApplySuppressedConstants(state.target)
+    return true
+end
+
+function BD.SuspendNativePublicAuraSuppressionForEditMode(which)
+    if InCombatLockdown() then return false end
+    local state = suppressedStates[which]
+    if not state then return false end
+
+    HideTargetOverlays(state.target)
+    state.target.container:SetShown(true)
+    -- Blizzard's Edit Mode preview hides private anchors while showing its
+    -- ordinary example buttons. Preserve that write-only lifecycle constant
+    -- regardless of callback ordering.
+    for _, anchor in ipairs(state.target.privateAuraAnchors or {}) do
+        anchor:SetShown(false)
+    end
+    for _, control in ipairs(state.target.controls) do
+        control:SetAlpha(1)
+        control:EnableMouse(true)
+    end
+
+    suppressedStates[which] = nil
+    suppressedRoots[state.target.frame] = nil
+    return true
+end
+
 function BD.SetNativePublicAurasSuppressed(which, suppressed)
     if which ~= "buffs" and which ~= "debuffs" then return false end
     suppressed = suppressed == true
@@ -170,6 +239,9 @@ function BD.SetNativePublicAurasSuppressed(which, suppressed)
     if state then
         HideTargetOverlays(state.target)
         state.target.container:SetShown(true)
+        for _, anchor in ipairs(state.target.privateAuraAnchors or {}) do
+            anchor:SetShown(true)
+        end
         for _, control in ipairs(state.target.controls) do
             control:SetAlpha(1)
             control:EnableMouse(true)
@@ -183,21 +255,16 @@ function BD.SetNativePublicAurasSuppressed(which, suppressed)
     local target = ResolveNativePublicAuraFrame(which)
     if not target then return false end
 
-    -- Retail 12.1.0.68914 (UI source d3915c78aba7) creates the supported public
-    -- AuraContainerTemplate shown, with these ordinary controls at alpha 1 and
-    -- mouse enabled. Keep only a BFI-owned suppression ledger and restore those
-    -- known constants; observing visibility, alpha, or mouse state can return
-    -- secret values. Private anchors are direct root children and
-    -- DeadlyDebuffFrame is separate; neither is touched here.
+    -- Retail 12.1.0.69189 (UI source a520b6c27bb8) creates the supported public
+    -- AuraContainerTemplate and the six DebuffFrame private-aura anchors shown,
+    -- with the ordinary Buff controls at alpha 1 and mouse enabled. Keep only a
+    -- BFI-owned suppression ledger and restore those known constants; observing
+    -- visibility, alpha, or mouse state can return secret values.
+    -- DeadlyDebuffFrame is separate and remains untouched.
     state = {target = target}
 
     InstallOverlayCleanupHook(target)
-    HideTargetOverlays(target)
-    target.container:SetShown(false)
-    for _, control in ipairs(target.controls) do
-        control:SetAlpha(0)
-        control:EnableMouse(false)
-    end
+    ApplySuppressedConstants(target)
 
     suppressedStates[which] = state
     suppressedRoots[target.frame] = state

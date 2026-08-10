@@ -100,6 +100,7 @@ local function NewHarness()
         combat = false,
         suppressEnableSucceeds = true,
         suppressRestoreSucceeds = true,
+        reassertSuppressionSucceeds = true,
         timers = {},
         events = {},
         registryCallbacks = {},
@@ -324,6 +325,9 @@ local function NewHarness()
     function BD.HasCustomAuraContainerCapability()
         return state.capability
     end
+    function BD.HasCustomAuraContainerPaneCapability()
+        return state.capability
+    end
     function BD.CanSuppressNativePublicAuras()
         return state.canSuppress
     end
@@ -335,6 +339,17 @@ local function NewHarness()
         if suppressed then
             return state.suppressEnableSucceeds
         end
+        return state.suppressRestoreSucceeds
+    end
+    function BD.ReassertNativePublicAuraSuppression(which)
+        record("BD.ReassertNativePublicAuraSuppression", which)
+        return state.reassertSuppressionSucceeds
+    end
+    function BD.SuspendNativePublicAuraSuppressionForEditMode(which)
+        record(
+            "BD.SuspendNativePublicAuraSuppressionForEditMode",
+            which
+        )
         return state.suppressRestoreSucceeds
     end
 
@@ -554,6 +569,29 @@ local function CompileSharedMoverBuffs(config)
     return descriptor
 end
 
+local function CompileDebuffs(config)
+    local descriptor, diagnostic = CompileBuffs(config)
+    if not descriptor then return nil, diagnostic end
+
+    descriptor.position = nil
+    descriptor.positionSave = nil
+    descriptor.moverText = nil
+    descriptor.holderRolesets = "buffs"
+    descriptor.holderAnchor = {
+        globalName = "DebuffFrame",
+        point = "TOPRIGHT",
+        relativePoint = "TOPRIGHT",
+        x = 0,
+        y = 0,
+    }
+    descriptor.groups[1].key = "debuffs"
+    descriptor.groups[1].filterString = "HARMFUL"
+    descriptor.itemEnchantments = {}
+    descriptor.itemEnchantmentSort = nil
+    descriptor.itemEnchantmentLayout = nil
+    return descriptor
+end
+
 local function NewPositionSave(position)
     return function(point, x, y)
         position[1] = point
@@ -566,9 +604,11 @@ end
 do
     local harness = NewHarness()
     local BD = harness.BD
+    local environment = harness.environment
     local state = harness.state
-    BD.RegisterCustomAuraContainerPane("buffs", CompileBuffs)
-    BD.RegisterCustomAuraContainerPane("debuffs", CompileBuffs)
+    environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("buffs", CompileSharedMoverBuffs)
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileDebuffs)
 
     state.combat = true
     BD.UpdateCustomAuraContainer("buffs", {
@@ -634,6 +674,437 @@ do
         "shared queue preserves buffs callback state")
     assertTrue(sawDebuffsTuning == true,
         "shared queue preserves debuffs callback state")
+
+    local counters = BD.GetCustomAuraContainerConstructionStats()
+    assertEqual(counters.buildAttempts, 2,
+        "combined upper-right build attempts")
+    assertEqual(counters.buildCompletions, 2,
+        "combined upper-right build completions")
+    assertEqual(counters.afContainerAllocations, 2,
+        "combined upper-right container allocations")
+    assertEqual(counters.afGroupsAdded, 2,
+        "combined upper-right aura groups")
+    assertEqual(counters.afItemEnchantmentsAdded, 2,
+        "combined upper-right weapon enchantments")
+    assertEqual(counters.afInitialFrameReservationsCompleted, 22,
+        "combined upper-right initial reservations")
+    assertEqual(counters.expectedInitialReservations, 22,
+        "combined controller reservation accounting")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local environment = harness.environment
+    local state = harness.state
+    local debuffFrame = {}
+    environment.DebuffFrame = debuffFrame
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileDebuffs)
+
+    local buildStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+    })
+    local active = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(active.active, "root-anchored Debuffs activate")
+    assertFalse(active.nativeFollowerActive,
+        "Debuffs never claim the Blizzard root")
+
+    local anchorCall, anchorIndex = findCall(
+        state.calls,
+        "holder1.SetPoint",
+        buildStart
+    )
+    assertEqual(anchorCall.args[1], "TOPRIGHT", "Debuff holder point")
+    assertEqual(anchorCall.args[2], debuffFrame,
+        "Debuff holder uses the Blizzard root seam")
+    assertEqual(anchorCall.args[3], "TOPRIGHT",
+        "Debuff holder relative point")
+    assertEqual(anchorCall.args[4], 0, "Debuff holder X")
+    assertEqual(anchorCall.args[5], 0, "Debuff holder Y")
+    assertEqual(
+        countCalls(state.calls, "AF.CreateMover"),
+        0,
+        "Debuffs create no independent mover"
+    )
+    assertEqual(
+        countCalls(state.calls, "BFI.LoadPosition"),
+        0,
+        "Debuffs read no independent saved position"
+    )
+    local _, suppressIndex = findCallWhere(
+        state.calls,
+        "BD.SetNativePublicAurasSuppressed",
+        function(call)
+            return call.args[1] == "debuffs" and call.args[2] == true
+        end,
+        buildStart
+    )
+    assertTrue(anchorIndex < suppressIndex,
+        "holder is anchored before native Debuffs are suppressed")
+
+    local containerCount = countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    )
+    local groupCount = countCalls(state.calls, "AF.AddCustomAuraGroup")
+    local enchantmentCount = countCalls(
+        state.calls,
+        "AF.AddCustomItemEnchantment"
+    )
+    local counters = BD.GetCustomAuraContainerConstructionStats()
+    assertEqual(counters.buildAttempts, 1,
+        "isolated harmful build attempts")
+    assertEqual(counters.buildCompletions, 1,
+        "isolated harmful build completions")
+    assertEqual(counters.afContainerAllocations, 1,
+        "isolated harmful container allocation")
+    assertEqual(counters.afGroupsAdded, 1,
+        "isolated harmful group allocation")
+    assertEqual(counters.afItemEnchantmentsAdded, 0,
+        "isolated harmful build has no weapon enchantments")
+    assertEqual(counters.afInitialFrameReservationsCompleted, 10,
+        "isolated harmful initial reservations")
+    assertEqual(counters.expectedInitialReservations, 10,
+        "isolated harmful controller reservation accounting")
+    local suspendStart = #state.calls + 1
+    state.fireRegistry("EditMode.Enter")
+    local suspended = BD.GetCustomAuraContainerState("debuffs")
+    assertFalse(suspended.active,
+        "Edit Mode hides the custom Debuff presentation")
+    assertTrue(suspended.editModeSuspended,
+        "Edit Mode records a resumable Debuff suspension")
+    local restore = findCallWhere(
+        state.calls,
+        "BD.SuspendNativePublicAuraSuppressionForEditMode",
+        function(call)
+            return call.args[1] == "debuffs"
+        end,
+        suspendStart
+    )
+    assertTrue(restore ~= nil,
+        "Edit Mode restores Blizzard examples before the root moves")
+
+    local mutationStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 90,
+    })
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 91,
+    })
+    suspended = BD.GetCustomAuraContainerState("debuffs")
+    assertFalse(suspended.active,
+        "Edit Mode defers Debuff tuning without showing the custom row")
+    assertTrue(suspended.editModeSuspended,
+        "Edit Mode keeps Debuffs suspended after a tuning request")
+    assertTrue(suspended.pending,
+        "Edit Mode retains the latest Debuff tuning request for exit")
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        containerCount,
+        "Edit Mode tuning allocates no container"
+    )
+    assertEqual(
+        countCalls(state.calls, "AF.AddCustomAuraGroup"),
+        groupCount,
+        "Edit Mode tuning adds no aura group"
+    )
+    assertEqual(
+        countCalls(state.calls, "AF.AddCustomItemEnchantment"),
+        enchantmentCount,
+        "Edit Mode tuning adds no enchantment"
+    )
+    assertEqual(findCallWhere(
+        state.calls,
+        "AF.SetCustomAuraContainerFlowLayout",
+        function(call)
+            local layout = call.args[1]
+            return layout and (layout.marker == 90 or layout.marker == 91)
+        end,
+        mutationStart
+    ), nil, "Edit Mode applies no deferred tuning early")
+    assertEqual(findCallWhere(
+        state.calls,
+        "BD.SetNativePublicAurasSuppressed",
+        function(call)
+            return call.args[1] == "debuffs" and call.args[2] == true
+        end,
+        mutationStart
+    ), nil, "Edit Mode tuning does not suppress Blizzard Debuffs")
+
+    local reassertStart = #state.calls + 1
+    state.fireRegistry("EditMode.Exit")
+    state.runTimers(0)
+    active = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(active.active, "Edit Mode exit resumes custom Debuffs")
+    assertFalse(active.editModeSuspended,
+        "Edit Mode exit clears the suspension ledger")
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        containerCount,
+        "Edit Mode exit reuses the same native container"
+    )
+    assertEqual(
+        countCalls(state.calls, "AF.AddCustomAuraGroup"),
+        groupCount,
+        "Edit Mode exit adds no aura groups or reservations"
+    )
+    assertEqual(
+        countCalls(state.calls, "AF.AddCustomItemEnchantment"),
+        enchantmentCount,
+        "Edit Mode exit adds no enchantments"
+    )
+    local latestTuning = findCallWhere(
+        state.calls,
+        "AF.SetCustomAuraContainerFlowLayout",
+        function(call)
+            return call.args[1] and call.args[1].marker == 91
+        end,
+        reassertStart
+    )
+    assertTrue(latestTuning ~= nil,
+        "Edit Mode exit applies the latest tuning request")
+    assertEqual(findCallWhere(
+        state.calls,
+        "AF.SetCustomAuraContainerFlowLayout",
+        function(call)
+            return call.args[1] and call.args[1].marker == 90
+        end,
+        mutationStart
+    ), nil, "superseded Edit Mode tuning is never applied")
+    local reassert = findCallWhere(
+        state.calls,
+        "BD.ReassertNativePublicAuraSuppression",
+        function(call)
+            return call.args[1] == "debuffs"
+        end,
+        reassertStart
+    )
+    assertTrue(reassert ~= nil,
+        "Edit Mode exit reasserts private-anchor suppression")
+
+    reassertStart = #state.calls + 1
+    state.fireEvent("PLAYER_ENTERING_WORLD")
+    state.runTimers(0)
+    reassert = findCallWhere(
+        state.calls,
+        "BD.ReassertNativePublicAuraSuppression",
+        function(call)
+            return call.args[1] == "debuffs"
+        end,
+        reassertStart
+    )
+    assertTrue(reassert ~= nil,
+        "world/layout refresh reasserts private-anchor suppression")
+
+    state.fireRegistry("EditMode.Enter")
+    local retargetStart = #state.calls + 1
+    state.playerUnit = "vehicle"
+    BD.RefreshCustomAuraContainerUnits()
+    suspended = BD.GetCustomAuraContainerState("debuffs")
+    assertFalse(suspended.active,
+        "Edit Mode keeps Debuffs hidden during a unit retarget")
+    assertTrue(suspended.editModeSuspended,
+        "unit retarget preserves the Edit Mode suspension")
+    assertTrue(suspended.pending,
+        "unit retarget waits for the Edit Mode exit tick")
+    assertEqual(findCallWhere(
+        state.calls,
+        "AF.SetCustomAuraContainerUnit",
+        function(call)
+            return call.args[1] == "vehicle"
+        end,
+        retargetStart
+    ), nil, "Edit Mode does not retarget the hidden container early")
+    state.fireRegistry("EditMode.Exit")
+    state.runTimers(0)
+    active = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(active.active,
+        "Edit Mode exit resumes Debuffs after deferred retarget")
+    assertFalse(active.editModeSuspended,
+        "deferred retarget is followed by normal resume")
+    assertFalse(active.pending,
+        "deferred retarget drains on exit")
+    assertEqual(active.unit, "vehicle",
+        "deferred retarget applies the latest player unit")
+    assertTrue(findCallWhere(
+        state.calls,
+        "AF.SetCustomAuraContainerUnit",
+        function(call)
+            return call.args[1] == "vehicle"
+        end,
+        retargetStart
+    ) ~= nil, "Edit Mode exit applies the deferred retarget")
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        containerCount,
+        "retarget cycle allocates no container"
+    )
+    assertEqual(
+        countCalls(state.calls, "AF.AddCustomAuraGroup"),
+        groupCount,
+        "retarget cycle adds no aura group"
+    )
+
+    local disableStart = #state.calls + 1
+    state.fireRegistry("EditMode.Enter")
+    BD.DisableCustomAuraContainer("debuffs")
+    suspended = BD.GetCustomAuraContainerState("debuffs")
+    assertFalse(suspended.active,
+        "Edit Mode keeps Debuffs hidden after a disable request")
+    assertTrue(suspended.editModeSuspended,
+        "disable remains an Edit Mode suspension until exit")
+    assertTrue(suspended.pending,
+        "disable is retained for the Edit Mode exit tick")
+    assertEqual(findCallWhere(
+        state.calls,
+        "BD.SetNativePublicAurasSuppressed",
+        function(call)
+            return call.args[1] == "debuffs" and call.args[2] == true
+        end,
+        disableStart
+    ), nil, "disable never re-suppresses Blizzard Debuffs in Edit Mode")
+    state.fireRegistry("EditMode.Exit")
+    state.runTimers(0)
+    local inactive = BD.GetCustomAuraContainerState("debuffs")
+    assertEqual(inactive.state, "INACTIVE",
+        "Edit Mode exit applies the pending disable")
+    assertFalse(inactive.active,
+        "pending disable is not followed by automatic resume")
+    assertFalse(inactive.pending, "pending disable drains on exit")
+    assertFalse(inactive.editModeSuspended,
+        "pending disable clears the suspension ledger")
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        containerCount,
+        "disable cycle allocates no container"
+    )
+    assertEqual(
+        countCalls(state.calls, "AF.AddCustomAuraGroup"),
+        groupCount,
+        "disable cycle adds no aura group"
+    )
+
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 92,
+    })
+    assertTrue(BD.GetCustomAuraContainerState("debuffs").active,
+        "existing Debuff container can reactivate before construction test")
+    state.fireRegistry("EditMode.Enter")
+    local constructionStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        style = "alternate",
+        tuning = 93,
+    })
+    suspended = BD.GetCustomAuraContainerState("debuffs")
+    assertFalse(suspended.active,
+        "construction-owned change remains hidden in Edit Mode")
+    assertTrue(suspended.editModeSuspended,
+        "construction-owned change retains the suspension ledger")
+    assertTrue(suspended.pending,
+        "construction-owned change waits for the exit tick")
+    assertFalse(suspended.reloadRequired,
+        "construction-owned change does not transition before exit")
+    assertEqual(findCallWhere(
+        state.calls,
+        "BD.SetNativePublicAurasSuppressed",
+        function(call)
+            return call.args[1] == "debuffs" and call.args[2] == true
+        end,
+        constructionStart
+    ), nil, "construction change does not suppress in Edit Mode")
+    state.fireRegistry("EditMode.Exit")
+    state.runTimers(0)
+    local reload = BD.GetCustomAuraContainerState("debuffs")
+    assertEqual(reload.state, "RELOAD_REQUIRED",
+        "Edit Mode exit applies construction-owned change policy")
+    assertTrue(reload.reloadRequired,
+        "construction-owned change requests reload after exit")
+    assertFalse(reload.active,
+        "construction-owned change is not automatically resumed")
+    assertFalse(reload.pending,
+        "construction-owned change drains on exit")
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        containerCount,
+        "construction-change cycle allocates no container"
+    )
+    assertEqual(
+        countCalls(state.calls, "AF.AddCustomAuraGroup"),
+        groupCount,
+        "construction-change cycle adds no aura group"
+    )
+    assertEqual(
+        countCalls(state.calls, "AF.AddCustomItemEnchantment"),
+        enchantmentCount,
+        "all Edit Mode mutation cycles add no enchantment"
+    )
+    counters = BD.GetCustomAuraContainerConstructionStats()
+    assertEqual(counters.buildAttempts, 1,
+        "Edit Mode mutation cycles do not rebuild")
+    assertEqual(counters.afInitialFrameReservationsCompleted, 10,
+        "Edit Mode mutation cycles reserve no additional buttons")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local environment = harness.environment
+    local state = harness.state
+    environment.DebuffFrame = {}
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileDebuffs)
+
+    state.fireRegistry("EditMode.Enter")
+    local enableStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 101,
+    })
+    local pending = BD.GetCustomAuraContainerState("debuffs")
+    assertFalse(pending.active,
+        "initial Debuff enable stays hidden during Edit Mode")
+    assertTrue(pending.pending,
+        "initial Debuff enable waits for the exit tick")
+    assertFalse(pending.buildAttempted,
+        "initial Debuff enable defers construction during Edit Mode")
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        0,
+        "initial Edit Mode enable allocates no early container"
+    )
+    assertEqual(findCallWhere(
+        state.calls,
+        "BD.SetNativePublicAurasSuppressed",
+        function(call)
+            return call.args[1] == "debuffs" and call.args[2] == true
+        end,
+        enableStart
+    ), nil, "initial Edit Mode enable does not suppress Blizzard Debuffs")
+
+    state.fireRegistry("EditMode.Exit")
+    state.runTimers(0)
+    local active = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(active.active,
+        "initial Debuff enable constructs and activates on exit")
+    assertFalse(active.pending,
+        "initial Debuff enable drains on exit")
+    local counters = BD.GetCustomAuraContainerConstructionStats()
+    assertEqual(counters.buildAttempts, 1,
+        "deferred initial enable constructs once")
+    assertEqual(counters.buildCompletions, 1,
+        "deferred initial enable completes once")
+    assertEqual(counters.afContainerAllocations, 1,
+        "deferred initial enable allocates one container")
+    assertEqual(counters.afGroupsAdded, 1,
+        "deferred initial enable adds one group")
+    assertEqual(counters.afItemEnchantmentsAdded, 0,
+        "deferred initial enable adds no enchantments")
+    assertEqual(counters.afInitialFrameReservationsCompleted, 10,
+        "deferred initial enable reserves one group batch")
 end
 
 do

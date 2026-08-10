@@ -16,6 +16,10 @@ local secondaryHandSlot = GetInventorySlotInfo("SecondaryHandSlot")
 local REQUIRED_LEGACY_AF_VERSION = 21
 -- AF #27/r36 registers only the selected native aura duration carrier.
 local REQUIRED_CUSTOM_AF_VERSION = 36
+-- AF r39 adds a declarative, native-driven square dispel-colour texture for
+-- CustomAuraButtons. The harmful upper-right replacement must not suppress
+-- Blizzard's ordinary/private Debuffs without that exact presentation path.
+local REQUIRED_HARMFUL_CUSTOM_AF_VERSION = 39
 local RETAIL_12_0_INTERFACE_MIN = 120000
 local RETAIL_12_1_INTERFACE_MIN = 120100
 local RETAIL_12_2_INTERFACE_MIN = 120200
@@ -58,8 +62,8 @@ local function GetRetailInterfaceVersion()
 end
 
 -- Retail 12.0.7 loads the implementation and template together from
--- Blizzard_RestrictedAddOnEnvironment/SecureGroupHeaders. Retail 12.1.0.68914
--- (wow-ui-source d3915c78) marks SecureAuraHeader.lua/xml Classic-only. Keep an
+-- Blizzard_RestrictedAddOnEnvironment/SecureGroupHeaders. Retail 12.1.0.69189
+-- (wow-ui-source a520b6c2) marks SecureAuraHeader.lua/xml Classic-only. Keep an
 -- explicit interface boundary because Lua function globals cannot prove that
 -- SecureAuraHeaderTemplate is constructible.
 function BD.HasSecureAuraHeaderBackend()
@@ -144,6 +148,23 @@ function BD.HasCustomAuraContainerCapability()
         and type(BD.SetNativePublicAurasSuppressed) == "function"
 end
 
+function BD.HasCustomHarmfulAuraContainerCapability()
+    return BD.HasCustomAuraContainerCapability()
+        and (tonumber(AF.versionNum) or 0)
+            >= REQUIRED_HARMFUL_CUSTOM_AF_VERSION
+        and type(AF.HasNativeDispelColorTexture) == "function"
+        and AF.HasNativeDispelColorTexture() == true
+end
+
+function BD.HasCustomAuraContainerPaneCapability(which)
+    if which == "debuffs" then
+        return BD.HasCustomHarmfulAuraContainerCapability()
+    elseif which == "buffs" then
+        return BD.HasCustomAuraContainerCapability()
+    end
+    return false
+end
+
 local function HasRegisteredCustomAuraContainerBackend(which)
     return type(BD.IsCustomAuraContainerAvailable) == "function"
         and type(BD.UpdateCustomAuraContainer) == "function"
@@ -170,9 +191,14 @@ function BD.GetAuraBackend(which)
         if interfaceVersion >= RETAIL_12_2_INTERFACE_MIN then
             return nil
         elseif which == "debuffs" then
-            -- A 12.1 CustomAuraContainer always consumes public and private
-            -- harmful sources together. Keep Blizzard's harmful data path and
-            -- expose only the verified static styling adapter.
+            if BD.HasCustomHarmfulAuraContainerCapability()
+                and HasRegisteredCustomAuraContainerBackend(which)
+            then
+                return CUSTOM_AURA_CONTAINER_BACKEND
+            end
+            -- AF r38 and older cannot preserve Blizzard-owned dispel colours
+            -- on square custom buttons. Keep the verified static styling
+            -- adapter and leave Blizzard's private anchors visible instead.
             if HasBlizzardDebuffStyleBackend() then
                 return BLIZZARD_DEBUFF_STYLE_BACKEND
             end
