@@ -287,7 +287,7 @@ local function makeHarness()
     }
     local AF = {
         isRetail = true,
-        versionNum = 38,
+        versionNum = 39,
     }
     local UF = {}
     local F = {}
@@ -315,6 +315,10 @@ local function makeHarness()
     end
 
     function AF.HasCustomAuraContainer()
+        return true
+    end
+
+    function AF.HasNativeDispelColorTexture()
         return true
     end
 

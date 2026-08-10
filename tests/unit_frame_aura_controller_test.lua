@@ -281,7 +281,7 @@ local function makeHarness(options)
     }
     local AF = {
         isRetail = options.isRetail ~= false,
-        versionNum = options.versionNum or 38,
+        versionNum = options.versionNum or 39,
     }
     local UF = {}
     local afConstructionTotals = {
@@ -320,6 +320,10 @@ local function makeHarness(options)
 
     function AF.HasCustomAuraContainer()
         return options.hasBackend ~= false
+    end
+
+    function AF.HasNativeDispelColorTexture()
+        return options.hasNativeDispelColor ~= false
     end
 
     function AF.CreateCustomAuraContainer(parent)
@@ -1142,18 +1146,18 @@ local function assertNoNativeMutation(harness, message)
 end
 
 local function testCapabilityGate()
-    local oldAF = makeHarness({versionNum = 36})
+    local oldAF = makeHarness({versionNum = 38})
     assertEqual(
         oldAF.UF.HasNativeAuraContainerBackend(),
         false,
-        "AF r36 dispel-overlay gate"
+        "AF r38 native Debuff color gate"
     )
     assertEqual(
         oldAF.UF.CreateNativeAuraContainerController({}, "OldAF"),
         nil,
-        "AF r36 controller"
+        "AF r38 controller"
     )
-    assertEqual(#oldAF.holders, 0, "AF r36 holder count")
+    assertEqual(#oldAF.holders, 0, "AF r38 holder count")
 
     local missingMethod = makeHarness({
         missingMethod = "SetCustomAuraSlotSortMethod",
@@ -1183,6 +1187,24 @@ local function testCapabilityGate()
         missingDispelOverlay.UF.HasNativeAuraContainerBackend(),
         false,
         "missing dispel-overlay method gate"
+    )
+
+    local missingNativeDispelColor = makeHarness({
+        missingMethod = "HasNativeDispelColorTexture",
+    })
+    assertEqual(
+        missingNativeDispelColor.UF.HasNativeAuraContainerBackend(),
+        false,
+        "missing native Debuff color method gate"
+    )
+
+    local unavailableNativeDispelColor = makeHarness({
+        hasNativeDispelColor = false,
+    })
+    assertEqual(
+        unavailableNativeDispelColor.UF.HasNativeAuraContainerBackend(),
+        false,
+        "unavailable native Debuff color capability gate"
     )
 end
 
@@ -1227,12 +1249,12 @@ local function testGlobalFrameworkRequirement()
     assertTrue(chunk, loadError)
     setfenv(chunk, environment)
     chunk("BFInfinite", BFI)
-    assertEqual(BFI.requiredAFVersion, 38, "published global AF minimum")
+    assertEqual(BFI.requiredAFVersion, 39, "published global AF minimum")
 
     local ok, versionError = pcall(eventHandler.ADDON_LOADED, eventHandler, BFI.name)
     assertEqual(ok, false, "global AF version check stops harness")
     assertEqual(versionError, stopAfterVersionCheck, "global AF version check sentinel")
-    assertEqual(requiredVersion, 38, "global AF minimum")
+    assertEqual(requiredVersion, 39, "global AF minimum")
 end
 
 local function testDispelOverlaySlotContract()
