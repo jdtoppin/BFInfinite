@@ -145,8 +145,7 @@ function frame:UpdateShownState()
     self.nativeShownStateCalls = (self.nativeShownStateCalls or 0) + 1
 end
 
-local callback
-local callbackEvent
+local callbacks = {}
 local hookCount = 0
 local removeCalls = {}
 local backdropCalls = {}
@@ -201,9 +200,11 @@ function AF.RegisterAddonLoaded()
     error("Talking Head must not wait for ADDON_LOADED", 2)
 end
 
+function AF.CreateMover()
+end
+
 function AF.RegisterCallback(event, registeredCallback)
-    callbackEvent = event
-    callback = registeredCallback
+    callbacks[event] = registeredCallback
 end
 
 function AF.SetFontShadow(fontString)
@@ -250,6 +251,20 @@ local BFI = {
 
 local environment = {
     AbstractFramework = AF,
+    CreateFrame = function()
+        local proxy = {}
+
+        function proxy:Hide()
+        end
+
+        function proxy:RegisterEvent()
+        end
+
+        function proxy:SetScript()
+        end
+
+        return proxy
+    end,
     hooksecurefunc = function(target, method, hook)
         local original = target[method]
         hookCount = hookCount + 1
@@ -265,6 +280,8 @@ local environment = {
     unpack = unpack,
 }
 environment._G = environment
+environment.OTHER = "Other"
+environment.HUD_EDIT_MODE_TALKING_HEAD_FRAME_LABEL = "Talking Head"
 environment.TalkingHeadFrame = frame
 
 local chunk, loadError =
@@ -273,11 +290,11 @@ assertEqual(type(chunk), "function", loadError or "module load")
 setfenv(chunk, environment)
 chunk("BFInfinite", BFI)
 
-assertEqual(callbackEvent, "BFI_StyleBlizzard", "startup style callback")
-assertEqual(type(callback), "function", "registered callback")
+assertEqual(type(callbacks.BFI_StyleBlizzard), "function", "startup style callback")
+assertEqual(type(callbacks.BFI_PrepareEditModePositions), "function", "mover prepare callback")
 assertEqual(#removeCalls, 0, "styling is deferred")
 
-callback()
+callbacks.BFI_StyleBlizzard()
 
 assertEqual(#removeCalls, 5, "native art containers")
 assertTrue(textBackground.hidden, "text background hidden")
@@ -366,7 +383,7 @@ assertEqual(name.shadowColor[4], 1,
 assertEqual(text.shadowColor[4], 1,
     "body shadow restored after PlayCurrent")
 
-callback()
+callbacks.BFI_StyleBlizzard()
 assertEqual(#removeCalls, 5, "repeat initialization is ignored")
 assertEqual(#backdropCalls, 2, "no duplicate backdrops")
 assertEqual(closeButtonCalls, 1, "no duplicate close-button skin")
