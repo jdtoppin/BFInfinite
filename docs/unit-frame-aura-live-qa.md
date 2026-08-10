@@ -1,8 +1,8 @@
 # 12.1 aura full-stack live QA
 
 This is the release gate for BFInfinite's aura migration. The primary target
-is Retail 12.1. The current audited pin is `12.1.0.68914`, with Blizzard UI
-source at `d3915c78aba77a7a9be76acbfa35c674bbb6abe9`. Retail 12.1 is scheduled
+is Retail 12.1. The current audited pin is `12.1.0.69189`, with Blizzard UI
+source at `a520b6c27bb897e6be2333b6cc2be36d52c7c11b`. Retail 12.1 is scheduled
 for August 11, 2026; repeat this entire gate against the final release build
 and replace both pins before release.
 
@@ -22,17 +22,17 @@ aggregate only after the isolated leaves pass.
 Use this clean isolated-install sequence:
 
 Before the supported pairs, run one deliberate dependency-mismatch preflight:
-install AF #36/r37 at
-`f3434d777bfcea2da8e1cc769e43ce06f5b456f6` with BFInfinite #139 at
-`23b3e2176cbb2b2a2124fe864dc8bdec3a81e530`. A dependency warning is
-expected because #139 requires AF #37/r38. Every BFI-owned unit-frame aura row,
+install AF #37/r38 at
+`a6b19d67f69ed82dbf80ae6e84bc69d0a6d1ce5a` with BFInfinite #142 at
+`82783ce53821ff5149e3c6144f3b92fc529f8903`. A dependency warning is
+expected because #142 requires AF #39/r39. Every BFI-owned unit-frame aura row,
 including Party/Raid Debuffs and their native dispel highlights, must remain
 hidden rather than using a legacy fallback. Begin with a reload in an active
 Challenge Mode dungeon, then enter combat and exercise hostile, friendly,
 cleared, and restored targets; Party/Raid roster changes; and config-mode
 entry/exit. Blizzard-owned upper-right Buffs/Debuffs must remain available.
 The error log must contain no `GetUnitAuraInstanceIDs`, `UNIT_AURA`, Lua, or
-taint error. Then delete both addon folders before installing AF #37/r38.
+taint error. Then delete both addon folders before installing AF #39/r39.
 
 1. AF #19 at `d6858f3997a1014a7ab9ce05ddaaf53efe4df9c6` with BFInfinite
    #90 at `d9c5a23246a01572e1fb75d470a250032f802b33`.
@@ -63,7 +63,12 @@ taint error. Then delete both addon folders before installing AF #37/r38.
    Raid matrix, then repeat the Party smoke test because #139 contains #138.
    This supersedes closed PR #87; no merge to `master` is needed for either
    isolated install.
-10. AF #36 at `f3434d777bfcea2da8e1cc769e43ce06f5b456f6` with BFInfinite
+10. AF #39 at `d2affb6d47914ada6b81f1dd81ecd3fb658dc6d6` with BFInfinite
+    #142 at `82783ce53821ff5149e3c6144f3b92fc529f8903`. Run the complete
+    native unit-frame Debuff-border matrix below, including Exhaustion on the
+    standalone Player frame and Party's optional player child. Repeat the
+    Party/Raid smoke tests because #142 contains #139 and #138.
+11. AF #36 at `f3434d777bfcea2da8e1cc769e43ce06f5b456f6` with BFInfinite
    #134 at `762cbf687ae00456757a8747cf9216f12ee38faa`, then #110 at
    `8068aa4601f372e70200491ac839115ece29ccbc`. At #134, verify other
    allied players use class-coloured names, friendly NPCs retain reaction
@@ -71,63 +76,63 @@ taint error. Then delete both addon folders before installing AF #37/r38.
    nameplate token across public, restricted, and public identities; require
    a neutral restricted fallback, no stale class colour, and no Lua or taint
    error.
-11. AF #36 at `f3434d777bfcea2da8e1cc769e43ce06f5b456f6` with BFInfinite
+12. AF #36 at `f3434d777bfcea2da8e1cc769e43ce06f5b456f6` with BFInfinite
    #112 at `c7cda3c76e6264ed8d92a2b453481bd0f58d00d0`.
-12. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
+13. AF #20 at `5190acb56f85a52353d857b95510eca81348495e` with BFInfinite
    #103 at `ab6a3fd8e2d0c18416717a0c59e3c675fc203bac`. Verify the
    ordinary upper-right Debuffs use BFI's neutral square outline while
    Blizzard continues to own their data and layout.
-13. Validation-only AF #25 at
-   `53ea5bdb65d6f37e97ac7a40576350a78cc0521b` with BFInfinite #110
+14. Validation-only AF #25 at
+   `0a04ecf055b888bb750b16df1cf623e4d927a162` with BFInfinite #110
    at `8068aa4601f372e70200491ac839115ece29ccbc`. This is the clean
    combined check for AF #26's square border and AF #36's required r37
    runtime. Verify Target Debuffs use a square border while Blizzard's native
    dispel type still controls its colour and visibility. Target Buffs must
    remain unchanged.
-14. AF #36 at `f3434d777bfcea2da8e1cc769e43ce06f5b456f6` with BFInfinite
+15. AF #36 at `f3434d777bfcea2da8e1cc769e43ce06f5b456f6` with BFInfinite
    #110 at `8068aa4601f372e70200491ac839115ece29ccbc`. On Target Buffs
    and Debuffs, test every cooldown choice after its required reload and
    require exactly one graphical timer.
-15. AF #36 at `f3434d777bfcea2da8e1cc769e43ce06f5b456f6` with BFInfinite
+16. AF #36 at `f3434d777bfcea2da8e1cc769e43ce06f5b456f6` with BFInfinite
     #112 at `c7cda3c76e6264ed8d92a2b453481bd0f58d00d0`. Repeat every
     cooldown choice on hostile nameplate Debuffs.
-16. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
+17. AF #27 at `479084cd31f74a838ddf4b67785129148bb5d112` with BFInfinite
     #121 at `d1a5fe741fc703458b5d0830e620cd6ac6f070b9`, then #103 at
     `ab6a3fd8e2d0c18416717a0c59e3c675fc203bac`. Verify the
     fixed-clock upper-right native Buff groups and temporary enchants have a
     circular swipe only, never a second vertical fill.
-17. Current AF `main` at `f31772e0733b3fdf22063c8bcda28dfe11236848`
+18. Current AF `main` at `f31772e0733b3fdf22063c8bcda28dfe11236848`
    with BFInfinite #118 at
    `24c26df850ee0730982a1263e0770d5a5e7296c4`. Test the native tooltip
    shell on Blizzard's TargetFrame with BFI Unit Frames disabled, then on any
    upper-right native AuraButtons available to the fixture.
-18. Current AF `main` at `f31772e0733b3fdf22063c8bcda28dfe11236848`
+19. Current AF `main` at `f31772e0733b3fdf22063c8bcda28dfe11236848`
    with BFInfinite #119 at
    `d555ad11c49cb8e598340e7d273778d33f285b39`. Reload before testing,
    then open the Character panel inside an active Challenge Mode both outside
    and during combat.
-19. Current AF `main` at `f31772e0733b3fdf22063c8bcda28dfe11236848`
+20. Current AF `main` at `f31772e0733b3fdf22063c8bcda28dfe11236848`
     with BFInfinite #122 at
     `7334f0ba2b6ec8434d94f79050642a99c8ef37a5`. Give Target Buffs and
     Debuffs visibly different settings, then switch between them slowly and
     rapidly outside combat and during ordinary combat. No value from the
     previous row may render on the selected row.
-20. Current AF `main` at `f31772e0733b3fdf22063c8bcda28dfe11236848`
+21. Current AF `main` at `f31772e0733b3fdf22063c8bcda28dfe11236848`
     with BFInfinite #124 at
     `5b01b20408e3044b18e8fc12a574f8c70befa6bf`. Start after a reload
     without opening Achievements, enter Challenge Mode combat, and open
     Achievements for the first time. Require no nil edit-box error, protected
     action, or taint.
-21. Validation-only AF #25 at
-    `53ea5bdb65d6f37e97ac7a40576350a78cc0521b` with BFInfinite
+22. Validation-only AF #25 at
+    `0a04ecf055b888bb750b16df1cf623e4d927a162` with BFInfinite
     #127 at `625144a3aab87c95005de6b1930caf9d765a3e59`. Use the default
     Horizontal / Left / Down Blizzard Debuff Frame layout. Outside combat,
     move the restored **BFI Buff Frame** mover and verify custom Buffs and
     ordinary Debuffs travel together, remain right-edge aligned, and keep the
     five-pixel gap. Attempting to open BFI Edit Mode in combat must show the
     combat warning and perform no movement.
-22. Validation-only AF #25 at
-    `53ea5bdb65d6f37e97ac7a40576350a78cc0521b` with the exact
+23. Validation-only AF #25 at
+    `0a04ecf055b888bb750b16df1cf623e4d927a162` with the exact
     checked-out head of `codex/unitframe-aura-full-stack-test` as the final #91
     validation SHA. Record that full branch-head SHA immediately before
     installation.
@@ -140,19 +145,19 @@ inputs.
 
 For the final stack, use validation-only AbstractFramework PR #25, branch
 `codex/aura-full-stack-test`, exact head
-`53ea5bdb65d6f37e97ac7a40576350a78cc0521b`. It combines AF #23/r35,
-AF #26, AF #27/r36, AF #36/r37, AF #37/r38, and AF #28's legacy
-fail-closed boundary with current AF `main` at
+`0a04ecf055b888bb750b16df1cf623e4d927a162`. It combines AF #23/r35,
+AF #26, AF #27/r36, AF #28's legacy fail-closed boundary, AF #36/r37,
+AF #37/r38, and AF #39/r39 with current AF `main` at
 `f31772e0733b3fdf22063c8bcda28dfe11236848`, including #24's Retail
 12.1 max-level fix, AF #29's saved-position shape fix, AF #30's
-restricted-context mover guard, and #35's package-artifact support. Never
-merge AF #25.
+restricted-context mover guard, #35's package-artifact support, and #39's
+native-coloured square Debuff-border contract. Never merge AF #25.
 
 The aggregate must contain these exact BFInfinite terminal heads:
 
 | Coverage | Branch | Exact head |
 |---|---|---|
-| Current BFInfinite master compatibility | `master` | `f9f3b438c4fe1011ac437d6a76f3c5f24192939e` |
+| Current BFInfinite master compatibility | `master` | `482b386acf4f9028ff89c91e58ace88749ed2dca` |
 | Achievement UI 12.1 search topology (#124) | `codex/achievement-ui-12-1-search-path` | `5b01b20408e3044b18e8fc12a574f8c70befa6bf` |
 | Unit Frame pane-switch lifecycle (#122) | `codex/unitframe-aura-settings-switch` | `7334f0ba2b6ec8434d94f79050642a99c8ef37a5` |
 | Aura settings presentation (#123) | `codex/unitframe-aura-plain-option-labels` | `dcac8ca227734ee0132c3362ef7208f774e050c6` |
@@ -173,6 +178,7 @@ The aggregate must contain these exact BFInfinite terminal heads:
 | Enemy nameplate Debuffs (#112) | `codex/nameplate-native-auras-12-1` | `c7cda3c76e6264ed8d92a2b453481bd0f58d00d0` |
 | Party + native dispel highlight (#138; supersedes #84) | `codex/unitframe-party-dispel-highlights` | `7622a7a59f1d286d9710151275b90a67f8dcb835` |
 | Raid + native dispel highlight (#139; includes #138; supersedes #87) | `codex/unitframe-raid-dispel-highlights` | `23b3e2176cbb2b2a2124fe864dc8bdec3a81e530` |
+| Native unit-frame Debuff colours (#142; includes #139/#138) | `codex/unitframe-native-debuff-colors` | `82783ce53821ff5149e3c6144f3b92fc529f8903` |
 | Upper-right AF r36 gate (#121) | `codex/native-aura-r36-upper-right-gate` | `d1a5fe741fc703458b5d0830e620cd6ac6f070b9` |
 | Upper-right Debuff appearance (#103; includes #99 and #121) | `codex/buffs-debuffs-native-debuffs` | `ab6a3fd8e2d0c18416717a0c59e3c675fc203bac` |
 | Upper-right shared BFI mover (#127; includes #103) | `codex/upper-aura-debuff-follower` | `625144a3aab87c95005de6b1930caf9d765a3e59` |
@@ -199,7 +205,9 @@ Test in this order:
    Blizzard healer-spell importer.
 4. Test the eight unchanged unit-frame integration leaves independently. Then
    test AF #37 with #138 for Party, followed by AF #37 with #139 for Raid and
-   a Party ancestry smoke test. Do not install closed #84 or #87.
+   a Party ancestry smoke test. Finally test AF #39 with #142 for native
+   square Debuff colours on all unit-frame rows, including Party's player
+   child. Do not install closed #84 or #87.
 5. Test #134 after #137 and before #110. Verify allied-player class colours,
    non-player reaction colours, hostile-player custom-white defaults, and a
    public-to-restricted-to-public pooled-nameplate transition. Then test
@@ -217,11 +225,13 @@ Test in this order:
    `DeadlyDebuffFrame` independently.
 9. Test AF #26's focused regression, then test its square border in the
    AF #25/BFI #110 combined pair because #110 now correctly requires AF r36.
-   Repeat the square, native-dispel-colour check across every harmful
-   unit-frame row on the final aggregate.
+   Test AF #39/BFI #142 for the supported native square-colour path, then
+   repeat that exact Debuff-border matrix across every harmful unit-frame row
+   on the final aggregate.
 10. Test AF #36 with #136/#137/#134/#110 and #112 as two clean sibling paths.
-    Test AF #37 with #138, then #139, as the group-frame path. Use AF #27 with
-    #121/#103 for the independent upper-right path. Run the
+    Test AF #37 with #138, then #139, and finally AF #39 with #142 as the
+    group-frame path. Use AF #27 with #121/#103 for the independent
+    upper-right path. Run the
     single-graphical-timer and duration-threshold matrices below on unit-frame
     groups and the graphical-timer matrix on nameplate and upper-right groups,
     then repeat them on the final aggregate.
@@ -236,7 +246,7 @@ Test in this order:
 14. Test #124 independently. The first Achievement UI load must occur during
     Challenge Mode combat; then exercise search, filter visibility, and
     comparison-mode layout as described below.
-15. Install AF #25 at `53ea5bdb65d6f37e97ac7a40576350a78cc0521b`
+15. Install AF #25 at `0a04ecf055b888bb750b16df1cf623e4d927a162`
     and the current head of disposable BFI #91 as clean, complete folders.
 16. Run the 12.1 gates below in order.
 
@@ -334,7 +344,8 @@ two rows each therefore prebuild 320 groups and 3,200 initial reservations.
 This is a hypothetical spell-colour expansion budget, not the shipped
 Party/Raid base topology.
 
-The fixed #138/#139 base contributions are:
+The fixed #138/#139 base contributions, unchanged by #142's presentation-only
+border contract, are:
 
 - Party: 15 containers (10 AF-created plus 5 secure-header seeded), 10 aura
   groups, 5 dispel slots, and 105 initial reservations.
@@ -753,7 +764,7 @@ after all groups, layout, unit, and refresh work, using the supported inbound
 Before starting churn, place a visible harmful aura on each supported frame
 type and inspect every cooldown style. Debuff borders must use the complete
 square asset with no rounded atlas corners or cropped edge. Blizzard's native
-dispel classification must still control the border colour and visibility;
+classification must control the colour, including the `None`/red fallback;
 helpful Buff rows must remain visually unchanged. Repeat this check on Player,
 Pet, Party, Raid, Target, Boss, Focus, TargetTarget, FocusTarget, and PetTarget.
 
@@ -769,6 +780,45 @@ Exercise:
 No secret identity may be cached or compared. A temporarily unavailable unit
 must wait, remain curtained, and recover to the newest clean token without
 retargeting a native container to a preview identity.
+
+#### Native unit-frame Debuff border colours
+
+Run this section first on AF #39/BFI #142, then repeat it on AF #25/BFI #91.
+This covers icon borders only; it is independent of the Party/Raid Health Bar
+**Dispels** tint below.
+
+1. For Player, Pet, Party, Raid, Target, Boss, Focus, TargetTarget,
+   FocusTarget, and PetTarget Debuffs, enable **Border Color → Debuff Type**.
+   Require BFI's complete square border with Blizzard's native Magic, Curse,
+   Disease, Poison, and Bleed colours. Helpful Buff rows must not gain a
+   Debuff-type border.
+2. Apply Exhaustion, Well-Honed Instincts, or another known untyped/`None`
+   harmful effect. Its icon must use Blizzard's ordinary red harmful colour,
+   not a missing, neutral, black, or rounded border. BFInfinite must not
+   identify the aura or read its type to produce that result.
+3. Enable **Unit Frames → Party → General → Show Player**. Show the same
+   player and harmful effect simultaneously on the standalone Player frame
+   and Party's player child. The Party child must follow **Party → Debuffs →
+   Border Color → Debuff Type**; it must not borrow the standalone **Player →
+   Debuffs** value. Prove both directions by giving those settings opposite
+   values, judging only after the requested reload, and then reversing them.
+4. Disable **Debuff Type** for each representative owner and confirm its type
+   border is absent without changing the aura filter, cooldown, duration,
+   stack text, tooltip, or row placement. Re-enable it and confirm the native
+   square colour returns after the required reload.
+5. Treat the Debuff Type flag as construction-owned. A change must quiesce the
+   applied row and produce one reload-required notice without allocating a
+   replacement. Cancel leaves it quiesced; exact reversion before reload
+   resumes the original container; confirmation/reload constructs the chosen
+   mode exactly once.
+6. With Party/Raid **Dispels** also enabled, an untyped red icon border must
+   not by itself produce a typed Health Bar tint. Conversely, disabling icon
+   **Debuff Type** must not disable an otherwise eligible Health Bar tint.
+7. Repeat through dummy combat, Mythic+, raid, arena/BG, roster and target
+   churn, secret-unit transitions, stationary hover, profile changes, and
+   reload. Require no `AuraData`/UnitAura access, forbidden-object error,
+   taint, duplicate border, rounded-atlas corner, or construction-counter
+   growth beyond the one expected post-reload rebuild.
 
 #### Party and Raid native dispel highlights
 
@@ -1111,6 +1161,15 @@ Stop and file a failure with evidence for any of the following:
 - a dispel tint, `showDispelIcon`, visibility, geometry, or counter being used
   as a general private-aura-presence signal; a dedicated BFI private anchor;
   or duplication of the managed Debuffs presence/icon presentation;
+- an untyped/`None` unit-frame Debuff such as Exhaustion missing Blizzard's
+  red square border while **Debuff Type** is enabled; any typed category using
+  the wrong native colour; a rounded or duplicate unit-frame Debuff border;
+  or a helpful Buff receiving a Debuff-type border;
+- Party's optional player child borrowing the standalone Player Debuff Type
+  setting instead of Party's setting; changing icon Debuff Type changing the
+  independent Health Bar Dispels eligibility (or the reverse); or a
+  construction-owned border change applying live, allocating before reload,
+  or growing counters after the one expected reload rebuild;
 - missing category, duplicate aura, partial color fallback, inferred spell
   family, or a listed ID using the wrong exact RGBA;
 - more than one graphical duration display on a native AuraButton, including
