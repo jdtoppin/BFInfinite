@@ -99,11 +99,13 @@ equipmentSlotOrder.categoryIconByEquipLoc = {
 }
 -- Profession tools, profession equipment, and equippable bags are not
 -- conventional paper-doll equipment. Keep them together under the one
--- Miscellaneous parent and give each compact row a purpose-built AF icon.
+-- Miscellaneous parent, which follows the same native-item-art treatment as
+-- the other category parents. Its compact child rows retain purpose-built AF
+-- icons.
 -- childKey is separately namespaced in GetCategory, so it cannot collide
 -- with a real item-class fallback that shares this parent.
 equipmentSlotOrder.miscellaneous = {
-    icon = "Bag_Miscellaneous",
+    icon = {texture = "Interface\\Icons\\INV_Misc_QuestionMark"},
     order = 700,
     byEquipLoc = {
         INVTYPE_PROFESSION_TOOL = {
@@ -449,8 +451,10 @@ local VIEW_MODE_INDIVIDUAL = "individual"
 -- 2. INVTYPE_PROFESSION_TOOL, INVTYPE_PROFESSION_GEAR, and INVTYPE_BAG are
 --    deliberately outside the Equipment parent. They share the dedicated
 --    Miscellaneous aggregate with actual unknown-class items, and use the
---    purpose-built Bag_ProfessionTool, Bag_ProfessionEquipment, Bag_Bag,
---    and Bag_Miscellaneous adaptive icons supplied by AbstractFramework.
+--    same full-color native parent art as the other top-level categories.
+--    Their child rows use the purpose-built Bag_ProfessionTool,
+--    Bag_ProfessionEquipment, and Bag_Bag adaptive icons supplied by
+--    AbstractFramework.
 -- 3. Parent-category atlases (SUPERSEDED by Task 3, sidebar v3): both
 --    commits' identical Blizzard_UIPanels_Game/Mainline/ContainerFrame.lua
 --    define a `BAG_FILTER_ICONS` table (~line 218) keyed by
@@ -1484,19 +1488,15 @@ local function RegisterEmptyButton(itemButton, bagID)
     end
 end
 
-local function AddAggregateEmptyGroups()
-    local emptyGroup
+-- Empty representatives keep Combined View's compact, cursor-compatible
+-- empty-slot presentation, but they are not a useful standalone sidebar
+-- category. Individual Bags still receives every physical empty slot through
+-- its own groups in BuildItemGroups.
+local function AddAggregateEmptyItems()
     for kind = EMPTY_KIND_BAG, EMPTY_KIND_REAGENT do
         local representative = emptyStates[kind].representative
         if representative then
             flatGroup.items[#flatGroup.items + 1] = representative
-            emptyGroup = emptyGroup or AcquireCategoryGroup(
-                "empty",
-                _G.EMPTY or "Empty",
-                1000,
-                "Bag_Empty"
-            )
-            emptyGroup.items[#emptyGroup.items + 1] = representative
         end
     end
 end
@@ -1532,7 +1532,7 @@ local function BuildItemGroups()
         end
     end
 
-    AddAggregateEmptyGroups()
+    AddAggregateEmptyItems()
     SortCategoryGroups()
     sort(individualGroups, function(a, b) return a.order < b.order end)
 end

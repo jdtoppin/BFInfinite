@@ -567,11 +567,12 @@ assertNotContains(bags, "C_PaperDollInfo",
     "the retired slot-art API path must not return")
 
 -- Profession tools, profession equipment, and equippable bags have a shared
--- Miscellaneous parent but retain purpose-specific labels and adaptive icons.
+-- Miscellaneous parent. The parent uses the same native item-art treatment as
+-- other top-level categories; children retain purpose-specific adaptive icons.
 assertContains(bags, "equipmentSlotOrder.miscellaneous = {",
     "special inventory locations have a dedicated Miscellaneous definition")
-assertContains(bags, 'icon = "Bag_Miscellaneous"',
-    "Miscellaneous uses its own AF adaptive icon")
+assertContains(bags, 'icon = {texture = "Interface\\\\Icons\\\\INV_Misc_QuestionMark"}',
+    "Miscellaneous uses a native item icon like the other category parents")
 for _, retiredEquipmentOrder in ipairs({
     "INVTYPE_PROFESSION_TOOL = 20,",
     "INVTYPE_PROFESSION_GEAR = 21,",
@@ -660,6 +661,17 @@ assertContains(bags,
 assertContains(bags,
     "local child = AcquireCategoryGroup(\n        childKey,\n        childLabel,\n        childOrder,\n        childIcon,\n        parent\n    )",
     "AddItemToCategoryGroups passes childIcon as the child group's icon parameter")
+
+-- Empty slots still have live representative buttons in Combined View for
+-- cursor compatibility, but are not exposed as a redundant sidebar category.
+assertContains(bags, "local function AddAggregateEmptyItems()",
+    "Combined View retains aggregate empty representatives without a category")
+assertContains(bags, "flatGroup.items[#flatGroup.items + 1] = representative",
+    "aggregate empty representatives remain in Combined View")
+assertNotContains(bags, "local function AddAggregateEmptyGroups()",
+    "the old Empty category builder is removed")
+assertNotContains(bags, '_G.EMPTY or "Empty"',
+    "empty slots no longer create a selectable Empty category")
 
 -- BuildSidebarModel child nodes fall back from an explicit child icon to
 -- the parent group's icon, so every collapsed-rail row still shows

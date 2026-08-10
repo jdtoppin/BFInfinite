@@ -220,7 +220,7 @@ local function makeRail(parent, options)
 
     function rail:GetDesiredWidth()
         return self.collapsed
-            and (self.options.collapsedWidth or 50)
+            and (self.options.collapsedWidth or 58)
             or (self.options.expandedWidth or 170)
     end
 
@@ -297,11 +297,11 @@ end), true, "collapsed callback accepted")
 -- rail's own SetCollapsed/ToggleCollapsed contract exactly.
 assertEqual(Sidebar.SetCollapsed(true), true, "collapsing can be buffered before Initialize")
 assertEqual(#presentationCalls, 2, "buffered collapse republishes presentation width")
-assertEqual(presentationCalls[2][1], 50, "buffered collapse publishes the compact width with scrollbar lane")
-assertEqual(presentationCalls[2][2], 50, "buffered collapse publishes the compact reserved width")
+assertEqual(presentationCalls[2][1], 58, "buffered collapse publishes the compact width with scrollbar lane")
+assertEqual(presentationCalls[2][2], 58, "buffered collapse publishes the compact reserved width")
 assertEqual(Sidebar.GetCollapsed(), true, "buffered collapsed state is queryable before Initialize")
-assertEqual(Sidebar.GetDesiredWidth(), 50, "buffered compact desired width")
-assertEqual(Sidebar.GetContentInset(), 58, "buffered compact content inset")
+assertEqual(Sidebar.GetDesiredWidth(), 58, "buffered compact desired width")
+assertEqual(Sidebar.GetContentInset(), 66, "buffered compact content inset")
 assertEqual(#collapsedCalls, 1, "an unsilenced buffered change fires the callback")
 assertEqual(collapsedCalls[1], true, "the fired callback reports the new collapsed state")
 
@@ -320,7 +320,7 @@ assertEqual(Sidebar.GetCollapsed(), false, "the silent change still updates the 
 assertEqual(Sidebar.ToggleCollapsed(), true,
     "header toggle can collapse the buffered state before Initialize")
 assertEqual(#presentationCalls, 4, "buffered toggle republishes presentation width")
-assertEqual(presentationCalls[4][1], 50, "buffered toggle presentation width")
+assertEqual(presentationCalls[4][1], 58, "buffered toggle presentation width")
 assertEqual(#collapsedCalls, 2, "unlike Set, Toggle always fires the callback")
 assertEqual(collapsedCalls[2], true, "buffered toggle reports the new collapsed state")
 
@@ -359,7 +359,7 @@ assertEqual(Sidebar.frame, rail, "Sidebar.frame exposes the AF rail frame")
 assertEqual(rail.parent, parent, "the rail is parented to the caller's frame")
 
 assertEqual(rail.options.expandedWidth, 170, "expanded width option")
-assertEqual(rail.options.collapsedWidth, 50, "collapsed width reserves the scrollbar lane")
+assertEqual(rail.options.collapsedWidth, 58, "collapsed width reserves compact icon clearance and the scrollbar lane")
 assertEqual(rail.options.headingHeight, 22, "heading height option")
 assertEqual(rail.options.accentColor, "BFI", "accent color option")
 assertEqual(rail.options.fallbackIcon, "Bag_Misc", "fallback icon option")
@@ -480,15 +480,15 @@ assertEqual(rail.treeList.toggleCalls[#rail.treeList.toggleCalls], "equipment",
 -- entering this block the rail is collapsed (the flushed buffered state);
 -- post-Initialize, Sidebar.SetCollapsed delegates straight to the rail,
 -- whose SetOnCollapsedChanged wiring is now live, so unsilenced changes fire
-assertEqual(Sidebar.GetDesiredWidth(), 50, "compact desired width pass-through")
-assertEqual(Sidebar.GetContentInset(), 58, "compact content inset pass-through")
+assertEqual(Sidebar.GetDesiredWidth(), 58, "compact desired width pass-through")
+assertEqual(Sidebar.GetContentInset(), 66, "compact content inset pass-through")
 assertEqual(Sidebar.SetCollapsed(false), true, "the sidebar can be expanded after Initialize")
 assertEqual(#collapsedCalls, 3, "the expand fires the callback")
 assertEqual(Sidebar.GetDesiredWidth(), 170, "expanded desired width pass-through")
 assertEqual(Sidebar.GetContentInset(), 178, "expanded content inset pass-through")
 assertEqual(Sidebar.SetCollapsed(true), true, "the sidebar can be collapsed after Initialize")
 assertEqual(#collapsedCalls, 4, "the collapse fires the callback")
-assertEqual(Sidebar.GetDesiredWidth(), 50, "restored compact desired width")
+assertEqual(Sidebar.GetDesiredWidth(), 58, "restored compact desired width")
 
 ---------------------------------------------------------------------
 -- post-Initialize: silent SetCollapsed vs. ToggleCollapsed firing the callback
