@@ -8,10 +8,10 @@ local AF = _G.AbstractFramework
 local type = type
 
 local DESIRED_WIDTH = 170
--- AF's compact content lane is 48px: 12px hover clearance + 20px icon +
--- 14px parent chevron + 2px gap. The extra 10px is AF's dedicated transient
--- scrollbar lane, preventing it from covering a parent chevron.
-local COLLAPSED_WIDTH = 58
+-- AF's compact content lane is 34px: 12px hover clearance + 20px icon +
+-- 2px visual gap. Compact rows no longer show a chevron; the remaining 10px
+-- is AF's dedicated transient scrollbar lane, so it never covers the icon.
+local COLLAPSED_WIDTH = 44
 local CONTENT_GAP = 8
 local HEADING_HEIGHT = 22
 local ACCENT_COLOR = "BFI"
