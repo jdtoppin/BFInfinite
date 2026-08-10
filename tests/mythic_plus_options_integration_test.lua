@@ -498,10 +498,16 @@ assertEqual(autoAcceptQuests.tooltip[1], "Auto Accept Quests",
     "auto-accept tooltip title")
 assertEqual(autoAcceptQuests.tooltip[2], questAutomationTooltip,
     "auto-accept tooltip body")
+assertEqual(autoAcceptQuests._tooltipOwner,
+    environment.BFIOptionsFrame_UIWidgetsPanel,
+    "auto-accept tooltip escapes the settings scroll viewport")
 assertEqual(autoTurnInQuests.tooltip[1], "Auto Turn In Quests",
     "auto-turn-in tooltip title")
 assertEqual(autoTurnInQuests.tooltip[2], questAutomationTooltip,
     "auto-turn-in tooltip body")
+assertEqual(autoTurnInQuests._tooltipOwner,
+    environment.BFIOptionsFrame_UIWidgetsPanel,
+    "auto-turn-in tooltip escapes the settings scroll viewport")
 autoAcceptQuests.onCheck(true)
 autoTurnInQuests.onCheck(true)
 assertEqual(objectiveInfo.cfg.autoAcceptQuests, true,

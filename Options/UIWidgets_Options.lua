@@ -777,6 +777,9 @@ builder["objectiveTrackerQuestAutomation"] = function(parent)
     local function CreateToggle(key, label, x)
         local control = AF.CreateCheckButton(pane, label)
         AF.SetPoint(control, "LEFT", x, 0)
+        -- Keep this shared tooltip out of the scroll viewport on supported
+        -- AbstractFramework installs; it remains anchored to the control.
+        control._tooltipOwner = BFIOptionsFrame_UIWidgetsPanel
         control:SetTooltip(label, tooltip)
         control:SetOnCheck(function(checked)
             pane.t.cfg[key] = checked
