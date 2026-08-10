@@ -106,7 +106,6 @@ select(2, ...).L = setmetatable({
     ["Disease"] = "Disease",
     ["Poison"] = "Poison",
     ["Bleed"] = "Bleed",
-    ["Appearance"] = "Appearance",
     ["Bottom Gradient"] = "Bottom Gradient",
     ["Full Gradient"] = "Full Gradient",
     ["Full Solid"] = "Full Solid",
