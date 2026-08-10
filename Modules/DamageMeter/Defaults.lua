@@ -46,9 +46,9 @@ local defaults = {
     resetOnMythicPlusStart = false,
     alwaysShowPlayer = true,
     windowHeights = {
-        220,
-        220,
-        220,
+        147,
+        134,
+        134,
     },
     windowAnchors = {
         {
@@ -345,13 +345,16 @@ local function NormalizeConfig(config)
         config.alwaysShowPlayer = defaults.alwaysShowPlayer
     end
 
-    local legacyHeight = NormalizeNumber(
-        config.height,
-        defaults.windowHeights[1],
-        120,
-        520,
-        true
-    )
+    local legacyHeight
+    if type(config.height) == "number" and config.height == config.height then
+        legacyHeight = NormalizeNumber(
+            config.height,
+            defaults.windowHeights[1],
+            120,
+            520,
+            true
+        )
+    end
     config.height = nil
     if type(config.windowHeights) ~= "table" then
         config.windowHeights = {}
@@ -359,7 +362,7 @@ local function NormalizeConfig(config)
     for index = 1, 3 do
         config.windowHeights[index] = NormalizeNumber(
             config.windowHeights[index],
-            legacyHeight,
+            legacyHeight or defaults.windowHeights[index],
             120,
             520,
             true

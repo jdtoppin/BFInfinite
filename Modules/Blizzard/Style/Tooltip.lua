@@ -15,8 +15,9 @@ local function StyleAuraButtonTooltip()
     local inbound = _G.AuraContainerInbound
     if type(inbound) ~= "table" or type(inbound.SetTooltipBackdrop) ~= "function" then return end
 
-    -- AuraButtonTooltip is hidden and forbidden in Retail 12.1. Use Blizzard's
-    -- global inbound styling surface instead of reading or mutating the object.
+    -- Retail 12.1.0.69189 / wow-ui-source a520b6c27bb897e6:
+    -- AuraButtonTooltip is hidden and forbidden. Use Blizzard's global inbound
+    -- styling surface instead of reading or mutating the object.
     local pixel = AF.GetOnePixelForRegion(_G.UIParent)
     local backgroundR, backgroundG, backgroundB, backgroundA = AF.GetColorRGB("background")
     local borderR, borderG, borderB, borderA = AF.GetColorRGB("border")
