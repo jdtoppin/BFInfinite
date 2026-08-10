@@ -78,6 +78,13 @@ local function resetLayouts()
                 layoutType = Enum.EditModeLayoutType.Account,
                 systems = {
                     {
+                        anchorInfo = {
+                            point = "TOPRIGHT",
+                            relativeTo = "UIParent",
+                            relativePoint = "TOPRIGHT",
+                            offsetX = -110,
+                            offsetY = -275,
+                        },
                         isInDefaultPosition = false,
                         settings = {
                             {setting = Enum.EditModeObjectiveTrackerSetting.Height, value = 40},
@@ -146,6 +153,10 @@ assertContains(source, "editMode.SaveLayouts(layouts)",
     "native height adapter persists through the documented API")
 assertContains(source, "EditModePresetLayoutsMeta",
     "native height adapter maps the global active layout index")
+assertContains(source, "SetObjectiveTrackerBFIRightStackPlacement",
+    "native placement adapter is exported")
+assertContains(source, "offsetY = -200",
+    "BFI right stack moves the tracker higher than Blizzard's preset")
 for _, forbidden in ipairs({
     "ObjectiveTrackerFrame",
     "OnSystemSettingChange",
@@ -177,6 +188,10 @@ assertEqual(type(W.GetObjectiveTrackerNativeHeight), "function",
     "native height getter is exported")
 assertEqual(type(W.SetObjectiveTrackerNativeHeight), "function",
     "native height setter is exported")
+assertEqual(type(W.GetObjectiveTrackerNativePlacement), "function",
+    "native placement getter is exported")
+assertEqual(type(W.SetObjectiveTrackerBFIRightStackPlacement), "function",
+    "native placement setter is exported")
 
 local height, reason = W.GetObjectiveTrackerNativeHeight()
 assertEqual(height, 800, "raw default height converts to pixels")
@@ -227,6 +242,90 @@ assertEqual(
 )
 
 resetLayouts()
+local isDefaultPosition, placementReason =
+    W.GetObjectiveTrackerNativePlacement()
+assertEqual(isDefaultPosition, false,
+    "custom-position tracker reports its current native placement")
+assertEqual(placementReason, nil,
+    "custom-position tracker placement is writable")
+assertTrue(W.SetObjectiveTrackerBFIRightStackPlacement(),
+    "BFI right stack saves through Edit Mode")
+assertEqual(saveCalls, 1, "one layout save for BFI right stack placement")
+assertEqual(
+    savedLayouts.layouts[1].systems[1].isInDefaultPosition,
+    false,
+    "BFI right stack keeps the tracker out of Blizzard's managed column"
+)
+assertEqual(
+    savedLayouts.layouts[1].systems[1].anchorInfo.point,
+    "TOPRIGHT",
+    "BFI right stack uses the native top-right anchor"
+)
+assertEqual(
+    savedLayouts.layouts[1].systems[1].anchorInfo.relativeTo,
+    "UIParent",
+    "BFI right stack remains screen-relative"
+)
+assertEqual(
+    savedLayouts.layouts[1].systems[1].anchorInfo.relativePoint,
+    "TOPRIGHT",
+    "BFI right stack targets the screen top-right"
+)
+assertEqual(
+    savedLayouts.layouts[1].systems[1].anchorInfo.offsetX,
+    -110,
+    "BFI right stack retains Blizzard's right inset"
+)
+assertEqual(
+    savedLayouts.layouts[1].systems[1].anchorInfo.offsetY,
+    -200,
+    "BFI right stack is 75 pixels higher than Blizzard's preset"
+)
+assertEqual(
+    savedLayouts.layouts[1].systems[1].settings[1].value,
+    40,
+    "BFI placement leaves the native height setting unchanged"
+)
+assertEqual(
+    savedLayouts.layouts[1].systems[2].settings[1].value,
+    17,
+    "BFI placement leaves unrelated Edit Mode systems unchanged"
+)
+assertTrue(W.SetObjectiveTrackerBFIRightStackPlacement(),
+    "matching BFI right stack placement is accepted")
+assertEqual(saveCalls, 1,
+    "matching BFI right stack placement does not rewrite layouts")
+
+resetLayouts()
+sourceLayouts.layouts[1].systems[1].isInDefaultPosition = true
+isDefaultPosition, placementReason = W.GetObjectiveTrackerNativePlacement()
+assertEqual(isDefaultPosition, true,
+    "managed tracker exposes its native default-position state")
+assertEqual(placementReason, nil,
+    "managed tracker can opt into BFI's custom placement")
+assertTrue(W.SetObjectiveTrackerBFIRightStackPlacement(),
+    "BFI right stack moves a managed tracker into a custom layout")
+assertEqual(
+    savedLayouts.layouts[1].systems[1].isInDefaultPosition,
+    false,
+    "BFI right stack disables Blizzard's right-managed placement"
+)
+
+resetLayouts()
+local originalHeightSettings = Enum.EditModeObjectiveTrackerSetting
+Enum.EditModeObjectiveTrackerSetting = nil
+isDefaultPosition, placementReason = W.GetObjectiveTrackerNativePlacement()
+assertEqual(isDefaultPosition, false,
+    "placement works even when this client has no native height setting")
+assertEqual(placementReason, nil,
+    "placement does not depend on the native height enum")
+assertTrue(W.SetObjectiveTrackerBFIRightStackPlacement(),
+    "placement persists without the native height enum")
+assertEqual(saveCalls, 1,
+    "placement without the native height enum saves once")
+Enum.EditModeObjectiveTrackerSetting = originalHeightSettings
+
+resetLayouts()
 table.remove(sourceLayouts.layouts[1].systems[1].settings, 1)
 height, reason = W.GetObjectiveTrackerNativeHeight()
 assertEqual(height, 800, "missing native setting uses Blizzard default")
@@ -263,6 +362,8 @@ assertEqual(reason, "customLayout",
     "preset layout requires a user-created layout")
 assertEqual(W.SetObjectiveTrackerNativeHeight(500), false,
     "preset layout is not overwritten")
+assertEqual(W.SetObjectiveTrackerBFIRightStackPlacement(), false,
+    "preset layout is not overwritten by BFI placement")
 assertEqual(saveCalls, 0, "preset layout does not save")
 
 resetLayouts()
@@ -279,6 +380,8 @@ assertEqual(height, 800, "combat retains the current displayed height")
 assertEqual(reason, "combat", "combat blocks native height writes")
 assertEqual(W.SetObjectiveTrackerNativeHeight(500), false,
     "combat does not write Edit Mode layouts")
+assertEqual(W.SetObjectiveTrackerBFIRightStackPlacement(), false,
+    "combat does not write BFI placement to Edit Mode layouts")
 assertEqual(saveCalls, 0, "combat does not save layouts")
 
 resetLayouts()
@@ -288,6 +391,8 @@ assertEqual(height, 800, "active Edit Mode retains the displayed height")
 assertEqual(reason, "editMode", "active Edit Mode blocks snapshot writes")
 assertEqual(W.SetObjectiveTrackerNativeHeight(500), false,
     "active Edit Mode does not overwrite unsaved layout state")
+assertEqual(W.SetObjectiveTrackerBFIRightStackPlacement(), false,
+    "active Edit Mode does not overwrite BFI placement state")
 assertEqual(saveCalls, 0, "active Edit Mode does not save layouts")
 
 resetLayouts()

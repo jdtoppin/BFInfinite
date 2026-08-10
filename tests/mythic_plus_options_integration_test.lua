@@ -44,6 +44,11 @@ local clearHistoryCalls = 0
 local nativeObjectiveTrackerHeight = 650
 local nativeObjectiveTrackerHeightReason
 local nativeObjectiveTrackerHeightWrites = 0
+local nativeObjectiveTrackerPlacementIsDefault = true
+local nativeObjectiveTrackerPlacementReason
+local nativeObjectiveTrackerPlacementWrites = 0
+local nativeEditModeShown
+local optionsHidden = false
 
 local AF = {
     noop = function()
@@ -111,8 +116,14 @@ function AF.CreateButton(_, label)
     local button = {
         labelText = label,
     }
+    function button:SetEnabled(value)
+        self.enabled = value
+    end
     function button:SetOnClick(callback)
         self.onClick = callback
+    end
+    function button:SetTooltip(...)
+        self.tooltip = {...}
     end
     buttons[#buttons + 1] = button
     return button
@@ -249,6 +260,10 @@ local W = {
         return nativeObjectiveTrackerHeight,
             nativeObjectiveTrackerHeightReason
     end,
+    GetObjectiveTrackerNativePlacement = function()
+        return nativeObjectiveTrackerPlacementIsDefault,
+            nativeObjectiveTrackerPlacementReason
+    end,
     MythicPlus = {
         SetPreview = function(shown)
             previewCalls[#previewCalls + 1] = shown
@@ -261,6 +276,12 @@ local W = {
         nativeObjectiveTrackerHeight = value
         nativeObjectiveTrackerHeightWrites =
             nativeObjectiveTrackerHeightWrites + 1
+        return true
+    end,
+    SetObjectiveTrackerBFIRightStackPlacement = function()
+        nativeObjectiveTrackerPlacementIsDefault = false
+        nativeObjectiveTrackerPlacementWrites =
+            nativeObjectiveTrackerPlacementWrites + 1
         return true
     end,
 }
@@ -281,7 +302,20 @@ local BFI = {
 local environment = {
     _G = false,
     AbstractFramework = AF,
+    BFIOptionsFrame = {
+        Hide = function()
+            optionsHidden = true
+        end,
+    },
     BFIOptionsFrame_UIWidgetsPanel = {},
+    EditModeManagerFrame = {
+        CanEnterEditMode = function()
+            return true
+        end,
+    },
+    InCombatLockdown = function()
+        return false
+    end,
     READY_CHECK = "Ready Check",
     RESET = "Reset",
     ROLE_POLL = "Role Poll",
@@ -290,6 +324,9 @@ local environment = {
     next = next,
     pairs = pairs,
     select = select,
+    ShowUIPanel = function(frame)
+        nativeEditModeShown = frame
+    end,
     table = table,
     tinsert = table.insert,
     tostring = tostring,
@@ -434,6 +471,56 @@ assertTrue(#objectiveOptionPanes >= 5, "Objective Tracker options panes")
 for _, pane in ipairs(objectiveOptionPanes) do
     pane.Load(objectiveInfo)
 end
+
+local nativePlacement = findByLabel(buttons, "Use BFI Right Stack")
+assertTrue(nativePlacement, "Objective Tracker native placement action")
+assertEqual(nativePlacement.enabled, true,
+    "native placement remains enabled for the active Blizzard layout")
+assertEqual(nativePlacement.tooltip[1], "Objective Tracker Position",
+    "native placement tooltip title")
+nativePlacement.onClick()
+assertEqual(nativeObjectiveTrackerPlacementIsDefault, false,
+    "native placement leaves Blizzard's managed tracker column")
+assertEqual(nativeObjectiveTrackerPlacementWrites, 1,
+    "native placement writes once through the Blizzard adapter")
+assertEqual(objectiveInfo.cfg.position, nil,
+    "native placement is not stored in the BFI profile")
+local nativePlacementStatus = findByText(fontStrings,
+    "Saved. Open and close Blizzard Edit Mode to apply it; temporary Blizzard layouts take precedence.")
+assertTrue(nativePlacementStatus,
+    "native placement explains how Blizzard applies the saved layout")
+assertEqual(nativePlacementStatus.shown, true,
+    "native placement refresh guidance is visible")
+
+local openBlizzardEditMode = findByLabel(buttons, "Open Blizzard Edit Mode")
+assertTrue(openBlizzardEditMode,
+    "Objective Tracker opens its native Blizzard Edit Mode")
+assertEqual(openBlizzardEditMode.enabled, true,
+    "native Edit Mode launcher is available out of combat")
+assertEqual(openBlizzardEditMode.tooltip[1], "Objective Tracker Position",
+    "native Edit Mode launcher tooltip title")
+assertEqual(openBlizzardEditMode.point[1], "TOPLEFT",
+    "native Edit Mode launcher stacks below the placement action")
+assertEqual(openBlizzardEditMode.point[2], nativePlacement,
+    "native Edit Mode launcher stays inside the options viewport")
+assertEqual(openBlizzardEditMode.point[3], "BOTTOMLEFT",
+    "native Edit Mode launcher anchors below the placement action")
+openBlizzardEditMode.onClick()
+assertEqual(nativeEditModeShown, environment.EditModeManagerFrame,
+    "native Edit Mode launcher opens Blizzard's manager")
+assertEqual(optionsHidden, true,
+    "native Edit Mode launcher closes BFI options first")
+
+nativeObjectiveTrackerPlacementReason = "customLayout"
+for _, pane in ipairs(objectiveOptionPanes) do
+    if pane.name == "BFI_UIWidgetOption_ObjectiveTrackerPlacement" then
+        pane.Load(objectiveInfo)
+        break
+    end
+end
+assertEqual(nativePlacement.enabled, false,
+    "preset tracker layout disables BFI native placement")
+nativeObjectiveTrackerPlacementReason = nil
 
 local nativeHeight = findByLabel(sliders, "Objective Tracker Height")
 assertTrue(nativeHeight, "Objective Tracker native height slider")

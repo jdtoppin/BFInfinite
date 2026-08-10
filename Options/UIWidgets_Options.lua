@@ -68,6 +68,7 @@ local settings = {
         "markerSpacing",
     },
     objectiveTracker = {
+        "objectiveTrackerPlacement",
         "objectiveTrackerNativeHeight",
         "objectiveTrackerBackground",
         "objectiveTrackerQuestAutomation",
@@ -606,6 +607,121 @@ builder["alpha"] = function(parent)
     function pane.Load(t)
         pane.t = t
         alpha:SetValue(t.cfg.alpha)
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- objectiveTrackerPlacement
+---------------------------------------------------------------------
+builder["objectiveTrackerPlacement"] = function(parent)
+    if created["objectiveTrackerPlacement"] then
+        return created["objectiveTrackerPlacement"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_ObjectiveTrackerPlacement",
+        nil,
+        110
+    )
+    created["objectiveTrackerPlacement"] = pane
+
+    local placement = AF.CreateButton(
+        pane,
+        L["Use BFI Right Stack"],
+        "BFI_hover",
+        180,
+        20
+    )
+    AF.SetPoint(placement, "TOPLEFT", 15, -12)
+    placement:SetTooltip(
+        L["Objective Tracker Position"],
+        L["Moves the Blizzard Objective Tracker into the active custom Blizzard Edit Mode layout, 75 pixels higher than Blizzard's preset. This keeps the tracker and docked damage meters in BFI's right-side stack. It does not save a position in your BFI profile."]
+    )
+
+    local openEditMode = AF.CreateButton(
+        pane,
+        L["Open Blizzard Edit Mode"],
+        "BFI_hover",
+        190,
+        20
+    )
+    AF.SetPoint(openEditMode, "TOPLEFT", placement, "BOTTOMLEFT", 0, -7)
+    openEditMode:SetTooltip(
+        L["Objective Tracker Position"],
+        L["The Objective Tracker is Blizzard-owned, so it is positioned in Blizzard Edit Mode rather than BFI Edit Mode. Use this to fine-tune its location."]
+    )
+
+    local status = AF.CreateFontString(pane, nil, "disabled")
+    AF.SetPoint(status, "TOPLEFT", openEditMode, "BOTTOMLEFT", 0, -8)
+    AF.SetPoint(status, "RIGHT", -15, 0)
+    status:SetJustifyH("LEFT")
+    status:SetWordWrap(true)
+    local placementSaved
+
+    local unavailableStatus = {
+        busy = L["Saving Objective Tracker position..."],
+        combat = L["Unavailable in combat."],
+        customLayout = L["Use a custom Blizzard Edit Mode layout first."],
+        editMode = L["Finish editing in Blizzard Edit Mode first."],
+        unavailable = L["Unavailable on this client."],
+    }
+
+    local function CanOpenBlizzardEditMode()
+        local manager = _G.EditModeManagerFrame
+        return not (type(_G.InCombatLockdown) == "function"
+                and _G.InCombatLockdown())
+            and manager
+            and type(manager.CanEnterEditMode) == "function"
+            and manager:CanEnterEditMode()
+            and type(_G.ShowUIPanel) == "function"
+    end
+
+    local function Refresh()
+        local isDefaultPosition, reason
+        if type(W.GetObjectiveTrackerNativePlacement) == "function" then
+            isDefaultPosition, reason = W.GetObjectiveTrackerNativePlacement()
+        else
+            reason = "unavailable"
+        end
+
+        placement:SetEnabled(reason == nil
+            and type(W.SetObjectiveTrackerBFIRightStackPlacement) == "function")
+        openEditMode:SetEnabled(CanOpenBlizzardEditMode() == true)
+
+        local statusText = reason and (
+            unavailableStatus[reason] or unavailableStatus.unavailable
+        ) or placementSaved and L[
+            "Saved. Open and close Blizzard Edit Mode to apply it; temporary Blizzard layouts take precedence."
+        ] or isDefaultPosition and L[
+            "Using Blizzard's right-managed position."
+        ] or L["Using a custom Blizzard Edit Mode position."]
+        status:SetText(statusText)
+        status:SetShown(true)
+    end
+
+    placement:SetOnClick(function()
+        if type(W.SetObjectiveTrackerBFIRightStackPlacement) == "function" then
+            placementSaved = W.SetObjectiveTrackerBFIRightStackPlacement()
+                == true
+        end
+        Refresh()
+    end)
+
+    openEditMode:SetOnClick(function()
+        if not CanOpenBlizzardEditMode() then return end
+
+        local optionsFrame = _G.BFIOptionsFrame
+        if optionsFrame then optionsFrame:Hide() end
+        _G.ShowUIPanel(_G.EditModeManagerFrame)
+    end)
+
+    function pane.Load(t)
+        pane.t = t
+        placementSaved = nil
+        Refresh()
     end
 
     return pane

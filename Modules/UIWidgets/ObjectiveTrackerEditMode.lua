@@ -14,12 +14,24 @@ local AF = _G.AbstractFramework
 -- GetLayouts contains saved layouts only, but activeLayout keeps its global
 -- index after Blizzard's preset layouts. Convert it to a saved-layout index
 -- before reading or changing the active custom layout.
+-- Temporary Blizzard override layouts are intentionally not inspected here:
+-- the public API exposes saved layouts only, so this adapter persists an
+-- eligible custom layout without depending on private Edit Mode state.
 local NATIVE_HEIGHT_MIN = 400
 local NATIVE_HEIGHT_MAX = 1000
 local NATIVE_HEIGHT_STEP = 10
 local NATIVE_HEIGHT_DEFAULT_RAW = 40
+local BFI_RIGHT_STACK_ANCHOR = {
+    point = "TOPRIGHT",
+    relativeTo = "UIParent",
+    relativePoint = "TOPRIGHT",
+    offsetX = -110,
+    -- Blizzard's preset is -275. Keep the native tracker clear of the
+    -- minimap while placing the BFI right-side stack 75 pixels higher.
+    offsetY = -200,
+}
 
-local nativeHeightSaveInProgress
+local nativeLayoutSaveInProgress
 
 local function IsInCombat()
     return type(_G.InCombatLockdown) == "function"
@@ -33,7 +45,10 @@ local function IsEditModeActive()
         and manager:IsEditModeActive()
 end
 
-local function GetObjectiveTrackerEditModeContext()
+local function GetObjectiveTrackerEditModeContext(
+    requireCustomPosition,
+    requireHeightSetting
+)
     local editMode = _G.C_EditMode
     local enums = _G.Enum
     local systems = enums and enums.EditModeSystem
@@ -44,14 +59,16 @@ local function GetObjectiveTrackerEditModeContext()
         or type(editMode.GetLayouts) ~= "function"
         or type(editMode.SaveLayouts) ~= "function"
         or type(systems) ~= "table"
-        or type(settings) ~= "table"
         or type(layoutTypes) ~= "table"
         or type(presetLayouts) ~= "table"
         or systems.ObjectiveTracker == nil
-        or settings.Height == nil
         or layoutTypes.Account == nil
         or layoutTypes.Character == nil
         or type(presetLayouts.NumValues) ~= "number"
+        or (requireHeightSetting and (
+            type(settings) ~= "table"
+            or settings.Height == nil
+        ))
     then
         return nil, "unavailable"
     end
@@ -88,17 +105,19 @@ local function GetObjectiveTrackerEditModeContext()
         if type(systemInfo) == "table"
             and systemInfo.system == systems.ObjectiveTracker
         then
-            if type(systemInfo.settings) ~= "table" then
+            if requireHeightSetting and type(systemInfo.settings) ~= "table" then
                 return nil, "unavailable"
             end
-            if systemInfo.isInDefaultPosition ~= false then
+            if requireCustomPosition
+                and systemInfo.isInDefaultPosition ~= false
+            then
                 return nil, "customPosition"
             end
 
             return {
                 activeLayoutIndex = activeLayoutIndex,
                 editMode = editMode,
-                heightSetting = settings.Height,
+                heightSetting = requireHeightSetting and settings.Height,
                 layouts = layouts,
                 systemIndex = index,
             }
@@ -147,7 +166,7 @@ local function GetRawValueFromHeight(height)
 end
 
 function W.GetObjectiveTrackerNativeHeight()
-    local context, reason = GetObjectiveTrackerEditModeContext()
+    local context, reason = GetObjectiveTrackerEditModeContext(true, true)
     if not context then return nil, reason end
 
     local activeLayout = context.layouts.layouts[
@@ -162,15 +181,15 @@ function W.GetObjectiveTrackerNativeHeight()
 
     if IsInCombat() then return height, "combat" end
     if IsEditModeActive() then return height, "editMode" end
-    if nativeHeightSaveInProgress then return height, "busy" end
+    if nativeLayoutSaveInProgress then return height, "busy" end
     return height
 end
 
 function W.SetObjectiveTrackerNativeHeight(height)
     if type(height) ~= "number" then return false, "invalid" end
-    if nativeHeightSaveInProgress then return false, "busy" end
+    if nativeLayoutSaveInProgress then return false, "busy" end
 
-    local context, reason = GetObjectiveTrackerEditModeContext()
+    local context, reason = GetObjectiveTrackerEditModeContext(true, true)
     if not context then return false, reason end
     if IsInCombat() then return false, "combat" end
     if IsEditModeActive() then return false, "editMode" end
@@ -195,8 +214,60 @@ function W.SetObjectiveTrackerNativeHeight(height)
         })
     end
 
-    nativeHeightSaveInProgress = true
+    nativeLayoutSaveInProgress = true
     context.editMode.SaveLayouts(layouts)
-    nativeHeightSaveInProgress = nil
+    nativeLayoutSaveInProgress = nil
+    return true
+end
+
+local function HasBFIRightStackPlacement(systemInfo)
+    local anchorInfo = systemInfo.anchorInfo
+    return systemInfo.isInDefaultPosition == false
+        and type(anchorInfo) == "table"
+        and anchorInfo.point == BFI_RIGHT_STACK_ANCHOR.point
+        and anchorInfo.relativeTo == BFI_RIGHT_STACK_ANCHOR.relativeTo
+        and anchorInfo.relativePoint == BFI_RIGHT_STACK_ANCHOR.relativePoint
+        and anchorInfo.offsetX == BFI_RIGHT_STACK_ANCHOR.offsetX
+        and anchorInfo.offsetY == BFI_RIGHT_STACK_ANCHOR.offsetY
+        and systemInfo.anchorInfo2 == nil
+end
+
+function W.GetObjectiveTrackerNativePlacement()
+    local context, reason = GetObjectiveTrackerEditModeContext(false, false)
+    if not context then return nil, reason end
+
+    local activeLayout = context.layouts.layouts[
+        context.activeLayoutIndex
+    ]
+    local systemInfo = activeLayout.systems[context.systemIndex]
+    local isDefaultPosition = systemInfo.isInDefaultPosition ~= false
+
+    if IsInCombat() then return isDefaultPosition, "combat" end
+    if IsEditModeActive() then return isDefaultPosition, "editMode" end
+    if nativeLayoutSaveInProgress then return isDefaultPosition, "busy" end
+    return isDefaultPosition
+end
+
+function W.SetObjectiveTrackerBFIRightStackPlacement()
+    if nativeLayoutSaveInProgress then return false, "busy" end
+
+    local context, reason = GetObjectiveTrackerEditModeContext(false, false)
+    if not context then return false, reason end
+    if IsInCombat() then return false, "combat" end
+    if IsEditModeActive() then return false, "editMode" end
+    if type(AF.Copy) ~= "function" then return false, "unavailable" end
+
+    local layouts = AF.Copy(context.layouts)
+    local activeLayout = layouts.layouts[context.activeLayoutIndex]
+    local systemInfo = activeLayout.systems[context.systemIndex]
+    if HasBFIRightStackPlacement(systemInfo) then return true end
+
+    systemInfo.isInDefaultPosition = false
+    systemInfo.anchorInfo = AF.Copy(BFI_RIGHT_STACK_ANCHOR)
+    systemInfo.anchorInfo2 = nil
+
+    nativeLayoutSaveInProgress = true
+    context.editMode.SaveLayouts(layouts)
+    nativeLayoutSaveInProgress = nil
     return true
 end
