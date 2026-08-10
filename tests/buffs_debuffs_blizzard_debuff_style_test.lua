@@ -324,16 +324,10 @@ do
         )
         assertEqual(button.DebuffBorder.width, 36, "border width")
         assertEqual(button.DebuffBorder.height, 34, "border height")
-        assertEqual(button.DebuffBorder.alpha, 0, "rounded border hidden")
-        assertEqual(#button.createdTextures, 1, "one square border created")
-        local squareBorder = button.createdTextures[1]
-        assertEqual(squareBorder.allPoints, button.Icon,
-            "square border follows icon")
-        assertEqual(squareBorder.texture, "AF-square-border",
-            "square border asset")
-        assertTableEqual(squareBorder.vertexColor,
-            {0.05, 0.06, 0.07, 1}, "square border colour")
-        assertTrue(squareBorder.shown, "square border shown")
+        assertEqual(button.DebuffBorder.alpha, 1,
+            "Blizzard-native coloured border remains visible")
+        assertEqual(#button.createdTextures, 0,
+            "fallback creates no neutral square border")
         assertTableEqual(
             button.Count.font,
             {"resolved:Expressway", 11, "outline"},
@@ -363,8 +357,8 @@ do
     assertTrue(state.active, "style state active")
     assertEqual(state.styledButtonCount, 16, "styled button count")
     assertEqual(state.snapshotsCreated, 16, "snapshot count")
-    assertEqual(state.squareBordersCreated, 16,
-        "fixed square border construction count")
+    assertEqual(state.squareBordersCreated, nil,
+        "fallback exposes no square-border construction")
 
     config.width = 100
     config.height = 5
@@ -376,15 +370,15 @@ do
     )
     state = BD.GetBlizzardDebuffStyleState()
     assertEqual(state.snapshotsCreated, 16, "snapshots are not duplicated")
-    assertEqual(state.squareBordersCreated, 16,
-        "square borders are not duplicated")
+    assertEqual(state.squareBordersCreated, nil,
+        "style update still exposes no square-border construction")
     for _, button in ipairs(harness.buttons) do
         assertEqual(button.Icon.width, 30, "icon width clamps to cell")
         assertEqual(button.Icon.height, 10, "icon height clamps to cell")
         assertEqual(button.Count.alpha, 0, "count disabled")
         assertEqual(button.Duration.alpha, 1, "duration enabled")
-        assertEqual(#button.createdTextures, 1,
-            "style updates reuse square border")
+        assertEqual(#button.createdTextures, 0,
+            "style updates never create a neutral square border")
     end
 
     config.enabled = false
@@ -410,8 +404,8 @@ do
         )
         assertEqual(button.DebuffBorder.alpha, 0.9,
             "restored rounded border alpha")
-        assertFalse(button.createdTextures[1].shown,
-            "square border hidden on restore")
+        assertEqual(#button.createdTextures, 0,
+            "restore has no substitute square border")
         assertEqual(button.Count.alpha, 0.75, "restored count alpha")
         assertEqual(
             button.Duration.alpha,

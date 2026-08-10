@@ -4,10 +4,9 @@ local L = BFI.L
 ---@class BuffsDebuffs
 local BD = BFI.modules.BuffsDebuffs
 
--- On Retail 12.1, register only the public Buffs replacement:
--- CustomAuraContainer
--- always receives public and private sources, so a harmful group would
--- duplicate DebuffFrame's private-aura anchors.
+-- Register the helpful upper-right pane. CustomDebuffs.lua separately owns
+-- the harmful/private replacement when AF r39 can preserve Blizzard-driven
+-- dispel colours and the exact native Debuff components can be suppressed.
 if type(BD.RegisterCustomAuraContainerPane) ~= "function"
     or not BD.HasCustomAuraContainerCapability()
 then

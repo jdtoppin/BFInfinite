@@ -12,7 +12,7 @@ local tonumber = tonumber
 local type = type
 local unpack = unpack
 
--- Retail 12.1.0.68914 (wow-ui-source d3915c78) keeps the upper-right
+-- Retail 12.1.0.69189 (wow-ui-source a520b6c2) keeps the upper-right
 -- DebuffFrame on the legacy Blizzard_BuffFrame implementation. Its fixed
 -- ordinary Button pool is parented to DebuffFrame.AuraContainer, while private
 -- aura anchors are direct DebuffFrame children and DeadlyDebuffFrame is
@@ -24,11 +24,9 @@ local ICON_CROP_MIN = 0.08
 local ICON_CROP_MAX = 0.92
 
 local snapshots = setmetatable({}, {__mode = "k"})
-local squareBorders = setmetatable({}, {__mode = "k"})
 local cachedTarget
 local styleState = {
     active = false,
-    squareBordersCreated = 0,
     styledButtonCount = 0,
     snapshotsCreated = 0,
 }
@@ -87,7 +85,6 @@ end
 
 local function IsStaticDebuffButton(button, container)
     return button
-        and type(button.CreateTexture) == "function"
         and type(button.GetParent) == "function"
         and button:GetParent() == container
         and HasMethods(button.Icon, REQUIRED_ICON_METHODS)
@@ -208,21 +205,6 @@ local function ClampIconSize(value)
     return max(10, min(MAX_NATIVE_ICON_SIZE, value))
 end
 
-local function GetSquareBorder(button)
-    local border = squareBorders[button]
-    if border then return border end
-
-    border = button:CreateTexture(nil, "OVERLAY")
-    border:SetAllPoints(button.Icon)
-    border:SetTexture(AF.GetTexture("Border"))
-    border:SetVertexColor(AF.GetColorRGB("border"))
-    border:Hide()
-    squareBorders[button] = border
-    styleState.squareBordersCreated =
-        styleState.squareBordersCreated + 1
-    return border
-end
-
 local function ApplyButtonStyle(button, config)
     SnapshotButton(button)
 
@@ -236,11 +218,11 @@ local function ApplyButtonStyle(button, config)
         ICON_CROP_MAX
     )
     button.DebuffBorder:SetSize(width + 10, height + 10)
-    -- Blizzard refreshes this rounded atlas from secret dispel data. Keep its
-    -- data path intact but hide the art statically; the neutral BFI ring does
-    -- not inspect or imply a dispel classification.
-    button.DebuffBorder:SetAlpha(0)
-    GetSquareBorder(button):Show()
+    -- AF r38 and older cannot render Blizzard-owned dispel classification on
+    -- BFI's square asset. Preserve Blizzard's rounded native atlas instead of
+    -- replacing it with a neutral square: typed dispels and the None/red case
+    -- remain native-driven without exposing their identity to Lua.
+    button.DebuffBorder:SetAlpha(1)
 
     local stack = config.stack
     AF.SetFont(button.Count, unpack(stack.font))
@@ -265,10 +247,6 @@ local function RestoreButton(button)
         snapshot.borderHeight
     )
     button.DebuffBorder:SetAlpha(snapshot.borderAlpha)
-    local squareBorder = squareBorders[button]
-    if squareBorder then
-        squareBorder:Hide()
-    end
 
     button.Count:SetFont(unpack(snapshot.countFont))
     button.Count:ClearAllPoints()
@@ -297,8 +275,6 @@ end
 function BD.HasBlizzardDebuffStyleCapability()
     return ResolveTarget() ~= nil
         and type(AF.SetFont) == "function"
-        and type(AF.GetColorRGB) == "function"
-        and type(AF.GetTexture) == "function"
 end
 
 function BD.UpdateBlizzardDebuffStyle(config)
@@ -326,7 +302,6 @@ end
 function BD.GetBlizzardDebuffStyleState()
     return {
         active = styleState.active,
-        squareBordersCreated = styleState.squareBordersCreated,
         styledButtonCount = styleState.styledButtonCount,
         snapshotsCreated = styleState.snapshotsCreated,
     }

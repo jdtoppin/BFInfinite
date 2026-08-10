@@ -12,7 +12,7 @@ local CreateFrame = CreateFrame
 local InCombatLockdown = InCombatLockdown
 local rawget = rawget
 
--- Retail 12.1.0.68914 (wow-ui-source d3915c78) makes aura groups and
+-- Retail 12.1.0.69189 (wow-ui-source a520b6c2) makes aura groups and
 -- item-enchantment sources add-only. Their buttons receive conditional access
 -- restrictions after AF's initializer returns and deny tainted access whenever
 -- aura data is secret. This controller owns configuration state, plain holders,
@@ -20,6 +20,9 @@ local rawget = rawget
 -- or native container geometry.
 local NATIVE_GROUP_INITIAL_RESERVATIONS = 10
 local ALLOWED_NATIVE_FOLLOWER_GLOBALS = {
+    DebuffFrame = true,
+}
+local ALLOWED_HOLDER_ANCHOR_GLOBALS = {
     DebuffFrame = true,
 }
 local VALID_ANCHOR_POINTS = {
@@ -57,6 +60,7 @@ local function NotifyControllerState(controller)
         ) and "1" or "0",
         controller.reloadRequired and "1" or "0",
         controller.nativeFollowerActive and "1" or "0",
+        controller.editModeSuspended and "1" or "0",
         controller.diagnostic or "",
     }, "\031")
     if controller.optionsStateSignature == signature then return end
@@ -159,6 +163,21 @@ local function QueueController(controller)
     end
 end
 
+local function UsesHolderAnchor(controller)
+    local pendingDescriptor = controller.pendingDescriptor
+    local descriptor = controller.descriptor
+    return (pendingDescriptor and pendingDescriptor.holderAnchor ~= nil)
+        or (descriptor and descriptor.holderAnchor ~= nil)
+end
+
+local function DeferControllerForEditMode(controller)
+    local wasPending = pendingControllers[controller] == true
+    pendingControllers[controller] = true
+    if not wasPending then
+        NotifyControllerState(controller)
+    end
+end
+
 local function AssertDescriptor(descriptor)
     assert(type(descriptor) == "table",
         "custom aura pane compiler must return a descriptor")
@@ -209,8 +228,26 @@ local function AssertDescriptor(descriptor)
     assert(descriptor.holderRolesets == nil
         or type(descriptor.holderRolesets) == "string",
         "custom aura descriptor holderRolesets must be a string or nil")
-    assert(descriptor.position ~= nil,
-        "custom aura descriptor requires a holder position")
+    assert(descriptor.holderAnchor == nil
+        or (
+            type(descriptor.holderAnchor) == "table"
+            and type(descriptor.holderAnchor.globalName) == "string"
+            and ALLOWED_HOLDER_ANCHOR_GLOBALS[
+                descriptor.holderAnchor.globalName
+            ] == true
+            and VALID_ANCHOR_POINTS[
+                descriptor.holderAnchor.point
+            ] == true
+            and VALID_ANCHOR_POINTS[
+                descriptor.holderAnchor.relativePoint
+            ] == true
+            and type(descriptor.holderAnchor.x) == "number"
+            and type(descriptor.holderAnchor.y) == "number"
+        ),
+        "custom aura descriptor requires an allowed holder anchor")
+    assert((descriptor.position ~= nil)
+        ~= (descriptor.holderAnchor ~= nil),
+        "custom aura descriptor requires one holder position source")
     assert(descriptor.position ~= nil or descriptor.positionSave == nil,
         "custom aura descriptor cannot save a missing holder position")
 end
@@ -406,13 +443,31 @@ local function ApplyHolder(controller, descriptor)
     local holder = controller.holder
     AF.SetSize(holder, descriptor.holder.width, descriptor.holder.height)
 
-    if holder.mover then
-        AF.UpdateMoverSave(
-            holder,
-            descriptor.positionSave or descriptor.position
+    if descriptor.holderAnchor then
+        local anchor = descriptor.holderAnchor
+        local relativeTo = rawget(_G, anchor.globalName)
+        if not relativeTo then return false end
+
+        -- The relative frame is a static positioning seam only. Never read
+        -- its geometry or visibility: #127 may move DebuffFrame under the BFI
+        -- Buff holder, while Blizzard Edit Mode may restore its native point.
+        holder:ClearAllPoints()
+        holder:SetPoint(
+            anchor.point,
+            relativeTo,
+            anchor.relativePoint,
+            anchor.x,
+            anchor.y
         )
+    else
+        if holder.mover then
+            AF.UpdateMoverSave(
+                holder,
+                descriptor.positionSave or descriptor.position
+            )
+        end
+        BFI.funcs.LoadPosition(holder, descriptor.position)
     end
-    BFI.funcs.LoadPosition(holder, descriptor.position)
 
     holder.enabled = descriptor.enabled
     return true
@@ -493,6 +548,13 @@ local function RestoreNative(controller)
     return BD.SetNativePublicAurasSuppressed(controller.which, false) == true
 end
 
+local function SuspendNativeForEditMode(controller)
+    return type(BD.SuspendNativePublicAuraSuppressionForEditMode) == "function"
+        and BD.SuspendNativePublicAuraSuppressionForEditMode(
+            controller.which
+        ) == true
+end
+
 local function HideCustom(controller)
     if controller.container then
         AF.SetCustomAuraContainerEnabled(controller.container, false)
@@ -514,6 +576,7 @@ local function Deactivate(controller, state)
     end
 
     HideCustom(controller)
+    controller.editModeSuspended = nil
     controller.state = state or (controller.buildCompleted and "INACTIVE" or "NEW")
     return true
 end
@@ -554,6 +617,7 @@ local function Activate(controller)
     controller.holder.enabled = true
     controller.holder:Show()
     controller.active = true
+    controller.editModeSuspended = nil
     controller.state = "ACTIVE"
     controller.diagnostic = nil
     return true
@@ -607,7 +671,12 @@ local function Build(controller, descriptor)
     end
 
     CreateHolder(controller, descriptor)
-    ApplyHolder(controller, descriptor)
+    if not ApplyHolder(controller, descriptor) then
+        HideCustom(controller)
+        controller.state = "NATIVE_UNAVAILABLE"
+        controller.diagnostic = "HOLDER_ANCHOR_UNAVAILABLE"
+        return false
+    end
 
     controller.buildAttempted = true
     controller.state = "BUILDING"
@@ -703,6 +772,17 @@ function ControllerMixin:_ApplyRetarget()
 end
 
 function ControllerMixin:_ApplyPending()
+    if (self.pendingOperation or self.pendingUnit)
+        and nativeFollowerEditModeActive
+        and UsesHolderAnchor(self)
+    then
+        -- A holder anchored to Blizzard's DebuffFrame must remain dormant while
+        -- Edit Mode owns that root. Preserve only the latest requested operation;
+        -- the queued Exit refresh applies it before considering normal resume.
+        DeferControllerForEditMode(self)
+        return
+    end
+
     if not self.pendingOperation and self.pendingUnit then
         self:_ApplyRetarget()
         if not self.pendingUnit then
@@ -786,8 +866,14 @@ function ControllerMixin:_ApplyPending()
     else
         self.reloadRequired = nil
         self.descriptor = descriptor
-        ApplyNativeTuning(self, descriptor)
-        Activate(self)
+        if ApplyNativeTuning(self, descriptor) then
+            Activate(self)
+        else
+            RestoreNative(self)
+            HideCustom(self)
+            self.state = "NATIVE_UNAVAILABLE"
+            self.diagnostic = "HOLDER_ANCHOR_UNAVAILABLE"
+        end
     end
 
     if self.pendingUnit then
@@ -835,6 +921,7 @@ function ControllerMixin:GetState()
         buildAttempted = self.buildAttempted == true,
         buildCompleted = self.buildCompleted == true,
         nativeFollowerActive = self.nativeFollowerActive == true,
+        editModeSuspended = self.editModeSuspended == true,
         reloadRequired = self.reloadRequired == true,
         diagnostic = self.diagnostic,
         unit = self.unit,
@@ -883,6 +970,49 @@ local function RefreshNativeAuraFollowers()
             NotifyControllerState(controller)
         end
     end
+
+    -- Apply holder-anchored work accumulated during Edit Mode before the
+    -- ordinary suspension-resume pass. Update/disable calls overwrite the
+    -- controller's pending fields, so this drains exactly the latest request.
+    local deferredHolderControllers = {}
+    for controller in pairs(pendingControllers) do
+        if UsesHolderAnchor(controller) then
+            deferredHolderControllers[#deferredHolderControllers + 1] = controller
+        end
+    end
+    for _, controller in ipairs(deferredHolderControllers) do
+        controller:_ApplyPending()
+    end
+
+    for _, controller in pairs(registrations) do
+        if controller.editModeSuspended
+            and controller.buildCompleted
+            and controller.descriptor
+            and controller.descriptor.enabled
+        then
+            if ApplyNativeTuning(controller, controller.descriptor)
+                and Activate(controller)
+            then
+                controller.editModeSuspended = nil
+            else
+                controller.state = "NATIVE_UNAVAILABLE"
+                controller.diagnostic = "EDIT_MODE_RESUME_FAILED"
+            end
+            NotifyControllerState(controller)
+        end
+    end
+
+    for _, controller in pairs(registrations) do
+        if controller.active
+            and type(BD.ReassertNativePublicAuraSuppression) == "function"
+        then
+            if not BD.ReassertNativePublicAuraSuppression(controller.which) then
+                Deactivate(controller, "SUPPRESSION_FAILED")
+                controller.diagnostic = "NATIVE_SUPPRESSION_FAILED"
+            end
+            NotifyControllerState(controller)
+        end
+    end
 end
 
 local function QueueNativeAuraFollowerRefresh()
@@ -901,6 +1031,22 @@ local function OnEditModeEnter()
         if controller.nativeFollowerActive then
             if not RestoreNativeFollower(controller) then
                 controller.diagnostic = "NATIVE_FOLLOWER_UNAVAILABLE"
+            end
+            NotifyControllerState(controller)
+        end
+
+        local descriptor = controller.descriptor
+        if controller.active
+            and descriptor
+            and descriptor.holderAnchor
+        then
+            if SuspendNativeForEditMode(controller) then
+                HideCustom(controller)
+                controller.editModeSuspended = true
+                controller.state = "EDIT_MODE_SUSPENDED"
+                controller.diagnostic = nil
+            else
+                controller.diagnostic = "EDIT_MODE_SUSPEND_FAILED"
             end
             NotifyControllerState(controller)
         end
@@ -994,13 +1140,17 @@ end
 function BD.IsCustomAuraContainerAvailable(which)
     return IsPane(which)
         and registrations[which] ~= nil
-        and BD.HasCustomAuraContainerCapability() == true
+        and type(BD.HasCustomAuraContainerPaneCapability) == "function"
+        and BD.HasCustomAuraContainerPaneCapability(which) == true
         and BD.CanSuppressNativePublicAuras(which) == true
 end
 
 function BD.UpdateCustomAuraContainer(which, config)
     local controller = registrations[which]
-    if not controller or not BD.HasCustomAuraContainerCapability() then
+    if not controller
+        or type(BD.HasCustomAuraContainerPaneCapability) ~= "function"
+        or not BD.HasCustomAuraContainerPaneCapability(which)
+    then
         return false
     end
 
