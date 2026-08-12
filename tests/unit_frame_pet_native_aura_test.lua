@@ -578,6 +578,7 @@ local function makeDisabledRuntimeHarness()
         next = next,
         pairs = pairs,
         select = select,
+        setmetatable = setmetatable,
         type = type,
     }
     environment._G = environment
