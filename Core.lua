@@ -5,8 +5,8 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF #27/r36 registers only the selected native aura duration carrier.
-local REQUIRED_AF_VERSION = 36
+-- AF #27/r39 registers only the selected native aura duration carrier.
+local REQUIRED_AF_VERSION = 39
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar
@@ -59,7 +59,7 @@ function eventHandler:ADDON_LOADED(arg)
             AF.SetAddonAccentColor(BFI.name, "blazing_tangerine")
         end
 
-        -- This is global because the supported filter path also runs on 12.0.7.
+        -- check AF version
         AF.RequireVersion(REQUIRED_AF_VERSION)
 
         -- general.language
@@ -267,6 +267,9 @@ local function InitAndBackupCVars()
         "AutoPushSpellToActionBar",
         -- bags
         "combinedBags",
+        -- damage meter
+        "damageMeterEnabled",
+        "damageMeterResetOnNewInstance",
         -- chat
         "chatStyle",
         "whisperMode",

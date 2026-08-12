@@ -10,12 +10,13 @@ local InCombatLockdown = InCombatLockdown
 local floor, huge = math.floor, math.huge
 local ipairs, next, pairs, type = ipairs, next, pairs, type
 
--- Retail 12.1.0.68914 (wow-ui-source d3915c78) makes native aura
+-- Retail 12.1.0.69273 (wow-ui-source eb941aad) makes native aura
 -- groups/slots add-only and restricts their buttons after initialization.
 -- This controller owns only configuration-derived state and never reads aura
 -- data, live buttons, native container geometry, or native visibility.
--- AF #27/r36 registers only the selected native aura duration carrier.
-local REQUIRED_AF_VERSION = 36
+-- AF #27/r39 registers only the selected native aura duration carrier, on
+-- top of the static Block colors and construction ledgers consumed here.
+local REQUIRED_AF_VERSION = 39
 local NATIVE_GROUP_AURA_TEMPLATE = "CustomAuraContainerTemplate"
 -- CustomAuraContainerConstants.FrameCreationBatchSize in the pinned build.
 local NATIVE_INITIAL_GROUP_RESERVATIONS = 10
@@ -128,8 +129,8 @@ end
 
 -- Retail 12.1 SecureGroupHeaderTemplate creates one unconfigured
 -- AuraContainer for each child when this attribute is present before the
--- child is born. 12.0.7 does not know the attribute, so callers must use
--- this capability-gated helper instead of setting it unconditionally.
+-- child is born. Callers use this capability-gated helper rather than
+-- assuming that the native backend is available.
 function UF.PrepareNativeGroupAuraHeader(header)
     if not UF.HasNativeAuraContainerBackend() then
         return false
@@ -439,7 +440,7 @@ local function SetExternalContainerCurtained(controller, curtained)
     if controller._containerAlpha == alpha then return end
 
     -- A seeded container is not parented to the plain holder, so curtain its
-    -- inherited Frame alpha separately. The 12.1.0.68914/d3915c78
+    -- inherited Frame alpha separately. The 12.1.0.69273/eb941aad
     -- SimpleRegion contract permits this constant SetAlpha write. This
     -- remains a write-only gate: BFI never reads native visibility, children,
     -- or aura state.
@@ -463,7 +464,7 @@ local function SetHolderShownSafe(controller, shown)
         return false
     end
 
-    -- Retail 12.1.0.68914 can make visibility and hover accessors secret when
+    -- Retail 12.1.0.69273 can make visibility and hover accessors secret when
     -- a holder is anchored to a native aura container. Keep an ordinary
     -- write-only ledger instead of inspecting frame state.
     controller.frame:SetShown(shown)
@@ -740,7 +741,7 @@ local function ApplyLiveUnitRetarget(controller)
         return false
     end
 
-    -- 12.1.0.68914 exposes SetUnit and UpdateAllAuras as inbound,
+    -- 12.1.0.69273 exposes SetUnit and UpdateAllAuras as inbound,
     -- combat-live operations on an already-built container. This is the
     -- only native mutation group controllers may perform before regen.
     AF.SetCustomAuraContainerUnit(controller._container, controller._spec.unit)
@@ -950,6 +951,13 @@ function ControllerMixin:IsPresentationApplied()
         and spec.shown
 end
 
+-- Expose only the native frame reference needed for forbidden-aspect-safe
+-- dependent anchoring. Callers must never inspect its size, visibility,
+-- children, aura data, or other restricted state.
+function ControllerMixin:GetNativeFrame()
+    return self._container
+end
+
 -- Queue the latest configuration-only holder mutation behind the same
 -- combat gate as native work. This is intentionally a callback:
 -- indicator placement can resolve anchors only through UnitFrames/Common.
@@ -1045,7 +1053,7 @@ function ControllerMixin:Refresh()
         return
     end
 
-    -- 68914's inbound UpdateAllAuras only marks a full native dirty rebuild.
+    -- 69273's inbound UpdateAllAuras only marks a full native dirty rebuild.
     -- It does not expose aura values and is safe for stable-token refreshes.
     AF.UpdateCustomAuraContainer(self._container)
 end
@@ -1079,7 +1087,12 @@ local function CreateController(parent, name, completeSpec, options)
     end
 
     local controller = setmetatable({}, ControllerMixin)
-    controller.frame = CreateFrame("Frame", name, parent)
+    controller.frame = CreateFrame(
+        "Frame",
+        name,
+        parent,
+        options.frameTemplate
+    )
     controller.frame:SetAlpha(0)
     controller._holderAlpha = 0
     if not InCombatLockdown() then
@@ -1114,8 +1127,587 @@ local function CreateController(parent, name, completeSpec, options)
     return controller
 end
 
-function UF.CreateNativeAuraContainerController(parent, name, completeSpec)
-    return CreateController(parent, name, completeSpec)
+function UF.CreateNativeAuraContainerController(
+    parent,
+    name,
+    completeSpec,
+    frameTemplate
+)
+    return CreateController(parent, name, completeSpec, {
+        frameTemplate = frameTemplate,
+    })
+end
+
+---------------------------------------------------------------------
+-- relation-partition controller
+---------------------------------------------------------------------
+local PARTITION_FRIENDLY = "friendly"
+local PARTITION_HOSTILE = "hostile"
+local PARTITION_VARIANTS = {
+    PARTITION_FRIENDLY,
+    "main",
+    "complement",
+}
+
+local function NormalizePartitionVariant(value)
+    assert(
+        value == PARTITION_FRIENDLY or value == PARTITION_HOSTILE,
+        "aura partition variant must be friendly or hostile"
+    )
+    return value
+end
+
+local function NormalizePartitionAttachment(attachment)
+    if attachment == nil then return nil end
+
+    assert(type(attachment) == "table",
+        "aura partition attachment must be a table")
+    assert(IsNonEmptyString(attachment.point),
+        "aura partition attachment point must be a non-empty string")
+    assert(IsNonEmptyString(attachment.relativePoint),
+        "aura partition attachment relativePoint must be a non-empty string")
+    assert(type(attachment.x) == "number",
+        "aura partition attachment x must be a number")
+    assert(type(attachment.y) == "number",
+        "aura partition attachment y must be a number")
+
+    return {
+        point = attachment.point,
+        relativePoint = attachment.relativePoint,
+        x = attachment.x,
+        y = attachment.y,
+    }
+end
+
+local function NormalizePartitionCompleteSpec(spec)
+    assert(type(spec) == "table",
+        "complete aura partition spec must be a table")
+    assert(IsNonEmptyString(spec.unit),
+        "aura partition unit must be a non-empty string")
+    assert(spec.enabled == nil or type(spec.enabled) == "boolean",
+        "aura partition enabled must be a boolean")
+    assert(spec.shown == nil or type(spec.shown) == "boolean",
+        "aura partition shown must be a boolean")
+    assert(type(spec.friendly) == "table",
+        "aura partition requires a friendly spec")
+    assert(spec.main == nil or type(spec.main) == "table",
+        "aura partition main spec must be a table")
+    assert(spec.complement == nil or type(spec.complement) == "table",
+        "aura partition complement spec must be a table")
+    assert(
+        spec.attachment == nil
+            or (spec.main ~= nil and spec.complement ~= nil),
+        "aura partition attachment requires main and complement specs"
+    )
+
+    return {
+        unit = spec.unit,
+        enabled = spec.enabled ~= false,
+        shown = spec.shown ~= false,
+        variant = NormalizePartitionVariant(
+            spec.variant or PARTITION_FRIENDLY
+        ),
+        holder = NormalizeHolder(spec.holder),
+        friendly = CopyTable(spec.friendly),
+        main = CopyTable(spec.main),
+        complement = CopyTable(spec.complement),
+        attachment = NormalizePartitionAttachment(spec.attachment),
+    }
+end
+
+local function NormalizePartitionTuning(tuning)
+    assert(type(tuning) == "table",
+        "aura partition tuning must be a table")
+    assert(type(tuning.friendly) == "table",
+        "aura partition tuning requires a friendly spec")
+    assert(tuning.main == nil or type(tuning.main) == "table",
+        "aura partition main tuning must be a table")
+    assert(tuning.complement == nil or type(tuning.complement) == "table",
+        "aura partition complement tuning must be a table")
+    assert(
+        tuning.attachment == nil
+            or (tuning.main ~= nil and tuning.complement ~= nil),
+        "aura partition tuning attachment requires both hostile specs"
+    )
+
+    return {
+        holder = NormalizeHolder(tuning.holder),
+        friendly = CopyTable(tuning.friendly),
+        main = CopyTable(tuning.main),
+        complement = CopyTable(tuning.complement),
+        attachment = NormalizePartitionAttachment(tuning.attachment),
+    }
+end
+
+local PartitionControllerMixin = {}
+PartitionControllerMixin.__index = PartitionControllerMixin
+setmetatable(PartitionControllerMixin, {
+    __index = ControllerMixin,
+})
+
+local function PartitionChildBuilt(child)
+    return child and child._spec ~= nil
+end
+
+local function SetPartitionChildShown(child, shown)
+    if PartitionChildBuilt(child) then
+        child:SetShown(shown)
+    end
+end
+
+local function SyncPartitionVisibility(controller)
+    local spec = controller._spec
+    local shown = spec ~= nil and spec.enabled and spec.shown
+    local variant = controller._variant or PARTITION_FRIENDLY
+
+    -- The outer holder is the atomic curtain for all prebuilt variants. Its
+    -- alpha is write-only BFI state; no child/native visibility is inspected.
+    SetHolderCurtained(controller, true)
+    if InCombatLockdown() then
+        local applied = controller._holderShown == shown
+            and (not shown or controller._shownVariant == variant)
+        if applied and shown then
+            -- A latest-wins reversal may expose the already-applied variant
+            -- without making any protected child visibility writes.
+            SetHolderCurtained(controller, false)
+            controller._presentationApplied = true
+        elseif applied then
+            controller._shownVariant = nil
+        end
+        return applied
+    end
+
+    if not shown then
+        if not SetHolderShownSafe(controller, false) then
+            return false
+        end
+        for _, key in ipairs(PARTITION_VARIANTS) do
+            SetPartitionChildShown(controller[key], false)
+        end
+        controller._shownVariant = nil
+        -- Hidden partitions remain behind the outer curtain even after every
+        -- protected child write has completed.
+        return true
+    end
+
+    local swapping = controller._holderShown == true
+        and controller._shownVariant ~= variant
+    if swapping and not SetHolderShownSafe(controller, false) then
+        return false
+    end
+
+    local friendlyShown = variant == PARTITION_FRIENDLY
+    if friendlyShown then
+        -- Hide the old presentation before showing its replacement so event
+        -- scripts cannot observe both relation variants at once.
+        SetPartitionChildShown(controller.main, false)
+        SetPartitionChildShown(controller.complement, false)
+        SetPartitionChildShown(controller.friendly, true)
+    else
+        SetPartitionChildShown(controller.friendly, false)
+        SetPartitionChildShown(
+            controller.main,
+            spec.main ~= nil
+        )
+        SetPartitionChildShown(
+            controller.complement,
+            spec.complement ~= nil
+        )
+    end
+
+    if not SetHolderShownSafe(controller, true) then
+        return false
+    end
+    controller._shownVariant = variant
+    SetHolderCurtained(controller, false)
+    controller._presentationApplied = true
+    return true
+end
+
+local function AnchorPartitionChild(controller, child, childSpec)
+    if not childSpec or not PartitionChildBuilt(child) then return end
+
+    local frame = child:GetFrame()
+    local point = childSpec.containerPoint.point
+    frame:ClearAllPoints()
+    frame:SetPoint(point, controller.frame, point, 0, 0)
+end
+
+local function AnchorPartitionComplement(controller)
+    local spec = controller._spec
+    local complement = controller.complement
+    if not spec
+        or not spec.complement
+        or not PartitionChildBuilt(complement)
+    then
+        return
+    end
+
+    local attachment = spec.attachment
+    if not attachment then
+        AnchorPartitionChild(
+            controller,
+            complement,
+            spec.complement
+        )
+        return
+    end
+
+    local mainFrame = controller.main:GetNativeFrame()
+    assert(mainFrame,
+        "aura partition attachment requires a built main container")
+    local frame = complement:GetFrame()
+    frame:ClearAllPoints()
+    frame:SetPoint(
+        attachment.point,
+        mainFrame,
+        attachment.relativePoint,
+        attachment.x,
+        attachment.y
+    )
+end
+
+local function DisablePartitionChild(child)
+    if not PartitionChildBuilt(child) then return end
+    child:SetShown(false)
+    child:SetEnabled(false)
+end
+
+local function BuildPartitionChild(
+    controller,
+    child,
+    childSpec
+)
+    if not childSpec then
+        DisablePartitionChild(child)
+        return
+    end
+
+    local spec = AF.Copy(childSpec)
+    spec.unit = controller._spec.unit
+    spec.enabled = controller._spec.enabled
+    spec.shown = false
+    child:Rebuild(spec)
+end
+
+local function BuildPartition(controller)
+    assert(not controller._buildAttempted,
+        "aura partition controller initial build already attempted")
+    controller._buildAttempted = true
+
+    local spec = controller._spec
+    AF.SetSize(controller.frame, spec.holder.width, spec.holder.height)
+
+    BuildPartitionChild(
+        controller,
+        controller.friendly,
+        spec.friendly
+    )
+    BuildPartitionChild(controller, controller.main, spec.main)
+    BuildPartitionChild(
+        controller,
+        controller.complement,
+        spec.complement
+    )
+
+    AnchorPartitionChild(
+        controller,
+        controller.friendly,
+        spec.friendly
+    )
+    AnchorPartitionChild(controller, controller.main, spec.main)
+    AnchorPartitionComplement(controller)
+end
+
+local function ApplyPartitionTuning(controller)
+    local tuning = controller._pendingTuning
+    local spec = controller._spec
+    AF.SetSize(
+        controller.frame,
+        tuning.holder.width,
+        tuning.holder.height
+    )
+
+    controller.friendly:ApplyTuning(tuning.friendly)
+    AssertMatchingTopology(spec.friendly, tuning.friendly)
+    MergeTuning(spec.friendly, tuning.friendly)
+    if tuning.main then
+        controller.main:ApplyTuning(tuning.main)
+        AssertMatchingTopology(spec.main, tuning.main)
+        MergeTuning(spec.main, tuning.main)
+    end
+    if tuning.complement then
+        controller.complement:ApplyTuning(tuning.complement)
+        AssertMatchingTopology(spec.complement, tuning.complement)
+        MergeTuning(spec.complement, tuning.complement)
+    end
+
+    spec.holder = tuning.holder
+    spec.attachment = tuning.attachment
+    AnchorPartitionChild(
+        controller,
+        controller.friendly,
+        spec.friendly
+    )
+    AnchorPartitionChild(controller, controller.main, spec.main)
+    AnchorPartitionComplement(controller)
+end
+
+function PartitionControllerMixin:_ApplyPending()
+    if not HasPendingMutation(self) then
+        pendingControllers[self] = nil
+        return
+    end
+
+    if not HasNativeMutation(self) then
+        if SyncPartitionVisibility(self) then
+            self._needsVisibility = nil
+            pendingControllers[self] = nil
+        else
+            QueueController(self)
+        end
+        return
+    end
+
+    -- Structural work always starts behind the outer curtain. In combat no
+    -- child visibility, enabled-state, anchoring, or construction write runs.
+    SetHolderCurtained(self, true)
+    if InCombatLockdown() then
+        QueueController(self)
+        return
+    end
+    local holderHidden = SetHolderShownSafe(self, false)
+    if not holderHidden then
+        return
+    end
+
+    if self._destroyRequested then
+        for _, key in ipairs(PARTITION_VARIANTS) do
+            self[key]:Destroy()
+        end
+        self._holderShown = nil
+        self._spec = nil
+        self._destroyed = true
+        pendingControllers[self] = nil
+        return
+    end
+
+    if self._holderConfig then
+        local configure = self._holderConfig
+        self._holderConfig = nil
+        configure(self.frame)
+    end
+
+    if self._needsRebuild then
+        BuildPartition(self)
+        self._needsRebuild = nil
+        self._needsTuning = nil
+        self._pendingTuning = nil
+        self._needsRetarget = nil
+        self._needsEnabled = nil
+    else
+        if self._needsTuning then
+            ApplyPartitionTuning(self)
+            self._needsTuning = nil
+            self._pendingTuning = nil
+        end
+        if self._needsRetarget then
+            for _, key in ipairs(PARTITION_VARIANTS) do
+                local child = self[key]
+                if self._spec[key] and PartitionChildBuilt(child) then
+                    child:SetUnit(self._spec.unit)
+                end
+            end
+            self._needsRetarget = nil
+        end
+        if self._needsEnabled then
+            for _, key in ipairs(PARTITION_VARIANTS) do
+                local child = self[key]
+                if PartitionChildBuilt(child) then
+                    child:SetEnabled(
+                        self._spec[key] ~= nil
+                            and self._spec.enabled
+                    )
+                end
+            end
+            self._needsEnabled = nil
+        end
+    end
+
+    self._needsVisibility = true
+    if SyncPartitionVisibility(self) then
+        self._needsVisibility = nil
+        pendingControllers[self] = nil
+    end
+end
+
+function PartitionControllerMixin:ApplyHolderConfig(configure)
+    assert(not self._destroyed and not self._destroyRequested,
+        "aura partition controller is destroyed")
+    assert(type(configure) == "function",
+        "aura partition holder configuration must be a function")
+
+    self._holderConfig = configure
+    RequestMutation(self)
+end
+
+function PartitionControllerMixin:Rebuild(completeSpec)
+    assert(not self._destroyed and not self._destroyRequested,
+        "aura partition controller is destroyed")
+    assert(not self._spec,
+        "aura partition controller initial build already attempted")
+
+    self._spec = NormalizePartitionCompleteSpec(completeSpec)
+    self._variant = self._spec.variant
+    self._needsRebuild = true
+    self._needsTuning = nil
+    self._pendingTuning = nil
+    self._needsRetarget = nil
+    self._needsEnabled = nil
+    self._needsVisibility = nil
+    RequestMutation(self)
+end
+
+function PartitionControllerMixin:ApplyTuning(tuning)
+    assert(not self._destroyed and not self._destroyRequested,
+        "aura partition controller is destroyed")
+    assert(self._spec,
+        "aura partition controller requires a complete spec")
+
+    tuning = NormalizePartitionTuning(tuning)
+    assert((self._spec.main == nil) == (tuning.main == nil),
+        "aura partition main topology requires Rebuild")
+    assert(
+        (self._spec.complement == nil)
+            == (tuning.complement == nil),
+        "aura partition complement topology requires Rebuild"
+    )
+
+    self._pendingTuning = tuning
+    self._needsTuning = true
+    RequestMutation(self)
+end
+
+function PartitionControllerMixin:SetUnit(unit)
+    assert(not self._destroyed and not self._destroyRequested,
+        "aura partition controller is destroyed")
+    assert(self._spec,
+        "aura partition controller requires a complete spec")
+    assert(IsNonEmptyString(unit),
+        "aura partition unit must be a non-empty string")
+    if self._spec.unit == unit then return end
+
+    self._spec.unit = unit
+    if not self._needsRebuild then
+        self._needsRetarget = true
+    end
+    RequestMutation(self)
+end
+
+function PartitionControllerMixin:SetEnabled(enabled)
+    assert(not self._destroyed and not self._destroyRequested,
+        "aura partition controller is destroyed")
+    assert(self._spec,
+        "aura partition controller requires a complete spec")
+    assert(type(enabled) == "boolean",
+        "aura partition enabled must be a boolean")
+    if self._spec.enabled == enabled then return end
+
+    self._spec.enabled = enabled
+    if not self._needsRebuild then
+        self._needsEnabled = true
+    end
+    self._needsVisibility = true
+    RequestMutation(self)
+end
+
+function PartitionControllerMixin:SetShown(shown)
+    assert(not self._destroyed and not self._destroyRequested,
+        "aura partition controller is destroyed")
+    assert(self._spec,
+        "aura partition controller requires a complete spec")
+    assert(type(shown) == "boolean",
+        "aura partition shown must be a boolean")
+    if self._spec.shown == shown then return end
+
+    self._spec.shown = shown
+    self._needsVisibility = true
+    RequestMutation(self)
+end
+
+function PartitionControllerMixin:SetVariant(variant)
+    assert(not self._destroyed and not self._destroyRequested,
+        "aura partition controller is destroyed")
+    variant = NormalizePartitionVariant(variant)
+    if self._variant == variant then return end
+
+    self._variant = variant
+    if self._spec then
+        self._spec.variant = variant
+        self._needsVisibility = true
+        RequestMutation(self)
+    end
+end
+
+function PartitionControllerMixin:Refresh()
+    assert(not self._destroyed and not self._destroyRequested,
+        "aura partition controller is destroyed")
+    assert(self._spec,
+        "aura partition controller requires a complete spec")
+
+    for _, key in ipairs(PARTITION_VARIANTS) do
+        local child = self[key]
+        if self._spec[key] and PartitionChildBuilt(child) then
+            child:Refresh()
+        end
+    end
+end
+
+function PartitionControllerMixin:Destroy()
+    if self._destroyed or self._destroyRequested then return end
+
+    self._destroyRequested = true
+    self._holderConfig = nil
+    self._needsRebuild = nil
+    self._needsTuning = nil
+    self._pendingTuning = nil
+    self._needsRetarget = nil
+    self._needsEnabled = nil
+    self._needsVisibility = nil
+    RequestMutation(self)
+end
+
+function UF.CreateNativeAuraPartitionController(parent, name)
+    if not UF.HasNativeAuraContainerBackend() then
+        return nil
+    end
+
+    local controller = setmetatable({}, PartitionControllerMixin)
+    controller.frame = CreateFrame("Frame", name, parent)
+    controller.frame:SetAlpha(0)
+    controller._holderAlpha = 0
+    if not InCombatLockdown() then
+        controller.frame:Hide()
+        controller._holderShown = false
+    else
+        controller._needsVisibility = true
+        QueueController(controller)
+    end
+    controller.friendly = UF.CreateNativeAuraContainerController(
+        controller.frame,
+        name .. "_Friendly"
+    )
+    controller.main = UF.CreateNativeAuraContainerController(
+        controller.frame,
+        name .. "_HostileMain"
+    )
+    controller.complement = UF.CreateNativeAuraContainerController(
+        controller.frame,
+        name .. "_HostileComplement",
+        nil,
+        "DisableUntrustedLayoutScriptsTemplate"
+    )
+    return controller
 end
 
 function UF.CreateNativeGroupAuraContainerController(
