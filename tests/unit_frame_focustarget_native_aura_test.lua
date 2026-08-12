@@ -1399,39 +1399,39 @@ local function testFocusTargetRuntimeLifecycleHasNoGrowth()
         "FocusTarget lifecycle compile count")
 end
 
-local function testFocusTargetLegacyFallbackUsesBothAuraBuilders()
+local function testFocusTargetUnavailableBackendUsesBothAuraBuilders()
     local harness = makeEventRuntimeHarness(true, false)
     local buffs = harness.buffs
     local debuffs = harness.debuffs
 
     assertEqual(#harness.controllers, 0,
-        "12.0.7 FocusTarget native controller count")
+        "unavailable backend FocusTarget native controller count")
     assertEqual(#harness.compiles, 0,
-        "12.0.7 FocusTarget native compile count")
+        "unavailable backend FocusTarget native compile count")
     assertEqual(#harness.legacyConstructions, 2,
-        "12.0.7 FocusTarget legacy builder count")
+        "unavailable backend FocusTarget legacy builder count")
     assertEqual(buffs.builder, "auras",
-        "12.0.7 FocusTarget buffs builder")
+        "unavailable backend FocusTarget buffs builder")
     assertEqual(buffs.name, "BFI_FocusTarget_Buffs",
-        "12.0.7 FocusTarget buffs name")
+        "unavailable backend FocusTarget buffs name")
     assertEqual(buffs.auraFilter, "HELPFUL",
-        "12.0.7 FocusTarget buffs filter")
+        "unavailable backend FocusTarget buffs filter")
     assertEqual(buffs.hasSubFrame, nil,
-        "12.0.7 FocusTarget buffs subframe flag")
+        "unavailable backend FocusTarget buffs subframe flag")
     assertEqual(debuffs.builder, "auras",
-        "12.0.7 FocusTarget debuffs builder")
+        "unavailable backend FocusTarget debuffs builder")
     assertEqual(debuffs.name, "BFI_FocusTarget_Debuffs",
-        "12.0.7 FocusTarget debuffs name")
+        "unavailable backend FocusTarget debuffs name")
     assertEqual(debuffs.auraFilter, "HARMFUL",
-        "12.0.7 FocusTarget debuffs filter")
+        "unavailable backend FocusTarget debuffs filter")
     assertEqual(debuffs.hasSubFrame, nil,
-        "12.0.7 FocusTarget debuffs subframe flag")
+        "unavailable backend FocusTarget debuffs subframe flag")
 
     harness.root.hooks.OnShow(harness.root)
     assertEqual(buffs.enableCount, 1,
-        "12.0.7 FocusTarget buffs enable count")
+        "unavailable backend FocusTarget buffs enable count")
     assertEqual(debuffs.enableCount, 1,
-        "12.0.7 FocusTarget debuffs enable count")
+        "unavailable backend FocusTarget debuffs enable count")
 end
 
 local function testShippedFocusTargetPresetBounds()
@@ -1567,7 +1567,7 @@ testFocusTargetConfigModeGuardsAreLocal()
 testFocusTargetDefaultDisabledDoesNotBuild()
 testFocusTargetUnitEventsAndTicksRefreshNativeRuntime()
 testFocusTargetRuntimeLifecycleHasNoGrowth()
-testFocusTargetLegacyFallbackUsesBothAuraBuilders()
+testFocusTargetUnavailableBackendUsesBothAuraBuilders()
 testShippedFocusTargetPresetBounds()
 
 print("unit_frame_focustarget_native_aura_test.lua: ok")
