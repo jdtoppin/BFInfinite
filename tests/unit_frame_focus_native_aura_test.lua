@@ -629,7 +629,7 @@ local function testFocusDisableAndReenableLifecycle()
         "Focus re-enabled unit watch")
 end
 
-local function testFocusLegacyAuraFallback()
+local function testFocusUnavailableNativeBackendFallback()
     local harness = makeHarness(false)
     local update = harness.callbacks.BFI_UpdateModule
 
@@ -637,17 +637,17 @@ local function testFocusLegacyAuraFallback()
     local frame = harness.frames[1]
 
     assertEqual(#harness.nativeConstructions, 0,
-        "12.0.7 Focus native construction count")
+        "unavailable backend Focus native construction count")
     assertEqual(#harness.legacyConstructions, 2,
-        "12.0.7 Focus legacy construction count")
+        "unavailable backend Focus legacy construction count")
     assertEqual(frame.indicators.buffs.builder, "auras",
-        "12.0.7 Focus buffs fallback")
+        "unavailable backend Focus buffs fallback")
     assertEqual(frame.indicators.buffs.auraFilter, "HELPFUL",
-        "12.0.7 Focus buffs filter")
+        "unavailable backend Focus buffs filter")
     assertEqual(frame.indicators.debuffs.builder, "auras",
-        "12.0.7 Focus debuffs fallback")
+        "unavailable backend Focus debuffs fallback")
     assertEqual(frame.indicators.debuffs.auraFilter, "HARMFUL",
-        "12.0.7 Focus debuffs filter")
+        "unavailable backend Focus debuffs filter")
 
     update(nil, "unitFrames", "focus", true)
     harness.UF.config.focus.general.enabled = false
@@ -655,9 +655,9 @@ local function testFocusLegacyAuraFallback()
     harness.UF.config.focus.general.enabled = true
     update(nil, "unitFrames", "focus", true)
     assertEqual(#harness.frames, 1,
-        "12.0.7 Focus fallback frame growth")
+        "unavailable backend Focus fallback frame growth")
     assertEqual(#harness.legacyConstructions, 2,
-        "12.0.7 Focus fallback indicator growth")
+        "unavailable backend Focus fallback indicator growth")
 end
 
 local function testFocusConfigModeGuardsAreLocal()
@@ -817,7 +817,7 @@ end
 testFocusActivationAndConstructionOrder()
 testFocusDisableAndReenableLifecycle()
 testFocusConfigModeGuardsAreLocal()
-testFocusLegacyAuraFallback()
+testFocusUnavailableNativeBackendFallback()
 testShippedFocusPresetBounds()
 
 print("unit_frame_focus_native_aura_test.lua: ok")

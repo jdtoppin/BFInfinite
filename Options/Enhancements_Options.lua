@@ -21,6 +21,7 @@ local settings = {
         "missingEnhance",
     },
     mythicPlus = {
+        "autoInsertKeystone",
         "teleportButtons",
     },
 }
@@ -376,6 +377,35 @@ builder["missingEnhance"] = function(parent)
         anchorPoint:SetSelectedValue(t.cfg.missingEnhance.position[1])
         xOffset:SetValue(t.cfg.missingEnhance.position[2])
         yOffset:SetValue(t.cfg.missingEnhance.position[3])
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- autoInsertKeystone
+---------------------------------------------------------------------
+builder["autoInsertKeystone"] = function(parent)
+    if created["autoInsertKeystone"] then return created["autoInsertKeystone"] end
+
+    local pane = AF.CreateBorderedFrame(parent, "BFI_EnhancementOption_AutoInsertKeystone", nil, 30)
+    created["autoInsertKeystone"] = pane
+
+    local enabled = AF.CreateCheckButton(pane, L["Auto Insert Matching Keystone"])
+    AF.SetPoint(enabled, "LEFT", 15, 0)
+    enabled:SetTooltip(
+        L["Auto Insert Matching Keystone"],
+        L["Automatically inserts your usable Mythic Keystone when the dungeon pedestal opens. It never starts the key."]
+    )
+
+    enabled:SetOnCheck(function(checked)
+        pane.t.cfg.autoInsertKeystone.enabled = checked
+        AF.Fire("BFI_UpdateConfig", "enhancements", pane.t.id)
+    end)
+
+    function pane.Load(t)
+        pane.t = t
+        enabled:SetChecked(t.cfg.autoInsertKeystone.enabled)
     end
 
     return pane
