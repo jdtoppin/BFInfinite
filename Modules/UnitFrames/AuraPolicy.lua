@@ -12,7 +12,7 @@ local function HasAuraFilterToken(key, token)
         and auraFilters[key] == token
 end
 
--- Retail 12.1.0.68914 (wow-ui-source d3915c78) supports negated native
+-- Retail 12.1.0.69273 (wow-ui-source eb941aad) supports negated native
 -- filter tokens, but each CustomAuraContainer group owns its own limit and
 -- sort. The container also has no selector that separates public from private
 -- aura sources. This compiler records those limitations without reading any
@@ -119,6 +119,7 @@ function UF.CompileNativeAuraPolicy(baseFilter, filters)
         groups[1] = {
             key = "all",
             filterString = baseFilter,
+            playerScope = "any",
         }
     else
         -- The selected categories are an OR-union. Adding the logical
@@ -136,6 +137,14 @@ function UF.CompileNativeAuraPolicy(baseFilter, filters)
                 groups[#groups + 1] = {
                     key = rule.key,
                     filterString = concat(parts, "|"),
+                    -- Preserve the disjoint source relationship as compiler
+                    -- metadata. Later presentation compilers must not infer
+                    -- it by reparsing native filter strings.
+                    playerScope = rule.key == "player" and "player"
+                        or rule.key == "notPlayer" and "notPlayer"
+                        or enabled.player and "notPlayer"
+                        or enabled.notPlayer and "player"
+                        or "any",
                 }
                 precedingExclusionTokens[
                     #precedingExclusionTokens + 1
