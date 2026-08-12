@@ -564,6 +564,12 @@ local function makeDisabledRuntimeHarness()
                 callback()
             end,
         },
+        CreateFrame = function()
+            error("disabled Pet runtime unexpectedly created a frame", 2)
+        end,
+        GetBuildInfo = function()
+            return "12.1.0", "69273", "Aug 11 2026", 120100
+        end,
         InCombatLockdown = function()
             return false
         end,
@@ -582,6 +588,7 @@ local function makeDisabledRuntimeHarness()
         pairs = pairs,
         select = select,
         setmetatable = setmetatable,
+        tonumber = tonumber,
         type = type,
     }
     environment._G = environment

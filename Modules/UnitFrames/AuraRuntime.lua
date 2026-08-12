@@ -7,16 +7,18 @@ local F = BFI.funcs
 local AF = _G.AbstractFramework
 
 local C_Timer = C_Timer
+local CreateFrame = CreateFrame
+local GetBuildInfo = GetBuildInfo
 local InCombatLockdown = InCombatLockdown
 local UnitCanAssist = UnitCanAssist
 local UnitCanAttack = UnitCanAttack
 local UnitIsVisible = UnitIsVisible
 local ipairs, next, pairs, setmetatable, type =
     ipairs, next, pairs, setmetatable, type
+local tonumber = tonumber
 
 local CONFIG_COMMIT_DELAY = 0.15
 local RETAIL_12_1_INTERFACE_MIN = 120100
-local CreateFrame
 local nativeAuraRequirementResolved
 local requiresNativeAuraContainer
 
@@ -30,28 +32,13 @@ local function RequiresNativeAuraContainer()
     end
     nativeAuraRequirementResolved = true
 
-    local GetBuildInfo
-    local tonumber
-    for globalName, globalValue in pairs(_G) do
-        if globalName == "CreateFrame" then
-            CreateFrame = globalValue
-        elseif globalName == "GetBuildInfo" then
-            GetBuildInfo = globalValue
-        elseif globalName == "tonumber" then
-            tonumber = globalValue
-        end
-    end
-
-    -- These globals exist on every supported WoW client. Incomplete embedding
-    -- environments cannot model the inert Frame contract and retain their
-    -- historical legacy fallback; a real client with an unknown interface
-    -- still fails closed.
+    -- These globals exist on every supported WoW client. Missing build data is
+    -- not a positively identified legacy interface and therefore fails closed.
     if type(GetBuildInfo) ~= "function"
-        or type(CreateFrame) ~= "function"
         or type(tonumber) ~= "function"
     then
-        requiresNativeAuraContainer = false
-        return false
+        requiresNativeAuraContainer = true
+        return true
     end
     local _, _, _, reportedInterfaceVersion = GetBuildInfo()
     local interfaceVersion = tonumber(reportedInterfaceVersion)
