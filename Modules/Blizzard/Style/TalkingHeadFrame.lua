@@ -6,6 +6,9 @@ local F = BFI.funcs
 local AF = _G.AbstractFramework
 
 local talkingHeadMover
+local TALKING_HEAD_ACTION_WIDTH = 300
+local TALKING_HEAD_ACTION_HEIGHT = 40
+local TALKING_HEAD_ACTION_OFFSET_Y = 180
 
 -- Retail 12.1.0.68914 (jdtoppin wow-ui-source d3915c78aba77a7a9be76acbfa35c674bbb6abe9)
 -- marks frame scale and anchoring geometry secret-capable. Keep this bridge
@@ -45,6 +48,10 @@ local function IsOrdinaryOptionalBoolean(value)
         and (value == nil or type(value) == "boolean")
 end
 
+local function IsOrdinaryBoolean(value)
+    return F.isValueNonSecret(value) and type(value) == "boolean"
+end
+
 local function IsOrdinaryTable(value)
     return F.isValueNonSecret(value) and type(value) == "table"
 end
@@ -74,7 +81,7 @@ local function HasOrdinaryTalkingHeadMoverPoint()
         and IsOrdinaryNumber(y)
 end
 
-local function GetTalkingHeadEditModeState()
+local function GetTalkingHeadEditModeBaseState()
     local frame = _G.TalkingHeadFrame
     local manager = _G.EditModeManagerFrame
 
@@ -82,10 +89,7 @@ local function GetTalkingHeadEditModeState()
         or not frame
         or not manager
         or not manager.IsInitialized
-        or not manager.GetActiveLayoutInfo
-        or not manager.GetActiveLayoutSystemInfo
-        or not manager.SaveLayouts
-        or not frame.UpdateSystem
+        or not manager.IsEditModeActive
         or not frame.IsInitialized
     then
         return
@@ -121,6 +125,20 @@ local function GetTalkingHeadEditModeState()
         end
     end
 
+    return frame, manager
+end
+
+local function GetTalkingHeadCustomEditModeState(frame, manager)
+    if not frame
+        or not manager
+        or not manager.GetActiveLayoutInfo
+        or not manager.GetActiveLayoutSystemInfo
+        or not manager.SaveLayouts
+        or not frame.UpdateSystem
+    then
+        return
+    end
+
     local system = frame.system
     local systemIndex = frame.systemIndex
     if not IsOrdinaryNumber(system)
@@ -152,9 +170,10 @@ local function GetTalkingHeadEditModeState()
     local isInDefaultPosition = systemInfo.isInDefaultPosition
     local anchorInfo2 = systemInfo.anchorInfo2
     -- The default Talking Head layout is bottom-managed, so its live geometry
-    -- is container-owned rather than represented by anchorInfo.
+    -- is container-owned. Keep native ownership until Blizzard gives the frame
+    -- a simple custom anchor that BFI can faithfully mirror.
     if not IsOrdinaryTable(anchorInfo)
-        or not IsOrdinaryOptionalBoolean(isInDefaultPosition)
+        or not IsOrdinaryBoolean(isInDefaultPosition)
         or isInDefaultPosition
         or not F.isValueNonSecret(anchorInfo2)
         or anchorInfo2 ~= nil
@@ -183,36 +202,92 @@ local function GetMoverScale()
     return scale, moverScale
 end
 
-local function SyncTalkingHeadMover()
-    if not talkingHeadMover then return end
-
-    local frame, _, systemInfo = GetTalkingHeadEditModeState()
-    local moverScale, moverEffectiveScale = GetMoverScale()
-    if not frame or not moverScale then
-        DisableTalkingHeadMover()
-        return
+local function CanOpenTalkingHeadNativeEditMode(manager)
+    if not manager.CanEnterEditMode
+        or not manager.IsEditModeActive
+        or not _G.ShowUIPanel
+    then
+        return false
     end
+
+    local canEnterEditMode = manager:CanEnterEditMode()
+    return IsOrdinaryBoolean(canEnterEditMode) and canEnterEditMode
+end
+
+local function OpenTalkingHeadNativeEditMode()
+    local frame, manager = GetTalkingHeadEditModeBaseState()
+    if not frame or not CanOpenTalkingHeadNativeEditMode(manager) then return end
+
+    -- Retail 12.1.0.68914 (jdtoppin wow-ui-source
+    -- d3915c78aba77a7a9be76acbfa35c674bbb6abe9) opens HUD Edit Mode from
+    -- GameMenuFrame through CanEnterEditMode then ShowUIPanel.
+    AF.HideMovers()
+    ShowUIPanel(manager)
+
+    local isEditModeActive = manager:IsEditModeActive()
+    if not IsOrdinaryBoolean(isEditModeActive) or not isEditModeActive then return end
+
+    -- SelectSystem is a version-pinned FrameXML convenience, not a saved-layout
+    -- API. It only selects the native system; it does not move or save it.
+    if manager.SelectSystem then
+        manager:SelectSystem(frame)
+    end
+end
+
+local function EnableTalkingHeadAction(manager)
+    if not CanOpenTalkingHeadNativeEditMode(manager) then
+        AF.SetMoverAction(talkingHeadMover, nil)
+        DisableTalkingHeadMover()
+        return false
+    end
+
+    talkingHeadMover.enabled = false
+    AF.SetMoverAction(
+        talkingHeadMover,
+        OpenTalkingHeadNativeEditMode,
+        _G.HUD_EDIT_MODE_TALKING_HEAD_FRAME_LABEL .. " — " .. _G.HUD_EDIT_MODE_MENU
+    )
+    talkingHeadMover:SetSize(TALKING_HEAD_ACTION_WIDTH, TALKING_HEAD_ACTION_HEIGHT)
+    talkingHeadMover._useOriginalPoints = true
+    AF.ClearPoints(talkingHeadMover)
+    AF.SetPoint(
+        talkingHeadMover,
+        "BOTTOM",
+        AF.UIParent,
+        "BOTTOM",
+        0,
+        TALKING_HEAD_ACTION_OFFSET_Y
+    )
+    if not HasOrdinaryTalkingHeadMoverPoint() then
+        SetTalkingHeadMoverFallbackPoint()
+        DisableTalkingHeadMover()
+        return false
+    end
+    talkingHeadMover.enabled = true
+    return true
+end
+
+local function SyncCustomTalkingHeadMover(frame, systemInfo)
+    local moverScale, moverEffectiveScale = GetMoverScale()
+    if not moverScale then return false end
 
     local frameEffectiveScale = frame:GetEffectiveScale()
     local frameWidth = frame:GetWidth()
     local frameHeight = frame:GetHeight()
-    local anchorInfo = systemInfo.anchorInfo
     if not IsOrdinaryPositiveNumber(frameEffectiveScale)
         or not IsOrdinaryPositiveNumber(frameWidth)
         or not IsOrdinaryPositiveNumber(frameHeight)
     then
-        DisableTalkingHeadMover()
-        return
+        return false
     end
 
     local frameScale = frameEffectiveScale / moverEffectiveScale
-    if not IsOrdinaryPositiveNumber(frameScale) then
-        DisableTalkingHeadMover()
-        return
-    end
+    if not IsOrdinaryPositiveNumber(frameScale) then return false end
 
     local moverWidth = frameWidth * frameScale
     local moverHeight = frameHeight * frameScale
+    local anchorInfo = systemInfo.anchorInfo
+
     local offsetX = anchorInfo.offsetX / moverScale
     local offsetY = anchorInfo.offsetY / moverScale
     if not IsOrdinaryPositiveNumber(moverWidth)
@@ -220,11 +295,11 @@ local function SyncTalkingHeadMover()
         or not IsOrdinaryNumber(offsetX)
         or not IsOrdinaryNumber(offsetY)
     then
-        DisableTalkingHeadMover()
-        return
+        return false
     end
 
     talkingHeadMover.enabled = false
+    AF.SetMoverAction(talkingHeadMover, nil)
     talkingHeadMover:SetSize(moverWidth, moverHeight)
     talkingHeadMover._useOriginalPoints = true
     AF.ClearPoints(talkingHeadMover)
@@ -239,15 +314,34 @@ local function SyncTalkingHeadMover()
     if not HasOrdinaryTalkingHeadMoverPoint() then
         SetTalkingHeadMoverFallbackPoint()
         DisableTalkingHeadMover()
-        return
+        return false
     end
     talkingHeadMover.enabled = true
+    return true
+end
+
+local function SyncTalkingHeadMover()
+    if not talkingHeadMover then return end
+
+    local frame, manager = GetTalkingHeadEditModeBaseState()
+    if not frame then
+        AF.SetMoverAction(talkingHeadMover, nil)
+        DisableTalkingHeadMover()
+        return
+    end
+
+    local _, _, systemInfo = GetTalkingHeadCustomEditModeState(frame, manager)
+    if systemInfo and SyncCustomTalkingHeadMover(frame, systemInfo) then return end
+
+    EnableTalkingHeadAction(manager)
 end
 
 local function SaveTalkingHeadPosition(point, x, y)
-    local frame, manager, systemInfo = GetTalkingHeadEditModeState()
+    local frame, manager = GetTalkingHeadEditModeBaseState()
+    local _, _, systemInfo = GetTalkingHeadCustomEditModeState(frame, manager)
     local moverScale = GetMoverScale()
     if not frame
+        or not systemInfo
         or not moverScale
         or not IsOrdinaryFramePoint(point)
         or not IsOrdinaryNumber(x)

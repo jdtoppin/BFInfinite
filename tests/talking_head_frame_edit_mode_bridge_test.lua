@@ -50,11 +50,11 @@ local systemInfo = {
         point = "BOTTOM",
         relativeTo = "UIParent",
         relativePoint = "BOTTOM",
-        offsetX = 10,
-        offsetY = 20,
+        offsetX = 0,
+        offsetY = 45,
     },
     settings = {},
-    isInDefaultPosition = false,
+    isInDefaultPosition = true,
 }
 
 local manager = {
@@ -90,12 +90,21 @@ function manager:SaveLayouts()
     self.saveCalls = (self.saveCalls or 0) + 1
 end
 
+function manager:CanEnterEditMode()
+    return self.canEnterEditMode ~= false
+end
+
+function manager:SelectSystem(selectedFrame)
+    self.selectedSystem = selectedFrame
+end
+
 function manager:EnterEditMode()
     self.editModeActive = true
 end
 
 function manager:ExitEditMode()
     self.editModeActive = nil
+    self.shown = nil
 end
 
 local name = makeFontString()
@@ -115,14 +124,23 @@ local frame = {
 }
 
 function frame:GetWidth()
+    if systemInfo.isInDefaultPosition then
+        error("default preview must not read managed frame width")
+    end
     return 570
 end
 
 function frame:GetHeight()
+    if systemInfo.isInDefaultPosition then
+        error("default preview must not read managed frame height")
+    end
     return 155
 end
 
 function frame:GetEffectiveScale()
+    if systemInfo.isInDefaultPosition then
+        error("default preview must not read managed frame scale")
+    end
     return 3
 end
 
@@ -221,6 +239,7 @@ function AF.CreateMover(owner, group, textLabel, save)
         self.hideCalls = (self.hideCalls or 0) + 1
     end
     function mover:Show()
+        if self.action then return end
         if not self._original then
             local point, _, _, x, y = self.owner:GetPoint()
             self._original = {
@@ -238,6 +257,16 @@ function AF.CreateMover(owner, group, textLabel, save)
         save = save,
         text = textLabel,
     }
+end
+
+function AF.SetMoverAction(owner, action, actionText)
+    owner.mover.action = action
+    owner.mover.actionText = actionText
+    owner.mover._original = nil
+end
+
+function AF.HideMovers()
+    AF.hideMoversCalls = (AF.hideMoversCalls or 0) + 1
 end
 
 function AF.CreateFadeInOutAnimation()
@@ -294,6 +323,11 @@ local environment = {
     InCombatLockdown = function()
         return inCombat
     end,
+    ShowUIPanel = function(target)
+        target.showUIPanelCalls = (target.showUIPanelCalls or 0) + 1
+        target.shown = true
+        target:EnterEditMode()
+    end,
     UIParent = UIParent,
     hooksecurefunc = function(target, method, hook)
         local original = target[method]
@@ -309,6 +343,7 @@ local environment = {
 environment._G = environment
 environment.EditModeManagerFrame = manager
 environment.HUD_EDIT_MODE_TALKING_HEAD_FRAME_LABEL = "Talking Head"
+environment.HUD_EDIT_MODE_MENU = "HUD Edit Mode"
 environment.OTHER = "Other"
 environment.TalkingHeadFrame = frame
 
@@ -336,13 +371,61 @@ assertEqual(moverCalls[1].mover._original[2], 0, "generic mover can capture fall
 assertEqual(moverCalls[1].mover._original[3], 0, "generic mover can capture fallback y")
 moverCalls[1].mover._original = nil
 
-systemInfo.isInDefaultPosition = true
 callbacks.BFI_PrepareEditModePositions()
-assertTrue(not proxy.enabled, "managed default position remains Blizzard-only")
-systemInfo.isInDefaultPosition = false
+assertTrue(proxy.enabled, "managed default position has a BFI action entry")
+assertEqual(proxy.width, 300, "default action has a compact width")
+assertEqual(proxy.height, 40, "default action has a compact height")
+assertEqual(proxy.point[1], "BOTTOM", "default action is anchored at the screen bottom")
+assertEqual(proxy.point[2], afUIParent, "default action is anchored to AF parent")
+assertEqual(proxy.point[3], "BOTTOM", "default action uses matching relative point")
+assertEqual(proxy.point[4], 0, "default action is centered")
+assertEqual(proxy.point[5], 180, "default action sits above the action bar")
+assertEqual(type(proxy.mover.action), "function", "default action opens Blizzard HUD Edit Mode")
+assertEqual(proxy.mover.actionText, "Talking Head — HUD Edit Mode", "default action has a clear handoff label")
+moverCalls[1].mover:Show()
+assertEqual(moverCalls[1].mover._original, nil, "action entry does not create an undo snapshot")
+
+proxy.mover.action(proxy)
+assertEqual(AF.hideMoversCalls, 1, "handoff closes BFI Edit Mode")
+assertEqual(manager.showUIPanelCalls, 1, "handoff opens Blizzard HUD Edit Mode")
+assertEqual(manager.selectedSystem, frame, "handoff selects Blizzard's Talking Head system")
+assertTrue(manager.editModeActive, "handoff enters native Edit Mode")
+assertTrue(not proxy.enabled, "native Edit Mode hides the BFI action entry")
+assertEqual(frame.updateSystemCalls, nil, "handoff does not update the native frame")
+assertEqual(manager.saveCalls, nil, "handoff does not save a native layout")
+manager:ExitEditMode()
+assertTrue(proxy.enabled, "exiting native Edit Mode restores the BFI action entry")
+
+manager.canEnterEditMode = false
+callbacks.BFI_PrepareEditModePositions()
+assertTrue(not proxy.enabled, "unavailable native Edit Mode hides the action entry")
+assertEqual(proxy.mover.action, nil, "unavailable native Edit Mode clears the action callback")
+manager.canEnterEditMode = nil
 
 callbacks.BFI_PrepareEditModePositions()
+manager.activeLayoutInfo.layoutType = environment.Enum.EditModeLayoutType.Preset
+callbacks.BFI_PrepareEditModePositions()
+assertTrue(proxy.enabled, "preset layouts show the native handoff action")
+assertEqual(type(proxy.mover.action), "function", "preset layouts remain native-owned")
+local presetUpdateCalls = frame.updateSystemCalls
+local presetSaveCalls = manager.saveCalls
+proxy.mover.action(proxy)
+assertEqual(frame.updateSystemCalls, presetUpdateCalls, "preset handoff does not update the native frame")
+assertEqual(manager.saveCalls, presetSaveCalls, "preset handoff does not save a native layout")
+manager:ExitEditMode()
+
+manager.activeLayoutInfo.layoutType = environment.Enum.EditModeLayoutType.Override
+callbacks.BFI_PrepareEditModePositions()
+assertTrue(proxy.enabled, "override layouts show the native handoff action")
+assertEqual(type(proxy.mover.action), "function", "override layouts remain native-owned")
+
+manager.activeLayoutInfo.layoutType = environment.Enum.EditModeLayoutType.Account
+systemInfo.isInDefaultPosition = false
+systemInfo.anchorInfo.offsetX = 10
+systemInfo.anchorInfo.offsetY = 20
+callbacks.BFI_PrepareEditModePositions()
 assertTrue(proxy.enabled, "custom native layout enables the proxy mover")
+assertEqual(proxy.mover.action, nil, "custom native layout restores normal mover behavior")
 assertEqual(proxy.width, 1710, "proxy width preserves screen size")
 assertEqual(proxy.height, 465, "proxy height preserves screen size")
 assertEqual(proxy.point[1], "BOTTOM", "native anchor point copied to proxy")
@@ -368,7 +451,7 @@ assertEqual(systemInfo.anchorInfo.relativeTo, "UIParent", "native parent preserv
 assertEqual(systemInfo.anchorInfo.relativePoint, "TOP", "native relative point saved")
 assertEqual(systemInfo.anchorInfo.offsetX, 15, "AF x converted back to native scale")
 assertEqual(systemInfo.anchorInfo.offsetY, -20, "AF y converted back to native scale")
-assertTrue(not systemInfo.isInDefaultPosition, "native layout marked custom")
+assertTrue(not systemInfo.isInDefaultPosition, "native layout remains custom")
 assertEqual(frame.updateSystemCalls, 1, "Blizzard applies its own anchor")
 assertEqual(manager.saveCalls, 1, "Blizzard layout is persisted")
 assertEqual(frame.clearPointCalls, nil, "bridge never clears the native frame")
@@ -386,18 +469,20 @@ local previousPoint = proxy.point
 local clearPointCalls = proxy.clearPointCalls
 systemInfo.anchorInfo.offsetX = nil
 callbacks.BFI_PrepareEditModePositions()
-assertTrue(not proxy.enabled, "incomplete native anchors remain Blizzard-only")
-assertEqual(proxy.clearPointCalls, clearPointCalls, "incomplete native anchors preserve last proxy point")
-assertEqual(proxy.point, previousPoint, "incomplete native anchors retain last safe proxy anchor")
+assertTrue(proxy.enabled, "incomplete native anchors fall back to the native handoff action")
+assertEqual(type(proxy.mover.action), "function", "incomplete native anchors do not become draggable")
+assertTrue(proxy.clearPointCalls > clearPointCalls, "handoff action replaces the stale custom proxy point")
+assertTrue(proxy.point ~= previousPoint, "handoff action uses its own stable position")
 systemInfo.anchorInfo.offsetX = -25
 
 systemInfo.anchorInfo.offsetY = secretValue
 callbacks.BFI_PrepareEditModePositions()
-assertTrue(not proxy.enabled, "secret native anchors remain Blizzard-only")
-assertEqual(proxy.clearPointCalls, clearPointCalls, "secret native anchors do not clear the proxy")
+assertTrue(proxy.enabled, "secret native anchors fall back to the native handoff action")
+assertEqual(type(proxy.mover.action), "function", "secret native anchors do not become draggable")
 systemInfo.anchorInfo.offsetY = 30
 callbacks.BFI_PrepareEditModePositions()
 assertTrue(proxy.enabled, "ordinary native anchors restore the proxy")
+assertEqual(proxy.mover.action, nil, "ordinary native anchors restore normal mover behavior")
 
 local updateCalls = frame.updateSystemCalls
 local saveCalls = manager.saveCalls
@@ -407,19 +492,20 @@ assertEqual(manager.saveCalls, saveCalls, "invalid mover geometry is not persist
 
 systemInfo.anchorInfo.relativeTo = "OtherFrame"
 callbacks.BFI_PrepareEditModePositions()
-assertTrue(not proxy.enabled, "non-UIParent native anchors remain Blizzard-only")
+assertTrue(proxy.enabled, "non-UIParent native anchors fall back to the native handoff action")
+assertEqual(type(proxy.mover.action), "function", "non-UIParent native anchors do not become draggable")
 systemInfo.anchorInfo.relativeTo = "UIParent"
 
 manager.activeLayoutInfo.layoutType = environment.Enum.EditModeLayoutType.Preset
 callbacks.BFI_PrepareEditModePositions()
-assertTrue(not proxy.enabled, "preset layouts remain Blizzard-only")
+assertTrue(proxy.enabled, "preset layouts remain Blizzard-owned through the handoff action")
 moverCalls[1].save("CENTER", 1, 2)
 assertEqual(frame.updateSystemCalls, 1, "preset layout is not mutated")
 assertEqual(manager.saveCalls, 1, "preset layout is not persisted")
 
 manager.activeLayoutInfo.layoutType = environment.Enum.EditModeLayoutType.Override
 callbacks.BFI_PrepareEditModePositions()
-assertTrue(not proxy.enabled, "override layouts remain Blizzard-only")
+assertTrue(proxy.enabled, "override layouts remain Blizzard-owned through the handoff action")
 moverCalls[1].save("CENTER", 1, 2)
 assertEqual(frame.updateSystemCalls, 1, "override layout is not mutated")
 assertEqual(manager.saveCalls, 1, "override layout is not persisted")
