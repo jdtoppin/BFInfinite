@@ -630,15 +630,15 @@ builder["objectiveTrackerPlacement"] = function(parent)
 
     local placement = AF.CreateButton(
         pane,
-        L["Use BFI Right Stack"],
+        L["Set Default Position & Height"],
         "BFI_hover",
-        180,
+        220,
         20
     )
     AF.SetPoint(placement, "TOPLEFT", 15, -12)
     placement:SetTooltip(
-        L["Objective Tracker Position"],
-        L["Moves the Blizzard Objective Tracker into the active custom Blizzard Edit Mode layout, 75 pixels higher than Blizzard's preset. This keeps the tracker and docked damage meters in BFI's right-side stack. It does not save a position in your BFI profile."]
+        L["Objective Tracker Position & Height"],
+        L["Sets the Blizzard Objective Tracker to BFI's default position, 75 pixels higher than Blizzard's preset, and its default height to 640 where Blizzard supports it. This uses the active custom Blizzard Edit Mode layout and does not save a position or height in your BFI profile."]
     )
 
     local openEditMode = AF.CreateButton(
@@ -650,7 +650,7 @@ builder["objectiveTrackerPlacement"] = function(parent)
     )
     AF.SetPoint(openEditMode, "TOPLEFT", placement, "BOTTOMLEFT", 0, -7)
     openEditMode:SetTooltip(
-        L["Objective Tracker Position"],
+        L["Objective Tracker Position & Height"],
         L["The Objective Tracker is Blizzard-owned, so it is positioned in Blizzard Edit Mode rather than BFI Edit Mode. Use this to fine-tune its location."]
     )
 
@@ -662,7 +662,7 @@ builder["objectiveTrackerPlacement"] = function(parent)
     local placementSaved
 
     local unavailableStatus = {
-        busy = L["Saving Objective Tracker position..."],
+        busy = L["Saving Objective Tracker position and height..."],
         combat = L["Unavailable in combat."],
         customLayout = L["Use a custom Blizzard Edit Mode layout first."],
         editMode = L["Finish editing in Blizzard Edit Mode first."],
@@ -694,7 +694,7 @@ builder["objectiveTrackerPlacement"] = function(parent)
         local statusText = reason and (
             unavailableStatus[reason] or unavailableStatus.unavailable
         ) or placementSaved and L[
-            "Saved. Open and close Blizzard Edit Mode to apply it; temporary Blizzard layouts take precedence."
+            "Saved default position and 640 height where supported. Open and close Blizzard Edit Mode to apply it; temporary Blizzard layouts take precedence."
         ] or isDefaultPosition and L[
             "Using Blizzard's right-managed position."
         ] or L["Using a custom Blizzard Edit Mode position."]

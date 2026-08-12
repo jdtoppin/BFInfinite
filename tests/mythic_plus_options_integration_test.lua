@@ -280,6 +280,7 @@ local W = {
     end,
     SetObjectiveTrackerBFIRightStackPlacement = function()
         nativeObjectiveTrackerPlacementIsDefault = false
+        nativeObjectiveTrackerHeight = 640
         nativeObjectiveTrackerPlacementWrites =
             nativeObjectiveTrackerPlacementWrites + 1
         return true
@@ -472,21 +473,23 @@ for _, pane in ipairs(objectiveOptionPanes) do
     pane.Load(objectiveInfo)
 end
 
-local nativePlacement = findByLabel(buttons, "Use BFI Right Stack")
+local nativePlacement = findByLabel(buttons, "Set Default Position & Height")
 assertTrue(nativePlacement, "Objective Tracker native placement action")
 assertEqual(nativePlacement.enabled, true,
     "native placement remains enabled for the active Blizzard layout")
-assertEqual(nativePlacement.tooltip[1], "Objective Tracker Position",
+assertEqual(nativePlacement.tooltip[1], "Objective Tracker Position & Height",
     "native placement tooltip title")
 nativePlacement.onClick()
 assertEqual(nativeObjectiveTrackerPlacementIsDefault, false,
     "native placement leaves Blizzard's managed tracker column")
 assertEqual(nativeObjectiveTrackerPlacementWrites, 1,
     "native placement writes once through the Blizzard adapter")
+assertEqual(nativeObjectiveTrackerHeight, 640,
+    "native placement applies BFI's default Objective Tracker height")
 assertEqual(objectiveInfo.cfg.position, nil,
     "native placement is not stored in the BFI profile")
 local nativePlacementStatus = findByText(fontStrings,
-    "Saved. Open and close Blizzard Edit Mode to apply it; temporary Blizzard layouts take precedence.")
+    "Saved default position and 640 height where supported. Open and close Blizzard Edit Mode to apply it; temporary Blizzard layouts take precedence.")
 assertTrue(nativePlacementStatus,
     "native placement explains how Blizzard applies the saved layout")
 assertEqual(nativePlacementStatus.shown, true,
@@ -497,7 +500,7 @@ assertTrue(openBlizzardEditMode,
     "Objective Tracker opens its native Blizzard Edit Mode")
 assertEqual(openBlizzardEditMode.enabled, true,
     "native Edit Mode launcher is available out of combat")
-assertEqual(openBlizzardEditMode.tooltip[1], "Objective Tracker Position",
+assertEqual(openBlizzardEditMode.tooltip[1], "Objective Tracker Position & Height",
     "native Edit Mode launcher tooltip title")
 assertEqual(openBlizzardEditMode.point[1], "TOPLEFT",
     "native Edit Mode launcher stacks below the placement action")

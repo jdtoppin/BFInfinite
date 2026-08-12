@@ -157,6 +157,8 @@ assertContains(source, "SetObjectiveTrackerBFIRightStackPlacement",
     "native placement adapter is exported")
 assertContains(source, "offsetY = -200",
     "BFI right stack moves the tracker higher than Blizzard's preset")
+assertContains(source, "BFI_TRACKER_DEFAULT_HEIGHT = 640",
+    "BFI native layout defines a 640 Objective Tracker height")
 for _, forbidden in ipairs({
     "ObjectiveTrackerFrame",
     "OnSystemSettingChange",
@@ -283,8 +285,8 @@ assertEqual(
 )
 assertEqual(
     savedLayouts.layouts[1].systems[1].settings[1].value,
-    40,
-    "BFI placement leaves the native height setting unchanged"
+    24,
+    "BFI placement saves Blizzard's 640 native height value"
 )
 assertEqual(
     savedLayouts.layouts[1].systems[2].settings[1].value,
@@ -294,7 +296,19 @@ assertEqual(
 assertTrue(W.SetObjectiveTrackerBFIRightStackPlacement(),
     "matching BFI right stack placement is accepted")
 assertEqual(saveCalls, 1,
-    "matching BFI right stack placement does not rewrite layouts")
+    "matching BFI right stack position and height do not rewrite layouts")
+
+resetLayouts()
+sourceLayouts.layouts[1].systems[1].anchorInfo.offsetY = -200
+assertTrue(W.SetObjectiveTrackerBFIRightStackPlacement(),
+    "existing BFI placement upgrades its default native height")
+assertEqual(saveCalls, 1,
+    "existing BFI placement saves its missing default height once")
+assertEqual(
+    savedLayouts.layouts[1].systems[1].settings[1].value,
+    24,
+    "existing BFI placement upgrades Blizzard's 800 height to 640"
+)
 
 resetLayouts()
 sourceLayouts.layouts[1].systems[1].isInDefaultPosition = true
@@ -310,6 +324,11 @@ assertEqual(
     false,
     "BFI right stack disables Blizzard's right-managed placement"
 )
+assertEqual(
+    savedLayouts.layouts[1].systems[1].settings[1].value,
+    24,
+    "managed tracker receives BFI's 640 native height when positioned"
+)
 
 resetLayouts()
 local originalHeightSettings = Enum.EditModeObjectiveTrackerSetting
@@ -323,7 +342,43 @@ assertTrue(W.SetObjectiveTrackerBFIRightStackPlacement(),
     "placement persists without the native height enum")
 assertEqual(saveCalls, 1,
     "placement without the native height enum saves once")
+assertEqual(
+    savedLayouts.layouts[1].systems[1].settings[1].value,
+    40,
+    "older clients retain their native setting when height is unavailable"
+)
+assertEqual(#savedLayouts.layouts[1].systems[1].settings, 2,
+    "older clients do not add an invalid native height setting")
 Enum.EditModeObjectiveTrackerSetting = originalHeightSettings
+
+resetLayouts()
+sourceLayouts.layouts[1].systems[1].settings = nil
+assertTrue(W.SetObjectiveTrackerBFIRightStackPlacement(),
+    "BFI placement works without an optional native settings list")
+assertEqual(saveCalls, 1,
+    "BFI placement without an optional native settings list saves once")
+assertEqual(
+    savedLayouts.layouts[1].systems[1].settings,
+    nil,
+    "BFI placement does not invent an unsupported native settings list"
+)
+
+resetLayouts()
+table.remove(sourceLayouts.layouts[1].systems[1].settings, 1)
+assertTrue(W.SetObjectiveTrackerBFIRightStackPlacement(),
+    "BFI placement creates a missing native height setting")
+assertEqual(saveCalls, 1,
+    "BFI placement with a missing height setting saves once")
+assertEqual(
+    savedLayouts.layouts[1].systems[1].settings[2].setting,
+    Enum.EditModeObjectiveTrackerSetting.Height,
+    "BFI placement adds Blizzard's height setting"
+)
+assertEqual(
+    savedLayouts.layouts[1].systems[1].settings[2].value,
+    24,
+    "BFI placement adds its 640 native height value"
+)
 
 resetLayouts()
 table.remove(sourceLayouts.layouts[1].systems[1].settings, 1)

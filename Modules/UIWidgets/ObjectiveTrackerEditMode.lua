@@ -21,6 +21,7 @@ local NATIVE_HEIGHT_MIN = 400
 local NATIVE_HEIGHT_MAX = 1000
 local NATIVE_HEIGHT_STEP = 10
 local NATIVE_HEIGHT_DEFAULT_RAW = 40
+local BFI_TRACKER_DEFAULT_HEIGHT = 640
 local BFI_RIGHT_STACK_ANCHOR = {
     point = "TOPRIGHT",
     relativeTo = "UIParent",
@@ -128,6 +129,8 @@ local function GetObjectiveTrackerEditModeContext(
 end
 
 local function GetHeightSettingInfo(settings, heightSetting)
+    if type(settings) ~= "table" then return end
+
     for index, settingInfo in ipairs(settings) do
         if type(settingInfo) == "table"
             and settingInfo.setting == heightSetting
@@ -135,6 +138,13 @@ local function GetHeightSettingInfo(settings, heightSetting)
             return settingInfo, index
         end
     end
+end
+
+local function GetNativeHeightSetting()
+    local enums = _G.Enum
+    local settings = enums and enums.EditModeObjectiveTrackerSetting
+    if type(settings) ~= "table" then return nil end
+    return settings.Height
 end
 
 local function GetHeightFromRawValue(rawValue)
@@ -163,6 +173,29 @@ local function GetRawValueFromHeight(height)
             rawValue
         )
     )
+end
+
+local function SetHeightSettingValue(systemInfo, heightSetting, height)
+    if heightSetting == nil or type(systemInfo.settings) ~= "table" then
+        return false
+    end
+
+    local settingInfo = GetHeightSettingInfo(
+        systemInfo.settings,
+        heightSetting
+    )
+    local rawValue = GetRawValueFromHeight(height)
+    if settingInfo and settingInfo.value == rawValue then return false end
+
+    if settingInfo then
+        settingInfo.value = rawValue
+    else
+        table.insert(systemInfo.settings, {
+            setting = heightSetting,
+            value = rawValue,
+        })
+    end
+    return true
 end
 
 function W.GetObjectiveTrackerNativeHeight()
@@ -220,9 +253,9 @@ function W.SetObjectiveTrackerNativeHeight(height)
     return true
 end
 
-local function HasBFIRightStackPlacement(systemInfo)
+local function HasBFIRightStackPlacement(systemInfo, heightSetting)
     local anchorInfo = systemInfo.anchorInfo
-    return systemInfo.isInDefaultPosition == false
+    local hasPosition = systemInfo.isInDefaultPosition == false
         and type(anchorInfo) == "table"
         and anchorInfo.point == BFI_RIGHT_STACK_ANCHOR.point
         and anchorInfo.relativeTo == BFI_RIGHT_STACK_ANCHOR.relativeTo
@@ -230,6 +263,21 @@ local function HasBFIRightStackPlacement(systemInfo)
         and anchorInfo.offsetX == BFI_RIGHT_STACK_ANCHOR.offsetX
         and anchorInfo.offsetY == BFI_RIGHT_STACK_ANCHOR.offsetY
         and systemInfo.anchorInfo2 == nil
+    if not hasPosition
+        or heightSetting == nil
+        or type(systemInfo.settings) ~= "table"
+    then
+        return hasPosition
+    end
+
+    local settingInfo = GetHeightSettingInfo(
+        systemInfo.settings,
+        heightSetting
+    )
+    return settingInfo
+        and settingInfo.value == GetRawValueFromHeight(
+            BFI_TRACKER_DEFAULT_HEIGHT
+        )
 end
 
 function W.GetObjectiveTrackerNativePlacement()
@@ -260,11 +308,17 @@ function W.SetObjectiveTrackerBFIRightStackPlacement()
     local layouts = AF.Copy(context.layouts)
     local activeLayout = layouts.layouts[context.activeLayoutIndex]
     local systemInfo = activeLayout.systems[context.systemIndex]
-    if HasBFIRightStackPlacement(systemInfo) then return true end
+    local heightSetting = GetNativeHeightSetting()
+    if HasBFIRightStackPlacement(systemInfo, heightSetting) then return true end
 
     systemInfo.isInDefaultPosition = false
     systemInfo.anchorInfo = AF.Copy(BFI_RIGHT_STACK_ANCHOR)
     systemInfo.anchorInfo2 = nil
+    SetHeightSettingValue(
+        systemInfo,
+        heightSetting,
+        BFI_TRACKER_DEFAULT_HEIGHT
+    )
 
     nativeLayoutSaveInProgress = true
     context.editMode.SaveLayouts(layouts)
