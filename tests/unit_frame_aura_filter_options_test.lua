@@ -146,6 +146,10 @@ local function makeWidget(kind, harness, parent, text)
         self.onCheck = callback
     end
 
+    function widget:SetOnChange(callback)
+        self.onChange = callback
+    end
+
     function widget:SetOnClick(callback)
         self.onClick = callback
     end
@@ -164,6 +168,14 @@ local function makeWidget(kind, harness, parent, text)
 
     function widget:SetOnValueChanged(callback)
         self.onValueChanged = callback
+    end
+
+    function widget:SetConfirmButton(callback)
+        self.onConfirm = callback
+    end
+
+    function widget:SetMaxLetters(value)
+        self.maxLetters = value
     end
 
     function widget:SetSelectedValue(value)
@@ -328,10 +340,30 @@ local function makeHarness(
         )
     end
 
+    function AF.CreateColorPicker(parent, text)
+        local picker = makeWidget(
+            "colorPicker",
+            harness,
+            parent,
+            text
+        )
+        picker.label = makeWidget(
+            "colorPickerLabel",
+            harness,
+            parent,
+            text
+        )
+        return picker
+    end
+
     function AF.CreateDropdown(parent, width)
         local dropdown = makeWidget("dropdown", harness, parent)
         dropdown.width = width
         return dropdown
+    end
+
+    function AF.CreateEditBox(parent, text)
+        return makeWidget("editBox", harness, parent, text)
     end
 
     function AF.CreateFontString(parent, text)
@@ -384,12 +416,24 @@ local function makeHarness(
         }
     end
 
+    function AF.GetDropdownItems_AnchorPoint()
+        return {}
+    end
+
     function AF.GetEditBox(parent)
         return makeWidget("editBox", harness, parent)
     end
 
     function AF.GetGradientText(text)
-        return text
+        return "<gradient>" .. text .. "</gradient>"
+    end
+
+    function AF.LSM_GetFontDropdownItems()
+        return {}
+    end
+
+    function AF.LSM_GetFontOutlineDropdownItems()
+        return {}
     end
 
     function AF.GetIcon(name)
@@ -1321,18 +1365,28 @@ local function testRetailSpellLists(hasNativeBackend)
         )
         assertContains(
             tip.text,
-            "may ignore the list for protected auras",
+            "protected auras may bypass the list",
             version .. " spell-list limitation warning"
         )
         assertContains(
             tip.text,
-            "always makes available to addons",
+            "Auras Blizzard keeps available can still be filtered",
             version .. " spell-list exception warning"
         )
         assertContains(
             tip.text,
-            "hides the whole aura row",
+            "BFI hides that aura row",
             version .. " spell-list conservative holder behavior"
+        )
+        assertContains(
+            tip.text,
+            "<MouseLeftClick>Edit",
+            version .. " spell-list edit hint"
+        )
+        assertContains(
+            tip.text,
+            "<MouseRightClick>Delete",
+            version .. " spell-list delete hint"
         )
     else
         assertContains(
@@ -1344,6 +1398,16 @@ local function testRetailSpellLists(hasNativeBackend)
             tip.text,
             "saved list is kept",
             version .. " spell-list read-only warning"
+        )
+        assertNotContains(
+            tip.text,
+            "<MouseLeftClick>Edit",
+            version .. " inactive edit hint"
+        )
+        assertNotContains(
+            tip.text,
+            "<MouseRightClick>Delete",
+            version .. " inactive delete hint"
         )
     end
 end
@@ -1412,23 +1476,33 @@ local function testRetailIndicatorAwareNativeWording()
         )
         assertContains(
             tip.text,
-            "Spell lists work",
+            "Works for buffs on units you can help and debuffs on units you cannot help",
             label .. " native spell-list message"
         )
         assertContains(
             tip.text,
-            "may ignore the list for protected auras",
+            "protected auras may bypass the list",
             label .. " native limitation message"
         )
         assertContains(
             tip.text,
-            "always makes available to addons",
+            "Auras Blizzard keeps available can still be filtered",
             label .. " native exception message"
         )
         assertContains(
             tip.text,
-            "hides the whole aura row",
+            "BFI hides that aura row",
             label .. " native holder behavior"
+        )
+        assertContains(
+            tip.text,
+            "<MouseLeftClick>Edit",
+            label .. " native edit hint"
+        )
+        assertContains(
+            tip.text,
+            "<MouseRightClick>Delete",
+            label .. " native delete hint"
         )
         assertNotContains(
             tip.text,
@@ -1500,8 +1574,13 @@ local function testRetailIndicatorAwareNativeWording()
         )
         assertNotContains(
             tip.text,
-            "can apply saved spell-ID lists",
-            label .. " native spell-list message"
+            "<MouseLeftClick>Edit",
+            label .. " inactive edit hint"
+        )
+        assertNotContains(
+            tip.text,
+            "<MouseRightClick>Delete",
+            label .. " inactive delete hint"
         )
         assertTrue(
             spellPane.listTopPadding < nativeTopPadding,
@@ -1933,6 +2012,88 @@ local function testNonRetailSemantics()
     )
 end
 
+local function testPlainAuraControlLabels()
+    local harness = makeHarness(true, true)
+    assertContains(
+        harness.AF.GetGradientText("probe"),
+        "<gradient>",
+        "gradient sentinel"
+    )
+
+    local stackPane = harness.builders.stackText(makeParent())
+    assertTrue(
+        findWidget(
+            stackPane,
+            "checkButton",
+            "initialText",
+            "Stack Text"
+        ) ~= nil,
+        "Stack Text uses a plain label"
+    )
+
+    local durationPane =
+        harness.builders.durationText(makeParent())
+    assertTrue(
+        findWidget(
+            durationPane,
+            "checkButton",
+            "initialText",
+            "Duration Text"
+        ) ~= nil,
+        "Duration Text uses a plain label"
+    )
+
+    local info = newInfo("debuffs", "target")
+    local colorPane =
+        harness.builders.auraTypeColor(makeParent())
+    colorPane.Load(info)
+    local colorLabel = findWidget(
+        colorPane,
+        "fontString",
+        "kind",
+        "fontString"
+    )
+    assertContains(
+        colorLabel.text,
+        "Border Color",
+        "Border Color label"
+    )
+    assertNotContains(
+        colorLabel.text,
+        "<gradient>",
+        "Border Color uses a plain label"
+    )
+
+    local partitionPane =
+        harness.builders.auraSubFrame(makeParent())
+    partitionPane.Load(info)
+    local partitionLabel = findWidget(
+        partitionPane,
+        "checkButton",
+        "initialText",
+        "Enable Sub Frame"
+    )
+    assertEqual(
+        partitionLabel.text,
+        "Separate Auras Not from Player, Pet, or Vehicle",
+        "target partition uses a plain label"
+    )
+
+    local arrangementPane =
+        harness.builders.auraArrangement(makeParent())
+    local arrangement = findWidget(
+        arrangementPane,
+        "dropdown",
+        "kind",
+        "dropdown"
+    )
+    assertEqual(
+        arrangement.label,
+        "Arrangement",
+        "aura Arrangement uses a plain label"
+    )
+end
+
 for _, hasNativeBackend in ipairs({false, true}) do
     testRetailCanonicalFilters(hasNativeBackend)
     testRetailSpellLists(hasNativeBackend)
@@ -1941,5 +2102,6 @@ end
 testRetailIndicatorAwareNativeWording()
 testPtr7FilterTokenCapabilities()
 testNonRetailSemantics()
+testPlainAuraControlLabels()
 
 print("unit_frame_aura_filter_options_test.lua: ok")
