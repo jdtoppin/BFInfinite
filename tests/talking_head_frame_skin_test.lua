@@ -156,7 +156,9 @@ local colors = {
     white = {1, 1, 1, 1},
 }
 
-local AF = {}
+local AF = {
+    UIParent = {},
+}
 
 function AF.CreateFadeInOutAnimation(region, duration, noHide)
     fadeAnimationCalls[#fadeAnimationCalls + 1] = {
@@ -203,6 +205,14 @@ end
 function AF.CreateMover()
 end
 
+function AF.ClearPoints(region)
+    region:ClearAllPoints()
+end
+
+function AF.SetPoint(region, point, relativeTo, relativePoint, x, y)
+    region:SetPoint(point, relativeTo, relativePoint, x, y)
+end
+
 function AF.RegisterCallback(event, registeredCallback)
     callbacks[event] = registeredCallback
 end
@@ -244,6 +254,11 @@ function S.StyleCloseButton(button)
 end
 
 local BFI = {
+    funcs = {
+        isValueNonSecret = function()
+            return true
+        end,
+    },
     modules = {
         Style = S,
     },
@@ -254,6 +269,9 @@ local environment = {
     CreateFrame = function()
         local proxy = {}
 
+        function proxy:ClearAllPoints()
+        end
+
         function proxy:Hide()
         end
 
@@ -261,6 +279,12 @@ local environment = {
         end
 
         function proxy:SetScript()
+        end
+
+        function proxy:SetPoint()
+        end
+
+        function proxy:SetSize()
         end
 
         return proxy
@@ -274,6 +298,7 @@ local environment = {
         end
     end,
     ipairs = ipairs,
+    math = math,
     select = select,
     tostring = tostring,
     type = type,

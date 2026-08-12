@@ -31,6 +31,7 @@ local inCombat = false
 local callbacks = {}
 local moverCalls = {}
 local proxy
+local secretValue = {}
 
 local UIParent = {
     GetEffectiveScale = function()
@@ -183,6 +184,11 @@ local function CreateFrame()
         self.point = {point, relativeTo, relativePoint, x, y}
     end
 
+    function proxy:GetPoint()
+        if not self.point then return end
+        return self.point[1], self.point[2], self.point[3], self.point[4], self.point[5]
+    end
+
     return proxy
 end
 
@@ -197,16 +203,37 @@ end
 
 function AF.SetPoint(region, point, relativeTo, relativePoint, x, y)
     region:SetPoint(point, relativeTo, relativePoint, x, y)
+    region._points = {
+        [point] = {point, relativeTo, relativePoint, x, y},
+    }
+end
+
+function AF.RoundToDecimal(num, decimalPlaces)
+    local multiplier = 10 ^ decimalPlaces
+    return math.floor(num * multiplier + 0.5) / multiplier
 end
 
 function AF.CreateMover(owner, group, textLabel, save)
-    owner.mover = {
-        Hide = function(self)
-            self.hideCalls = (self.hideCalls or 0) + 1
-        end,
+    local mover = {
+        owner = owner,
     }
+    function mover:Hide()
+        self.hideCalls = (self.hideCalls or 0) + 1
+    end
+    function mover:Show()
+        if not self._original then
+            local point, _, _, x, y = self.owner:GetPoint()
+            self._original = {
+                point,
+                AF.RoundToDecimal(x, 1),
+                AF.RoundToDecimal(y, 1),
+            }
+        end
+    end
+    owner.mover = mover
     moverCalls[#moverCalls + 1] = {
         group = group,
+        mover = mover,
         owner = owner,
         save = save,
         text = textLabel,
@@ -240,6 +267,11 @@ function S.StyleCloseButton()
 end
 
 local BFI = {
+    funcs = {
+        isValueNonSecret = function(value)
+            return value ~= secretValue
+        end,
+    },
     modules = {
         Style = S,
     },
@@ -270,6 +302,7 @@ local environment = {
             hook(...)
         end
     end,
+    math = math,
     select = select,
     type = type,
 }
@@ -290,6 +323,18 @@ assertEqual(moverCalls[1].owner, proxy, "native frame is not the mover owner")
 assertEqual(moverCalls[1].group, "BFI: Other", "mover group")
 assertEqual(moverCalls[1].text, "Talking Head", "mover label")
 assertEqual(proxy.event, "EDIT_MODE_LAYOUTS_UPDATED", "native layout resync event")
+assertEqual(proxy.width, 1, "proxy has an inert fallback width")
+assertEqual(proxy.height, 1, "proxy has an inert fallback height")
+assertEqual(proxy.point[1], "CENTER", "proxy is anchored before mover registration")
+assertEqual(proxy.point[2], afUIParent, "fallback uses AF parent")
+assertEqual(proxy.point[3], "CENTER", "fallback uses matching relative point")
+assertEqual(proxy.point[4], 0, "fallback x")
+assertEqual(proxy.point[5], 0, "fallback y")
+moverCalls[1].mover:Show()
+assertEqual(moverCalls[1].mover._original[1], "CENTER", "generic mover can capture fallback point")
+assertEqual(moverCalls[1].mover._original[2], 0, "generic mover can capture fallback x")
+assertEqual(moverCalls[1].mover._original[3], 0, "generic mover can capture fallback y")
+moverCalls[1].mover._original = nil
 
 systemInfo.isInDefaultPosition = true
 callbacks.BFI_PrepareEditModePositions()
@@ -305,6 +350,10 @@ assertEqual(proxy.point[2], afUIParent, "proxy is anchored to AF parent")
 assertEqual(proxy.point[3], "BOTTOM", "native relative point copied to proxy")
 assertEqual(proxy.point[4], 20, "native x is converted to AF mover scale")
 assertEqual(proxy.point[5], 40, "native y is converted to AF mover scale")
+moverCalls[1].mover:Show()
+assertEqual(moverCalls[1].mover._original[1], "BOTTOM", "generic mover captures the native point after sync")
+assertEqual(moverCalls[1].mover._original[2], 20, "generic mover captures the native x after sync")
+assertEqual(moverCalls[1].mover._original[3], 40, "generic mover captures the native y after sync")
 
 local hideCalls = proxy.mover.hideCalls or 0
 manager:EnterEditMode()
@@ -332,6 +381,29 @@ systemInfo.anchorInfo.offsetY = 30
 proxy.OnEvent(proxy, "EDIT_MODE_LAYOUTS_UPDATED")
 assertEqual(proxy.point[4], -50, "layout event refreshes native x")
 assertEqual(proxy.point[5], 60, "layout event refreshes native y")
+
+local previousPoint = proxy.point
+local clearPointCalls = proxy.clearPointCalls
+systemInfo.anchorInfo.offsetX = nil
+callbacks.BFI_PrepareEditModePositions()
+assertTrue(not proxy.enabled, "incomplete native anchors remain Blizzard-only")
+assertEqual(proxy.clearPointCalls, clearPointCalls, "incomplete native anchors preserve last proxy point")
+assertEqual(proxy.point, previousPoint, "incomplete native anchors retain last safe proxy anchor")
+systemInfo.anchorInfo.offsetX = -25
+
+systemInfo.anchorInfo.offsetY = secretValue
+callbacks.BFI_PrepareEditModePositions()
+assertTrue(not proxy.enabled, "secret native anchors remain Blizzard-only")
+assertEqual(proxy.clearPointCalls, clearPointCalls, "secret native anchors do not clear the proxy")
+systemInfo.anchorInfo.offsetY = 30
+callbacks.BFI_PrepareEditModePositions()
+assertTrue(proxy.enabled, "ordinary native anchors restore the proxy")
+
+local updateCalls = frame.updateSystemCalls
+local saveCalls = manager.saveCalls
+moverCalls[1].save("TOP", math.huge, 0)
+assertEqual(frame.updateSystemCalls, updateCalls, "invalid mover geometry is not applied")
+assertEqual(manager.saveCalls, saveCalls, "invalid mover geometry is not persisted")
 
 systemInfo.anchorInfo.relativeTo = "OtherFrame"
 callbacks.BFI_PrepareEditModePositions()
