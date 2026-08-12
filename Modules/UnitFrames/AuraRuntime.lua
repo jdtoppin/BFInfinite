@@ -8,6 +8,7 @@ local AF = _G.AbstractFramework
 local C_Timer = C_Timer
 local InCombatLockdown = InCombatLockdown
 local UnitCanAssist = UnitCanAssist
+local UnitCanAttack = UnitCanAttack
 local UnitIsVisible = UnitIsVisible
 local ipairs, next, pairs, type = ipairs, next, pairs, type
 
@@ -256,6 +257,27 @@ local function PassesVisibility(runtime)
     return true
 end
 
+local function ResolvePartitionVariant(runtime)
+    local partition = runtime._descriptor
+        and runtime._descriptor.partition
+    local selector = partition and partition.selector
+    if not runtime._partitionCapable
+        or type(selector) ~= "table"
+        or selector.kind ~= "unitCanAttack"
+    then
+        return "friendly"
+    end
+
+    local canAttack = UnitCanAttack(
+        selector.actorUnit or "player",
+        runtime._unit
+    )
+    if F.isValueNonSecret(canAttack) and canAttack == true then
+        return "hostile"
+    end
+    return "friendly"
+end
+
 local function ShouldShowNative(runtime)
     return runtime._state == STATE_READY
         and runtime._active
@@ -274,11 +296,19 @@ local function SyncWatcher(runtime)
         )
     local hasDynamicUnit = MatchesStableUnit(runtime, "target")
         or MatchesStableUnit(runtime, "focus")
+    local hasPartitionSelector = runtime._partitionCapable
+        and runtime._descriptor
+        and runtime._descriptor.partition
+        and runtime._descriptor.partition.selector ~= nil
     SetRuntimeWatched(
         runtime,
         runtime._active
             and runtime._state == STATE_READY
-            and (hasGate or hasDynamicUnit)
+            and (
+                hasGate
+                or hasDynamicUnit
+                or hasPartitionSelector
+            )
             and ShouldEnableNative(runtime)
             and not runtime._destroyed
     )
@@ -302,6 +332,10 @@ local function SyncLifecycle(runtime)
         and ShouldEnableNative(runtime)
     local shown = enabled and ShouldShowNative(runtime)
 
+    if runtime._partitionCapable then
+        runtime._partitionVariant = ResolvePartitionVariant(runtime)
+        runtime._controller:SetVariant(runtime._partitionVariant)
+    end
     if not shown then
         runtime._controller:SetShown(false)
     end
@@ -318,6 +352,7 @@ local function Compile(runtime, unit)
     if type(unit) ~= "string" or unit == "" then
         runtime._descriptor = nil
         runtime._error = nil
+        runtime._partitionVariant = nil
         runtime._state = STATE_WAITING_FOR_UNIT
         return
     end
@@ -334,10 +369,18 @@ local function Compile(runtime, unit)
         runtime._state = STATE_ERROR
     elseif descriptor.empty then
         runtime._state = STATE_EMPTY
-    elseif not descriptor.migrationReady then
+    elseif not descriptor.migrationReady
+        or (descriptor.partition and not runtime._partitionCapable)
+    then
         runtime._state = STATE_PARTITION_DEFERRED
     else
         runtime._state = STATE_READY
+    end
+
+    if runtime._partitionCapable and descriptor and descriptor.partition then
+        runtime._partitionVariant = ResolvePartitionVariant(runtime)
+    else
+        runtime._partitionVariant = nil
     end
 end
 
@@ -353,6 +396,72 @@ local function ApplyPlacement(runtime, descriptor)
             placement.anchorTo
         )
     end)
+end
+
+local function GetVariantField(variant, field)
+    return variant and variant[field] or nil
+end
+
+local function CopyOptional(value)
+    return type(value) == "table" and AF.Copy(value) or value
+end
+
+local function BuildControllerDescriptor(runtime, descriptor)
+    if not runtime._partitionCapable then
+        return {
+            completeSpec = descriptor.completeSpec,
+            tuningSpec = descriptor.tuningSpec,
+            constructionKey = descriptor.constructionKey,
+        }
+    end
+
+    local partition = descriptor.partition
+    local hostile = partition and partition.hostile
+    local main = hostile and hostile.main
+    local complement = hostile and hostile.complement
+    local holder = partition
+        and partition.holder
+        or descriptor.completeSpec.holder
+
+    runtime._partitionVariant = ResolvePartitionVariant(runtime)
+    return {
+        completeSpec = {
+            unit = runtime._unit,
+            enabled = true,
+            shown = false,
+            variant = runtime._partitionVariant,
+            holder = AF.Copy(holder),
+            friendly = AF.Copy(descriptor.completeSpec),
+            main = CopyOptional(GetVariantField(main, "completeSpec")),
+            complement = CopyOptional(
+                GetVariantField(complement, "completeSpec")
+            ),
+            attachment = CopyOptional(hostile and hostile.attachment),
+        },
+        tuningSpec = {
+            holder = AF.Copy(holder),
+            friendly = AF.Copy(descriptor.tuningSpec),
+            main = CopyOptional(GetVariantField(main, "tuningSpec")),
+            complement = CopyOptional(
+                GetVariantField(complement, "tuningSpec")
+            ),
+            attachment = CopyOptional(hostile and hostile.attachment),
+        },
+        -- Construction-only button styles differ between the friendly,
+        -- hostile main, and hostile complement variants. Include every
+        -- prebuilt topology so subframe appearance changes rebuild instead
+        -- of being submitted as unsupported tuning.
+        constructionKey = {
+            kind = "relationPartition",
+            friendly = AF.Copy(descriptor.constructionKey),
+            main = CopyOptional(
+                GetVariantField(main, "constructionKey")
+            ),
+            complement = CopyOptional(
+                GetVariantField(complement, "constructionKey")
+            ),
+        },
+    }
 end
 
 Commit = function(runtime)
@@ -396,30 +505,40 @@ Commit = function(runtime)
     RemoveCombatCommit(runtime)
 
     local descriptor = runtime._descriptor
+    local controllerDescriptor = BuildControllerDescriptor(
+        runtime,
+        descriptor
+    )
     local constructionChanged = not runtime._built
         or not DeepEqual(
             runtime._constructionKey,
-            descriptor.constructionKey
+            controllerDescriptor.constructionKey
         )
 
     if runtime._configDirty then
         ApplyPlacement(runtime, descriptor)
 
         if constructionChanged then
-            local completeSpec = AF.Copy(descriptor.completeSpec)
+            local completeSpec = AF.Copy(
+                controllerDescriptor.completeSpec
+            )
             completeSpec.unit = runtime._unit
             completeSpec.enabled = true
             completeSpec.shown = ShouldShowNative(runtime)
             runtime._controller:Rebuild(completeSpec)
             runtime._built = true
         else
-            runtime._controller:ApplyTuning(descriptor.tuningSpec)
+            runtime._controller:ApplyTuning(
+                controllerDescriptor.tuningSpec
+            )
             if runtime._appliedUnit ~= runtime._unit then
                 runtime._controller:SetUnit(runtime._unit)
             end
         end
 
-        runtime._constructionKey = AF.Copy(descriptor.constructionKey)
+        runtime._constructionKey = AF.Copy(
+            controllerDescriptor.constructionKey
+        )
     elseif runtime._unitDirty and runtime._built then
         runtime._controller:SetShown(false)
         runtime._controller:SetUnit(runtime._unit)
@@ -669,11 +788,22 @@ local function NativeAuras_GetState(self)
         configMode = self._configMode == true,
         migrationReady = descriptor and descriptor.migrationReady or false,
         empty = descriptor and descriptor.empty or false,
-        visibility = descriptor and AF.Copy(descriptor.visibility) or nil,
-        partition = descriptor and AF.Copy(descriptor.partition) or nil,
-        diagnostics = descriptor and AF.Copy(descriptor.diagnostics) or {},
-        degradations = descriptor and AF.Copy(descriptor.degradations) or {},
-        metrics = descriptor and AF.Copy(descriptor.metrics) or {},
+        visibility = CopyOptional(
+            descriptor and descriptor.visibility
+        ),
+        partition = CopyOptional(
+            descriptor and descriptor.partition
+        ),
+        partitionVariant = self._partitionVariant,
+        diagnostics = CopyOptional(
+            descriptor and descriptor.diagnostics
+        ) or {},
+        degradations = CopyOptional(
+            descriptor and descriptor.degradations
+        ) or {},
+        metrics = CopyOptional(
+            descriptor and descriptor.metrics
+        ) or {},
     }
 end
 
@@ -719,20 +849,18 @@ end
 ---------------------------------------------------------------------
 -- create
 ---------------------------------------------------------------------
-function UF.CreateNativeAuraIndicator(parent, name, auraFilter, hasSubFrame)
-    if not UF.HasNativeAuraContainerBackend() then
-        return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
-    end
-
-    local controller = UF.CreateNativeAuraContainerController(parent, name)
-    if not controller then
-        return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
-    end
-
+local function InitializeNativeAuraIndicator(
+    parent,
+    auraFilter,
+    hasSubFrame,
+    controller,
+    partitionCapable
+)
     local frame = controller:GetFrame()
     frame.root = parent
     frame.auraFilter = auraFilter
     frame._hasSubFrame = hasSubFrame == true
+    frame._partitionCapable = partitionCapable == true
     frame._controller = controller
     frame._state = STATE_NEW
     frame._commitGeneration = 0
@@ -752,13 +880,79 @@ function UF.CreateNativeAuraIndicator(parent, name, auraFilter, hasSubFrame)
     return frame
 end
 
--- Keep the 12.0.7 path and Target's complementary subframe exact until a
+function UF.CreateNativeAuraIndicator(parent, name, auraFilter, hasSubFrame)
+    if not UF.HasNativeAuraContainerBackend() then
+        return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
+    end
+
+    local controller = UF.CreateNativeAuraContainerController(parent, name)
+    if not controller then
+        return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
+    end
+
+    return InitializeNativeAuraIndicator(
+        parent,
+        auraFilter,
+        hasSubFrame,
+        controller,
+        false
+    )
+end
+
+function UF.CreateNativePartitionedAuraIndicator(
+    parent,
+    name,
+    auraFilter,
+    hasSubFrame
+)
+    if not UF.HasNativeAuraContainerBackend() then
+        return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
+    end
+
+    local controller = UF.CreateNativeAuraPartitionController(
+        parent,
+        name
+    )
+    if not controller then
+        return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
+    end
+
+    return InitializeNativeAuraIndicator(
+        parent,
+        auraFilter,
+        hasSubFrame,
+        controller,
+        true
+    )
+end
+
+-- Keep Target's complementary subframe on the established fallback until a
 -- frame-specific PR explicitly adopts a migration-ready native contract.
 function UF.CreateNativeAuras(parent, name, auraFilter, hasSubFrame)
     if hasSubFrame or not UF.HasNativeAuraContainerBackend() then
         return UF.CreateAuras(parent, name, auraFilter, hasSubFrame)
     end
     return UF.CreateNativeAuraIndicator(
+        parent,
+        name,
+        auraFilter,
+        hasSubFrame
+    )
+end
+
+-- Opt-in builder for frame integrations that have accepted the compiled
+-- relation-partition contract. The legacy implementation remains the exact
+-- fallback when the 12.1 native backend is unavailable.
+function UF.CreateNativePartitionedAuras(
+    parent,
+    name,
+    auraFilter,
+    hasSubFrame
+)
+    if not UF.HasNativeAuraContainerBackend() then
+        return UF.CreateAuras(parent, name, auraFilter, hasSubFrame)
+    end
+    return UF.CreateNativePartitionedAuraIndicator(
         parent,
         name,
         auraFilter,

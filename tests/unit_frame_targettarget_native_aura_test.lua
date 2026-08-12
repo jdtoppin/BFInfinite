@@ -636,6 +636,9 @@ local function makeEventRuntimeHarness()
         UnitCanAssist = function()
             return true
         end,
+        UnitCanAttack = function()
+            return false
+        end,
         UnitClass = function()
             return nil
         end,
