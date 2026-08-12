@@ -712,7 +712,7 @@ local function testBossDisableAndReenableLifecycle()
     end
 end
 
-local function testBossLegacyAuraFallback()
+local function testBossUnavailableBackendFallback()
     local harness = makeHarness(false)
     local update = harness.callbacks.BFI_UpdateModule
 
@@ -720,18 +720,18 @@ local function testBossLegacyAuraFallback()
     local boss = harness.frames[1]
 
     assertEqual(#harness.nativeConstructions, 0,
-        "12.0.7 Boss native construction count")
+        "unavailable-backend Boss native construction count")
     assertEqual(#harness.legacyConstructions, 16,
-        "12.0.7 Boss legacy construction count")
+        "unavailable-backend Boss legacy construction count")
     for index = 1, 8 do
         assertEqual(boss[index].indicators.buffs.builder, "auras",
-            "12.0.7 Boss buffs fallback " .. index)
+            "unavailable-backend Boss buffs fallback " .. index)
         assertEqual(boss[index].indicators.buffs.auraFilter, "HELPFUL",
-            "12.0.7 Boss buffs filter " .. index)
+            "unavailable-backend Boss buffs filter " .. index)
         assertEqual(boss[index].indicators.debuffs.builder, "auras",
-            "12.0.7 Boss debuffs fallback " .. index)
+            "unavailable-backend Boss debuffs fallback " .. index)
         assertEqual(boss[index].indicators.debuffs.auraFilter, "HARMFUL",
-            "12.0.7 Boss debuffs filter " .. index)
+            "unavailable-backend Boss debuffs filter " .. index)
     end
 
     update(nil, "unitFrames", "boss", true)
@@ -740,9 +740,9 @@ local function testBossLegacyAuraFallback()
     harness.UF.config.boss.general.enabled = true
     update(nil, "unitFrames", "boss", true)
     assertEqual(#harness.frames, 9,
-        "12.0.7 Boss fallback frame growth")
+        "unavailable-backend Boss fallback frame growth")
     assertEqual(#harness.legacyConstructions, 16,
-        "12.0.7 Boss fallback indicator growth")
+        "unavailable-backend Boss fallback indicator growth")
 end
 
 local function testBossConfigModeGuardsAreLocal()
@@ -952,7 +952,7 @@ end
 testBossActivationAndConstructionOrder()
 testBossDisableAndReenableLifecycle()
 testBossConfigModeGuardsAreLocal()
-testBossLegacyAuraFallback()
+testBossUnavailableBackendFallback()
 testShippedBossPresetBounds()
 
 print("unit_frame_boss_native_aura_test.lua: ok")
