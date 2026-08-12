@@ -926,7 +926,7 @@ function UF.CreateNativePartitionedAuraIndicator(
     )
 end
 
--- Keep the 12.0.7 path and Target's complementary subframe exact until a
+-- Keep Target's complementary subframe on the established fallback until a
 -- frame-specific PR explicitly adopts a migration-ready native contract.
 function UF.CreateNativeAuras(parent, name, auraFilter, hasSubFrame)
     if hasSubFrame or not UF.HasNativeAuraContainerBackend() then

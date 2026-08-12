@@ -567,6 +567,9 @@ local function makeDisabledRuntimeHarness()
         UnitCanAssist = function()
             return true
         end,
+        UnitCanAttack = function()
+            return false
+        end,
         UnitIsVisible = function()
             return true
         end,

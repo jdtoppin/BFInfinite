@@ -642,7 +642,7 @@ local function testDormancyAndFallback()
             true
         )
     assertEqual(nativePartitionFallback, unavailable.legacyFrames[2],
-        "12.0.7 partition legacy fallback")
+        "backend-unavailable partition legacy fallback")
     assertEqual(nativePartitionFallback.hasSubFrame, true,
         "partition fallback subframe")
 
