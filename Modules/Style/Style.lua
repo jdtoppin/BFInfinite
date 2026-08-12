@@ -1219,7 +1219,7 @@ function S.StyleTitleBarInfoButton(frame, button)
     AF.SetFrameLevel(button, 1, frame.BFIHeader)
 end
 
-function S.StyleTitledFrame(frame, movableTarget)
+function S.StyleTitledFrame(frame, movableTarget, useLightweightBackdrop)
     assert(frame, "StyleTitledFrame: frame is nil")
 
     if frame._BFIStyled then return end
@@ -1239,7 +1239,11 @@ function S.StyleTitledFrame(frame, movableTarget)
 
     -- style into bfi -----------------------------------------------
     -- bg
-    frame.BFIBg = AF.CreateBorderedFrame(frame)
+    local CreateBorderedFrame = useLightweightBackdrop
+        and AF.CreateLightweightBorderedFrame
+        or AF.CreateBorderedFrame
+
+    frame.BFIBg = CreateBorderedFrame(frame)
     frame.BFIBg:SetAllPoints(frame)
     AF.SetFrameLevel(frame.BFIBg)
 
@@ -1247,7 +1251,7 @@ function S.StyleTitledFrame(frame, movableTarget)
     AF.AddToPixelUpdater_CustomGroup("BFIStyled", frame.BFIBg)
 
     -- title
-    frame.BFIHeader = AF.CreateBorderedFrame(frame, nil, nil, nil, "header", "border")
+    frame.BFIHeader = CreateBorderedFrame(frame, nil, nil, nil, "header", "border")
     frame.BFIHeader:SetPoint("TOPLEFT")
     frame.BFIHeader:SetPoint("TOPRIGHT")
     AF.SetHeight(frame.BFIHeader, 20)
@@ -1513,7 +1517,23 @@ end
 ---------------------------------------------------------------------
 local start
 
+local function HasPublicPixelGeometry(region)
+    local width, height = region:GetSize()
+    if not F.isValueNonSecret(width)
+        or not F.isValueNonSecret(height)
+        or type(width) ~= "number"
+        or type(height) ~= "number"
+    then
+        return false
+    end
+
+    local scale = region:GetEffectiveScale()
+    return F.isValueNonSecret(scale)
+        and type(scale) == "number" and scale > 0
+end
+
 local function UpdatePixels(_, region, remaining, total)
+    if not HasPublicPixelGeometry(region) then return end
     region:UpdatePixels()
     -- print("BFIStyled: ", AF.RoundToDecimal((total - remaining) / total, 2))
 end

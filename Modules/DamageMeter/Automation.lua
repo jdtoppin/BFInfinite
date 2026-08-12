@@ -88,6 +88,13 @@ local function HandleMythicPlusStart()
     local layoutChanged
 
     if config.resetOnMythicPlusStart then
+        local widgets = BFI.modules.UIWidgets
+        local mythicPlus = widgets and widgets.MythicPlus
+        if mythicPlus
+            and type(mythicPlus.PrepareForDamageMeterReset) == "function"
+        then
+            mythicPlus.PrepareForDamageMeterReset("mythicPlusStart")
+        end
         DM.Data.Reset()
     end
 
