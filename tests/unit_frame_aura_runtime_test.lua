@@ -883,6 +883,97 @@ local function testWatcherRoutesUnitSignals()
     targetRuntime:Disable()
 end
 
+local function testWatcherRoutesRelationshipSignals()
+    local harness = makeHarness()
+    local focusRoot = newRoot("VehicleFocus", "focus")
+    local targetRoot = newRoot("VehicleTarget", "target")
+    focusRoot.effectiveUnit = "focuspet"
+    targetRoot.effectiveUnit = "targetpet"
+    local focusRuntime, focusController = createRuntime(
+        harness,
+        focusRoot
+    )
+    local targetRuntime, targetController = createRuntime(
+        harness,
+        targetRoot
+    )
+
+    focusRuntime:LoadConfig(validConfig())
+    targetRuntime:LoadConfig(validConfig())
+    focusRuntime:Enable()
+    targetRuntime:Enable()
+    local focusRefreshes = focusController.refreshCount
+    local targetRefreshes = targetController.refreshCount
+
+    harness:Fire("PLAYER_TARGET_CHANGED")
+    harness:RunTimers(0.05)
+    assertEqual(
+        focusController.refreshCount,
+        focusRefreshes,
+        "derived target-event focus suppression"
+    )
+    assertEqual(
+        targetController.refreshCount,
+        targetRefreshes + 1,
+        "derived target-event target refresh"
+    )
+
+    harness:Fire("PLAYER_FOCUS_CHANGED")
+    harness:RunTimers(0.05)
+    assertEqual(
+        focusController.refreshCount,
+        focusRefreshes + 1,
+        "derived focus-event focus refresh"
+    )
+    assertEqual(
+        targetController.refreshCount,
+        targetRefreshes + 1,
+        "derived focus-event target suppression"
+    )
+
+    harness:Fire("UNIT_FACTION", "targetpet")
+    harness:RunTimers(0.05)
+    assertEqual(
+        focusController.refreshCount,
+        focusRefreshes + 1,
+        "effective-faction focus suppression"
+    )
+    assertEqual(
+        targetController.refreshCount,
+        targetRefreshes + 2,
+        "effective-faction target refresh"
+    )
+
+    harness:Fire("UNIT_FACTION", "target")
+    harness:RunTimers(0.05)
+    assertEqual(
+        focusController.refreshCount,
+        focusRefreshes + 1,
+        "root-faction focus suppression"
+    )
+    assertEqual(
+        targetController.refreshCount,
+        targetRefreshes + 3,
+        "root-faction target refresh"
+    )
+
+    harness:Fire("UNIT_FACTION", "player")
+    harness:RunTimers(0.05)
+    assertEqual(
+        focusController.refreshCount,
+        focusRefreshes + 2,
+        "player-faction focus relationship refresh"
+    )
+    assertEqual(
+        targetController.refreshCount,
+        targetRefreshes + 4,
+        "player-faction target relationship refresh"
+    )
+
+    focusRuntime:Disable()
+    targetRuntime:Disable()
+end
+
 local function testQuiesceAndRecovery()
     local harness = makeHarness()
     local root = newRoot("Recovery", "target")
@@ -1199,6 +1290,7 @@ testSharedCombatCommitQueue()
 testCombatConfigSupersession()
 testUngatedFocusWatcher()
 testWatcherRoutesUnitSignals()
+testWatcherRoutesRelationshipSignals()
 testQuiesceAndRecovery()
 testSecretSafeWholeHolderGates()
 testConfigModeNeverRetargetsPlayer()
