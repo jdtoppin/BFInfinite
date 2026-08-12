@@ -7,7 +7,75 @@ local F = BFI.funcs
 local AF = _G.AbstractFramework
 
 local changelogsFrame
-local changelogs
+
+local function EscapeHTML(value)
+    if type(value) ~= "string" then
+        return ""
+    end
+
+    return value
+        :gsub("&", "&amp;")
+        :gsub("<", "&lt;")
+        :gsub(">", "&gt;")
+        :gsub('"', "&quot;")
+        :gsub("'", "&#39;")
+end
+
+local function GetLocalizedNote(note, locale)
+    if type(note) ~= "table" then
+        return nil
+    end
+
+    local localized = type(locale) == "string" and note[locale]
+    if type(localized) == "string" and localized ~= "" then
+        return localized
+    end
+
+    if type(note.enUS) == "string" and note.enUS ~= "" then
+        return note.enUS
+    end
+end
+
+local function BuildChangelogHTML(locale)
+    local output = {}
+    local releases = BFI.changelog
+    if type(releases) ~= "table" then
+        return ""
+    end
+
+    for _, release in ipairs(releases) do
+        if type(release) == "table"
+            and type(release.version) == "string"
+            and release.version ~= ""
+        then
+            local heading = EscapeHTML(release.version)
+            if type(release.date) == "string" and release.date ~= "" then
+                heading = heading .. " (" .. EscapeHTML(release.date) .. ")"
+            end
+            output[#output + 1] = "<h1>" .. heading .. "</h1>"
+
+            if type(release.notes) == "table" then
+                for _, note in ipairs(release.notes) do
+                    local text = GetLocalizedNote(note, locale)
+                    if text then
+                        output[#output + 1] = "<p>- " .. EscapeHTML(text) .. "</p>"
+                    end
+                end
+            end
+
+            output[#output + 1] = "<br/>"
+        end
+    end
+
+    if output[#output] == "<br/>" then
+        output[#output] = nil
+    end
+    return table.concat(output, "\n")
+end
+
+-- Kept on the addon function table so the renderer can be covered without
+-- constructing Blizzard UI objects in a standalone Lua test.
+F.BuildChangelogHTML = BuildChangelogHTML
 
 ---------------------------------------------------------------------
 -- create
@@ -61,7 +129,8 @@ local function CreateChangelogsFrame()
     --------------------------------------------------
     function changelogsFrame:Load()
         changelogsFrame:Show()
-        html:SetText("<html><body>" .. changelogs .. "</body></html>")
+        local locale = LOCALE_zhCN and "zhCN" or "enUS"
+        html:SetText("<html><body>" .. BuildChangelogHTML(locale) .. "</body></html>")
         RunNextFrame(function()
             html:SetHeight(html:GetContentHeight())
             scroll:SetContentHeight(html:GetHeight() + 30, true)
@@ -82,35 +151,4 @@ function F.ToggleChangelogsFrame()
     else
         changelogsFrame:Load()
     end
-end
-
----------------------------------------------------------------------
--- changelogs
----------------------------------------------------------------------
-if LOCALE_zhCN then
-    changelogs = [[
-<h1>r2-alpha (2025-10-14 17:30 GMT+8)</h1>
-<p>- 新增职业强调色的支持</p>
-<p>- 修复单位框体的预设问题</p>
-<p>- 临时修复字体相关问题</p>
-<p>- 更新增益与减益选项</p>
-<p>- 更新字体选项</p>
-<br/>
-
-<h1>r1-alpha (2025-10-06 01:36 GMT+8)</h1>
-<p>- 首次发布</p>
-    ]]
-else
-    changelogs = [[
-<h1>r2-alpha (2025-10-14 17:30 GMT+8)</h1>
-<p>- Added class accent color support</p>
-<p>- Fixed Unit Frames preset issues</p>
-<p>- Temporary font fixes</p>
-<p>- Updated Buffs &amp; Debuffs options</p>
-<p>- Updated font options</p>
-<br/>
-
-<h1>r1-alpha (2025-10-06 01:36 GMT+8)</h1>
-<p>- Initial release</p>
-    ]]
 end
