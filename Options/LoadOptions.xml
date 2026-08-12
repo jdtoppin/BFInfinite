@@ -22,6 +22,7 @@
     <Script file="UIWidgets.lua"/>
     <Script file="DataBars_Options.lua"/>
     <Script file="DataBars.lua"/>
+    <Script file="DamageMeter.lua"/>
     <Script file="Maps_Options.lua"/>
     <Script file="Maps.lua"/>
     <Script file="Chat.lua"/>
@@ -30,5 +31,6 @@
     <Script file="Profiles.lua"/>
     <Script file="About.lua"/>
     <Script file="CVarRestoreFrame.lua"/>
+    <Script file="ChangelogData.lua"/>
     <Script file="ChangelogsFrame.lua"/>
 </Ui>

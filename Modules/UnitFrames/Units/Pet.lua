@@ -6,6 +6,7 @@ local UF = BFI.modules.UnitFrames
 local AF = _G.AbstractFramework
 
 local pet
+local UnitWatchRegistered = UnitWatchRegistered
 local indicators = {
     "healthBar",
     "powerBar",
@@ -21,8 +22,8 @@ local indicators = {
     "targetHighlight",
     "mouseoverHighlight",
     "threatGlow",
-    {"auras", "buffs", "HELPFUL"},
-    {"auras", "debuffs", "HARMFUL"},
+    {"nativeAuras", "buffs", "HELPFUL"},
+    {"nativeAuras", "debuffs", "HARMFUL"},
 }
 
 ---------------------------------------------------------------------
@@ -32,6 +33,7 @@ local function CreatePet()
     local name = "BFI_Pet"
     pet = CreateFrame("Button", name, UF.Parent, "BFIUnitButtonTemplate")
     pet:SetAttribute("unit", "pet")
+    pet._updateOnUnitPetChanged = "player"
 
     -- mover
     AF.CreateMover(pet, "BFI: " .. L["Unit Frames"], _G.PET)
@@ -46,6 +48,14 @@ local function CreatePet()
     UF.CreateIndicators(pet, indicators)
 end
 
+local function RestorePetConfigModeIndicators()
+    for _, indicator in pairs(pet.indicators) do
+        if indicator.EnableConfigMode then
+            indicator:EnableConfigMode()
+        end
+    end
+end
+
 ---------------------------------------------------------------------
 -- update
 ---------------------------------------------------------------------
@@ -58,20 +68,35 @@ local function UpdatePet(_, module, which, skipIndicatorUpdates)
     if not (UF.config.general.enabled and config.general.enabled) then
         if pet then
             UF.DisableIndicators(pet)
-            UnregisterUnitWatch(pet)
+            if UnitWatchRegistered(pet) then
+                UnregisterUnitWatch(pet)
+            end
             pet:Hide()
         end
         return
     end
 
+    local wasEnabled = pet ~= nil and pet.enabled == true
     if not pet then
         CreatePet()
     end
 
     -- setup
-    UF.SetupUnitFrame(pet, config, indicators, skipIndicatorUpdates)
+    UF.SetupUnitFrame(
+        pet,
+        config,
+        indicators,
+        skipIndicatorUpdates == true and wasEnabled
+    )
 
-    -- visibility NOTE: show must invoke after settings applied
-    RegisterUnitWatch(pet)
+    if pet.inConfigMode then
+        if not wasEnabled then
+            RestorePetConfigModeIndicators()
+        end
+        pet:Show()
+    elseif not UnitWatchRegistered(pet) then
+        -- visibility NOTE: show must invoke after settings applied
+        RegisterUnitWatch(pet)
+    end
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdatePet)

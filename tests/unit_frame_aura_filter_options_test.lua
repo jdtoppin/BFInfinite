@@ -298,168 +298,6 @@ local function makeHarness(
         end,
     })
 
-    function F.ResolveUnitFrameAuraFilters(baseFilter, config)
-        if baseFilter ~= "HELPFUL" and baseFilter ~= "HARMFUL" then
-            return
-        end
-        if type(config) ~= "table" then return end
-
-        local hasCanonical = false
-        for _, field in ipairs(CANONICAL_FIELDS) do
-            if config[field] ~= nil then
-                hasCanonical = true
-                break
-            end
-        end
-
-        if hasCanonical then
-            local all = config.all == true
-            local player = config.player == true
-            local notPlayer = config.notPlayer == true
-            if player and notPlayer then
-                all = true
-            end
-            return {
-                all = all,
-                player = not all and player,
-                notPlayer = not all and notPlayer,
-                raidInCombat =
-                    not all and config.raidInCombat == true,
-                raidPlayerDispellable =
-                    not all
-                    and config.raidPlayerDispellable == true,
-                bigDefensive =
-                    not all
-                    and baseFilter == "HELPFUL"
-                    and config.bigDefensive == true,
-                externalDefensive =
-                    not all
-                    and baseFilter == "HELPFUL"
-                    and config.externalDefensive == true,
-                important =
-                    not all
-                    and baseFilter == "HELPFUL"
-                    and config.important == true,
-                anyDispellable =
-                    not all
-                    and config.anyDispellable == true,
-            }, {
-                legacy = false,
-                legacySourceFilterUsesSuperset = false,
-                bossAuraUsesCuratedRaidInCombat = false,
-                legacyDispellableUsesRaidPlayerDispellable = false,
-            }
-        end
-
-        local castByMe = config.castByMe == true
-        local castByOthers = config.castByOthers == true
-        local castByUnit = config.castByUnit == true
-        local castByNPC = config.castByNPC == true
-        local exactNotPlayer = castByOthers and castByNPC
-        local notPlayer = castByOthers or castByNPC
-        local exactAll = castByMe and exactNotPlayer
-        local all = castByUnit or (castByMe and notPlayer)
-        local migration = {
-            legacy = true,
-            legacySourceFilterUsesSuperset =
-                (notPlayer and not exactNotPlayer)
-                or (all and not exactAll),
-            bossAuraUsesCuratedRaidInCombat =
-                not all and config.isBossAura == true,
-            legacyDispellableUsesRaidPlayerDispellable =
-                not all
-                and (
-                    config.dispellable == true
-                    or config.canBeDispelled == true
-                ),
-        }
-        if all then
-            return {
-                all = true,
-                player = false,
-                notPlayer = false,
-                raidInCombat = false,
-                raidPlayerDispellable = false,
-                bigDefensive = false,
-                externalDefensive = false,
-                important = false,
-                anyDispellable = false,
-            }, migration
-        end
-
-        return {
-            all = false,
-            player = castByMe,
-            notPlayer = notPlayer,
-            raidInCombat = config.isBossAura == true,
-            raidPlayerDispellable =
-                config.dispellable == true
-                or config.canBeDispelled == true,
-            bigDefensive = false,
-            externalDefensive = false,
-            important = false,
-            anyDispellable = false,
-        }, migration
-    end
-
-    function F.SetUnitFrameAuraFilter(
-        baseFilter,
-        config,
-        field,
-        value
-    )
-        local supported = false
-        for _, candidate in ipairs(CANONICAL_FIELDS) do
-            if candidate == field then
-                supported = true
-                break
-            end
-        end
-        if not supported or type(value) ~= "boolean" then
-            return false
-        end
-        if baseFilter ~= "HELPFUL"
-            and (
-                field == "bigDefensive"
-                or field == "externalDefensive"
-                or field == "important"
-            )
-        then
-            return false
-        end
-
-        local resolved =
-            F.ResolveUnitFrameAuraFilters(baseFilter, config)
-        if not resolved then return false end
-        resolved[field] = value
-        if field == "all" and value then
-            for _, canonical in ipairs(CANONICAL_FIELDS) do
-                if canonical ~= "all" then
-                    resolved[canonical] = false
-                end
-            end
-        elseif field ~= "all" and value then
-            resolved.all = false
-            if resolved.player and resolved.notPlayer then
-                resolved.all = true
-                resolved.player = false
-                resolved.notPlayer = false
-            end
-        end
-        for _, canonical in ipairs(CANONICAL_FIELDS) do
-            config[canonical] = resolved[canonical]
-        end
-        for _, legacy in ipairs(LEGACY_FIELDS) do
-            config[legacy] = nil
-        end
-        harness.setCalls[#harness.setCalls + 1] = {
-            baseFilter = baseFilter,
-            field = field,
-            value = value,
-        }
-        return true
-    end
-
     function AF.ClearPoints(widget)
         widget.points = {}
     end
@@ -726,6 +564,9 @@ local function makeHarness(
         NONE = "None",
         ceil = math.ceil,
         error = error,
+        GetCVar = function()
+            return "0"
+        end,
         ipairs = ipairs,
         math = math,
         next = next,
@@ -755,6 +596,24 @@ local function makeHarness(
             )
         end,
     })
+
+    local utilsChunk, utilsLoadError = loadfile("Utils.lua")
+    assertTrue(utilsChunk, utilsLoadError)
+    setfenv(utilsChunk, environment)
+    utilsChunk("BFInfinite", BFI)
+
+    local setAuraFilter = F.SetUnitFrameAuraFilter
+    function F.SetUnitFrameAuraFilter(baseFilter, config, field, value)
+        local changed = setAuraFilter(baseFilter, config, field, value)
+        if changed then
+            harness.setCalls[#harness.setCalls + 1] = {
+                baseFilter = baseFilter,
+                field = field,
+                value = value,
+            }
+        end
+        return changed
+    end
 
     local chunk, loadError =
         loadfile("Options/UnitFrames_Options.lua")
@@ -1198,7 +1057,7 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         anyDispellable = false,
     }, version .. " canonical materialization")
 
-    local harmful = newInfo("debuffs", "target", {
+    local harmful = newInfo("debuffs", "focus", {
         player = true,
         raidInCombat = true,
         raidPlayerDispellable = true,
@@ -1227,7 +1086,7 @@ local function testRetailCanonicalFilters(hasNativeBackend)
     assertEqual(notPlayer.enabled, true,
         version .. " harmful not-player enabled state")
 
-    local friendly = newInfo("buffs", "party", {
+    local friendly = newInfo("buffs", "player", {
         player = true,
         raidInCombat = true,
         raidPlayerDispellable = true,
@@ -1473,7 +1332,7 @@ local function testRetailSpellLists(hasNativeBackend)
     local pane = harness.builders.auraBlackListWhitelist(parent)
     local info = newInfo(
         hasNativeBackend and "debuffs" or "buffs",
-        "target"
+        hasNativeBackend and "focus" or "target"
     )
 
     pane.Load(info)
@@ -1549,12 +1408,12 @@ local function testRetailSpellLists(hasNativeBackend)
         )
         assertContains(
             tip.text,
-            "protected spells may bypass the list",
+            "protected auras may bypass the list",
             version .. " spell-list limitation warning"
         )
         assertContains(
             tip.text,
-            "Spells Blizzard keeps available can still be filtered",
+            "Auras Blizzard keeps available can still be filtered",
             version .. " spell-list exception warning"
         )
         assertContains(
@@ -1596,30 +1455,20 @@ local function testRetailSpellLists(hasNativeBackend)
     end
 end
 
-local ALL_AURA_OWNERS = {
-    "player",
-    "target",
-    "focus",
-    "pet",
-    "targettarget",
-    "focustarget",
-    "pettarget",
-    "party",
-    "raid",
+local NATIVE_AURA_OWNERS = {
     "boss",
+    "focus",
+    "focustarget",
+    "player",
+    "pet",
+    "pettarget",
+    "targettarget",
 }
 
-local NATIVE_BUFF_OWNERS = {
-    "boss",
-    "focus",
-    "focustarget",
-    "player",
-    "pet",
-    "pettarget",
+local LEGACY_AURA_OWNERS = {
     "party",
     "raid",
     "target",
-    "targettarget",
 }
 
 local function testRetailIndicatorAwareNativeWording()
@@ -1683,12 +1532,12 @@ local function testRetailIndicatorAwareNativeWording()
         )
         assertContains(
             tip.text,
-            "protected spells may bypass the list",
+            "protected auras may bypass the list",
             label .. " native limitation message"
         )
         assertContains(
             tip.text,
-            "Spells Blizzard keeps available can still be filtered",
+            "Auras Blizzard keeps available can still be filtered",
             label .. " native exception message"
         )
         assertContains(
@@ -1771,10 +1620,10 @@ local function testRetailIndicatorAwareNativeWording()
         )
     end
 
-    local function assertLegacyBuffPresentation(owner, runtimeKind)
-        local label = owner .. " buffs"
+    local function assertLegacyPresentation(id, owner, runtimeKind)
+        local label = owner .. " " .. id
         local info = newInfo(
-            "buffs",
+            id,
             owner,
             nil,
             runtimeKind
@@ -1866,17 +1715,21 @@ local function testRetailIndicatorAwareNativeWording()
         )
     end
 
-    for _, owner in ipairs(NATIVE_BUFF_OWNERS) do
+    for _, owner in ipairs(NATIVE_AURA_OWNERS) do
         assertNativePresentation("buffs", owner)
-    end
-    for _, owner in ipairs(ALL_AURA_OWNERS) do
         assertNativePresentation("debuffs", owner)
+    end
+    for _, owner in ipairs(LEGACY_AURA_OWNERS) do
+        assertLegacyPresentation("buffs", owner)
+        assertLegacyPresentation("debuffs", owner)
     end
     -- An instantiated runtime is authoritative over the fallback integration
     -- map. This keeps the wording honest while branches are tested alone or
     -- if a later integration changes which aura factory owns a row.
-    assertLegacyBuffPresentation("player", "legacy")
+    assertLegacyPresentation("buffs", "player", "legacy")
+    assertLegacyPresentation("debuffs", "player", "legacy")
     assertNativePresentation("buffs", "target", "native")
+    assertNativePresentation("debuffs", "target", "native")
 end
 
 local COOLDOWN_STYLES = {
@@ -1984,6 +1837,9 @@ local function testRetailPresentation(hasNativeBackend)
 
     local arrangementPane =
         harness.builders.auraArrangement(makeParent())
+    if hasNativeBackend then
+        debuffs = newInfo("debuffs", "focus")
+    end
     arrangementPane.Load(debuffs)
     local maximum = findWidget(
         arrangementPane,
