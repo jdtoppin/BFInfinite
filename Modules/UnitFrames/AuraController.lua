@@ -150,8 +150,13 @@ function UF.CreateNativeGroupAuraContainerSeed(parent)
 
     local container = AF.CreateCustomAuraContainer(parent)
     constructionStats.seedsAllocated = constructionStats.seedsAllocated + 1
-    container:Hide()
-    AF.SetCustomAuraContainerEnabled(container, false)
+    -- A newly allocated/header-adjacent shell must be visually inert even if
+    -- it is created while protected visibility writes are unavailable.
+    container:SetAlpha(0)
+    if not InCombatLockdown() then
+        container:Hide()
+        AF.SetCustomAuraContainerEnabled(container, false)
+    end
     return container
 end
 
@@ -380,6 +385,7 @@ ControllerMixin.__index = ControllerMixin
 
 local function HasNativeMutation(controller)
     return controller._destroyRequested
+        or controller._needsClaimInitialization
         or controller._holderConfig
         or controller._needsRebuild
         or controller._needsTuning
@@ -411,9 +417,51 @@ function ControllerMixin:_QueueRegenDispatch()
     end)
 end
 
+local function SetHolderCurtained(controller, curtained)
+    local alpha = curtained and 0 or 1
+    if curtained then
+        controller._presentationApplied = nil
+    end
+    if controller._holderAlpha == alpha then return end
+
+    -- This is BFI's own plain holder, never a native aura container or
+    -- restricted child. Alpha provides an immediate fail-closed curtain while
+    -- the complete presentation is changed through constant writes.
+    controller.frame:SetAlpha(alpha)
+    controller._holderAlpha = alpha
+end
+
+local function SetExternalContainerCurtained(controller, curtained)
+    if not controller._containerIsExternal or not controller._container then
+        return
+    end
+
+    local alpha = curtained and 0 or 1
+    if controller._containerAlpha == alpha then return end
+
+    -- A seeded container is not parented to the plain holder, so curtain its
+    -- inherited Frame alpha separately. The 12.1.0.69273/eb941aad
+    -- SimpleRegion contract permits this constant SetAlpha write. This
+    -- remains a write-only gate: BFI never reads native visibility, children,
+    -- or aura state.
+    controller._container:SetAlpha(alpha)
+    controller._containerAlpha = alpha
+end
+
+local function SetPresentationCurtained(controller, curtained)
+    SetHolderCurtained(controller, curtained)
+    SetExternalContainerCurtained(controller, curtained)
+end
+
 local function SetHolderShownSafe(controller, shown)
+    if not shown then
+        SetHolderCurtained(controller, true)
+    end
     if controller._holderShown == shown then
         return true
+    end
+    if InCombatLockdown() then
+        return false
     end
 
     -- Retail 12.1.0.69273 can make visibility and hover accessors secret when
@@ -431,6 +479,9 @@ local function SetExternalContainerShownSafe(controller, shown)
     then
         return true
     end
+    if InCombatLockdown() then
+        return false
+    end
 
     if shown then
         controller._container:Show()
@@ -441,11 +492,30 @@ local function SetExternalContainerShownSafe(controller, shown)
     return true
 end
 
+local function IsControllerVisibilityApplied(controller, shown)
+    if controller._holderShown ~= shown then
+        return false
+    end
+    return not controller._containerIsExternal
+        or not controller._container
+        or controller._containerShown == shown
+end
+
 local function SetControllerShownSafe(controller, shown)
     -- A header-born/seeded container is parented to the secure unit button,
     -- not to BFI's plain holder. Hide it explicitly before hiding the holder;
     -- show it only after the holder is restored. No native visibility is
     -- read: _containerShown tracks only BFI's own successful writes.
+    SetPresentationCurtained(controller, true)
+    if InCombatLockdown() then
+        if not IsControllerVisibilityApplied(controller, shown) then
+            return false
+        end
+        if shown then
+            SetPresentationCurtained(controller, false)
+        end
+        return true
+    end
     if not shown and not SetExternalContainerShownSafe(controller, false) then
         return false
     end
@@ -455,15 +525,26 @@ local function SetControllerShownSafe(controller, shown)
     if shown and not SetExternalContainerShownSafe(controller, true) then
         return false
     end
+    -- Hidden, deferred, and destroyed presentations stay behind the alpha
+    -- curtain. Show/Hide/SetShown can be protected for header-born frames,
+    -- while constant SetAlpha writes remain permitted by the pinned 12.1
+    -- contract. Only expose a completely applied shown presentation.
+    if shown then
+        SetPresentationCurtained(controller, false)
+    end
     return true
 end
 
 local function RestoreControllerVisibility(controller)
     local spec = controller._spec
-    return SetControllerShownSafe(
+    local applied = SetControllerShownSafe(
         controller,
         spec ~= nil and spec.enabled and spec.shown
     )
+    if applied then
+        controller._presentationApplied = true
+    end
+    return applied
 end
 
 local function PositionContainer(container, holder, point)
@@ -556,7 +637,7 @@ function ControllerMixin:_Build()
         + #spec.slots
 
     -- Build the complete container while the public holder is hidden by the
-    -- hover-safe lifecycle gate. Native groups/slots are add-only, so this
+    -- write-only presentation gate. Native groups/slots are add-only, so this
     -- controller deliberately has no replacement/rebuild path after this.
     local container = self._seedContainer
     local containerIsExternal = container ~= nil
@@ -568,6 +649,9 @@ function ControllerMixin:_Build()
         self._container = container
         self._containerIsExternal = true
         self._containerShown = false
+        -- The seed was curtained at claim time, before any deferred build
+        -- work. Adopt that known write state without reading it back.
+        self._containerAlpha = 0
         MarkBuildShellStranded(self)
     end
 
@@ -580,6 +664,7 @@ function ControllerMixin:_Build()
         self._container = container
         self._containerIsExternal = false
         self._containerShown = false
+        self._containerAlpha = nil
         MarkBuildShellStranded(self)
     end
     container:Hide()
@@ -678,6 +763,8 @@ function ControllerMixin:_ApplyPending()
         if RestoreControllerVisibility(self) then
             self._needsVisibility = nil
             pendingControllers[self] = nil
+        else
+            QueueController(self)
         end
         return
     end
@@ -686,9 +773,13 @@ function ControllerMixin:_ApplyPending()
     -- complete BFI-owned presentation before applying native mutations.
     local holderHidden = SetControllerShownSafe(self, false)
     if InCombatLockdown() then
-        if holderHidden then
-            ApplyLiveUnitRetarget(self)
-        end
+        -- SetUnit/UpdateAllAuras are the only native operations explicitly
+        -- supported live. The alpha curtain is already active; protected
+        -- Show/Hide/SetShown calls are deferred until regen.
+        -- Register recovery before the supported inbound calls as well: an
+        -- unexpected adapter error must not strand a curtained controller.
+        QueueController(self)
+        ApplyLiveUnitRetarget(self)
         if HasNativeMutation(self) then
             QueueController(self)
         else
@@ -696,6 +787,8 @@ function ControllerMixin:_ApplyPending()
             if RestoreControllerVisibility(self) then
                 self._needsVisibility = nil
                 pendingControllers[self] = nil
+            else
+                QueueController(self)
             end
         end
         return
@@ -731,8 +824,10 @@ function ControllerMixin:_ApplyPending()
         end
         self._containerIsExternal = nil
         self._containerShown = nil
+        self._containerAlpha = nil
         self._nativeShellStranded = nil
         self._knownInitialReservations = nil
+        self._needsClaimInitialization = nil
         self._spec = nil
         self._holderShown = nil
         self._destroyed = true
@@ -740,6 +835,14 @@ function ControllerMixin:_ApplyPending()
             constructionStats.destroyCompletions + 1
         pendingControllers[self] = nil
         return
+    end
+
+    if self._needsClaimInitialization then
+        if self._seedContainer then
+            self._seedContainer:Hide()
+            AF.SetCustomAuraContainerEnabled(self._seedContainer, false)
+        end
+        self._needsClaimInitialization = nil
     end
 
     if self._holderConfig then
@@ -838,6 +941,16 @@ function ControllerMixin:GetFrame()
     return self.frame
 end
 
+function ControllerMixin:IsPresentationApplied()
+    local spec = self._spec
+    return self._presentationApplied == true
+        and not self._destroyed
+        and not self._destroyRequested
+        and spec ~= nil
+        and spec.enabled
+        and spec.shown
+end
+
 -- Expose only the native frame reference needed for forbidden-aspect-safe
 -- dependent anchoring. Callers must never inspect its size, visibility,
 -- children, aura data, or other restricted state.
@@ -846,7 +959,7 @@ function ControllerMixin:GetNativeFrame()
 end
 
 -- Queue the latest configuration-only holder mutation behind the same
--- combat and hover gate as native work. This is intentionally a callback:
+-- combat gate as native work. This is intentionally a callback:
 -- indicator placement can resolve anchors only through UnitFrames/Common.
 function ControllerMixin:ApplyHolderConfig(configure)
     assert(not self._destroyed and not self._destroyRequested,
@@ -980,17 +1093,32 @@ local function CreateController(parent, name, completeSpec, options)
         parent,
         options.frameTemplate
     )
-    controller.frame:Hide()
-    controller._holderShown = false
+    controller.frame:SetAlpha(0)
+    controller._holderAlpha = 0
+    if not InCombatLockdown() then
+        controller.frame:Hide()
+        controller._holderShown = false
+    end
     controller._seedContainer = options.seedContainer
     controller._liveUnitChanges = options.liveUnitChanges == true
     constructionStats.controllersCreated = constructionStats.controllersCreated + 1
+    if InCombatLockdown() then
+        controller._needsClaimInitialization = true
+        QueueController(controller)
+    end
 
     if controller._seedContainer then
         claimedGroupAuraContainers[controller._seedContainer] = true
         constructionStats.seedsClaimed = constructionStats.seedsClaimed + 1
-        controller._seedContainer:Hide()
-        AF.SetCustomAuraContainerEnabled(controller._seedContainer, false)
+        -- A header-born seed can exist before its controller receives a
+        -- complete spec. Curtain it immediately so combat-deferred build work
+        -- cannot expose Blizzard's baseline or a stale prior assignment even
+        -- if the protected Hide call is blocked.
+        controller._seedContainer:SetAlpha(0)
+        if not InCombatLockdown() then
+            controller._seedContainer:Hide()
+            AF.SetCustomAuraContainerEnabled(controller._seedContainer, false)
+        end
     end
 
     if completeSpec then
@@ -1132,6 +1260,23 @@ local function SyncPartitionVisibility(controller)
     local shown = spec ~= nil and spec.enabled and spec.shown
     local variant = controller._variant or PARTITION_FRIENDLY
 
+    -- The outer holder is the atomic curtain for all prebuilt variants. Its
+    -- alpha is write-only BFI state; no child/native visibility is inspected.
+    SetHolderCurtained(controller, true)
+    if InCombatLockdown() then
+        local applied = controller._holderShown == shown
+            and (not shown or controller._shownVariant == variant)
+        if applied and shown then
+            -- A latest-wins reversal may expose the already-applied variant
+            -- without making any protected child visibility writes.
+            SetHolderCurtained(controller, false)
+            controller._presentationApplied = true
+        elseif applied then
+            controller._shownVariant = nil
+        end
+        return applied
+    end
+
     if not shown then
         if not SetHolderShownSafe(controller, false) then
             return false
@@ -1140,6 +1285,8 @@ local function SyncPartitionVisibility(controller)
             SetPartitionChildShown(controller[key], false)
         end
         controller._shownVariant = nil
+        -- Hidden partitions remain behind the outer curtain even after every
+        -- protected child write has completed.
         return true
     end
 
@@ -1172,6 +1319,8 @@ local function SyncPartitionVisibility(controller)
         return false
     end
     controller._shownVariant = variant
+    SetHolderCurtained(controller, false)
+    controller._presentationApplied = true
     return true
 end
 
@@ -1314,15 +1463,20 @@ function PartitionControllerMixin:_ApplyPending()
         if SyncPartitionVisibility(self) then
             self._needsVisibility = nil
             pendingControllers[self] = nil
+        else
+            QueueController(self)
         end
         return
     end
 
-    local holderHidden = SetHolderShownSafe(self, false)
+    -- Structural work always starts behind the outer curtain. In combat no
+    -- child visibility, enabled-state, anchoring, or construction write runs.
+    SetHolderCurtained(self, true)
     if InCombatLockdown() then
         QueueController(self)
         return
     end
+    local holderHidden = SetHolderShownSafe(self, false)
     if not holderHidden then
         return
     end
@@ -1400,7 +1554,7 @@ end
 function PartitionControllerMixin:Rebuild(completeSpec)
     assert(not self._destroyed and not self._destroyRequested,
         "aura partition controller is destroyed")
-    assert(not self._buildAttempted,
+    assert(not self._spec,
         "aura partition controller initial build already attempted")
 
     self._spec = NormalizePartitionCompleteSpec(completeSpec)
@@ -1530,8 +1684,15 @@ function UF.CreateNativeAuraPartitionController(parent, name)
 
     local controller = setmetatable({}, PartitionControllerMixin)
     controller.frame = CreateFrame("Frame", name, parent)
-    controller.frame:Hide()
-    controller._holderShown = false
+    controller.frame:SetAlpha(0)
+    controller._holderAlpha = 0
+    if not InCombatLockdown() then
+        controller.frame:Hide()
+        controller._holderShown = false
+    else
+        controller._needsVisibility = true
+        QueueController(controller)
+    end
     controller.friendly = UF.CreateNativeAuraContainerController(
         controller.frame,
         name .. "_Friendly"

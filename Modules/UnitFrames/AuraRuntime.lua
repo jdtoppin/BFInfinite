@@ -419,7 +419,7 @@ local function QuiesceForReload(runtime)
     if not runtime._built then return end
 
     -- The plain holder can be hidden immediately through the controller's
-    -- hover-safe visibility path. Disabling the native container remains
+    -- write-only visibility path. Disabling the native container remains
     -- runtime-owned OOC work so a topology change cannot smuggle a protected
     -- mutation through an enable/disable or config-mode lifecycle call.
     runtime._controller:SetShown(false)
@@ -437,12 +437,12 @@ end
 local function SyncLifecycle(runtime)
     if runtime._reloadRequired then
         QuiesceForReload(runtime)
-        return
+        return false
     end
 
     if not runtime._built then
         SyncWatcher(runtime)
-        return
+        return false
     end
 
     local enabled = runtime._state == STATE_READY
@@ -455,12 +455,23 @@ local function SyncLifecycle(runtime)
     end
     if not shown then
         runtime._controller:SetShown(false)
+        runtime._controller:SetEnabled(enabled)
+        SyncWatcher(runtime)
+        return false
     end
     runtime._controller:SetEnabled(enabled)
-    if shown then
-        runtime._controller:SetShown(true)
-    end
+    runtime._controller:SetShown(true)
     SyncWatcher(runtime)
+    -- This answer comes only from BFI-owned tracked presentation state. A
+    -- presentation still being committed behind its alpha curtain must not
+    -- receive a stable-unit refresh.
+    -- Production controllers always provide the write-ledger query. Keep the
+    -- narrow nil fallback for integration adapters that model only lifecycle
+    -- writes; it is not an alternate production presentation path.
+    local isPresentationApplied =
+        runtime._controller.IsPresentationApplied
+    return type(isPresentationApplied) ~= "function"
+        or isPresentationApplied(runtime._controller)
 end
 
 local function Compile(runtime, unit)
@@ -1044,8 +1055,9 @@ local function NativeAuras_Enable(self)
     if unitChanged or self._configDirty or self._deferredCommit then
         ScheduleCommit(self, true)
     else
-        SyncLifecycle(self)
-        if self._built
+        local displayPermitted = SyncLifecycle(self)
+        if displayPermitted
+            and self._built
             and self._state == STATE_READY
             and not providerUsesTestData
         then
@@ -1087,8 +1099,9 @@ local function NativeAuras_Update(self)
         return
     end
 
-    SyncLifecycle(self)
-    if self._built
+    local displayPermitted = SyncLifecycle(self)
+    if displayPermitted
+        and self._built
         and self._state == STATE_READY
         and not self._reloadRequired
         and not providerUsesTestData
