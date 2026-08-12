@@ -2656,7 +2656,6 @@ local function testPartitionColorBudgetPreservesLargeGrayBaseline()
     local baseline = baseConfig()
     baseline.cooldownStyle = "block_vertical"
     baseline.filters = {
-        notPlayer = true,
         raidInCombat = true,
         raidPlayerDispellable = true,
         bigDefensive = true,
@@ -2675,13 +2674,18 @@ local function testPartitionColorBudgetPreservesLargeGrayBaseline()
     local baselineDescriptor = compile("target", "HELPFUL", baseline)
     assertEqual(
         baselineDescriptor.metrics.maxActiveGroupCount,
-        7,
+        12,
         "large gray baseline active groups"
     )
     assertEqual(
         baselineDescriptor.metrics.prebuiltGroupCount,
-        14,
+        18,
         "large gray baseline prebuilt groups"
+    )
+    assertEqual(
+        baselineDescriptor.metrics.initialRestrictedButtonCount,
+        180,
+        "large gray baseline prebuilt reservations"
     )
 
     local colored = copy(baseline)
@@ -2691,7 +2695,7 @@ local function testPartitionColorBudgetPreservesLargeGrayBaseline()
     local fallbackDescriptor = compile("target", "HELPFUL", colored)
     assertEqual(
         fallbackDescriptor.metrics.requestedColorExpandedGroupCount,
-        14,
+        24,
         "large baseline requested color groups"
     )
     assertEqual(
@@ -2701,13 +2705,18 @@ local function testPartitionColorBudgetPreservesLargeGrayBaseline()
     )
     assertEqual(
         fallbackDescriptor.metrics.maxActiveGroupCount,
-        7,
+        12,
         "large fallback keeps baseline active groups"
     )
     assertEqual(
         fallbackDescriptor.metrics.prebuiltGroupCount,
-        14,
+        18,
         "large fallback keeps baseline prebuilt groups"
+    )
+    assertEqual(
+        fallbackDescriptor.metrics.initialRestrictedButtonCount,
+        180,
+        "large fallback keeps baseline reservations"
     )
     assertDeepEqual(
         fallbackDescriptor.completeSpec,
