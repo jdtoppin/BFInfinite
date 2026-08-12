@@ -48,8 +48,8 @@ function UF.CompileNativeAuraPolicy(baseFilter, filters)
     end
 
     -- `isBossAura` is the legacy saved-variable name. The current migration
-    -- intentionally preserves its secret-safe 12.0.7 behavior through
-    -- Blizzard's curated RAID_IN_COMBAT token. It does not claim the exact
+    -- preserves the existing saved behavior through Blizzard's curated
+    -- RAID_IN_COMBAT token. It does not claim the exact
     -- 12.1 `candidateFilters.isBossAura` semantic; relabeling or replacing
     -- that user-facing control belongs to the dedicated options migration.
     local bossAuraUsesCuratedRaidInCombat = filters.isBossAura == true

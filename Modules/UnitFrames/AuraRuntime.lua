@@ -295,7 +295,8 @@ local function PassesVisibility(runtime)
     if not descriptor or not unit then return false end
 
     -- Blizzard's Edit Mode provider supplies synthetic data for the native
-    -- container independent of the live unit's visibility or reaction.
+    -- container independent of the live unit's visibility or assistability.
+    -- Relation partitions remain controller-owned and are resolved separately.
     if providerUsesTestData then return true end
 
     local visibility = descriptor.visibility

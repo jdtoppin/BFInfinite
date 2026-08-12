@@ -687,12 +687,12 @@ local function testDormancyAndFallback()
 
     local unavailable = makeHarness({backend = false})
     assertEqual(next(unavailable.registered), nil,
-        "12.0.7 provider observer")
+        "unavailable-backend provider observer")
     local unavailableStats = unavailable.UF.GetNativeAuraRuntimeStats()
     assertEqual(unavailableStats.nativeBackendAvailable, false,
-        "12.0.7 provider backend state")
+        "unavailable-backend provider state")
     assertEqual(unavailableStats.providerSwitchEvents, 0,
-        "12.0.7 provider switch count")
+        "unavailable-backend provider switch count")
     local root = newRoot("Fallback", "target")
     local direct, directError = unavailable.UF.CreateNativeAuraIndicator(
         root,
