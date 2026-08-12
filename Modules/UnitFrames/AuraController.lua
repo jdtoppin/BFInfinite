@@ -14,9 +14,10 @@ local ipairs, next, pairs, type = ipairs, next, pairs, type
 -- groups/slots add-only and restricts their buttons after initialization.
 -- This controller owns only configuration-derived state and never reads aura
 -- data, live buttons, native container geometry, or native visibility.
--- AF #27/r39 registers only the selected native aura duration carrier, on
--- top of the static Block colors and construction ledgers consumed here.
-local REQUIRED_AF_VERSION = 39
+-- AF #36/r40 adds native duration-text color curves driven by Blizzard's
+-- opaque remaining-time binding, on top of the static Block colors,
+-- construction ledgers, and single duration carrier consumed here.
+local REQUIRED_AF_VERSION = 40
 local NATIVE_GROUP_AURA_TEMPLATE = "CustomAuraContainerTemplate"
 -- CustomAuraContainerConstants.FrameCreationBatchSize in the pinned build.
 local NATIVE_INITIAL_GROUP_RESERVATIONS = 10

@@ -55,7 +55,7 @@ local LEGACY_FIELDS = {
 local function updateMockStringHeight(widget)
     if widget.kind ~= "fontString" then return end
 
-    local length = #(widget.text or "")
+    local length = #tostring(widget.text or "")
     if not widget.wordWrap or length <= 60 then
         widget.stringHeight = 12
     elseif length <= 120 then
@@ -119,7 +119,8 @@ local function makeWidget(kind, harness, parent, text)
         self.checked = value
     end
 
-    function widget:SetColor()
+    function widget:SetColor(...)
+        self.color = {...}
     end
 
     function widget:SetEnabled(value)
@@ -240,6 +241,16 @@ local function findWidget(pane, kind, field, value)
             return widget
         end
     end
+end
+
+local function findWidgets(pane, kind, field, value)
+    local matches = {}
+    for _, widget in ipairs(pane.widgets) do
+        if widget.kind == kind and widget[field] == value then
+            matches[#matches + 1] = widget
+        end
+    end
+    return matches
 end
 
 local function hasPoint(widget, point, relativeTo, relativePoint)
@@ -406,6 +417,13 @@ local function makeHarness(
     function AF.Debug()
     end
 
+    function AF.FillColorTable(color, r, g, b, a)
+        color[1] = r
+        color[2] = g
+        color[3] = b
+        if a ~= nil then color[4] = a end
+    end
+
     function AF.GetColorStr()
         return ""
     end
@@ -442,6 +460,9 @@ local function makeHarness(
 
     function AF.GetIconString(name)
         return "<" .. name .. ">"
+    end
+
+    function AF.HideColorPicker()
     end
 
     function AF.GetSpellInfo(spell)
@@ -547,6 +568,7 @@ local function makeHarness(
             return "0"
         end,
         ipairs = ipairs,
+        math = math,
         next = next,
         pairs = pairs,
         select = select,
@@ -676,6 +698,24 @@ local function newInfo(id, owner, filters, runtimeKind)
             },
             blacklist = {12345},
             cooldownStyle = "clock_with_leading_edge",
+            durationText = {
+                enabled = true,
+                font = {"BFI", 10, "outline", false},
+                position = {"TOP", "TOP", 1, 1},
+                color = {
+                    normal = {1, 1, 1, 1},
+                    percent = {
+                        enabled = true,
+                        value = 0.5,
+                        rgb = {1, 0.8, 0, 1},
+                    },
+                    seconds = {
+                        enabled = true,
+                        value = 5,
+                        rgb = {1, 0, 0, 1},
+                    },
+                },
+            },
             filters = filters or {},
             height = 19,
             mode = "blacklist",
@@ -2120,6 +2160,147 @@ local function testNonRetailSemantics()
     )
 end
 
+local function testDurationTextThresholdMode()
+    local harness = makeHarness(true, true)
+    local pane = harness.builders.durationText(makeParent())
+    local info = newInfo("debuffs", "target")
+    local colors = info.cfg.durationText.color
+
+    pane.Load(info)
+
+    local mode = findWidget(
+        pane,
+        "dropdown",
+        "label",
+        "Low-Time Color"
+    )
+    assertTrue(mode ~= nil, "duration threshold mode dropdown")
+    assertItemValues(mode, {
+        "off",
+        "seconds",
+        "percent",
+    }, "duration threshold modes")
+    assertContains(
+        mode.tooltipBody,
+        "seconds left or percent left",
+        "duration threshold explanation"
+    )
+    assertEqual(
+        colors.seconds.enabled,
+        true,
+        "legacy seconds threshold retained"
+    )
+    assertEqual(
+        colors.percent.enabled,
+        false,
+        "legacy both-enabled threshold normalizes to seconds"
+    )
+    assertEqual(mode.selectedValue, "seconds", "normalized threshold mode")
+    assertEqual(#harness.configLoads, 0, "threshold load has no fan-out")
+
+    local thresholdPickers = findWidgets(
+        pane,
+        "colorPicker",
+        "initialText",
+        "Remaining Time <"
+    )
+    assertEqual(#thresholdPickers, 2, "threshold color picker count")
+    local percentColorPicker = thresholdPickers[1]
+    local secondsColorPicker = thresholdPickers[2]
+    local percentDropdown = findWidget(
+        pane,
+        "dropdown",
+        "width",
+        50
+    )
+    local secondsEditBox = findWidget(
+        pane,
+        "editBox",
+        "kind",
+        "editBox"
+    )
+    local sec = findWidget(
+        pane,
+        "fontString",
+        "initialText",
+        "sec"
+    )
+    assertEqual(percentColorPicker.shown, false,
+        "percent controls hidden for seconds mode")
+    assertEqual(percentDropdown.shown, false,
+        "percent value hidden for seconds mode")
+    assertEqual(secondsColorPicker.shown, true,
+        "seconds color shown for seconds mode")
+    assertEqual(secondsEditBox.shown, true,
+        "seconds value shown for seconds mode")
+    assertEqual(sec.shown, true, "seconds unit shown for seconds mode")
+
+    harness:ClearLoads()
+    mode.onSelect("percent")
+    assertEqual(colors.seconds.enabled, false,
+        "percent mode disables seconds")
+    assertEqual(colors.percent.enabled, true,
+        "percent mode enabled")
+    assertEqual(percentColorPicker.shown, true,
+        "percent controls shown for percent mode")
+    assertEqual(percentDropdown.shown, true,
+        "percent value shown for percent mode")
+    assertEqual(secondsColorPicker.shown, false,
+        "seconds color hidden for percent mode")
+    assertEqual(secondsEditBox.shown, false,
+        "seconds value hidden for percent mode")
+    assertFanout(harness, info, 1, "percent threshold mode")
+
+    harness:ClearLoads()
+    percentColorPicker.onChange(0.2, 0.3, 0.4)
+    assertEqual(colors.percent.rgb[1], 0.2,
+        "percent threshold red")
+    assertEqual(colors.percent.rgb[2], 0.3,
+        "percent threshold green")
+    assertEqual(colors.percent.rgb[3], 0.4,
+        "percent threshold blue")
+    assertFanout(harness, info, 1, "percent threshold color")
+
+    harness:ClearLoads()
+    mode.onSelect("off")
+    assertEqual(colors.seconds.enabled, false,
+        "off mode disables seconds")
+    assertEqual(colors.percent.enabled, false,
+        "off mode disables percent")
+    assertEqual(percentColorPicker.shown, false,
+        "percent controls hidden for off mode")
+    assertEqual(secondsColorPicker.shown, false,
+        "seconds controls hidden for off mode")
+    assertFanout(harness, info, 1, "off threshold mode")
+
+    colors.seconds.value = 0
+    harness:ClearLoads()
+    mode.onSelect("seconds")
+    assertEqual(colors.seconds.enabled, true,
+        "seconds mode enabled")
+    assertEqual(colors.percent.enabled, false,
+        "seconds mode disables percent")
+    assertEqual(colors.seconds.value, 5,
+        "invalid dormant seconds threshold repaired")
+    assertEqual(secondsEditBox.text, 5,
+        "repaired seconds threshold displayed")
+    assertFanout(harness, info, 1, "seconds threshold mode")
+
+    harness:ClearLoads()
+    secondsEditBox.onConfirm(0)
+    assertEqual(colors.seconds.value, 5,
+        "invalid seconds edit rejected")
+    assertEqual(secondsEditBox.text, 5,
+        "invalid seconds edit reverted")
+    assertEqual(#harness.configLoads, 0,
+        "invalid seconds edit has no fan-out")
+
+    secondsEditBox.onConfirm(9)
+    assertEqual(colors.seconds.value, 9,
+        "valid seconds edit accepted")
+    assertFanout(harness, info, 1, "seconds threshold value")
+end
+
 local function testPlainAuraControlLabels()
     local harness = makeHarness(true, true)
     assertContains(
@@ -2210,6 +2391,7 @@ end
 testRetailIndicatorAwareNativeWording()
 testPtr7FilterTokenCapabilities()
 testNonRetailSemantics()
+testDurationTextThresholdMode()
 testPlainAuraControlLabels()
 
 print("unit_frame_aura_filter_options_test.lua: ok")

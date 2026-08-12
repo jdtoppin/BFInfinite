@@ -2544,6 +2544,9 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
 
     local colorPicker = AF.CreateColorPicker(pane)
     AF.SetPoint(colorPicker, "BOTTOMRIGHT", fontDropdown, "TOPRIGHT", 0, 2)
+    if extra == "duration" then
+        colorPicker:Hide()
+    end
     colorPicker:SetOnChange(function(r, g, b)
         AF.FillColorTable(pane.t.cfg[textType].color, r, g, b)
         LoadIndicatorConfig(pane.t)
@@ -2659,7 +2662,58 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
 
     --------------------------------------------------
     -- duration
-    local normalColorPicker, percentCheckButton, percentColorPicker, percentDropdown, secondsCheckButton, secondsColorPicker, secondsEditBox, sec
+    local normalColorPicker, thresholdModeDropdown, percentColorPicker,
+        percentDropdown, secondsColorPicker, secondsEditBox, sec
+    local UpdateWidgets
+
+    local function GetDurationThresholdMode(color)
+        if color.seconds.enabled == true then
+            return "seconds"
+        elseif color.percent.enabled == true then
+            return "percent"
+        end
+        return "off"
+    end
+
+    local function IsDurationThresholdValue(mode, value)
+        if type(value) ~= "number"
+            or value ~= value
+            or value <= 0
+            or value >= math.huge
+        then
+            return false
+        end
+        return mode ~= "percent" or value < 1
+    end
+
+    local function SetDurationThresholdMode(color, mode)
+        if mode ~= "off"
+            and mode ~= "seconds"
+            and mode ~= "percent"
+        then
+            return false
+        end
+
+        if mode == "seconds"
+            and not IsDurationThresholdValue(
+                "seconds",
+                color.seconds.value
+            )
+        then
+            color.seconds.value = 5
+        elseif mode == "percent"
+            and not IsDurationThresholdValue(
+                "percent",
+                color.percent.value
+            )
+        then
+            color.percent.value = 0.5
+        end
+
+        color.seconds.enabled = mode == "seconds"
+        color.percent.enabled = mode == "percent"
+        return true
+    end
 
     if extra == "duration" then
         normalColorPicker = AF.CreateColorPicker(pane, L["Normal"])
@@ -2669,11 +2723,54 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
             LoadIndicatorConfig(pane.t)
         end)
 
-        percentCheckButton = AF.CreateCheckButton(pane)
-        AF.SetPoint(percentCheckButton, "TOPLEFT", normalColorPicker, "BOTTOMLEFT", 0, -7)
+        thresholdModeDropdown = AF.CreateDropdown(pane, 150)
+        thresholdModeDropdown:SetLabel(L["Low-Time Color"])
+        AF.SetPoint(
+            thresholdModeDropdown,
+            "TOPLEFT",
+            normalColorPicker,
+            "BOTTOMLEFT",
+            0,
+            -25
+        )
+        thresholdModeDropdown:SetItems({
+            {text = L["Off"], value = "off"},
+            {text = L["Seconds"], value = "seconds"},
+            {text = L["Percent"], value = "percent"},
+        })
+        thresholdModeDropdown:SetTooltip(
+            L["Low-Time Color"],
+            L["Choose whether duration text changes color by seconds left or percent left"]
+        )
+        thresholdModeDropdown:SetOnSelect(function(value)
+            if not SetDurationThresholdMode(
+                pane.t.cfg[textType].color,
+                value
+            ) then
+                return
+            end
+            if value == "seconds" then
+                secondsEditBox:SetText(
+                    pane.t.cfg[textType].color.seconds.value
+                )
+            elseif value == "percent" then
+                percentDropdown:SetSelectedValue(
+                    pane.t.cfg[textType].color.percent.value
+                )
+            end
+            UpdateWidgets()
+            LoadIndicatorConfig(pane.t)
+        end)
 
         percentColorPicker = AF.CreateColorPicker(pane, L["Remaining Time"] .. " <")
-        AF.SetPoint(percentColorPicker, "TOPLEFT", percentCheckButton, "TOPRIGHT", 2, 0)
+        AF.SetPoint(
+            percentColorPicker,
+            "TOPLEFT",
+            thresholdModeDropdown,
+            "BOTTOMLEFT",
+            0,
+            -25
+        )
         percentColorPicker:SetOnChange(function(r, g, b)
             AF.FillColorTable(pane.t.cfg[textType].color.percent.rgb, r, g, b)
             LoadIndicatorConfig(pane.t)
@@ -2697,17 +2794,15 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
             LoadIndicatorConfig(pane.t)
         end)
 
-        percentCheckButton:SetOnCheck(function(checked)
-            pane.t.cfg[textType].color.percent.enabled = checked
-            AF.SetEnabled(checked, percentColorPicker, percentDropdown)
-            LoadIndicatorConfig(pane.t)
-        end)
-
-        secondsCheckButton = AF.CreateCheckButton(pane)
-        AF.SetPoint(secondsCheckButton, "TOPLEFT", percentCheckButton, "BOTTOMLEFT", 0, -7)
-
         secondsColorPicker = AF.CreateColorPicker(pane, L["Remaining Time"] .. " <")
-        AF.SetPoint(secondsColorPicker, "TOPLEFT", secondsCheckButton, "TOPRIGHT", 2, 0)
+        AF.SetPoint(
+            secondsColorPicker,
+            "TOPLEFT",
+            thresholdModeDropdown,
+            "BOTTOMLEFT",
+            0,
+            -25
+        )
         secondsColorPicker:SetOnChange(function(r, g, b)
             AF.FillColorTable(pane.t.cfg[textType].color.seconds.rgb, r, g, b)
             LoadIndicatorConfig(pane.t)
@@ -2717,22 +2812,22 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
         AF.SetPoint(secondsEditBox, "LEFT", secondsColorPicker.label, "RIGHT", 5, 0)
         secondsEditBox:SetMaxLetters(3)
         secondsEditBox:SetConfirmButton(function(value)
+            if not IsDurationThresholdValue("seconds", value) then
+                secondsEditBox:SetText(
+                    pane.t.cfg[textType].color.seconds.value
+                )
+                return
+            end
             pane.t.cfg[textType].color.seconds.value = value
             LoadIndicatorConfig(pane.t)
         end, nil, "RIGHT_OUTSIDE")
 
         sec = AF.CreateFontString(pane, L["sec"])
         AF.SetPoint(sec, "LEFT", secondsEditBox, "RIGHT", 5, 0)
-
-        secondsCheckButton:SetOnCheck(function(checked)
-            pane.t.cfg[textType].color.seconds.enabled = checked
-            AF.SetEnabled(checked, secondsColorPicker, secondsEditBox, sec)
-            LoadIndicatorConfig(pane.t)
-        end)
     end
     --------------------------------------------------
 
-    local function UpdateWidgets()
+    UpdateWidgets = function()
         AF.HideColorPicker()
         AF.SetEnabled(pane.t.cfg[textType].enabled, colorPicker,
             fontDropdown, fontOutlineDropdown, fontSizeSlider, shadowCheckButton,
@@ -2741,9 +2836,45 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
             AF.SetEnabled(pane.t.cfg[textType].enabled, numericFormatDropdown, percentFormatDropdown, delimiterEditBox, delimiterEditBox.label, percentSignCheckButton)
             useAsianUnitsCheckButton:SetEnabled(pane.t.cfg[textType].enabled and AF.isAsian)
         elseif extra == "duration" then
-            AF.SetEnabled(pane.t.cfg[textType].enabled, normalColorPicker, percentCheckButton, secondsCheckButton)
-            AF.SetEnabled(pane.t.cfg[textType].enabled and pane.t.cfg[textType].color.percent.enabled, percentColorPicker, percentDropdown)
-            AF.SetEnabled(pane.t.cfg[textType].enabled and pane.t.cfg[textType].color.seconds.enabled, secondsColorPicker, secondsEditBox, sec)
+            local mode = GetDurationThresholdMode(
+                pane.t.cfg[textType].color
+            )
+            local percentShown = mode == "percent"
+            local secondsShown = mode == "seconds"
+
+            if percentShown then
+                percentColorPicker:Show()
+                percentDropdown:Show()
+            else
+                percentColorPicker:Hide()
+                percentDropdown:Hide()
+            end
+            if secondsShown then
+                secondsColorPicker:Show()
+                secondsEditBox:Show()
+                sec:Show()
+            else
+                secondsColorPicker:Hide()
+                secondsEditBox:Hide()
+                sec:Hide()
+            end
+
+            AF.SetEnabled(
+                pane.t.cfg[textType].enabled,
+                normalColorPicker,
+                thresholdModeDropdown
+            )
+            AF.SetEnabled(
+                pane.t.cfg[textType].enabled and percentShown,
+                percentColorPicker,
+                percentDropdown
+            )
+            AF.SetEnabled(
+                pane.t.cfg[textType].enabled and secondsShown,
+                secondsColorPicker,
+                secondsEditBox,
+                sec
+            )
         end
     end
 
@@ -2755,6 +2886,15 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
 
     function pane.Load(t)
         pane.t = t
+        if extra == "duration"
+            and t.cfg[textType].color.seconds.enabled == true
+            and t.cfg[textType].color.percent.enabled == true
+        then
+            -- The native binding supports one threshold. Match the legacy
+            -- evaluation priority and persist a truthful settings state once
+            -- this pane is visited.
+            t.cfg[textType].color.percent.enabled = false
+        end
         UpdateWidgets()
 
         enabledCheckButton:SetChecked(t.cfg[textType].enabled)
@@ -2782,13 +2922,13 @@ local function CreateFontPositionExtraPane(parent, textType, frameName, label, e
             percentSignCheckButton:SetChecked(t.cfg[textType].format.showPercentSign)
             useAsianUnitsCheckButton:SetChecked(t.cfg[textType].format.useAsianUnits)
         elseif extra == "duration" then
-            colorPicker:Hide()
             normalColorPicker:SetColor(pane.t.cfg[textType].color.normal)
             percentColorPicker:SetColor(pane.t.cfg[textType].color.percent.rgb)
             secondsColorPicker:SetColor(pane.t.cfg[textType].color.seconds.rgb)
-            percentCheckButton:SetChecked(pane.t.cfg[textType].color.percent.enabled)
+            thresholdModeDropdown:SetSelectedValue(
+                GetDurationThresholdMode(pane.t.cfg[textType].color)
+            )
             percentDropdown:SetSelectedValue(pane.t.cfg[textType].color.percent.value)
-            secondsCheckButton:SetChecked(pane.t.cfg[textType].color.seconds.enabled)
             secondsEditBox:SetText(t.cfg[textType].color.seconds.value)
         end
     end

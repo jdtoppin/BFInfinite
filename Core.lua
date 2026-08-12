@@ -5,8 +5,9 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF #27/r39 registers only the selected native aura duration carrier.
-local REQUIRED_AF_VERSION = 39
+-- AF #36/r40 adds native duration-text color curves driven by Blizzard's
+-- opaque remaining-time binding, on top of r39's single duration carrier.
+local REQUIRED_AF_VERSION = 40
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar
