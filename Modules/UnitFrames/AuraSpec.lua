@@ -4,7 +4,7 @@ local UF = BFI.modules.UnitFrames
 
 local ceil, floor, huge, max, min =
     math.ceil, math.floor, math.huge, math.max, math.min
-local ipairs, next, pairs, rawget, type = ipairs, next, pairs, rawget, type
+local ipairs, pairs, rawget, type = ipairs, pairs, rawget, type
 local sub = string.sub
 
 -- Retail 12.1.0.69273 (wow-ui-source eb941aad) creates restricted
