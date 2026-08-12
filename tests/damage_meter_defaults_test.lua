@@ -80,6 +80,7 @@ local function loadDefaults()
 end
 
 local function assertDefaults(config, message)
+    local expectedWindowHeights = {147, 134, 134}
     assertEqual(config.enabled, false, message .. " enabled")
     assertEqual(config.windowCount, 3, message .. " window count")
     assertEqual(
@@ -135,7 +136,7 @@ local function assertDefaults(config, message)
         )
         assertEqual(
             config.windowHeights[index],
-            220,
+            expectedWindowHeights[index],
             message .. " window " .. index .. " height"
         )
     end
@@ -256,7 +257,7 @@ assertEqual(
 )
 assertEqual(
     DM.GetDefaults().windowHeights[1],
-    220,
+    147,
     "profile window heights independent from defaults"
 )
 assertEqual(
@@ -290,7 +291,22 @@ assertEqual(
     "partial key-start reset default"
 )
 assertEqual(partialConfig.alwaysShowPlayer, true, "partial player pin default")
+assertEqual(partialConfig.windowHeights[1], 147, "partial first height default")
+assertEqual(partialConfig.windowHeights[2], 134, "partial second height default")
+assertEqual(partialConfig.windowHeights[3], 134, "partial third height default")
 assertEqual(partialConfig.extra, "preserved", "unknown config preserved")
+
+local partialHeightsConfig = {
+    windowHeights = {
+        [2] = 199,
+    },
+}
+updateProfile(nil, {
+    damageMeter = partialHeightsConfig,
+})
+assertEqual(partialHeightsConfig.windowHeights[1], 147, "missing first height")
+assertEqual(partialHeightsConfig.windowHeights[2], 199, "saved second height")
+assertEqual(partialHeightsConfig.windowHeights[3], 134, "missing third height")
 
 local invalidConfig = {
     alwaysShowPlayer = "yes",
