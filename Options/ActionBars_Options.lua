@@ -577,17 +577,23 @@ builder["cast"] = function(parent)
     AF.SetPoint(mouseoverCastDropdown, "TOPLEFT", selfCast, "BOTTOMLEFT", 0, -25)
     mouseoverCastDropdown:SetItems(AF.GetDropdownItems_Modifier())
     mouseoverCastDropdown:SetOnSelect(function(value)
-        pane.t.sharedCfg.cast.mouseover[2] = value
-        AF.Fire("BFI_UpdateModule", "actionBars", "main")
+        AB.SetMouseoverCast(nil, value)
     end)
 
     local mouseoverCast = AF.CreateCheckButton(pane, L["Mouseover Cast"])
     AF.SetPoint(mouseoverCast, "BOTTOMLEFT", mouseoverCastDropdown, "TOPLEFT", 0, 2)
     mouseoverCast:SetOnCheck(function(checked)
-        pane.t.sharedCfg.cast.mouseover[1] = checked
         mouseoverCastDropdown:SetEnabled(checked)
-        AF.Fire("BFI_UpdateModule", "actionBars", "main")
+        AB.SetMouseoverCast(checked)
     end)
+
+    local function LoadMouseoverCast()
+        local enabled, modifier = AB.GetMouseoverCast()
+        mouseoverCast:SetChecked(enabled)
+        mouseoverCastDropdown:SetEnabled(enabled)
+        mouseoverCastDropdown:SetSelectedValue(modifier)
+    end
+    AF.RegisterCallback("BFI_MouseoverCastChanged", LoadMouseoverCast)
 
     local focusCastDropdown = AF.CreateDropdown(pane, 150)
     AF.SetPoint(focusCastDropdown, "TOPLEFT", mouseoverCastDropdown, 185, 0)
@@ -608,9 +614,7 @@ builder["cast"] = function(parent)
     function pane.Load(t)
         pane.t = t
         selfCast:SetChecked(t.sharedCfg.cast.self)
-        mouseoverCast:SetChecked(t.sharedCfg.cast.mouseover[1])
-        mouseoverCastDropdown:SetEnabled(t.sharedCfg.cast.mouseover[1])
-        mouseoverCastDropdown:SetSelectedValue(t.sharedCfg.cast.mouseover[2])
+        LoadMouseoverCast()
         focusCast:SetChecked(t.sharedCfg.cast.focus[1])
         focusCastDropdown:SetEnabled(t.sharedCfg.cast.focus[1])
         focusCastDropdown:SetSelectedValue(t.sharedCfg.cast.focus[2])
