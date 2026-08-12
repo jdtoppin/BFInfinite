@@ -8,19 +8,38 @@ local AF = _G.AbstractFramework
 local defaults = {
     enabled = true,
     position = {"BOTTOMRIGHT", -35, 110},
-    categories = false,
+    viewMode = "combined",
+    sidebarCollapsed = false,
     showBagSlots = true,
     showBlizzardBagBar = false,
+    showItemLevel = true,
     columns = 12,
     spacing = 4,
 }
 
+local validViewModes = {
+    combined = true,
+    individual = true,
+}
+
 local function NormalizeConfig(config)
     if type(config.enabled) ~= "boolean" then config.enabled = defaults.enabled end
-    if type(config.categories) ~= "boolean" then config.categories = defaults.categories end
+    if not validViewModes[config.viewMode] then
+        -- Category filtering now lives in the persistent sidebar rather than
+        -- being a saved main view. Legacy category profiles open Combined.
+        config.viewMode = defaults.viewMode
+    end
+    config.categories = nil
+    if type(config.sidebarCollapsed) ~= "boolean" then
+        config.sidebarCollapsed = config.sidebarAutoHide == true
+    end
+    config.sidebarAutoHide = nil
     if type(config.showBagSlots) ~= "boolean" then config.showBagSlots = defaults.showBagSlots end
     if type(config.showBlizzardBagBar) ~= "boolean" then
         config.showBlizzardBagBar = defaults.showBlizzardBagBar
+    end
+    if type(config.showItemLevel) ~= "boolean" then
+        config.showItemLevel = defaults.showItemLevel
     end
 
     local columns = tonumber(config.columns)

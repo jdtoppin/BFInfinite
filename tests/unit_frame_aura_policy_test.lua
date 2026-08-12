@@ -115,6 +115,13 @@ local function assertGroups(policy, expected, message)
         assertEqual(actual.layout, nil, (message or "policy") .. " layout " .. index)
         assertEqual(actual.buttonStyle, nil,
             (message or "policy") .. " style " .. index)
+        if group[3] ~= nil then
+            assertEqual(
+                actual.playerScope,
+                group[3],
+                (message or "policy") .. " player scope " .. index
+            )
+        end
     end
 end
 
@@ -183,7 +190,7 @@ local function testLegacyTruthTable()
         castByMe = true,
     })
     assertGroups(player, {
-        {"player", "HELPFUL|PLAYER"},
+        {"player", "HELPFUL|PLAYER", "player"},
     }, "cast by me")
     assertEqual(player.requiresVisible, true, "player visibility gate")
 
@@ -293,54 +300,42 @@ local function testLegacyTruthTable()
     )
 end
 
-local function testRelationScopeMetadata()
-    local all = compile("HARMFUL", {
+local function testPlayerScopeMetadata()
+    assertGroups(compile("HELPFUL", {
         all = true,
-    })
-    assertEqual(
-        all.groups[1].playerScope,
-        "any",
-        "all category relation scope"
-    )
+    }), {
+        {"all", "HELPFUL", "any"},
+    }, "all player scope")
 
-    local split = compile("HELPFUL", {
+    assertGroups(compile("HELPFUL", {
         player = true,
         raidInCombat = true,
-    })
-    assertEqual(
-        split.groups[1].playerScope,
-        "player",
-        "player category relation scope"
-    )
-    assertEqual(
-        split.groups[2].playerScope,
-        "notPlayer",
-        "category after player relation scope"
-    )
+    }), {
+        {"player", "HELPFUL|PLAYER", "player"},
+        {
+            "raidInCombat",
+            "HELPFUL|RAID_IN_COMBAT|!PLAYER",
+            "notPlayer",
+        },
+    }, "player-first scopes")
 
-    local inverseSplit = compile("HELPFUL", {
+    assertGroups(compile("HARMFUL", {
         notPlayer = true,
         raidInCombat = true,
-    })
-    assertEqual(
-        inverseSplit.groups[1].playerScope,
-        "notPlayer",
-        "not-player category relation scope"
-    )
-    assertEqual(
-        inverseSplit.groups[2].playerScope,
-        "player",
-        "category after not-player relation scope"
-    )
+    }), {
+        {"notPlayer", "HARMFUL|!PLAYER", "notPlayer"},
+        {
+            "raidInCombat",
+            "HARMFUL|RAID_IN_COMBAT|PLAYER",
+            "player",
+        },
+    }, "not-player-first scopes")
 
-    local unsplit = compile("HELPFUL", {
+    assertGroups(compile("HARMFUL", {
         raidInCombat = true,
-    })
-    assertEqual(
-        unsplit.groups[1].playerScope,
-        "any",
-        "standalone category relation scope"
-    )
+    }), {
+        {"raidInCombat", "HARMFUL|RAID_IN_COMBAT", "any"},
+    }, "unpartitioned player scope")
 end
 
 local function testLegacySourceResolutionExhaustive()
@@ -948,8 +943,8 @@ end
 testInvalidInputs()
 testEmptyPoliciesStayEmpty()
 testLegacyTruthTable()
-testRelationScopeMetadata()
 testLegacySourceResolutionExhaustive()
+testPlayerScopeMetadata()
 testCanonicalDisjointOrder()
 testNotPlayerDisjointOrderAndAllCollapse()
 testGateAndDegradationMetadata()
