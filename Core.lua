@@ -5,8 +5,9 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF #19/r32 provides the complement filters used by supported aura controls.
-local REQUIRED_AF_VERSION = 32
+-- AF #19/r35 provides the legacy complement descriptors emitted when saved
+-- unit-frame filters are materialized by the supported 12.1 controls.
+local REQUIRED_AF_VERSION = 35
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar
@@ -59,7 +60,7 @@ function eventHandler:ADDON_LOADED(arg)
             AF.SetAddonAccentColor(BFI.name, "blazing_tangerine")
         end
 
-        -- This is global because the supported filter path also runs on 12.0.7.
+        -- check AF version
         AF.RequireVersion(REQUIRED_AF_VERSION)
 
         -- general.language
@@ -267,6 +268,9 @@ local function InitAndBackupCVars()
         "AutoPushSpellToActionBar",
         -- bags
         "combinedBags",
+        -- damage meter
+        "damageMeterEnabled",
+        "damageMeterResetOnNewInstance",
         -- chat
         "chatStyle",
         "whisperMode",

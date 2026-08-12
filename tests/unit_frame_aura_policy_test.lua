@@ -115,6 +115,13 @@ local function assertGroups(policy, expected, message)
         assertEqual(actual.layout, nil, (message or "policy") .. " layout " .. index)
         assertEqual(actual.buttonStyle, nil,
             (message or "policy") .. " style " .. index)
+        if group[3] ~= nil then
+            assertEqual(
+                actual.playerScope,
+                group[3],
+                (message or "policy") .. " player scope " .. index
+            )
+        end
     end
 end
 
@@ -183,7 +190,7 @@ local function testLegacyTruthTable()
         castByMe = true,
     })
     assertGroups(player, {
-        {"player", "HELPFUL|PLAYER"},
+        {"player", "HELPFUL|PLAYER", "player"},
     }, "cast by me")
     assertEqual(player.requiresVisible, true, "player visibility gate")
 
@@ -291,6 +298,44 @@ local function testLegacyTruthTable()
         false,
         "all makes the boss approximation redundant"
     )
+end
+
+local function testPlayerScopeMetadata()
+    assertGroups(compile("HELPFUL", {
+        all = true,
+    }), {
+        {"all", "HELPFUL", "any"},
+    }, "all player scope")
+
+    assertGroups(compile("HELPFUL", {
+        player = true,
+        raidInCombat = true,
+    }), {
+        {"player", "HELPFUL|PLAYER", "player"},
+        {
+            "raidInCombat",
+            "HELPFUL|RAID_IN_COMBAT|!PLAYER",
+            "notPlayer",
+        },
+    }, "player-first scopes")
+
+    assertGroups(compile("HARMFUL", {
+        notPlayer = true,
+        raidInCombat = true,
+    }), {
+        {"notPlayer", "HARMFUL|!PLAYER", "notPlayer"},
+        {
+            "raidInCombat",
+            "HARMFUL|RAID_IN_COMBAT|PLAYER",
+            "player",
+        },
+    }, "not-player-first scopes")
+
+    assertGroups(compile("HARMFUL", {
+        raidInCombat = true,
+    }), {
+        {"raidInCombat", "HARMFUL|RAID_IN_COMBAT", "any"},
+    }, "unpartitioned player scope")
 end
 
 local function testLegacySourceResolutionExhaustive()
@@ -899,6 +944,7 @@ testInvalidInputs()
 testEmptyPoliciesStayEmpty()
 testLegacyTruthTable()
 testLegacySourceResolutionExhaustive()
+testPlayerScopeMetadata()
 testCanonicalDisjointOrder()
 testNotPlayerDisjointOrderAndAllCollapse()
 testGateAndDegradationMetadata()
