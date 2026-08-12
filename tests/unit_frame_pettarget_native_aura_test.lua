@@ -1401,39 +1401,39 @@ local function testPetTargetRuntimeLifecycleHasNoGrowth()
         "PetTarget lifecycle compile count")
 end
 
-local function testPetTargetLegacyFallbackUsesBothAuraBuilders()
+local function testPetTargetUnavailableBackendUsesLegacyAuraBuilders()
     local harness = makeEventRuntimeHarness(true, false)
     local buffs = harness.buffs
     local debuffs = harness.debuffs
 
     assertEqual(#harness.controllers, 0,
-        "12.0.7 PetTarget native controller count")
+        "unavailable-backend PetTarget native controller count")
     assertEqual(#harness.compiles, 0,
-        "12.0.7 PetTarget native compile count")
+        "unavailable-backend PetTarget native compile count")
     assertEqual(#harness.legacyConstructions, 2,
-        "12.0.7 PetTarget legacy builder count")
+        "unavailable-backend PetTarget legacy builder count")
     assertEqual(buffs.builder, "auras",
-        "12.0.7 PetTarget buffs builder")
+        "unavailable-backend PetTarget buffs builder")
     assertEqual(buffs.name, "BFI_PetTarget_Buffs",
-        "12.0.7 PetTarget buffs name")
+        "unavailable-backend PetTarget buffs name")
     assertEqual(buffs.auraFilter, "HELPFUL",
-        "12.0.7 PetTarget buffs filter")
+        "unavailable-backend PetTarget buffs filter")
     assertEqual(buffs.hasSubFrame, nil,
-        "12.0.7 PetTarget buffs subframe flag")
+        "unavailable-backend PetTarget buffs subframe flag")
     assertEqual(debuffs.builder, "auras",
-        "12.0.7 PetTarget debuffs builder")
+        "unavailable-backend PetTarget debuffs builder")
     assertEqual(debuffs.name, "BFI_PetTarget_Debuffs",
-        "12.0.7 PetTarget debuffs name")
+        "unavailable-backend PetTarget debuffs name")
     assertEqual(debuffs.auraFilter, "HARMFUL",
-        "12.0.7 PetTarget debuffs filter")
+        "unavailable-backend PetTarget debuffs filter")
     assertEqual(debuffs.hasSubFrame, nil,
-        "12.0.7 PetTarget debuffs subframe flag")
+        "unavailable-backend PetTarget debuffs subframe flag")
 
     harness.root.hooks.OnShow(harness.root)
     assertEqual(buffs.enableCount, 1,
-        "12.0.7 PetTarget buffs enable count")
+        "unavailable-backend PetTarget buffs enable count")
     assertEqual(debuffs.enableCount, 1,
-        "12.0.7 PetTarget debuffs enable count")
+        "unavailable-backend PetTarget debuffs enable count")
 end
 
 local function testShippedPetTargetPresetBounds()
@@ -1569,7 +1569,7 @@ testPetTargetConfigModeGuardsAreLocal()
 testPetTargetDefaultDisabledDoesNotBuild()
 testPetTargetUnitEventsAndTicksRefreshNativeRuntime()
 testPetTargetRuntimeLifecycleHasNoGrowth()
-testPetTargetLegacyFallbackUsesBothAuraBuilders()
+testPetTargetUnavailableBackendUsesLegacyAuraBuilders()
 testShippedPetTargetPresetBounds()
 
 print("unit_frame_pettarget_native_aura_test.lua: ok")
