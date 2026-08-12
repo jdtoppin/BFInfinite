@@ -399,7 +399,9 @@ local function Button_HookHighlight(button)
     end)
 end
 
-function S.StyleButton(button, color, hoverColor)
+-- preservePressScripts keeps protected or restricted Blizzard controls on
+-- their native mouse-down/up path while retaining BFI's visual treatment.
+function S.StyleButton(button, color, hoverColor, preservePressScripts)
     assert(button, "StyleButton: button is nil")
     if button._BFIStyled then return end
     button._BFIStyled = true
@@ -433,8 +435,10 @@ function S.StyleButton(button, color, hoverColor)
     button.BFI_OnDisable = Button_OnDisable
     button.BFI_HookHighlight = Button_HookHighlight
 
-    button:SetPushedTextOffset(0, -AF.GetOnePixelForRegion(button))
-    RegisterMouseDownUp(button)
+    if not preservePressScripts then
+        button:SetPushedTextOffset(0, -AF.GetOnePixelForRegion(button))
+        RegisterMouseDownUp(button)
+    end
 
     AF.AddToPixelUpdater_CustomGroup("BFIStyled", button)
 end
@@ -467,6 +471,142 @@ end
 
 function S.StyleIconButton(button, icon, iconSize, iconColor, color, hoverColor)
     SetupIconButton(button, icon, iconSize, iconColor, color, hoverColor)
+end
+
+---------------------------------------------------------------------
+-- navigation bar
+---------------------------------------------------------------------
+local styledNavBars = {}
+local navBarAddButtonHooked
+
+local function SetupNavBarTexture(texture, color, alpha, offset)
+    if not texture then return end
+
+    texture:SetTexture(AF.GetTexture("Gradient_Linear_Right"))
+    texture:SetTexCoord(0, 1, 0, 1)
+    texture:SetVertexColor(AF.GetColorRGB(color, alpha))
+
+    if offset then
+        texture:ClearAllPoints()
+        texture:SetPoint("TOPLEFT")
+        texture:SetPoint("BOTTOMRIGHT", offset, 0)
+    end
+end
+
+local function StyleNavBarMenuArrow(button)
+    if not button or button._BFINavBarArrowStyled then return end
+    button._BFINavBarArrowStyled = true
+
+    if not button.BFIIcon then
+        S.StyleIconButton(button, AF.GetIcon("ArrowDown2"), 16)
+    end
+    if not button.BFIIcon then return end
+
+    AF.SetSize(button.BFIIcon, 16, 16)
+    button.BFIIcon:SetTexture(AF.GetIcon("ArrowDown2"))
+    if button.BFIBackdrop then
+        AF.ClearBackdrop(button.BFIBackdrop)
+    end
+    if button.BFIBg then
+        button.BFIBg:Hide()
+    end
+
+    button.BFIIcon:SetVertexColor(AF.GetColorRGB("darkgray"))
+    button:HookScript("OnEnter", function(self)
+        self.BFIIcon:SetVertexColor(AF.GetColorRGB("white"))
+    end)
+    button:HookScript("OnLeave", function(self)
+        self.BFIIcon:SetVertexColor(AF.GetColorRGB("darkgray"))
+    end)
+end
+
+local function StyleNavBarButton(navBar, button)
+    if not button or button._BFINavBarStyled then return end
+    button._BFINavBarStyled = true
+
+    S.RemoveTextures(button)
+    button:SetPushedTextOffset(0, -1)
+
+    local offset = button == navBar.home and button.xoffset or nil
+    SetupNavBarTexture(button:GetNormalTexture(), "widget_highlight", 0.8, offset)
+    SetupNavBarTexture(button:GetPushedTexture(), "widget_highlight", 0.8, offset)
+    SetupNavBarTexture(button:GetHighlightTexture(), "widget_highlight", 0.2, offset)
+    SetupNavBarTexture(button.selected, "BFI", 0.2)
+    StyleNavBarMenuArrow(button.MenuArrowButton)
+end
+
+local function StyleNavBarButtons(navBar)
+    StyleNavBarButton(navBar, navBar.home)
+    if not navBar.navList then return end
+
+    for _, button in next, navBar.navList do
+        StyleNavBarButton(navBar, button)
+    end
+end
+
+local function StyleNavBarOverflow(navBar)
+    local overflow = navBar.overflow
+    if not overflow or overflow._BFINavBarStyled then return end
+    overflow._BFINavBarStyled = true
+
+    S.RemoveTextures(overflow)
+    SetupNavBarTexture(overflow:GetNormalTexture(), "widget_highlight", 0.8, overflow.xoffset)
+    SetupNavBarTexture(overflow:GetPushedTexture(), "widget_highlight", 0.8, overflow.xoffset)
+    SetupNavBarTexture(overflow:GetHighlightTexture(), "widget_highlight", 0.2, overflow.xoffset)
+
+    local icon = overflow:CreateTexture(nil, "ARTWORK", nil, 7)
+    overflow.BFINavBarIcon = icon
+    AF.SetPoint(icon, "CENTER", (overflow.xoffset or 0) / 2, 0)
+    AF.SetSize(icon, 16, 16)
+    icon:SetTexture(AF.GetIcon("ArrowLeft2"))
+    icon:SetVertexColor(AF.GetColorRGB("darkgray"))
+
+    overflow:HookScript("OnMouseDown", function(self)
+        self.BFINavBarIcon:AdjustPointsOffset(0, -AF.GetOnePixelForRegion(self))
+    end)
+    overflow:HookScript("OnMouseUp", function(self)
+        AF.RePoint(self.BFINavBarIcon)
+    end)
+    overflow:HookScript("OnShow", function(self)
+        AF.RePoint(self.BFINavBarIcon)
+    end)
+    overflow:HookScript("OnEnter", function(self)
+        self.BFINavBarIcon:SetVertexColor(AF.GetColorRGB("white"))
+    end)
+    overflow:HookScript("OnLeave", function(self)
+        self.BFINavBarIcon:SetVertexColor(AF.GetColorRGB("darkgray"))
+    end)
+end
+
+function S.StyleNavBar(navBar)
+    assert(navBar, "StyleNavBar: navBar is nil")
+    styledNavBars[navBar] = true
+
+    if not navBar._BFINavBarStyled then
+        navBar._BFINavBarStyled = true
+
+        S.RemoveTextures(navBar)
+        if navBar.overlay then
+            navBar.overlay:Hide()
+        end
+
+        S.CreateBackdrop(navBar)
+        AF.ClearPoints(navBar.BFIBackdrop)
+        AF.SetPoint(navBar.BFIBackdrop, "TOPLEFT", -1, -1)
+        AF.SetPoint(navBar.BFIBackdrop, "BOTTOMRIGHT")
+        StyleNavBarOverflow(navBar)
+    end
+
+    StyleNavBarButtons(navBar)
+
+    if not navBarAddButtonHooked then
+        navBarAddButtonHooked = true
+        hooksecurefunc("NavBar_AddButton", function(frame)
+            if styledNavBars[frame] then
+                StyleNavBarButtons(frame)
+            end
+        end)
+    end
 end
 
 function S.StyleCloseButton(button)
@@ -661,7 +801,7 @@ end
 ---------------------------------------------------------------------
 -- dropdown button
 ---------------------------------------------------------------------
-function S.StyleDropdownButton(button)
+function S.StyleDropdownButton(button, preservePressScripts)
     assert(button, "StyleDropdownButton: button is nil")
 
     if button._BFIStyled then return end
@@ -683,9 +823,11 @@ function S.StyleDropdownButton(button)
     --     button.Text:ClearAllPoints()
     --     button.Text:SetPoint("CENTER")
     -- end
-    button:SetPushedTextOffset(0, 0)
-    if button.displacedRegions then
-        wipe(button.displacedRegions) -- REVIEW: TAINT?
+    if not preservePressScripts then
+        button:SetPushedTextOffset(0, 0)
+        if button.displacedRegions then
+            wipe(button.displacedRegions) -- REVIEW: TAINT?
+        end
     end
 
     local arrow = AF.CreateTexture(button, AF.GetIcon("ArrowDown_Small"), "darkgray")
@@ -709,23 +851,88 @@ function S.StyleDropdownButton(button)
     --     print("StyleDropdown: OpenMenu")
     --     arrow:SetTexture(AF.GetIcon("ArrowDown_Small"))
     -- end
-    button:HookScript("OnMouseDown", function()
-        arrow:AdjustPointsOffset(0, -AF.GetOnePixelForRegion(button))
-        -- if button.Text then
-        --     button.Text:ClearPointsOffset()
-        -- end
-    end)
+    if not preservePressScripts then
+        button:HookScript("OnMouseDown", function()
+            arrow:AdjustPointsOffset(0, -AF.GetOnePixelForRegion(button))
+            -- if button.Text then
+            --     button.Text:ClearPointsOffset()
+            -- end
+        end)
 
-    local function ClearPointsOffset()
-        AF.RePoint(arrow)
-        -- if button.Text then
-        --     button.Text:ClearPointsOffset()
-        -- end
+        local function ClearPointsOffset()
+            AF.RePoint(arrow)
+            -- if button.Text then
+            --     button.Text:ClearPointsOffset()
+            -- end
+        end
+
+        button:HookScript("OnMouseUp", ClearPointsOffset)
+        button:HookScript("OnHide",ClearPointsOffset)
+        button:HookScript("OnDisable", ClearPointsOffset)
+    end
+end
+
+local function LayoutFilterDropdownButton(button)
+    local resetButton = button.ResetButton
+    local arrow = button.BFIArrow
+    local resetShown = resetButton and resetButton:IsShown()
+
+    if resetButton then
+        AF.ClearPoints(resetButton)
+        AF.SetPoint(resetButton, "RIGHT", button, "RIGHT", -2, 0)
     end
 
-    button:HookScript("OnMouseUp", ClearPointsOffset)
-    button:HookScript("OnHide",ClearPointsOffset)
-    button:HookScript("OnDisable", ClearPointsOffset)
+    if arrow then
+        AF.ClearPoints(arrow)
+        AF.SetPoint(arrow, "RIGHT", button, "RIGHT", resetShown and -18 or -5, 0)
+    end
+
+    local text = button.Text
+    if text then
+        AF.ClearPoints(text)
+        AF.SetPoint(text, "LEFT", button, "LEFT", 5, 0)
+        if arrow then
+            AF.SetPoint(text, "RIGHT", arrow, "LEFT", -2, 0)
+        elseif resetShown then
+            AF.SetPoint(text, "RIGHT", resetButton, "LEFT", -2, 0)
+        else
+            AF.SetPoint(text, "RIGHT", button, "RIGHT", -5, 0)
+        end
+        text:SetJustifyH("LEFT")
+    end
+end
+
+function S.StyleFilterDropdownButton(button)
+    assert(button, "StyleFilterDropdownButton: button is nil")
+
+    S.StyleDropdownButton(button)
+    if button._BFIFilterDropdownStyled then return end
+
+    local resetButton = button.ResetButton
+    if not resetButton then return end
+    button._BFIFilterDropdownStyled = true
+
+    S.StyleIconButton(resetButton, AF.GetIcon("Close"), 8, "red", "gray_hover")
+    AF.SetSize(resetButton, 14, 14)
+    resetButton:SetHitRectInsets(0, 0, 0, 0)
+    resetButton.BFIBg:SetAlpha(0)
+    resetButton.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("none"))
+
+    resetButton:HookScript("OnShow", function()
+        LayoutFilterDropdownButton(button)
+    end)
+    resetButton:HookScript("OnHide", function()
+        LayoutFilterDropdownButton(button)
+    end)
+    button:HookScript("OnShow", function()
+        LayoutFilterDropdownButton(button)
+    end)
+    if button.ValidateResetState then
+        hooksecurefunc(button, "ValidateResetState", function()
+            LayoutFilterDropdownButton(button)
+        end)
+    end
+    LayoutFilterDropdownButton(button)
 end
 
 ---------------------------------------------------------------------
@@ -975,13 +1182,48 @@ function S.MakeMovable(frame, dragHandle)
     RestoreFramePosition(frame)
 end
 
-function S.StyleTitledFrame(frame, movableTarget)
+local function GetTitledFrameCloseButton(frame)
+    local name = frame.GetName and frame:GetName()
+    return frame.CloseButton or frame.ClosePanelButton or (name and _G[name .. "CloseButton"])
+end
+
+local function GetMaximizeMinimizeFrame(frame)
+    return frame.MaximizeMinimizeButton or frame.MaximizeMinimizeFrame or frame.MaximizeMinimize
+end
+
+local function GetTitleBarInfoAnchor(frame)
+    local maximizeMinimizeFrame = GetMaximizeMinimizeFrame(frame)
+    if maximizeMinimizeFrame then
+        return maximizeMinimizeFrame
+    end
+    return GetTitledFrameCloseButton(frame)
+end
+
+function S.StyleTitleBarInfoButton(frame, button)
+    assert(frame, "StyleTitleBarInfoButton: frame is nil")
+    assert(button, "StyleTitleBarInfoButton: button is nil")
+    assert(frame.BFIHeader, "StyleTitleBarInfoButton: frame has no BFI header")
+
+    if not button._BFITitleBarInfoStyled then
+        button._BFITitleBarInfoStyled = true
+        S.StyleIconButton(button, AF.GetIcon("Info_Square"), 12, "gray", "gray_hover")
+        AF.SetSize(button, 20, 20)
+        button:SetHitRectInsets(0, 0, 0, 0)
+    end
+
+    -- Title controls read left-to-right as info, minimize/maximize, close.
+    local anchor = GetTitleBarInfoAnchor(frame)
+    assert(anchor, "StyleTitleBarInfoButton: frame has no close or minimize button")
+    AF.ClearPoints(button)
+    AF.SetPoint(button, "TOPRIGHT", anchor, "TOPLEFT", 1, 0)
+    AF.SetFrameLevel(button, 1, frame.BFIHeader)
+end
+
+function S.StyleTitledFrame(frame, movableTarget, useLightweightBackdrop)
     assert(frame, "StyleTitledFrame: frame is nil")
 
     if frame._BFIStyled then return end
     frame._BFIStyled = true
-
-    local name = frame.GetName and frame:GetName()
 
     -- remove blizzard ----------------------------------------------
     S.RemoveNineSliceAndBackground(frame)
@@ -997,7 +1239,11 @@ function S.StyleTitledFrame(frame, movableTarget)
 
     -- style into bfi -----------------------------------------------
     -- bg
-    frame.BFIBg = AF.CreateBorderedFrame(frame)
+    local CreateBorderedFrame = useLightweightBackdrop
+        and AF.CreateLightweightBorderedFrame
+        or AF.CreateBorderedFrame
+
+    frame.BFIBg = CreateBorderedFrame(frame)
     frame.BFIBg:SetAllPoints(frame)
     AF.SetFrameLevel(frame.BFIBg)
 
@@ -1005,7 +1251,7 @@ function S.StyleTitledFrame(frame, movableTarget)
     AF.AddToPixelUpdater_CustomGroup("BFIStyled", frame.BFIBg)
 
     -- title
-    frame.BFIHeader = AF.CreateBorderedFrame(frame, nil, nil, nil, "header", "border")
+    frame.BFIHeader = CreateBorderedFrame(frame, nil, nil, nil, "header", "border")
     frame.BFIHeader:SetPoint("TOPLEFT")
     frame.BFIHeader:SetPoint("TOPRIGHT")
     AF.SetHeight(frame.BFIHeader, 20)
@@ -1035,26 +1281,25 @@ function S.StyleTitledFrame(frame, movableTarget)
     end
 
     -- close button
-    local closeButton = frame.CloseButton or frame.ClosePanelButton or (name and _G[name .. "CloseButton"])
+    local closeButton = GetTitledFrameCloseButton(frame)
     S.StyleCloseButton(closeButton)
     closeButton:ClearAllPoints()
     closeButton:SetPoint("TOPRIGHT")
     AF.SetFrameLevel(closeButton, 1, frame.BFIHeader)
 
     -- minimize/maximize button
-    local maximizeMinimizeFrame = frame.MaximizeMinimizeButton or frame.MaximizeMinimizeFrame
+    local maximizeMinimizeFrame = GetMaximizeMinimizeFrame(frame)
     if maximizeMinimizeFrame then
         local maximizeButton = maximizeMinimizeFrame.MaximizeButton
         S.StyleMaximizeButton(maximizeButton)
-        AF.SetFrameLevel(maximizeButton, 1, frame.BFIHeader)
-        maximizeButton:ClearAllPoints()
-        AF.SetPoint(maximizeButton, "TOPRIGHT", closeButton, "TOPLEFT", 1, 0)
 
         local minimizeButton = maximizeMinimizeFrame.MinimizeButton
         S.StyleMinimizeButton(minimizeButton)
-        AF.SetFrameLevel(minimizeButton, 1, frame.BFIHeader)
-        minimizeButton:ClearAllPoints()
-        AF.SetPoint(minimizeButton, "TOPRIGHT", closeButton, "TOPLEFT", 1, 0)
+
+        AF.ClearPoints(maximizeMinimizeFrame)
+        AF.SetPoint(maximizeMinimizeFrame, "TOPRIGHT", closeButton, "TOPLEFT", 1, 0)
+        AF.SetSize(maximizeMinimizeFrame, 27, 20)
+        AF.SetFrameLevel(maximizeMinimizeFrame, 1, frame.BFIHeader)
     end
 
     -- BFI owns the drag handle and preserves Blizzard's panel-management
@@ -1272,7 +1517,23 @@ end
 ---------------------------------------------------------------------
 local start
 
+local function HasPublicPixelGeometry(region)
+    local width, height = region:GetSize()
+    if not F.isValueNonSecret(width)
+        or not F.isValueNonSecret(height)
+        or type(width) ~= "number"
+        or type(height) ~= "number"
+    then
+        return false
+    end
+
+    local scale = region:GetEffectiveScale()
+    return F.isValueNonSecret(scale)
+        and type(scale) == "number" and scale > 0
+end
+
 local function UpdatePixels(_, region, remaining, total)
+    if not HasPublicPixelGeometry(region) then return end
     region:UpdatePixels()
     -- print("BFIStyled: ", AF.RoundToDecimal((total - remaining) / total, 2))
 end

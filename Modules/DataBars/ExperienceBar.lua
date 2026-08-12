@@ -10,7 +10,6 @@ local IsXPUserDisabled = IsXPUserDisabled
 local UnitXP = UnitXP
 local UnitXPMax = UnitXPMax
 local UnitLevel = UnitLevel
-local GetMaxLevelForLatestExpansion = GetMaxLevelForLatestExpansion
 local GetNumQuestLogEntries = C_QuestLog.GetNumQuestLogEntries
 local GetQuestIDForLogIndex = C_QuestLog.GetQuestIDForLogIndex
 local GetQuestLogRewardXP = GetQuestLogRewardXP
@@ -169,7 +168,6 @@ function UpdateXP(self)
     self:SetMinMaxValues(0, self.maxXP)
     self:SetBarValue(self.currentXP)
 
-    local width = self:GetBarWidth()
     self.restedXP = GetXPExhaustion() or 0
 
     UpdateBarAndText(self)
@@ -193,11 +191,12 @@ local function CreateExperienceBar()
     -- disabled
     local disabledTexture = experienceBar:CreateTexture(nil, "OVERLAY")
     experienceBar.disabledTexture = disabledTexture
-    disabledTexture:SetAllPoints(experienceBar.bg)
+    disabledTexture:SetAllPoints(experienceBar.innerBar)
     disabledTexture:SetTexture(AF.GetTexture("Stripe"), "REPEAT", "REPEAT")
     disabledTexture:SetHorizTile(true)
     disabledTexture:SetVertTile(true)
     disabledTexture:SetVertexColor(AF.GetColorRGB("disabled", 0.75))
+    disabledTexture:Hide()
 
     -- completed
     local completeTexture = experienceBar:CreateTexture(nil, "ARTWORK")
@@ -281,7 +280,7 @@ local function UpdateExperienceBar(_, module, which)
     -- mover
     AF.UpdateMoverSave(experienceBar, config.position)
 
-    AF.LoadPosition(experienceBar, config.position)
+    BFI.funcs.LoadPosition(experienceBar, config.position)
     AF.SetSize(experienceBar, config.width, config.height)
 
     experienceBar:SetBorderColor(AF.UnpackColor(config.borderColor))

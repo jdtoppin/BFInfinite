@@ -279,17 +279,6 @@ local function UpdateButton(bar, config)
         end
         SetModifiedClick("SELFCAST", "NONE")
 
-        -- mouseover cast
-        if shared.cast.mouseover[1] then
-            b:SetAttribute("checkmouseovercast", true)
-            SetCVar("enableMouseoverCast", 1)
-            SetModifiedClick("MOUSEOVERCAST", shared.cast.mouseover[2])
-        else
-            b:SetAttribute("checkmouseovercast", false)
-            SetCVar("enableMouseoverCast", 0)
-            SetModifiedClick("MOUSEOVERCAST", "NONE")
-        end
-
         -- focus cast - FIXME: seems only CTRL works, ALT and SHIFT do not work
         if shared.cast.focus[1] then
             b:SetAttribute("checkfocuscast", true)
@@ -328,7 +317,7 @@ local function UpdateBar(bar, general, specific)
 
     -- bar
     AB.ReArrange(bar, specific.width, specific.height, specific.spacingX, specific.spacingY, specific.buttonsPerLine, specific.num, specific.orientation)
-    AF.LoadPosition(bar, specific.position)
+    BFI.funcs.LoadPosition(bar, specific.position)
 
     bar:SetFrameStrata(general.frameStrata)
     bar:SetFrameLevel(general.frameLevel)

@@ -48,10 +48,14 @@ local resetterInfo = {
     nameplates = {},
     actionBars = {},
     bags = {},
+    cooldownManager = {requireReload = true},
     buffsDebuffs = {},
     tooltip = {},
     uiWidgets = {},
     dataBars = {},
+    damageMeter = {
+        extraInfo = L["Native Damage Meter settings will not be changed"],
+    },
     maps = {},
     chat = {},
 }
