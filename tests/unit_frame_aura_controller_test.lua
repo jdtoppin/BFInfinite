@@ -276,7 +276,7 @@ local function makeHarness(options)
     }
     local AF = {
         isRetail = options.isRetail ~= false,
-        versionNum = options.versionNum or 37,
+        versionNum = options.versionNum or 39,
     }
     local UF = {}
     local afConstructionTotals = {
@@ -1088,18 +1088,32 @@ local function assertNoNativeMutation(harness, message)
 end
 
 local function testCapabilityGate()
-    local oldAF = makeHarness({versionNum = 36})
+    local oldAF = makeHarness({versionNum = 38})
     assertEqual(
         oldAF.UF.HasNativeAuraContainerBackend(),
         false,
-        "AF r36 block-color gate"
+        "AF r38 duration-carrier gate"
     )
     assertEqual(
         oldAF.UF.CreateNativeAuraContainerController({}, "OldAF"),
         nil,
-        "AF r36 controller"
+        "AF r38 controller"
     )
-    assertEqual(#oldAF.holders, 0, "AF r36 holder count")
+    assertEqual(#oldAF.holders, 0, "AF r38 holder count")
+
+    local currentAF = makeHarness({versionNum = 39})
+    assertEqual(
+        currentAF.UF.HasNativeAuraContainerBackend(),
+        true,
+        "AF r39 duration-carrier gate"
+    )
+
+    local validationAF = makeHarness({versionNum = 42})
+    assertEqual(
+        validationAF.UF.HasNativeAuraContainerBackend(),
+        true,
+        "current AF r42 validation gate"
+    )
 
     local missingMethod = makeHarness({
         missingMethod = "SetCustomAuraSlotSortMethod",
@@ -1164,12 +1178,12 @@ local function testGlobalFrameworkRequirement()
     assertTrue(chunk, loadError)
     setfenv(chunk, environment)
     chunk("BFInfinite", BFI)
-    assertEqual(BFI.requiredAFVersion, 37, "published global AF minimum")
+    assertEqual(BFI.requiredAFVersion, 39, "published global AF minimum")
 
     local ok, versionError = pcall(eventHandler.ADDON_LOADED, eventHandler, BFI.name)
     assertEqual(ok, false, "global AF version check stops harness")
     assertEqual(versionError, stopAfterVersionCheck, "global AF version check sentinel")
-    assertEqual(requiredVersion, 37, "global AF minimum")
+    assertEqual(requiredVersion, 39, "global AF minimum")
 end
 local function testBuildContract()
     local harness = makeHarness()

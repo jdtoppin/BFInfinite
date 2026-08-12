@@ -4,7 +4,7 @@ _G.BFInfinite = BFI
 
 BFI.prefix = "BFI"
 BFI.name = "BFInfinite"
-BFI.requiredAFVersion = 37
+BFI.requiredAFVersion = 39
 
 ---@class BFI
 ---@field L table

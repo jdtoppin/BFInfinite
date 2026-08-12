@@ -622,6 +622,9 @@ local function makeEventRuntimeHarness()
         GetTime = function()
             return 0
         end,
+        GetBuildInfo = function()
+            return "12.1.0", "69273", "Aug 11 2026", 120100
+        end,
         GetUnitName = function(unit)
             return unit
         end,

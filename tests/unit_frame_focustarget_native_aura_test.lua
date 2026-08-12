@@ -638,7 +638,20 @@ local function makeEventRuntimeHarness(
             return self.name
         end
 
-        function frame:SetAllPoints()
+        function frame:GetObjectType()
+            return "Frame"
+        end
+
+        function frame:Hide()
+            self.shown = false
+        end
+
+        function frame:SetAllPoints(relativeTo)
+            self.allPoints = relativeTo
+        end
+
+        function frame:SetAlpha(alpha)
+            self.alpha = alpha
         end
 
         function frame:SetFrameStrata()
@@ -666,6 +679,9 @@ local function makeEventRuntimeHarness(
         end,
         GetTime = function()
             return 0
+        end,
+        GetBuildInfo = function()
+            return "12.1.0", "69273", "Aug 11 2026", 120100
         end,
         GetUnitName = function(unit)
             return unit
@@ -1396,7 +1412,7 @@ local function testFocusTargetRuntimeLifecycleHasNoGrowth()
         "FocusTarget lifecycle compile count")
 end
 
-local function testFocusTargetUnavailableBackendUsesBothAuraBuilders()
+local function testFocusTargetUnavailableBackendUsesInertAuraShells()
     local harness = makeEventRuntimeHarness(true, false)
     local buffs = harness.buffs
     local debuffs = harness.debuffs
@@ -1405,30 +1421,58 @@ local function testFocusTargetUnavailableBackendUsesBothAuraBuilders()
         "unavailable backend FocusTarget native controller count")
     assertEqual(#harness.compiles, 0,
         "unavailable backend FocusTarget native compile count")
-    assertEqual(#harness.legacyConstructions, 2,
+    assertEqual(#harness.legacyConstructions, 0,
         "unavailable backend FocusTarget legacy builder count")
-    assertEqual(buffs.builder, "auras",
-        "unavailable backend FocusTarget buffs builder")
+    assertEqual(buffs._nativeAuraUnavailable, true,
+        "unavailable backend FocusTarget buffs shell")
+    assertEqual(buffs:GetObjectType(), "Frame",
+        "unavailable backend FocusTarget buffs object type")
     assertEqual(buffs.name, "BFI_FocusTarget_Buffs",
         "unavailable backend FocusTarget buffs name")
     assertEqual(buffs.auraFilter, "HELPFUL",
         "unavailable backend FocusTarget buffs filter")
     assertEqual(buffs.hasSubFrame, nil,
         "unavailable backend FocusTarget buffs subframe flag")
-    assertEqual(debuffs.builder, "auras",
-        "unavailable backend FocusTarget debuffs builder")
+    assertEqual(buffs.alpha, 0,
+        "unavailable backend FocusTarget buffs alpha")
+    assertEqual(buffs.allPoints, harness.root,
+        "unavailable backend FocusTarget buffs anchor")
+    assertEqual(buffs.shown, false,
+        "unavailable backend FocusTarget buffs visibility")
+    assertEqual(buffs.enabled, false,
+        "unavailable backend FocusTarget buffs enabled state")
+    assertEqual(buffs:GetNativeAuraState().state, "UNAVAILABLE",
+        "unavailable backend FocusTarget buffs runtime state")
+    assertEqual(debuffs._nativeAuraUnavailable, true,
+        "unavailable backend FocusTarget debuffs shell")
+    assertEqual(debuffs:GetObjectType(), "Frame",
+        "unavailable backend FocusTarget debuffs object type")
     assertEqual(debuffs.name, "BFI_FocusTarget_Debuffs",
         "unavailable backend FocusTarget debuffs name")
     assertEqual(debuffs.auraFilter, "HARMFUL",
         "unavailable backend FocusTarget debuffs filter")
     assertEqual(debuffs.hasSubFrame, nil,
         "unavailable backend FocusTarget debuffs subframe flag")
+    assertEqual(debuffs.alpha, 0,
+        "unavailable backend FocusTarget debuffs alpha")
+    assertEqual(debuffs.allPoints, harness.root,
+        "unavailable backend FocusTarget debuffs anchor")
+    assertEqual(debuffs.shown, false,
+        "unavailable backend FocusTarget debuffs visibility")
+    assertEqual(debuffs.enabled, false,
+        "unavailable backend FocusTarget debuffs enabled state")
+    assertEqual(debuffs:GetNativeAuraState().state, "UNAVAILABLE",
+        "unavailable backend FocusTarget debuffs runtime state")
 
     harness.root.hooks.OnShow(harness.root)
-    assertEqual(buffs.enableCount, 1,
-        "unavailable backend FocusTarget buffs enable count")
-    assertEqual(debuffs.enableCount, 1,
-        "unavailable backend FocusTarget debuffs enable count")
+    assertEqual(buffs.enabled, false,
+        "unavailable backend FocusTarget buffs show state")
+    assertEqual(debuffs.enabled, false,
+        "unavailable backend FocusTarget debuffs show state")
+    assertEqual(#harness.controllers, 0,
+        "unavailable backend FocusTarget show controller count")
+    assertEqual(#harness.compiles, 0,
+        "unavailable backend FocusTarget show compile count")
 end
 
 local function testShippedFocusTargetPresetBounds()
@@ -1517,7 +1561,7 @@ testFocusTargetConfigModeGuardsAreLocal()
 testFocusTargetDefaultDisabledDoesNotBuild()
 testFocusTargetUnitEventsAndTicksRefreshNativeRuntime()
 testFocusTargetRuntimeLifecycleHasNoGrowth()
-testFocusTargetUnavailableBackendUsesBothAuraBuilders()
+testFocusTargetUnavailableBackendUsesInertAuraShells()
 testShippedFocusTargetPresetBounds()
 
 print("unit_frame_focustarget_native_aura_test.lua: ok")

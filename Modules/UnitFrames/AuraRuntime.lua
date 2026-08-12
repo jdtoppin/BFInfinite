@@ -7,14 +7,45 @@ local F = BFI.funcs
 local AF = _G.AbstractFramework
 
 local C_Timer = C_Timer
+local CreateFrame = CreateFrame
+local GetBuildInfo = GetBuildInfo
 local InCombatLockdown = InCombatLockdown
 local UnitCanAssist = UnitCanAssist
 local UnitCanAttack = UnitCanAttack
 local UnitIsVisible = UnitIsVisible
 local ipairs, next, pairs, setmetatable, type =
     ipairs, next, pairs, setmetatable, type
+local tonumber = tonumber
 
 local CONFIG_COMMIT_DELAY = 0.15
+local RETAIL_12_1_INTERFACE_MIN = 120100
+local nativeAuraRequirementResolved
+local requiresNativeAuraContainer
+
+-- Retail 12.1.0.69273 (wow-ui-source eb941aad) makes general unit-aura
+-- enumeration error whenever unit-aura access is restricted. The legacy
+-- iterator is therefore available only on a positively identified pre-12.1
+-- interface. Unknown and future interfaces stay on the native boundary.
+local function RequiresNativeAuraContainer()
+    if nativeAuraRequirementResolved then
+        return requiresNativeAuraContainer
+    end
+    nativeAuraRequirementResolved = true
+
+    -- These globals exist on every supported WoW client. Missing build data is
+    -- not a positively identified legacy interface and therefore fails closed.
+    if type(GetBuildInfo) ~= "function"
+        or type(tonumber) ~= "function"
+    then
+        requiresNativeAuraContainer = true
+        return true
+    end
+    local _, _, _, reportedInterfaceVersion = GetBuildInfo()
+    local interfaceVersion = tonumber(reportedInterfaceVersion)
+    requiresNativeAuraContainer = interfaceVersion == nil
+        or interfaceVersion >= RETAIL_12_1_INTERFACE_MIN
+    return requiresNativeAuraContainer
+end
 
 local STATE_NEW = "NEW"
 local STATE_WAITING_FOR_UNIT = "WAITING_FOR_UNIT"
@@ -1291,6 +1322,105 @@ end, "low")
 ---------------------------------------------------------------------
 -- create
 ---------------------------------------------------------------------
+local UnavailableAuraIndicatorMixin = {}
+
+local function QuiesceUnavailableAuraIndicator(self)
+    self.enabled = false
+end
+
+UnavailableAuraIndicatorMixin.LoadConfig =
+    QuiesceUnavailableAuraIndicator
+UnavailableAuraIndicatorMixin.Enable =
+    QuiesceUnavailableAuraIndicator
+UnavailableAuraIndicatorMixin.Disable =
+    QuiesceUnavailableAuraIndicator
+UnavailableAuraIndicatorMixin.Update =
+    QuiesceUnavailableAuraIndicator
+UnavailableAuraIndicatorMixin.EnableConfigMode =
+    QuiesceUnavailableAuraIndicator
+UnavailableAuraIndicatorMixin.DisableConfigMode =
+    QuiesceUnavailableAuraIndicator
+
+function UnavailableAuraIndicatorMixin:GetNativeAuraState()
+    return {
+        state = "UNAVAILABLE",
+        active = false,
+        built = false,
+        nativeBackendAvailable = false,
+    }
+end
+
+function UnavailableAuraIndicatorMixin:RequiresReloadForConfig()
+    return false
+end
+
+local function CreateUnavailableAuraShell(
+    parent,
+    name,
+    auraFilter,
+    root
+)
+    local frame = CreateFrame("Frame", name, parent)
+
+    -- SetAlpha is the constant, write-only curtain that remains valid while
+    -- protected geometry/visibility mutations are unavailable. Outside
+    -- combat, complete the ordinary hidden anchor contract as well.
+    frame:SetAlpha(0)
+    if not InCombatLockdown() then
+        frame:SetAllPoints(parent)
+        frame:Hide()
+    end
+
+    for key, value in pairs(UnavailableAuraIndicatorMixin) do
+        frame[key] = value
+    end
+    frame._nativeAuraUnavailable = true
+    frame.auraFilter = auraFilter
+    frame.enabled = false
+    frame.root = root or parent
+    return frame
+end
+
+local function CreateUnavailableAuraIndicator(
+    parent,
+    name,
+    auraFilter,
+    hasSubFrame
+)
+    local frame = CreateUnavailableAuraShell(
+        parent,
+        name,
+        auraFilter,
+        parent
+    )
+    if hasSubFrame then
+        frame.subFrame = CreateUnavailableAuraShell(
+            frame,
+            nil,
+            auraFilter,
+            parent
+        )
+    end
+    return frame
+end
+
+local function CreateLegacyOrUnavailableAuraIndicator(
+    parent,
+    name,
+    auraFilter,
+    hasSubFrame
+)
+    if RequiresNativeAuraContainer() then
+        return CreateUnavailableAuraIndicator(
+            parent,
+            name,
+            auraFilter,
+            hasSubFrame
+        )
+    end
+    return UF.CreateAuras(parent, name, auraFilter, hasSubFrame)
+end
+
 local function InitializeNativeAuraIndicator(
     parent,
     auraFilter,
@@ -1407,7 +1537,11 @@ end
 -- neither accesses that map nor sets native header/container state.
 function UF.CreateGroupNativeAuras(parent, name, auraFilter, containerKey)
     if not UF.HasNativeAuraContainerBackend() then
-        return UF.CreateAuras(parent, name, auraFilter)
+        return CreateLegacyOrUnavailableAuraIndicator(
+            parent,
+            name,
+            auraFilter
+        )
     end
 
     local containers = parent._nativeAuraContainers
@@ -1421,11 +1555,17 @@ function UF.CreateGroupNativeAuras(parent, name, auraFilter, containerKey)
     )
 end
 
--- Keep Target's complementary subframe on the established fallback until a
--- frame-specific PR explicitly adopts a migration-ready native contract.
+-- Keep a positively identified pre-12.1 compatibility path exact. On 12.1,
+-- an unavailable backend or an unadopted complementary subframe stays inert
+-- instead of entering the legacy aura iterator.
 function UF.CreateNativeAuras(parent, name, auraFilter, hasSubFrame)
     if hasSubFrame or not UF.HasNativeAuraContainerBackend() then
-        return UF.CreateAuras(parent, name, auraFilter, hasSubFrame)
+        return CreateLegacyOrUnavailableAuraIndicator(
+            parent,
+            name,
+            auraFilter,
+            hasSubFrame
+        )
     end
     return UF.CreateNativeAuraIndicator(
         parent,
@@ -1436,8 +1576,8 @@ function UF.CreateNativeAuras(parent, name, auraFilter, hasSubFrame)
 end
 
 -- Opt-in builder for frame integrations that have accepted the compiled
--- relation-partition contract. The legacy implementation remains the exact
--- fallback when the 12.1 native backend is unavailable.
+-- relation-partition contract. Only a known pre-12.1 interface may enter the
+-- legacy fallback when the native backend is unavailable.
 function UF.CreateNativePartitionedAuras(
     parent,
     name,
@@ -1445,7 +1585,12 @@ function UF.CreateNativePartitionedAuras(
     hasSubFrame
 )
     if not UF.HasNativeAuraContainerBackend() then
-        return UF.CreateAuras(parent, name, auraFilter, hasSubFrame)
+        return CreateLegacyOrUnavailableAuraIndicator(
+            parent,
+            name,
+            auraFilter,
+            hasSubFrame
+        )
     end
     return UF.CreateNativePartitionedAuraIndicator(
         parent,

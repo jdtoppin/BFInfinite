@@ -5,8 +5,8 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF #22/r37 provides caller-supplied static Block colors for native groups.
-local REQUIRED_AF_VERSION = 37
+-- AF #27/r39 registers only the selected native aura duration carrier.
+local REQUIRED_AF_VERSION = 39
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar
