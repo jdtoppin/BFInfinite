@@ -5,7 +5,7 @@ local UF = BFI.modules.UnitFrames
 local concat = table.concat
 local ipairs, type = ipairs, type
 
--- Retail 12.1.0.68914 (wow-ui-source d3915c78) supports negated native
+-- Retail 12.1.0.69273 (wow-ui-source eb941aad) supports negated native
 -- filter tokens, but each CustomAuraContainer group owns its own limit and
 -- sort. The container also has no selector that separates public from private
 -- aura sources. This compiler records those limitations without reading any
@@ -81,6 +81,13 @@ function UF.CompileNativeAuraPolicy(baseFilter, filters)
             groups[#groups + 1] = {
                 key = rule.key,
                 filterString = concat(parts, "|"),
+                -- Keep source partitioning as compiler metadata instead of
+                -- reparsing filter strings later. When PLAYER is enabled it
+                -- is the first disjoint group and every later group excludes
+                -- it; otherwise the group spans both player relationships.
+                playerScope = rule.key == "player" and "player"
+                    or enabled.player and "notPlayer"
+                    or "any",
             }
             precedingTokens[#precedingTokens + 1] = rule.token
         end

@@ -361,7 +361,7 @@ local function testLegacyLoadAndSchemaGate()
     assertEqual(
         type(legacy.UF.CompileNativeAuraSpec),
         "function",
-        "12.0.7 compiler export"
+        "unavailable-schema compiler export"
     )
 
     local descriptor, errorCode = legacy.UF.CompileNativeAuraSpec(
@@ -369,13 +369,14 @@ local function testLegacyLoadAndSchemaGate()
         "HARMFUL",
         baseConfig()
     )
-    assertEqual(descriptor, nil, "12.0.7 descriptor")
+    assertEqual(descriptor, nil, "unavailable-schema descriptor")
     assertEqual(
         errorCode,
         "NATIVE_AURA_SCHEMA_UNAVAILABLE",
-        "12.0.7 schema error"
+        "unavailable-schema error"
     )
-    assertEqual(#legacy.forbiddenCalls, 0, "12.0.7 forbidden calls")
+    assertEqual(#legacy.forbiddenCalls, 0,
+        "unavailable-schema forbidden calls")
 end
 
 local function testCompleteSpecContract()
@@ -464,6 +465,8 @@ local function testCompleteSpecContract()
     assertDeepEqual(descriptor.visibility, {
         requiresVisible = true,
         requiresAssist = false,
+        spellIDFilterRequiresPublicAssist = false,
+        spellIDFilterRequiresPublicNonAssist = false,
     }, "visibility")
     assertEqual(descriptor.partition, nil, "partition")
 
@@ -492,6 +495,7 @@ local function testCompleteSpecContract()
         auraTypeColorSourceRulesIgnored = true,
         tooltipPlacementApproximate = false,
         partitionDeferred = false,
+        partitionSecretFallback = false,
     }, "base degradations")
 
     assertEqual(#descriptor.constructionKey.groups, 2, "construction groups")
@@ -680,7 +684,7 @@ local function testOrientationAndGeometry()
         height = 6,
     }, "negative-spacing holder")
 
-    -- d3915c78's flow cursor already retains elementSpacing after the prior
+    -- eb941aad's flow cursor already retains elementSpacing after the prior
     -- group's last element. A non-zero groupSpacing would double the 2px gap
     -- and can wrap the next group early.
     local boundary = compile("target", "HARMFUL", baseConfig())
@@ -977,6 +981,7 @@ local function testEmptyPolicies()
         auraTypeColorSourceRulesIgnored = false,
         tooltipPlacementApproximate = false,
         partitionDeferred = false,
+        partitionSecretFallback = false,
     }, "empty degradations")
     assertEqual(#empty.constructionKey.groups, 0, "empty construction groups")
     assertEqual(#empty.constructionKey.slots, 0, "empty construction slots")
@@ -1028,7 +1033,7 @@ local function testPartitionMetadata()
         height = 7,
     }
     local descriptor = compile("target", "HARMFUL", config)
-    assertEqual(descriptor.migrationReady, false, "partition readiness")
+    assertEqual(descriptor.migrationReady, true, "partition readiness")
     assertTrue(type(descriptor.partition) == "table", "partition metadata")
     assertEqual(
         descriptor.partition.filter,
@@ -1042,21 +1047,680 @@ local function testPartitionMetadata()
     )
     assertEqual(descriptor.partition.width, 8, "partition width")
     assertEqual(descriptor.partition.height, 7, "partition height")
+    assertDeepEqual(descriptor.partition.selector, {
+        kind = "unitCanAttack",
+        actorUnit = "player",
+        secretFallback = "friendly",
+    }, "partition selector")
+    assertDeepEqual(descriptor.partition.holder, {
+        width = 46,
+        height = 16,
+    }, "partition composite holder")
+
+    local hostile = descriptor.partition.hostile
+    assertTrue(type(hostile) == "table", "hostile presentation")
+    assertDeepEqual(hostile.holder, {
+        width = 46,
+        height = 16,
+    }, "hostile holder")
+    assertDeepEqual(hostile.attachment, {
+        template = "DisableUntrustedLayoutScriptsTemplate",
+        point = "TOPLEFT",
+        relativePoint = "BOTTOMLEFT",
+        x = 0,
+        y = 1,
+    }, "hostile attachment")
+
+    local main = hostile.main
+    local complement = hostile.complement
+    assertEqual(#main.completeSpec.groups, 1, "hostile main groups")
+    assertEqual(
+        main.completeSpec.groups[1].filterString,
+        "HARMFUL|PLAYER",
+        "hostile main filter"
+    )
+    assertDeepEqual(main.completeSpec.groups[1].layout, {
+        elementSpacing = 2,
+        lineSpacing = -1,
+        groupSpacing = 0,
+        groupLineSpacing = -1,
+        forceNewLine = false,
+        elementWidth = 10,
+        elementHeight = 10,
+        layoutIndex = 1,
+    }, "hostile main clamped-empty layout")
+    assertDeepEqual(
+        main.completeSpec.groups[1].buttonStyle,
+        expectedButtonStyle(true),
+        "hostile main style"
+    )
+    assertDeepEqual(main.completeSpec.holder, {
+        width = 46,
+        height = 6,
+    }, "hostile main visual holder")
+    assertDeepEqual(main.tuningSpec.groups[1].layout, {
+        elementSpacing = 2,
+        lineSpacing = -1,
+        groupSpacing = 0,
+        groupLineSpacing = -1,
+        forceNewLine = false,
+        elementWidth = 10,
+        elementHeight = 10,
+        layoutIndex = 1,
+    }, "hostile main tuning layout")
+
+    assertEqual(#complement.completeSpec.groups, 1, "complement groups")
+    assertEqual(
+        complement.completeSpec.groups[1].filterString,
+        "HARMFUL|RAID_IN_COMBAT|!PLAYER",
+        "complement filter"
+    )
+    assertDeepEqual(complement.completeSpec.groups[1].layout, {
+        elementSpacing = 2,
+        lineSpacing = 3,
+        groupSpacing = 0,
+        groupLineSpacing = 3,
+        forceNewLine = false,
+        elementWidth = 8,
+        elementHeight = 7,
+        layoutIndex = 1,
+    }, "complement layout")
+    local complementStyle =
+        copy(complement.completeSpec.groups[1].buttonStyle)
+    complementStyle.width = nil
+    complementStyle.height = nil
+    complementStyle.desaturated = nil
+    local expectedComplementStyle = expectedButtonStyle(true)
+    expectedComplementStyle.width = nil
+    expectedComplementStyle.height = nil
+    expectedComplementStyle.desaturated = nil
+    assertDeepEqual(
+        complementStyle,
+        expectedComplementStyle,
+        "complement inherited style"
+    )
+    assertEqual(
+        complement.completeSpec.groups[1].buttonStyle.width,
+        8,
+        "complement style width"
+    )
+    assertEqual(
+        complement.completeSpec.groups[1].buttonStyle.height,
+        7,
+        "complement style height"
+    )
+    assertEqual(
+        complement.completeSpec.groups[1].buttonStyle.desaturated,
+        true,
+        "complement style desaturated"
+    )
+    assertDeepEqual(complement.completeSpec.holder, {
+        width = 38,
+        height = 7,
+    }, "complement holder")
+    assertDeepEqual(
+        main.constructionKey.groups[1].buttonStyle,
+        main.completeSpec.groups[1].buttonStyle,
+        "main construction style"
+    )
+    assertDeepEqual(
+        complement.constructionKey.groups[1].buttonStyle,
+        complement.completeSpec.groups[1].buttonStyle,
+        "complement construction style"
+    )
+
+    assertDeepEqual(descriptor.metrics, {
+        groupCount = 2,
+        legacyMaxFrameCount = 4,
+        nativeVisibleCapacity = 8,
+        nativeBatchSize = 10,
+        initialRestrictedButtonCount = 40,
+        freshContainerRestrictedButtonCountCeiling = 40,
+        prebuiltContainerCount = 3,
+        prebuiltGroupCount = 4,
+        maxActiveGroupCount = 2,
+        hostileHolder = {
+            width = 46,
+            height = 16,
+        },
+        compositeHolder = {
+            width = 46,
+            height = 16,
+        },
+        variants = {
+            friendly = {
+                groupCount = 2,
+                nativeVisibleCapacity = 8,
+                initialRestrictedButtonCount = 20,
+                freshContainerRestrictedButtonCountCeiling = 20,
+                holder = {
+                    width = 46,
+                    height = 15,
+                },
+            },
+            hostileMain = {
+                groupCount = 1,
+                nativeVisibleCapacity = 4,
+                initialRestrictedButtonCount = 10,
+                freshContainerRestrictedButtonCountCeiling = 10,
+                holder = {
+                    width = 46,
+                    height = 6,
+                },
+            },
+            hostileComplement = {
+                groupCount = 1,
+                nativeVisibleCapacity = 4,
+                initialRestrictedButtonCount = 10,
+                freshContainerRestrictedButtonCountCeiling = 10,
+                holder = {
+                    width = 38,
+                    height = 7,
+                },
+            },
+        },
+    }, "partition metrics")
     assertDeepEqual(descriptor.diagnostics, {
         "NATIVE_DEFAULT_SORT_ADDS_PRIORITY",
         "NATIVE_HOLDER_USES_MAXIMUM_EXTENT",
         "AURA_TYPE_COLOR_SOURCE_RULES_IGNORED",
-        "TARGET_PARTITION_DEFERRED",
+        "NATIVE_PARTITION_PREBUILDS_RELATION_VARIANTS",
+        "NATIVE_PARTITION_SECRET_RELATION_USES_UNPARTITIONED",
     }, "partition diagnostics")
     assertEqual(
         descriptor.degradations.partitionDeferred,
-        true,
+        false,
         "partition degradation"
+    )
+    assertEqual(
+        descriptor.degradations.partitionSecretFallback,
+        true,
+        "partition secret fallback"
     )
 
     config.subFrame.enabled = false
     local disabled = compile("target", "HARMFUL", config)
     assertEqual(disabled.migrationReady, true, "disabled partition readiness")
+    assertEqual(disabled.partition, nil, "disabled partition descriptor")
+    assertEqual(
+        disabled.degradations.partitionSecretFallback,
+        false,
+        "disabled partition secret fallback"
+    )
+end
+
+local function testPartitionScopeSplitting()
+    local neutral = baseConfig()
+    neutral.filters = {
+        isBossAura = true,
+        dispellable = true,
+    }
+    neutral.subFrame = {
+        enabled = true,
+        desaturated = true,
+        filter = "notCastByMe",
+        width = 8,
+        height = 7,
+    }
+
+    local descriptor = compile("target", "HARMFUL", neutral)
+    local friendly = descriptor.completeSpec.groups
+    local hostile = descriptor.partition.hostile
+    local main = hostile.main.completeSpec.groups
+    local complement = hostile.complement.completeSpec.groups
+
+    assertEqual(#friendly, 2, "neutral friendly group count")
+    assertEqual(#main, 2, "neutral main group count")
+    assertEqual(#complement, 2, "neutral complement group count")
+    assertDeepEqual({
+        {friendly[1].key, friendly[1].filterString},
+        {friendly[2].key, friendly[2].filterString},
+    }, {
+        {"raidInCombat", "HARMFUL|RAID_IN_COMBAT"},
+        {
+            "raidPlayerDispellable",
+            "HARMFUL|RAID_PLAYER_DISPELLABLE|!RAID_IN_COMBAT",
+        },
+    }, "neutral friendly filters")
+    assertDeepEqual({
+        {main[1].key, main[1].filterString},
+        {main[2].key, main[2].filterString},
+    }, {
+        {"raidInCombat", "HARMFUL|RAID_IN_COMBAT|PLAYER"},
+        {
+            "raidPlayerDispellable",
+            "HARMFUL|RAID_PLAYER_DISPELLABLE|!RAID_IN_COMBAT|PLAYER",
+        },
+    }, "neutral main filters")
+    assertDeepEqual({
+        {complement[1].key, complement[1].filterString},
+        {complement[2].key, complement[2].filterString},
+    }, {
+        {"raidInCombat", "HARMFUL|RAID_IN_COMBAT|!PLAYER"},
+        {
+            "raidPlayerDispellable",
+            "HARMFUL|RAID_PLAYER_DISPELLABLE|!RAID_IN_COMBAT|!PLAYER",
+        },
+    }, "neutral complement filters")
+    assertDeepEqual(descriptor.partition.holder, {
+        width = 46,
+        height = 35,
+    }, "neutral composite holder")
+    assertDeepEqual(descriptor.metrics, {
+        groupCount = 2,
+        legacyMaxFrameCount = 4,
+        nativeVisibleCapacity = 16,
+        nativeBatchSize = 10,
+        initialRestrictedButtonCount = 60,
+        freshContainerRestrictedButtonCountCeiling = 60,
+        prebuiltContainerCount = 3,
+        prebuiltGroupCount = 6,
+        maxActiveGroupCount = 4,
+        hostileHolder = {
+            width = 46,
+            height = 35,
+        },
+        compositeHolder = {
+            width = 46,
+            height = 35,
+        },
+        variants = {
+            friendly = {
+                groupCount = 2,
+                nativeVisibleCapacity = 8,
+                initialRestrictedButtonCount = 20,
+                freshContainerRestrictedButtonCountCeiling = 20,
+                holder = {
+                    width = 46,
+                    height = 15,
+                },
+            },
+            hostileMain = {
+                groupCount = 2,
+                nativeVisibleCapacity = 8,
+                initialRestrictedButtonCount = 20,
+                freshContainerRestrictedButtonCountCeiling = 20,
+                holder = {
+                    width = 46,
+                    height = 15,
+                },
+            },
+            hostileComplement = {
+                groupCount = 2,
+                nativeVisibleCapacity = 8,
+                initialRestrictedButtonCount = 20,
+                freshContainerRestrictedButtonCountCeiling = 20,
+                holder = {
+                    width = 38,
+                    height = 17,
+                },
+            },
+        },
+    }, "neutral physical metrics")
+
+    local playerOnly = baseConfig()
+    playerOnly.filters = {
+        castByMe = true,
+    }
+    playerOnly.subFrame = copy(neutral.subFrame)
+    local playerDescriptor = compile("target", "HARMFUL", playerOnly)
+    local playerHostile = playerDescriptor.partition.hostile
+    assertTrue(playerHostile.main ~= nil, "player-only main")
+    assertEqual(playerHostile.complement, nil, "player-only complement")
+    assertEqual(playerHostile.attachment, nil, "player-only attachment")
+    assertDeepEqual(
+        playerHostile.main.completeSpec.groups[1].layout,
+        {
+            elementSpacing = 2,
+            lineSpacing = 3,
+            groupSpacing = 0,
+            groupLineSpacing = 3,
+            forceNewLine = false,
+            elementWidth = 10,
+            elementHeight = 6,
+            layoutIndex = 1,
+        },
+        "player-only main has no trailing reservation"
+    )
+    assertEqual(
+        playerDescriptor.metrics.prebuiltContainerCount,
+        2,
+        "player-only prebuilt containers"
+    )
+    assertEqual(
+        playerDescriptor.metrics.prebuiltGroupCount,
+        2,
+        "player-only prebuilt groups"
+    )
+    assertEqual(
+        playerDescriptor.metrics.initialRestrictedButtonCount,
+        20,
+        "player-only initial allocation"
+    )
+end
+
+local function testPartitionAttachmentGeometry()
+    local cases = {
+        {
+            orientation = "left_to_right",
+            anchor = "BOTTOM",
+            point = "BOTTOMLEFT",
+            relativePoint = "TOPLEFT",
+            x = 0,
+            y = -1,
+            elementWidth = 10,
+            elementHeight = 10,
+            holder = {width = 46, height = 16},
+        },
+        {
+            orientation = "left_to_right",
+            anchor = "TOP",
+            point = "TOPLEFT",
+            relativePoint = "BOTTOMLEFT",
+            x = 0,
+            y = 1,
+            elementWidth = 10,
+            elementHeight = 10,
+            holder = {width = 46, height = 16},
+        },
+        {
+            orientation = "right_to_left",
+            anchor = "BOTTOM",
+            point = "BOTTOMRIGHT",
+            relativePoint = "TOPRIGHT",
+            x = 0,
+            y = -1,
+            elementWidth = 10,
+            elementHeight = 10,
+            holder = {width = 46, height = 16},
+        },
+        {
+            orientation = "right_to_left",
+            anchor = "TOP",
+            point = "TOPRIGHT",
+            relativePoint = "BOTTOMRIGHT",
+            x = 0,
+            y = 1,
+            elementWidth = 10,
+            elementHeight = 10,
+            holder = {width = 46, height = 16},
+        },
+        {
+            orientation = "top_to_bottom",
+            anchor = "RIGHT",
+            point = "TOPRIGHT",
+            relativePoint = "TOPLEFT",
+            x = 1,
+            y = 0,
+            elementWidth = 13,
+            elementHeight = 6,
+            holder = {width = 22, height = 37},
+        },
+        {
+            orientation = "top_to_bottom",
+            anchor = "LEFT",
+            point = "TOPLEFT",
+            relativePoint = "TOPRIGHT",
+            x = -1,
+            y = 0,
+            elementWidth = 13,
+            elementHeight = 6,
+            holder = {width = 22, height = 37},
+        },
+        {
+            orientation = "bottom_to_top",
+            anchor = "RIGHT",
+            point = "BOTTOMRIGHT",
+            relativePoint = "BOTTOMLEFT",
+            x = 1,
+            y = 0,
+            elementWidth = 13,
+            elementHeight = 6,
+            holder = {width = 22, height = 37},
+        },
+        {
+            orientation = "bottom_to_top",
+            anchor = "LEFT",
+            point = "BOTTOMLEFT",
+            relativePoint = "BOTTOMRIGHT",
+            x = -1,
+            y = 0,
+            elementWidth = 13,
+            elementHeight = 6,
+            holder = {width = 22, height = 37},
+        },
+    }
+
+    for index, case in ipairs(cases) do
+        local config = baseConfig()
+        config.orientation = case.orientation
+        config.position[1] = case.anchor
+        config.subFrame = {
+            enabled = true,
+            desaturated = true,
+            filter = "notCastByMe",
+            width = 8,
+            height = 7,
+        }
+        local descriptor = compile("target", "HARMFUL", config)
+        local hostile = descriptor.partition.hostile
+        local layout = hostile.main.completeSpec.groups[1].layout
+        local message = "partition attachment case " .. index
+
+        assertDeepEqual(hostile.attachment, {
+            template = "DisableUntrustedLayoutScriptsTemplate",
+            point = case.point,
+            relativePoint = case.relativePoint,
+            x = case.x,
+            y = case.y,
+        }, message .. " attachment")
+        assertEqual(layout.lineSpacing, -1, message .. " line spacing")
+        assertEqual(
+            layout.groupLineSpacing,
+            -1,
+            message .. " group line spacing"
+        )
+        assertEqual(
+            layout.elementWidth,
+            case.elementWidth,
+            message .. " element width"
+        )
+        assertEqual(
+            layout.elementHeight,
+            case.elementHeight,
+            message .. " element height"
+        )
+        assertDeepEqual(
+            descriptor.partition.holder,
+            case.holder,
+            message .. " holder"
+        )
+    end
+
+    local overlapping = baseConfig()
+    overlapping.spacingY = -2
+    overlapping.subFrame = {
+        enabled = true,
+        desaturated = true,
+        filter = "notCastByMe",
+        width = 8,
+        height = 7,
+    }
+    local overlappingDescriptor =
+        compile("target", "HARMFUL", overlapping)
+    local overlappingMain = overlappingDescriptor.partition.hostile
+        .main.completeSpec.groups[1].layout
+    assertEqual(
+        overlappingMain.elementHeight,
+        5,
+        "negative spacing clamped-empty element"
+    )
+    assertEqual(
+        overlappingMain.lineSpacing,
+        -1,
+        "negative spacing clamped-empty line spacing"
+    )
+    assertDeepEqual(
+        overlappingDescriptor.partition.hostile.holder,
+        {
+            width = 46,
+            height = 11,
+        },
+        "negative spacing hostile visual union"
+    )
+    assertDeepEqual(
+        overlappingDescriptor.partition.holder,
+        {
+            width = 46,
+            height = 11,
+        },
+        "negative spacing composite holder"
+    )
+end
+
+local function testShippedTargetPartitionMetrics()
+    local config = baseConfig()
+    config.position[1] = "BOTTOMLEFT"
+    config.orientation = "left_to_right"
+    config.width = 19
+    config.height = 19
+    config.spacingX = 1
+    config.spacingY = 1
+    config.numPerLine = 11
+    config.numTotal = 22
+    config.filters = {
+        castByMe = true,
+        castByOthers = true,
+        castByUnit = true,
+        castByNPC = true,
+        isBossAura = true,
+        dispellable = true,
+    }
+    config.subFrame = {
+        enabled = true,
+        desaturated = true,
+        filter = "notCastByMe",
+        width = 17,
+        height = 17,
+    }
+
+    local descriptor = compile("target", "HARMFUL", config)
+    local hostile = descriptor.partition.hostile
+    assertEqual(#descriptor.completeSpec.groups, 3, "shipped friendly groups")
+    assertEqual(#hostile.main.completeSpec.groups, 1, "shipped main groups")
+    assertEqual(
+        #hostile.complement.completeSpec.groups,
+        2,
+        "shipped complement groups"
+    )
+    assertDeepEqual({
+        descriptor.completeSpec.groups[1].filterString,
+        descriptor.completeSpec.groups[2].filterString,
+        descriptor.completeSpec.groups[3].filterString,
+    }, {
+        "HARMFUL|PLAYER",
+        "HARMFUL|RAID_IN_COMBAT|!PLAYER",
+        "HARMFUL|RAID_PLAYER_DISPELLABLE|!PLAYER|!RAID_IN_COMBAT",
+    }, "shipped friendly filters")
+    assertDeepEqual({
+        hostile.main.completeSpec.groups[1].filterString,
+    }, {
+        "HARMFUL|PLAYER",
+    }, "shipped main filters")
+    assertDeepEqual({
+        hostile.complement.completeSpec.groups[1].filterString,
+        hostile.complement.completeSpec.groups[2].filterString,
+    }, {
+        "HARMFUL|RAID_IN_COMBAT|!PLAYER",
+        "HARMFUL|RAID_PLAYER_DISPELLABLE|!PLAYER|!RAID_IN_COMBAT",
+    }, "shipped complement filters")
+    assertEqual(
+        hostile.main.completeSpec.groups[1].layout.elementHeight,
+        21,
+        "shipped clamped-empty main element height"
+    )
+    assertEqual(
+        hostile.main.completeSpec.groups[1].layout.lineSpacing,
+        -1,
+        "shipped clamped-empty main line spacing"
+    )
+    assertEqual(
+        hostile.complement.completeSpec.groups[1].buttonStyle.width,
+        17,
+        "shipped complement width"
+    )
+    assertEqual(
+        hostile.complement.completeSpec.groups[1].buttonStyle.height,
+        17,
+        "shipped complement height"
+    )
+    assertEqual(
+        hostile.complement.completeSpec.groups[1].buttonStyle.desaturated,
+        true,
+        "shipped complement desaturation"
+    )
+    assertDeepEqual(hostile.attachment, {
+        template = "DisableUntrustedLayoutScriptsTemplate",
+        point = "BOTTOMLEFT",
+        relativePoint = "TOPLEFT",
+        x = 0,
+        y = -1,
+    }, "shipped attachment")
+    assertDeepEqual(descriptor.metrics, {
+        groupCount = 3,
+        legacyMaxFrameCount = 22,
+        nativeVisibleCapacity = 66,
+        nativeBatchSize = 10,
+        initialRestrictedButtonCount = 60,
+        freshContainerRestrictedButtonCountCeiling = 180,
+        prebuiltContainerCount = 3,
+        prebuiltGroupCount = 6,
+        maxActiveGroupCount = 3,
+        hostileHolder = {
+            width = 219,
+            height = 111,
+        },
+        compositeHolder = {
+            width = 219,
+            height = 119,
+        },
+        variants = {
+            friendly = {
+                groupCount = 3,
+                nativeVisibleCapacity = 66,
+                initialRestrictedButtonCount = 30,
+                freshContainerRestrictedButtonCountCeiling = 90,
+                holder = {
+                    width = 219,
+                    height = 119,
+                },
+            },
+            hostileMain = {
+                groupCount = 1,
+                nativeVisibleCapacity = 22,
+                initialRestrictedButtonCount = 10,
+                freshContainerRestrictedButtonCountCeiling = 30,
+                holder = {
+                    width = 219,
+                    height = 39,
+                },
+            },
+            hostileComplement = {
+                groupCount = 2,
+                nativeVisibleCapacity = 44,
+                initialRestrictedButtonCount = 20,
+                freshContainerRestrictedButtonCountCeiling = 60,
+                holder = {
+                    width = 197,
+                    height = 71,
+                },
+            },
+        },
+    }, "shipped physical metrics")
+    assertDeepEqual(descriptor.partition.holder, {
+        width = 219,
+        height = 119,
+    }, "shipped composite holder")
 end
 
 local function testCapacityMetrics()
@@ -1183,6 +1847,18 @@ local function testSpellIDCandidateFilters()
         "helpful identity filter assist gate"
     )
     assertEqual(
+        whitelistDescriptor.visibility
+            .spellIDFilterRequiresPublicAssist,
+        true,
+        "helpful identity filter requires public assist"
+    )
+    assertEqual(
+        whitelistDescriptor.visibility
+            .spellIDFilterRequiresPublicNonAssist,
+        false,
+        "helpful identity filter does not require public non-assist"
+    )
+    assertEqual(
         whitelistDescriptor.degradations.spellIDListsIgnored,
         false,
         "whitelist is not ignored"
@@ -1240,6 +1916,18 @@ local function testSpellIDCandidateFilters()
         "empty helpful whitelist assist gate"
     )
     assertEqual(
+        emptyWhitelistDescriptor.visibility
+            .spellIDFilterRequiresPublicAssist,
+        true,
+        "empty helpful whitelist retains public assist gate"
+    )
+    assertEqual(
+        emptyWhitelistDescriptor.visibility
+            .spellIDFilterRequiresPublicNonAssist,
+        false,
+        "empty helpful whitelist has no public non-assist gate"
+    )
+    assertEqual(
         emptyWhitelistDescriptor.degradations
             .spellIDFiltersRestrictedByUnitReaction,
         true,
@@ -1263,6 +1951,18 @@ local function testSpellIDCandidateFilters()
         false,
         "harmful identity filter assist gate"
     )
+    assertEqual(
+        blacklistDescriptor.visibility
+            .spellIDFilterRequiresPublicAssist,
+        false,
+        "harmful identity filter has no public assist gate"
+    )
+    assertEqual(
+        blacklistDescriptor.visibility
+            .spellIDFilterRequiresPublicNonAssist,
+        true,
+        "harmful identity filter requires public non-assist"
+    )
 
     local emptyBlacklist = baseConfig()
     emptyBlacklist.blacklist = {}
@@ -1283,6 +1983,18 @@ local function testSpellIDCandidateFilters()
             .spellIDFiltersRestrictedByUnitReaction,
         false,
         "empty blacklist reaction degradation"
+    )
+    assertEqual(
+        emptyBlacklistDescriptor.visibility
+            .spellIDFilterRequiresPublicAssist,
+        false,
+        "empty blacklist has no public assist gate"
+    )
+    assertEqual(
+        emptyBlacklistDescriptor.visibility
+            .spellIDFilterRequiresPublicNonAssist,
+        false,
+        "empty blacklist has no public non-assist gate"
     )
     assertEqual(
         #emptyBlacklistDescriptor.diagnostics,
@@ -1563,6 +2275,23 @@ local function testInvalidInputs()
         invalid,
         "INVALID_SUBFRAME"
     )
+
+    invalid = baseConfig()
+    invalid.spacingX = -9
+    invalid.subFrame = {
+        enabled = true,
+        desaturated = true,
+        filter = "notCastByMe",
+        width = 8,
+        height = 8,
+    }
+    assertCompileError(
+        "target",
+        "HARMFUL",
+        invalid,
+        "INVALID_SUBFRAME",
+        "partition cross geometry"
+    )
 end
 
 local function testConstructionBoundary()
@@ -1639,6 +2368,150 @@ local function testConstructionBoundary()
         movedApproximate.constructionKey,
         approximateDescriptor.constructionKey,
         "inactive native tooltip offsets"
+    )
+end
+
+local function testPartitionConstructionBoundary()
+    local function partitionConfig()
+        local config = baseConfig()
+        config.subFrame = {
+            enabled = true,
+            desaturated = true,
+            filter = "notCastByMe",
+            width = 8,
+            height = 7,
+        }
+        return config
+    end
+
+    local function assertDifferent(left, right, message)
+        local same = pcall(assertDeepEqual, left, right, message)
+        assertEqual(same, false, message)
+    end
+
+    local original = compile(
+        "target",
+        "HARMFUL",
+        partitionConfig()
+    )
+    local friendlyKey = original.constructionKey
+    local mainKey =
+        original.partition.hostile.main.constructionKey
+    local complementKey =
+        original.partition.hostile.complement.constructionKey
+
+    local tuningMutations = {
+        function(config) config.enabled = false end,
+        function(config) config.position = {"BOTTOM", "TOP", 20, 30} end,
+        function(config) config.anchorTo = "parent" end,
+        function(config) config.frameLevel = 12 end,
+        function(config) config.orientation = "right_to_left" end,
+        function(config) config.spacingX = 4 end,
+        function(config) config.spacingY = 5 end,
+        function(config) config.numPerLine = 2 end,
+        function(config) config.numTotal = 7 end,
+    }
+    for index, mutate in ipairs(tuningMutations) do
+        local config = partitionConfig()
+        mutate(config)
+        local descriptor = compile("focus", "HARMFUL", config)
+        assertDeepEqual(
+            descriptor.constructionKey,
+            friendlyKey,
+            "partition tuning friendly key " .. index
+        )
+        assertDeepEqual(
+            descriptor.partition.hostile.main.constructionKey,
+            mainKey,
+            "partition tuning main key " .. index
+        )
+        assertDeepEqual(
+            descriptor.partition.hostile.complement.constructionKey,
+            complementKey,
+            "partition tuning complement key " .. index
+        )
+    end
+
+    for index, mutate in ipairs({
+        function(config) config.subFrame.width = 9 end,
+        function(config) config.subFrame.height = 9 end,
+        function(config) config.subFrame.desaturated = false end,
+    }) do
+        local config = partitionConfig()
+        mutate(config)
+        local descriptor = compile("target", "HARMFUL", config)
+        assertDeepEqual(
+            descriptor.constructionKey,
+            friendlyKey,
+            "sub style friendly key " .. index
+        )
+        assertDeepEqual(
+            descriptor.partition.hostile.main.constructionKey,
+            mainKey,
+            "sub style main key " .. index
+        )
+        assertDifferent(
+            descriptor.partition.hostile.complement.constructionKey,
+            complementKey,
+            "sub style complement key " .. index
+        )
+    end
+
+    local baseWidth = partitionConfig()
+    baseWidth.width = 11
+    local baseWidthDescriptor = compile("target", "HARMFUL", baseWidth)
+    assertDifferent(
+        baseWidthDescriptor.constructionKey,
+        friendlyKey,
+        "base width friendly key"
+    )
+    assertDifferent(
+        baseWidthDescriptor.partition.hostile.main.constructionKey,
+        mainKey,
+        "base width main key"
+    )
+    assertDeepEqual(
+        baseWidthDescriptor.partition.hostile.complement.constructionKey,
+        complementKey,
+        "base width complement key"
+    )
+
+    local cooldown = partitionConfig()
+    cooldown.cooldownStyle = "none"
+    local cooldownDescriptor = compile("target", "HARMFUL", cooldown)
+    assertDifferent(
+        cooldownDescriptor.constructionKey,
+        friendlyKey,
+        "cooldown friendly key"
+    )
+    assertDifferent(
+        cooldownDescriptor.partition.hostile.main.constructionKey,
+        mainKey,
+        "cooldown main key"
+    )
+    assertDifferent(
+        cooldownDescriptor.partition.hostile.complement.constructionKey,
+        complementKey,
+        "cooldown complement key"
+    )
+
+    local neutral = partitionConfig()
+    neutral.filters.castByMe = false
+    local neutralDescriptor = compile("target", "HARMFUL", neutral)
+    assertDifferent(
+        neutralDescriptor.constructionKey,
+        friendlyKey,
+        "scope topology friendly key"
+    )
+    assertDifferent(
+        neutralDescriptor.partition.hostile.main.constructionKey,
+        mainKey,
+        "scope topology main key"
+    )
+    assertDeepEqual(
+        neutralDescriptor.partition.hostile.complement.constructionKey,
+        complementKey,
+        "stable complement topology key"
     )
 end
 
@@ -1747,6 +2620,64 @@ local function testFreshDeterministicOutput()
     assertDeepEqual(reorderedDescriptor, second, "insertion-order output")
 end
 
+local function testPartitionFreshDeterministicOutput()
+    local config = baseConfig()
+    config.subFrame = {
+        enabled = true,
+        desaturated = true,
+        filter = "notCastByMe",
+        width = 8,
+        height = 7,
+    }
+    local snapshot = copy(config)
+    local first = compile("target", "HARMFUL", config)
+    local second = compile("target", "HARMFUL", config)
+    local firstHostile = first.partition.hostile
+
+    assertDeepEqual(config, snapshot, "partition input mutation")
+    assertDeepEqual(first, second, "partition deterministic output")
+    assertTrue(first.partition ~= config.subFrame, "partition input alias")
+    assertTrue(
+        firstHostile.main.completeSpec ~= first.completeSpec,
+        "friendly and main spec alias"
+    )
+    assertTrue(
+        firstHostile.main.completeSpec.groups[1].layout
+            ~= firstHostile.main.tuningSpec.groups[1].layout,
+        "main complete/tuning layout alias"
+    )
+    assertTrue(
+        firstHostile.complement.completeSpec.groups[1].buttonStyle
+            ~= firstHostile.complement.constructionKey.groups[1].buttonStyle,
+        "complement construction style alias"
+    )
+    assertTrue(
+        first.metrics.variants.hostileMain.holder
+            ~= firstHostile.main.metrics.holder,
+        "aggregate/main metric holder alias"
+    )
+    assertTrue(
+        first.partition.holder ~= first.metrics.compositeHolder,
+        "partition/metric composite holder alias"
+    )
+
+    first.partition.selector.kind = "BROKEN"
+    first.partition.holder.height = 999
+    firstHostile.attachment.y = 999
+    firstHostile.main.completeSpec.groups[1].layout.elementHeight = 999
+    firstHostile.complement.completeSpec.groups[1].filterString = "BROKEN"
+    firstHostile.complement.constructionKey.groups[1]
+        .buttonStyle.desaturated = false
+    first.metrics.variants.hostileMain.holder.height = 999
+
+    local third = compile("target", "HARMFUL", config)
+    assertDeepEqual(
+        third,
+        second,
+        "fresh partition output after mutation"
+    )
+end
+
 testLegacyLoadAndSchemaGate()
 testCompleteSpecContract()
 testOrientationAndGeometry()
@@ -1754,11 +2685,16 @@ testStyleProjection()
 testTooltipProjection()
 testEmptyPolicies()
 testPartitionMetadata()
+testPartitionScopeSplitting()
+testPartitionAttachmentGeometry()
+testShippedTargetPartitionMetrics()
 testCapacityMetrics()
 testSpellIDCandidateFilters()
 testInvalidInputs()
 testConstructionBoundary()
+testPartitionConstructionBoundary()
 testFreshDeterministicOutput()
+testPartitionFreshDeterministicOutput()
 
 assertEqual(#harness.forbiddenCalls, 0, "forbidden dependency calls")
 print("unit_frame_aura_spec_test.lua: ok")

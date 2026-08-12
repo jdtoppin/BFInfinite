@@ -79,6 +79,20 @@ local function assertGroups(policy, expected, message)
             group[2],
             (message or "policy") .. " filter " .. index
         )
+        if group[3] ~= nil then
+            assertEqual(
+                actual.playerScope,
+                group[3],
+                (message or "policy") .. " player scope " .. index
+            )
+        else
+            assertTrue(
+                actual.playerScope == "player"
+                    or actual.playerScope == "notPlayer"
+                    or actual.playerScope == "any",
+                (message or "policy") .. " valid player scope " .. index
+            )
+        end
         assertEqual(actual.candidateFilters, nil,
             (message or "policy") .. " candidates " .. index)
         assertEqual(actual.maxFrameCount, nil,
@@ -136,13 +150,13 @@ local function testLegacyTruthTable()
     assertGroups(compile("HELPFUL", {
         castByMe = true,
     }), {
-        {"player", "HELPFUL|PLAYER"},
+        {"player", "HELPFUL|PLAYER", "player"},
     }, "cast by me")
 
     assertGroups(compile("HARMFUL", {
         isBossAura = true,
     }), {
-        {"raidInCombat", "HARMFUL|RAID_IN_COMBAT"},
+        {"raidInCombat", "HARMFUL|RAID_IN_COMBAT", "any"},
     }, "legacy boss choice uses curated encounter filter")
 
     assertGroups(compile("HELPFUL", {
@@ -201,21 +215,28 @@ local function testCanonicalDisjointOrder()
 
     local policy = compile("HELPFUL", filters)
     assertGroups(policy, {
-        {"player", "HELPFUL|PLAYER"},
-        {"raidInCombat", "HELPFUL|RAID_IN_COMBAT|!PLAYER"},
+        {"player", "HELPFUL|PLAYER", "player"},
+        {
+            "raidInCombat",
+            "HELPFUL|RAID_IN_COMBAT|!PLAYER",
+            "notPlayer",
+        },
         {
             "raidPlayerDispellable",
             "HELPFUL|RAID_PLAYER_DISPELLABLE|!PLAYER|!RAID_IN_COMBAT",
+            "notPlayer",
         },
         {
             "bigDefensive",
             "HELPFUL|BIG_DEFENSIVE|!PLAYER|!RAID_IN_COMBAT"
                 .. "|!RAID_PLAYER_DISPELLABLE",
+            "notPlayer",
         },
         {
             "externalDefensive",
             "HELPFUL|EXTERNAL_DEFENSIVE|!PLAYER|!RAID_IN_COMBAT"
                 .. "|!RAID_PLAYER_DISPELLABLE|!BIG_DEFENSIVE",
+            "notPlayer",
         },
     }, "canonical disjoint")
     assertEqual(policy.empty, false, "canonical empty state")
@@ -262,7 +283,7 @@ local function testGateAndDegradationMetadata()
     assertEqual(defensive.degradations.perGroupLimit, true, "defensive limit")
     assertEqual(defensive.degradations.perGroupSort, true, "defensive sort")
 
-    -- Blizzard's 68914 Edit Mode fixture treats RAID_IN_COMBAT as a RAID
+    -- Blizzard's 69273 Edit Mode fixture treats RAID_IN_COMBAT as a RAID
     -- substring and therefore selects its raid Bleed sample, not its
     -- non-raid isBossAura Poison sample. This test records BFI's existing
     -- curated contract; exact native boss-candidate coverage lives in AF and
@@ -306,20 +327,33 @@ local function testFreshDeterministicOutput()
         "degradation tables are shared"
     )
     assertGroups(first, {
-        {"player", "HARMFUL|PLAYER"},
-        {"raidInCombat", "HARMFUL|RAID_IN_COMBAT|!PLAYER"},
+        {"player", "HARMFUL|PLAYER", "player"},
+        {
+            "raidInCombat",
+            "HARMFUL|RAID_IN_COMBAT|!PLAYER",
+            "notPlayer",
+        },
     }, "first deterministic")
     assertGroups(second, {
-        {"player", "HARMFUL|PLAYER"},
-        {"raidInCombat", "HARMFUL|RAID_IN_COMBAT|!PLAYER"},
+        {"player", "HARMFUL|PLAYER", "player"},
+        {
+            "raidInCombat",
+            "HARMFUL|RAID_IN_COMBAT|!PLAYER",
+            "notPlayer",
+        },
     }, "second deterministic")
 
     first.groups[1].filterString = "BROKEN"
+    first.groups[1].playerScope = "BROKEN"
     first.degradations.perGroupLimit = false
     local third = compile("HARMFUL", filters)
     assertGroups(third, {
-        {"player", "HARMFUL|PLAYER"},
-        {"raidInCombat", "HARMFUL|RAID_IN_COMBAT|!PLAYER"},
+        {"player", "HARMFUL|PLAYER", "player"},
+        {
+            "raidInCombat",
+            "HARMFUL|RAID_IN_COMBAT|!PLAYER",
+            "notPlayer",
+        },
     }, "third deterministic")
     assertEqual(third.degradations.perGroupLimit, true, "fresh degradation")
 
