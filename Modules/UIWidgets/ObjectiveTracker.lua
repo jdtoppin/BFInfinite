@@ -83,8 +83,23 @@ local function LayoutTrackerDockFrame()
         -- Blizzard frame geometry. The visible BFI surface remains bounded by
         -- current content below, while default-positioned or collapsed
         -- trackers keep the compact content-bound dock target.
-        trackerDockFrame:SetPoint("TOPLEFT", tracker, "TOPLEFT")
-        trackerDockFrame:SetPoint("BOTTOMRIGHT", tracker, "BOTTOMRIGHT")
+        -- Match the horizontal bounds of the padded BFI surface so meters
+        -- align with its visible edge, while the native tracker continues to
+        -- own its own geometry and vertical extent.
+        trackerDockFrame:SetPoint(
+            "TOPLEFT",
+            tracker,
+            "TOPLEFT",
+            -TRACKER_BACKGROUND_PADDING,
+            0
+        )
+        trackerDockFrame:SetPoint(
+            "BOTTOMRIGHT",
+            tracker,
+            "BOTTOMRIGHT",
+            TRACKER_BACKGROUND_PADDING,
+            0
+        )
     else
         trackerDockFrame:SetPoint("TOPLEFT", trackerBackground, "TOPLEFT")
         trackerDockFrame:SetPoint(

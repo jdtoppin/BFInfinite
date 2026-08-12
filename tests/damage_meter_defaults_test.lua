@@ -107,7 +107,7 @@ end
 
 local function assertDefaults(config, message)
     local expectedWindowHeights = {124, 104, 104}
-    assertEqual(config.enabled, false, message .. " enabled")
+    assertEqual(config.enabled, true, message .. " enabled")
     assertEqual(config.windowCount, 3, message .. " window count")
     assertEqual(
         config.windowTypes[1],
@@ -221,7 +221,7 @@ assertEqual(type(updateProfile), "function", "profile callback registration")
 
 local defaultsCopy = DM.GetDefaults()
 assertDefaults(defaultsCopy, "defaults copy")
-defaultsCopy.enabled = true
+defaultsCopy.enabled = false
 defaultsCopy.extra = true
 defaultsCopy.windowTypes[1] = "DamageTaken"
 defaultsCopy.windowSessions[1].mode = "overall"
@@ -316,7 +316,7 @@ local partialProfile = {
 updateProfile(nil, partialProfile)
 assertEqual(partialProfile.damageMeter, partialConfig, "partial config identity")
 assertEqual(DM.config, partialConfig, "active partial config identity")
-assertEqual(partialConfig.enabled, false, "partial enabled default")
+assertEqual(partialConfig.enabled, true, "partial enabled default")
 assertEqual(partialConfig.locked, false, "partial lock default")
 assertEqual(
     partialConfig.resetOnMythicPlusStart,
@@ -334,6 +334,15 @@ assertEqual(partialConfig.windowHeights[1], 124, "partial first height default")
 assertEqual(partialConfig.windowHeights[2], 104, "partial second height default")
 assertEqual(partialConfig.windowHeights[3], 104, "partial third height default")
 assertEqual(partialConfig.extra, "preserved", "unknown config preserved")
+
+local disabledConfig = {
+    enabled = false,
+}
+updateProfile(nil, {
+    damageMeter = disabledConfig,
+})
+assertEqual(disabledConfig.enabled, false,
+    "saved Damage Meter opt-out remains disabled")
 
 local partialHeightsConfig = {
     windowHeights = {
@@ -798,7 +807,7 @@ local invalidConfig = {
 updateProfile(nil, {
     damageMeter = invalidConfig,
 })
-assertEqual(invalidConfig.enabled, false, "invalid enabled normalization")
+assertEqual(invalidConfig.enabled, true, "invalid enabled normalization")
 assertEqual(invalidConfig.windowCount, 3, "window count clamp")
 assertEqual(invalidConfig.windowTypes[1], "DamageDone", "window one type")
 assertEqual(invalidConfig.windowTypes[2], "Absorbs", "window two type")
@@ -1031,7 +1040,7 @@ for _, windowType in ipairs(validWindowTypes) do
 end
 
 local configIdentity = DM.config
-configIdentity.enabled = true
+configIdentity.enabled = false
 configIdentity.extra = "remove"
 configIdentity.windowTypes[1] = "DamageTaken"
 configIdentity.windowSessions[1].mode = "overall"

@@ -26,7 +26,10 @@ local BFI_RIGHT_STACK_ANCHOR = {
     point = "TOPRIGHT",
     relativeTo = "UIParent",
     relativePoint = "TOPRIGHT",
-    offsetX = -110,
+    -- The styled BFI surface extends six pixels beyond Blizzard's header.
+    -- Keep its outer edge four pixels inside the screen instead of retaining
+    -- Blizzard's much larger preset inset.
+    offsetX = -10,
     -- Blizzard's preset is -275. Keep the native tracker clear of the
     -- minimap while placing the BFI right-side stack 75 pixels higher.
     offsetY = -200,

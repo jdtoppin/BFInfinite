@@ -54,7 +54,7 @@ local PREVIOUS_DEFAULT_WINDOW_ANCHORS = {
 }
 
 local defaults = {
-    enabled = false,
+    enabled = true,
     windowCount = 3,
     windowTypes = {
         "DamageDone",

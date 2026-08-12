@@ -443,10 +443,18 @@ assertEqual(dockReservationAnchors[1][1], "TOPLEFT",
     "custom dock reservation top-left point")
 assertEqual(dockReservationAnchors[1][2], tracker,
     "custom dock reservation follows native tracker top")
+assertEqual(dockReservationAnchors[1][4], -6,
+    "custom dock reservation includes the surface's left padding")
+assertEqual(dockReservationAnchors[1][5], 0,
+    "custom dock reservation retains the native top edge")
 assertEqual(dockReservationAnchors[2][1], "BOTTOMRIGHT",
     "custom dock reservation bottom-right point")
 assertEqual(dockReservationAnchors[2][2], tracker,
     "custom dock reservation follows native tracker height")
+assertEqual(dockReservationAnchors[2][4], 6,
+    "custom dock reservation includes the surface's right padding")
+assertEqual(dockReservationAnchors[2][5], 0,
+    "custom dock reservation retains the native bottom edge")
 trackerCollapsed = true
 trackerHeightUpdateHook()
 assertEqual(dockReservationAnchors[1][2], trackerBackdrop,

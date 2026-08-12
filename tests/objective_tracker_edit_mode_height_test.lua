@@ -275,8 +275,8 @@ assertEqual(
 )
 assertEqual(
     savedLayouts.layouts[1].systems[1].anchorInfo.offsetX,
-    -110,
-    "BFI right stack retains Blizzard's right inset"
+    -10,
+    "BFI right stack keeps the styled surface near the screen edge"
 )
 assertEqual(
     savedLayouts.layouts[1].systems[1].anchorInfo.offsetY,
