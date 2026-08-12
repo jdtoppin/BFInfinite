@@ -599,6 +599,15 @@ local function makeHarness(options)
         },
     }
 
+    local getBuildInfo = function()
+        harness.getBuildInfoCalls = harness.getBuildInfoCalls + 1
+        return "12.1.0", "69273", "Aug 11 2026",
+            harness.interfaceVersion
+    end
+    if options.missingBuildAPI then
+        getBuildInfo = false
+    end
+
     local environment = {
         _G = false,
         AbstractFramework = AF,
@@ -697,11 +706,7 @@ local function makeHarness(options)
             )
             return frame
         end,
-        GetBuildInfo = function()
-            harness.getBuildInfoCalls = harness.getBuildInfoCalls + 1
-            return "12.1.0", "69273", "Aug 11 2026",
-                harness.interfaceVersion
-        end,
+        GetBuildInfo = getBuildInfo,
         InCombatLockdown = function()
             return harness.inCombat
         end,
@@ -1051,6 +1056,11 @@ local function testStaticInterfaceBoundaryAcrossSelectors()
             requiresNative = true,
         },
         {
+            label = "missing-build-api",
+            missingBuildAPI = true,
+            requiresNative = true,
+        },
+        {
             label = "12.0.7",
             interfaceVersion = 120007,
             requiresNative = false,
@@ -1080,6 +1090,7 @@ local function testStaticInterfaceBoundaryAcrossSelectors()
         local harness = makeHarness({
             backend = false,
             interfaceVersion = case.interfaceVersion,
+            missingBuildAPI = case.missingBuildAPI,
             unknownInterface = case.unknownInterface,
             unavailableFrameBudget = case.requiresNative and 6 or nil,
         })
@@ -1191,7 +1202,9 @@ local function testStaticInterfaceBoundaryAcrossSelectors()
             case.label .. " timer count")
         assertEqual(next(harness.registered), nil,
             case.label .. " provider/runtime observer count")
-        assertEqual(harness.getBuildInfoCalls, 1,
+        assertEqual(
+            harness.getBuildInfoCalls,
+            case.missingBuildAPI and 0 or 1,
             case.label .. " static interface lookup count")
         local stats = harness.UF.GetNativeAuraRuntimeStats()
         assertEqual(stats.runtimesCreated, 0,
