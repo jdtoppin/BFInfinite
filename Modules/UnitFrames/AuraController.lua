@@ -10,11 +10,11 @@ local InCombatLockdown = InCombatLockdown
 local floor, huge = math.floor, math.huge
 local ipairs, next, pairs, type = ipairs, next, pairs, type
 
--- Retail 12.1.0.68914 (wow-ui-source d3915c78) makes native aura
+-- Retail 12.1.0.69273 (wow-ui-source eb941aad) makes native aura
 -- groups/slots add-only and restricts their buttons after initialization.
 -- This controller owns only configuration-derived state and never reads aura
 -- data, live buttons, native container geometry, or native visibility.
-local REQUIRED_AF_VERSION = 30
+local REQUIRED_AF_VERSION = 33
 local REQUIRED_AF_METHODS = {
     "AddCustomAuraGroup",
     "AddCustomAuraSlot",
@@ -319,7 +319,7 @@ local function SetHolderShownSafe(controller, shown)
         return true
     end
 
-    -- Retail 12.1.0.68914 can make visibility and hover accessors secret when
+    -- Retail 12.1.0.69273 can make visibility and hover accessors secret when
     -- a holder is anchored to a native aura container. Keep an ordinary
     -- write-only ledger instead of inspecting frame state.
     controller.frame:SetShown(shown)
@@ -667,7 +667,7 @@ function ControllerMixin:Refresh()
         return
     end
 
-    -- 68914's inbound UpdateAllAuras only marks a full native dirty rebuild.
+    -- 69273's inbound UpdateAllAuras only marks a full native dirty rebuild.
     -- It does not expose aura values and is safe for stable-token refreshes.
     AF.UpdateCustomAuraContainer(self._container)
 end

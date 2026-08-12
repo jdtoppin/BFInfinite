@@ -7,7 +7,7 @@ local ceil, floor, huge, max, min =
 local ipairs, next, pairs, rawget, type = ipairs, next, pairs, rawget, type
 local sub = string.sub
 
--- Retail 12.1.0.68914 (wow-ui-source d3915c78) creates restricted
+-- Retail 12.1.0.69273 (wow-ui-source eb941aad) creates restricted
 -- CustomAuraContainer buttons in batches of ten. Keep the constant here as
 -- audit metadata only; this compiler never creates a frame.
 local NATIVE_BUTTON_BATCH_SIZE = 10
