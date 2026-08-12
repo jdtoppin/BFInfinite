@@ -2331,7 +2331,8 @@ local function testTargetPartitionPreservesSpellColorFamilies()
     assertEqual(#main, 3, "partition color hostile main groups")
     assertEqual(#complement, 3,
         "partition color hostile complement groups")
-    local previousThreshold
+    local seenThresholds = {}
+    local seenThresholdColors = {}
     for _, groups in ipairs({friendly, main, complement}) do
         for _, group in ipairs(groups) do
             local threshold =
@@ -2342,20 +2343,19 @@ local function testTargetPartitionPreservesSpellColorFamilies()
                 rgb = {0.9, 0.8, 0.7, 0.6},
             }, "partition duration threshold copy")
             assertTrue(
-                threshold ~= previousThreshold,
+                not seenThresholds[threshold],
                 "partition duration threshold descriptor alias"
             )
+            seenThresholds[threshold] = true
             assertTrue(
                 threshold.rgb ~= config.durationText.color.seconds.rgb,
                 "partition duration threshold saved-color alias"
             )
-            if previousThreshold then
-                assertTrue(
-                    threshold.rgb ~= previousThreshold.rgb,
-                    "partition duration threshold color alias"
-                )
-            end
-            previousThreshold = threshold
+            assertTrue(
+                not seenThresholdColors[threshold.rgb],
+                "partition duration threshold color alias"
+            )
+            seenThresholdColors[threshold.rgb] = true
         end
         assertDeepEqual(groups[1].candidateFilters, {
             includeSpellIDs = {
