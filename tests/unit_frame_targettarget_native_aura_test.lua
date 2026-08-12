@@ -1050,7 +1050,7 @@ local function testTargetTargetDisableAndReenableLifecycle()
         "TargetTarget re-enabled unit watch")
 end
 
-local function testTargetTargetLegacyAuraFallback()
+local function testTargetTargetUnavailableNativeBackendFallback()
     local harness = makeIntegrationHarness(false)
     local update = harness.callbacks.BFI_UpdateModule
 
@@ -1058,17 +1058,17 @@ local function testTargetTargetLegacyAuraFallback()
     local frame = harness.frames[1]
 
     assertEqual(#harness.nativeConstructions, 0,
-        "12.0.7 TargetTarget native construction count")
+        "unavailable backend TargetTarget native construction count")
     assertEqual(#harness.legacyConstructions, 2,
-        "12.0.7 TargetTarget legacy construction count")
+        "unavailable backend TargetTarget legacy construction count")
     assertEqual(frame.indicators.buffs.builder, "auras",
-        "12.0.7 TargetTarget buffs fallback")
+        "unavailable backend TargetTarget buffs fallback")
     assertEqual(frame.indicators.buffs.auraFilter, "HELPFUL",
-        "12.0.7 TargetTarget buffs filter")
+        "unavailable backend TargetTarget buffs filter")
     assertEqual(frame.indicators.debuffs.builder, "auras",
-        "12.0.7 TargetTarget debuffs fallback")
+        "unavailable backend TargetTarget debuffs fallback")
     assertEqual(frame.indicators.debuffs.auraFilter, "HARMFUL",
-        "12.0.7 TargetTarget debuffs filter")
+        "unavailable backend TargetTarget debuffs filter")
 
     update(nil, "unitFrames", "targettarget", true)
     harness.UF.config.targettarget.general.enabled = false
@@ -1076,9 +1076,9 @@ local function testTargetTargetLegacyAuraFallback()
     harness.UF.config.targettarget.general.enabled = true
     update(nil, "unitFrames", "targettarget", true)
     assertEqual(#harness.frames, 1,
-        "12.0.7 TargetTarget fallback frame growth")
+        "unavailable backend TargetTarget fallback frame growth")
     assertEqual(#harness.legacyConstructions, 2,
-        "12.0.7 TargetTarget fallback indicator growth")
+        "unavailable backend TargetTarget fallback indicator growth")
 end
 
 local function testTargetTargetConfigModeGuardsAreLocal()
@@ -1391,7 +1391,7 @@ end
 testTargetTargetActivationAndConstructionOrder()
 testTargetTargetDisableAndReenableLifecycle()
 testTargetTargetConfigModeGuardsAreLocal()
-testTargetTargetLegacyAuraFallback()
+testTargetTargetUnavailableNativeBackendFallback()
 testTargetTargetUnitEventsRefreshNativeRuntime()
 testShippedTargetTargetPresetBounds()
 
