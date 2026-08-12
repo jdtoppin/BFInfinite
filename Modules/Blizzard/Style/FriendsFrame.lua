@@ -42,7 +42,7 @@ local function GetStatusIcon(status)
     elseif _G.FRIENDS_TEXTURE_AFK and status == _G.FRIENDS_TEXTURE_AFK then
         return AF.GetIcon("Clock_Round"), "gold"
     elseif _G.FRIENDS_TEXTURE_DND and status == _G.FRIENDS_TEXTURE_DND then
-        return AF.GetIcon("Minus"), "lightred"
+        return AF.GetIcon("Circle_Filled"), "lightred"
     end
 
     -- Enum.SocialUIPresenceType and Appear Offline are new to the 12.1
@@ -55,7 +55,7 @@ local function GetStatusIcon(status)
     elseif presenceTypes.Away and status == presenceTypes.Away then
         return AF.GetIcon("Clock_Round"), "gold"
     elseif presenceTypes.Busy and status == presenceTypes.Busy then
-        return AF.GetIcon("Minus"), "lightred"
+        return AF.GetIcon("Circle_Filled"), "lightred"
     elseif (presenceTypes.AppearOffline and status == presenceTypes.AppearOffline)
         or (presenceTypes.Offline and status == presenceTypes.Offline)
         or (presenceTypes.Unknown and status == presenceTypes.Unknown)
