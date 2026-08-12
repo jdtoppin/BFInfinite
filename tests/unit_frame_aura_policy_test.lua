@@ -306,7 +306,7 @@ local function testGateAndDegradationMetadata()
     assertEqual(
         raid.groups[1].candidateFilters,
         nil,
-        "legacy boss choice emitted an exact native boss predicate"
+        "legacy boss choice must not emit an exact native boss predicate"
     )
 end
 
