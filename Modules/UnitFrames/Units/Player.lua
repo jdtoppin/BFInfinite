@@ -37,7 +37,18 @@ local indicators = {
     {"auras", "debuffs", "HARMFUL"},
 }
 
-UF.previewIndicators = indicators
+-- Preset cards hide aura indicators. Keep them out of the preview descriptor
+-- list entirely so opening Unit Frame options never binds a real unit aura
+-- list before those hidden widgets can be cleaned up.
+UF.previewIndicators = {}
+for _, indicator in ipairs(indicators) do
+    local isAuraIndicator = type(indicator) == "table"
+        and (indicator[2] == "buffs" or indicator[2] == "debuffs")
+    if not isAuraIndicator then
+        UF.previewIndicators[#UF.previewIndicators + 1] =
+            type(indicator) == "table" and AF.Copy(indicator) or indicator
+    end
+end
 
 ---------------------------------------------------------------------
 -- create
