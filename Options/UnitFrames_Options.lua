@@ -289,27 +289,111 @@ local settings = {
 ---------------------------------------------------------------------
 -- shared functions
 ---------------------------------------------------------------------
-local function LoadIndicatorConfig(t)
-    AF.Debug(AF.GetColorStr("darkgray"), "LoadIndicatorConfig", t.owner, t.id)
-    if t.owner == "party" then
-        for i = 1, 5 do
-            UF.LoadIndicatorConfig(t.target.header[i], t.id, t.cfg)
-        end
-    elseif t.owner == "raid" then
-        for i = 1, 40 do
-            UF.LoadIndicatorConfig(t.target.header[i], t.id, t.cfg)
-        end
-    elseif t.owner == "boss" then
-        for i = 1, 8 do
-            UF.LoadIndicatorConfig(t.target[i], t.id, t.cfg)
-        end
-    else
-        UF.LoadIndicatorConfig(t.target, t.id, t.cfg)
-    end
-end
-
 local function IsAuraIndicator(t)
     return t.id == "buffs" or t.id == "debuffs"
+end
+
+local nativeAuraReloadDialog
+local nativeAuraReloadConfirm
+local nativeAuraReloadCancel
+
+local function ClearNativeAuraReloadDialog(dialog)
+    if nativeAuraReloadDialog ~= dialog then return end
+
+    nativeAuraReloadDialog = nil
+    nativeAuraReloadConfirm = nil
+    nativeAuraReloadCancel = nil
+end
+
+local function GetIndicatorFrameCount(t)
+    if t.owner == "party" then
+        return 5
+    elseif t.owner == "raid" then
+        return 40
+    elseif t.owner == "boss" then
+        return 8
+    end
+    return 1
+end
+
+local function GetIndicatorFrame(t, index)
+    if t.owner == "party" or t.owner == "raid" then
+        return t.target.header[index]
+    elseif t.owner == "boss" then
+        return t.target[index]
+    end
+    return t.target
+end
+
+local function RequiresNativeAuraReload(t, count)
+    if not IsAuraIndicator(t) then return false end
+
+    for i = 1, count do
+        local frame = GetIndicatorFrame(t, i)
+        local indicator = frame
+            and frame.indicators
+            and frame.indicators[t.id]
+        local requiresReload = indicator
+            and indicator.RequiresReloadForConfig
+        if type(requiresReload) == "function"
+            and requiresReload(indicator, t.cfg) == true
+        then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function ShowNativeAuraReloadDialog()
+    if nativeAuraReloadDialog
+        and AF.IsDialogActive(nativeAuraReloadDialog)
+        and nativeAuraReloadDialog.onConfirm
+            == nativeAuraReloadConfirm
+        and nativeAuraReloadDialog.onCancel
+            == nativeAuraReloadCancel
+    then
+        return
+    end
+
+    local dialog = AF.GetDialog(
+        BFIOptionsFrame_UnitFramesPanel,
+        L["Native aura layout changes require a UI reload\nDo it now?"],
+        300
+    )
+    nativeAuraReloadDialog = dialog
+    nativeAuraReloadConfirm = function()
+        ClearNativeAuraReloadDialog(dialog)
+        _G.ReloadUI()
+    end
+    nativeAuraReloadCancel = function()
+        ClearNativeAuraReloadDialog(dialog)
+    end
+
+    AF.SetPoint(dialog, "TOP", 0, -50)
+    dialog:SetOnConfirm(nativeAuraReloadConfirm)
+    dialog:SetOnCancel(nativeAuraReloadCancel)
+end
+
+local function LoadIndicatorConfig(t)
+    AF.Debug(AF.GetColorStr("darkgray"), "LoadIndicatorConfig", t.owner, t.id)
+
+    local count = GetIndicatorFrameCount(t)
+    local reloadRequired = RequiresNativeAuraReload(t, count)
+
+    -- Always load every frame after checking. Native runtimes use this call
+    -- to quiesce their current container while the reload decision is shown.
+    for i = 1, count do
+        UF.LoadIndicatorConfig(
+            GetIndicatorFrame(t, i),
+            t.id,
+            t.cfg
+        )
+    end
+
+    if reloadRequired then
+        ShowNativeAuraReloadDialog()
+    end
 end
 
 local function LoadIndicatorPosition(t)
@@ -3287,7 +3371,13 @@ builder["auraBlackListWhitelist"] = function(parent)
         pane.t = t
         if AF.isRetail then
             HideEditBox()
-            tip:SetText(L["Spell-ID aura lists are unavailable for restricted Retail auras"])
+            if type(UF.HasNativeAuraContainerBackend) == "function"
+                and UF.HasNativeAuraContainerBackend()
+            then
+                tip:SetText(L["Saved spell-ID aura lists are applied where Retail permits identity filtering; editing is unavailable"])
+            else
+                tip:SetText(L["Spell-ID aura lists are unavailable for restricted Retail auras"])
+            end
         end
 
         mode:SetSelectedValue(t.cfg.mode)
