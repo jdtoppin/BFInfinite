@@ -6,6 +6,7 @@ local UF = BFI.modules.UnitFrames
 local AF = _G.AbstractFramework
 
 local focustarget
+local UnitWatchRegistered = UnitWatchRegistered
 local indicators = {
     "healthBar",
     "powerBar",
@@ -21,8 +22,8 @@ local indicators = {
     "targetHighlight",
     "mouseoverHighlight",
     "threatGlow",
-    {"auras", "buffs", "HELPFUL"},
-    {"auras", "debuffs", "HARMFUL"},
+    {"nativeAuras", "buffs", "HELPFUL"},
+    {"nativeAuras", "debuffs", "HARMFUL"},
 }
 
 ---------------------------------------------------------------------
@@ -49,6 +50,14 @@ local function CreateFocusTarget()
     UF.CreateIndicators(focustarget, indicators)
 end
 
+local function RestoreFocusTargetConfigModeIndicators()
+    for _, indicator in pairs(focustarget.indicators) do
+        if indicator.EnableConfigMode then
+            indicator:EnableConfigMode()
+        end
+    end
+end
+
 ---------------------------------------------------------------------
 -- update
 ---------------------------------------------------------------------
@@ -61,20 +70,36 @@ local function UpdateFocusTarget(_, module, which, skipIndicatorUpdates)
     if not (UF.config.general.enabled and config.general.enabled) then
         if focustarget then
             UF.DisableIndicators(focustarget)
-            UnregisterUnitWatch(focustarget)
+            if UnitWatchRegistered(focustarget) then
+                UnregisterUnitWatch(focustarget)
+            end
             focustarget:Hide()
         end
         return
     end
 
+    local wasEnabled =
+        focustarget ~= nil and focustarget.enabled == true
     if not focustarget then
         CreateFocusTarget()
     end
 
     -- setup
-    UF.SetupUnitFrame(focustarget, config, indicators, skipIndicatorUpdates)
+    UF.SetupUnitFrame(
+        focustarget,
+        config,
+        indicators,
+        skipIndicatorUpdates == true and wasEnabled
+    )
 
-    -- visibility NOTE: show must invoke after settings applied
-    RegisterUnitWatch(focustarget)
+    if focustarget.inConfigMode then
+        if not wasEnabled then
+            RestoreFocusTargetConfigModeIndicators()
+        end
+        focustarget:Show()
+    elseif not UnitWatchRegistered(focustarget) then
+        -- visibility NOTE: show must invoke after settings applied
+        RegisterUnitWatch(focustarget)
+    end
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateFocusTarget)

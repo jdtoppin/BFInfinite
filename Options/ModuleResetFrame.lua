@@ -53,6 +53,9 @@ local resetterInfo = {
     tooltip = {},
     uiWidgets = {},
     dataBars = {},
+    damageMeter = {
+        extraInfo = L["Native Damage Meter settings will not be changed"],
+    },
     maps = {},
     chat = {},
 }

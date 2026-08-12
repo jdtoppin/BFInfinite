@@ -49,8 +49,14 @@ local function CreateModulePanes(parent)
 
     local enabled = AF.CreateCheckButton(enabledPane, L["Enabled"])
     AF.SetPoint(enabled, "LEFT", 15, 0)
+
+    local function UpdateEnabledColor(checked)
+        enabled.label:SetTextColor(AF.GetColorRGB(checked and "softlime" or "firebrick"))
+    end
+
     enabled:SetOnCheck(function(checked)
         CM.config.enabled = checked
+        UpdateEnabledColor(checked)
         UpdateModule()
         if not checked then
             RequestReload()
@@ -59,6 +65,7 @@ local function CreateModulePanes(parent)
     end)
 
     function enabledPane.Load()
+        UpdateEnabledColor(CM.config.enabled)
         enabled:SetChecked(CM.config.enabled)
     end
 

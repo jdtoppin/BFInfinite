@@ -301,16 +301,16 @@ local function IsAuraIndicator(t)
         or t.id == "dispels"
 end
 
-local nativeHelpfulOwners = {
+-- Keep the disabled-frame fallback synchronized with integrations that have
+-- actually landed. A live runtime remains authoritative when one exists.
+local nativeAuraOwners = {
     boss = true,
     focus = true,
     focustarget = true,
+    party = true,
     player = true,
     pet = true,
     pettarget = true,
-    party = true,
-    raid = true,
-    target = true,
     targettarget = true,
 }
 
@@ -400,12 +400,7 @@ local function UsesNativeAuraContainer(t)
     -- Disabled frames may not have an indicator runtime yet. Mirror the
     -- integration contract until the frame exists, then prefer the actual
     -- runtime above so option wording cannot drift from implementation.
-    return t.id == "debuffs"
-        or (t.id == "dispels" and t.owner == "party")
-        or (
-            t.id == "buffs"
-            and nativeHelpfulOwners[t.owner] == true
-        )
+    return nativeAuraOwners[t.owner] == true
 end
 
 local function RequiresNativeAuraReload(t, count)
@@ -3955,7 +3950,7 @@ builder["auraBaseFilters"] = function(parent)
 
             allAuras:SetTooltip(
                 L["All Auras"],
-                L["Shows every aura of this type. Legacy Cast By Unit selections widen to All because exact unit-source matching is unavailable across both Retail versions"]
+                L["Shows every aura of this type. Legacy Cast By Unit selections widen to All because exact unit-source matching is unavailable in WoW 12.1"]
             )
             notPlayer:SetTooltip(
                 L["Not Player, Pet, or Vehicle"],
@@ -4115,21 +4110,27 @@ end
 -- auraBlackListWhitelist
 ---------------------------------------------------------------------
 local function IsCurrentSpecializationHealer()
-    local getSpecialization = rawget(_G, "GetSpecialization")
-    local getSpecializationRole =
-        rawget(_G, "GetSpecializationRole")
+    local specializationInfo =
+        rawget(_G, "C_SpecializationInfo")
+    local getSpecialization = specializationInfo
+        and specializationInfo.GetSpecialization
+    local getSpecializationInfo = specializationInfo
+        and specializationInfo.GetSpecializationInfo
     if type(getSpecialization) ~= "function"
-        or type(getSpecializationRole) ~= "function"
+        or type(getSpecializationInfo) ~= "function"
     then
         return false
     end
 
     local specialization = getSpecialization()
-    return specialization ~= nil
-        and getSpecializationRole(specialization) == "HEALER"
+    if type(specialization) ~= "number" then return false end
+
+    local _, _, _, _, role =
+        getSpecializationInfo(specialization)
+    return role == "HEALER"
 end
 
--- Retail 12.1.0.68914, wow-ui-source d3915c78:
+-- Retail 12.1.0.69273, wow-ui-source eb941aad:
 -- Blizzard's Group Buff filter uses these spell IDs as aura IDs. Availability
 -- reads are non-mutating; only an explicit user click writes the snapshot.
 local function GetGroupBuffImportAPI()
@@ -4390,7 +4391,7 @@ builder["auraBlackListWhitelist"] = function(parent)
                 canEdit = true
                 mode:SetItems(retailModeItems)
                 tip:SetText(
-                    L["Works for buffs on units you can help and debuffs on units you cannot help. In other cases, protected spells may bypass the list, so BFI hides that aura row. Spells Blizzard keeps available can still be filtered"]
+                    L["Works for buffs on units you can help and debuffs on units you cannot help. In other cases, protected auras may bypass the list, so BFI hides that aura row. Auras Blizzard keeps available can still be filtered"]
                         .. "\n"
                         .. editDeleteTip
                 )

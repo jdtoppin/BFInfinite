@@ -3,7 +3,6 @@ local BFI = select(2, ...)
 local F = BFI.funcs
 local W = BFI.modules.UIWidgets
 local S = BFI.modules.Style
-local L = BFI.L
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
@@ -13,126 +12,16 @@ local manager = _G.ObjectiveTrackerManager
 local scenarioTracker = _G.ScenarioObjectiveTracker
 local rewardsFrame = _G.ScenarioRewardsFrame
 
-local trackerContainer
+local trackerStyled
 
 local GenerateClosure = GenerateClosure
 
 ---------------------------------------------------------------------
--- create
----------------------------------------------------------------------
-local function CreateTrackerContainer()
-    -- trackerContainer = AF.CreateScrollFrame(AF.UIParent, "BFI_ObjectiveTrackerContainer", 275, nil, "none", "none")
-    trackerContainer = AF.CreateFrame(AF.UIParent, "BFI_ObjectiveTrackerContainer", 275)
-
-    -- background
-    -- local background = AF.CreateTexture(tracker, nil, AF.GetColorTable("background", 0.5), "BACKGROUND")
-    -- trackerContainer.background = background
-    -- background:SetPoint("TOPLEFT", tracker.NineSlice)
-    -- -- background:SetPoint("TOPRIGHT", trackerContainer)
-    -- background:SetPoint("BOTTOMRIGHT", tracker.NineSlice)
-
-    -- mover
-    AF.CreateMover(trackerContainer, "BFI: " .. L["UI Widgets"], _G.HUD_EDIT_MODE_OBJECTIVE_TRACKER_LABEL)
-end
-
----------------------------------------------------------------------
 -- setup
 ---------------------------------------------------------------------
---[[
-local function ApplyModuleOrder()
-    local order = W.config.objectiveTracker.order
-
-    -- simulate container allocation: start with availableHeight
-    local availableHeight = tracker:GetAvailableHeight()
-    print("ObjectiveTracker availableHeight:", availableHeight)
-
-    -- update modules in configured order, allocating availableHeight sequentially
-    for _, moduleName in ipairs(order) do
-        local module = _G[moduleName]
-        if module then
-            module:Update(availableHeight, false) --! SHIIT, TAINT
-            local heightUsed = module:GetContentsHeight()
-            if heightUsed > 0 then
-                availableHeight = availableHeight - heightUsed
-            end
-            if module:IsTruncated() then
-                availableHeight = 0
-            end
-        end
-    end
-
-    -- reposition visuals according to configured order (do not alter tracker.modules)
-    for _, module in next, tracker.modules do
-        module:ClearAllPoints() -- NOTE: prevent "Cannot anchor to a region dependent on it"
-    end
-
-    local prevModule
-    for _, moduleName in ipairs(order) do
-        local module = _G[moduleName]
-        if module then
-            local heightUsed = module:GetContentsHeight()
-            if heightUsed > 0 then
-                if prevModule then
-                    AF.FrameSetPoint(module, "TOP", prevModule, "BOTTOM", 0, -tracker.moduleSpacing)
-                else
-                    AF.FrameSetPoint(module, "TOP", 0, -tracker.topModulePadding)
-                end
-                AF.FrameSetPoint(module, "LEFT", module.leftMargin, 0)
-                prevModule = module
-            end
-        end
-    end
-end
-]]
-
---[[ -- TAINT!
-local function SetupOrder(_, dirtyUpdate, skip)
-    local order = W.config.objectiveTracker.order
-    order = AF.TransposeTable(order)
-
-    table.sort(tracker.modules, function(a, b)
-        local aIndex = order[a:GetName()] or math.huge
-        local bIndex = order[b:GetName()] or math.huge
-        return aIndex < bIndex
-    end)
-    tracker.needsSorting = false
-
-    tracker:Update(false, true)
-end
-]]
-
 local function SetupTracker()
-    F.DisableEditMode(tracker)
     -- tracker.topModulePadding = 20 + 10 -- 38 -- TAINT!
     -- tracker.moduleSpacing = 7 -- 10
-    tracker:SetClampedToScreen(false)
-
-    --------------------------------------------------
-    -- parent & position
-    --------------------------------------------------
-    -- tracker.systemInfo.isInDefaultPosition = false
-    tracker.IsInDefaultPosition = AF.noop_false -- REVIEW: TAINT?
-    tracker.ignoreFramePositionManager = true
-    tracker.isManagedFrame = false
-    tracker.isRightManagedFrame = false
-    _G.UIParentRightManagedFrameContainer:RemoveManagedFrame(tracker)
-    -- tracker:SetParent(trackerContainer) --! will cause weird issues ... so I give up on making it scrollable
-    tracker:ClearAllPoints()
-    tracker:SetPoint("TOPRIGHT", trackerContainer)
-    -- tracker:SetScript("OnShow", function(self)
-    --     self:UpdateHeight()
-    -- end)
-    -- tracker:SetScript("OnHide", nil)
-    -- hooksecurefunc(tracker, "Hide", function()
-    --     AF.PrintStack()
-    -- end)
-    hooksecurefunc(tracker, "SetPoint", function()
-        tracker:ClearAllPoints()
-        AF.FrameSetPoint(tracker, "TOPRIGHT", trackerContainer)
-    end)
-    -- hooksecurefunc(tracker, "UpdateHeight", function()
-    --     print(tracker:GetHeight())
-    -- end)
 
     --------------------------------------------------
     -- header style
@@ -198,20 +87,6 @@ local function SetupTracker()
 
     UpdateHeaderStyle(tracker)
 
-    --------------------------------------------------
-    -- module & scroll content height
-    --------------------------------------------------
-    -- local function UpdateScrollContentHeight()
-    --     local height = tracker.topModulePadding
-    --     for _, module in next, tracker.modules do
-    --         local moduleHeight = module:GetContentsHeight()
-    --         if moduleHeight > 0 then
-    --             height = height + moduleHeight + tracker.moduleSpacing
-    --         end
-    --     end
-    --     trackerContainer:SetContentHeight(height, true, true)
-    -- end
-
     local function UpdateHeaderAnimation(header)
         S.RemoveTextures(header)
     end
@@ -220,27 +95,10 @@ local function SetupTracker()
         -- print("MODULE ADDED:", module.headerText)
         if not module._BFIHooked then
             module._BFIHooked = true
-            -- hooksecurefunc(module, "UpdateHeight", UpdateScrollContentHeight)
-            -- hooksecurefunc(module, "Hide", UpdateScrollContentHeight)
             UpdateHeaderAnimation(module.Header)
             UpdateHeaderStyle(module)
         end
     end)
-
-    --------------------------------------------------
-    -- update order -- TAINT! everywhere, no idea how to make it work
-    --------------------------------------------------
-    -- -- hooksecurefunc(tracker, "Update", ApplyModuleOrder)
-    -- -- hooksecurefunc(tracker, "MarkDirty", ApplyModuleOrder)
-    -- hooksecurefunc(tracker, "Show", ApplyModuleOrder)
-
-    -- hooksecurefunc(tracker, "RemoveModule", function(_, module)
-    --     print("MODULE REMOVED:", module.headerText)
-    -- end)
-
-    -- hooksecurefunc(tracker, "RemoveAllModules", function()
-    --     print("ALL MODULES REMOVED")
-    -- end)
 end
 
 local function SetupReward_Main(main)
@@ -312,31 +170,7 @@ local function SetupReward_Sub(sub)
     sub.ItemBorder:SetWidth(81)
 end
 
--- TAINT!
--- local function SetupOrder(order)
---     -- ObjectiveTrackerManager:OnPlayerEnteringWorld
---     -- print(GetTime(), "SetupOrder called")
---     local orderedModules = {}
---     for i, moduleName in ipairs(order) do
---         tinsert(orderedModules, _G[moduleName])
---     end
---     manager:AssignModulesOrder(orderedModules, true) -- TAINT!, modified .uiOrder
---     for i, module in ipairs(orderedModules) do
---         manager:SetModuleContainer(module, tracker)
---     end
---     manager:UpdateAll()
--- end
-
 local function SetupManager()
-    -- hooksecurefunc(manager, "OnPlayerEnteringWorld", function(_, isInitialLogin, isReloadingUI)
-    --     if not (isInitialLogin or isReloadingUI) then return end
-    -- end)
-    -- hooksecurefunc(manager, "AssignModulesOrder", function(_, _, override)
-    --     if not override then
-    --         SetupOrder(W.config.objectiveTracker.order)
-    --     end
-    -- end)
-
     --[[ NOTE: test code
     ObjectiveTrackerManager:ShowRewardsToast({
         {count = 1, font = "AF_FONT_NORMAL", label = "TEST1", texture = 7137575},
@@ -534,16 +368,6 @@ end
 -- update
 ---------------------------------------------------------------------
 local function UpdateObjectiveTracker(_, module, which)
-    -- hooksecurefunc(tracker, "Show", function()
-    --     print("ObjectiveTrackerFrame Show")
-    -- end)
-    -- hooksecurefunc(tracker, "Hide", function()
-    --     AF.PrintStack()
-    -- end)
-    -- hooksecurefunc(tracker, "SetShown", function(_, shown)
-    --     print("ObjectiveTrackerFrame SetShown", shown)
-    -- end)
-
     if module and module ~= "uiWidgets" then return end
     if which and which ~= "objectiveTracker" then return end
 
@@ -553,34 +377,15 @@ local function UpdateObjectiveTracker(_, module, which)
         return
     end
 
-    if not trackerContainer then
-        CreateTrackerContainer()
+    if not trackerStyled then
+        trackerStyled = true
         SetupTracker()
         SetupManager()
         SetupScenarioObjectiveTracker()
         SetupQuestBlock()
     end
 
-    trackerContainer.enabled = true
-
-    -- height
-    trackerContainer:SetHeight(config.height)
-    tracker.editModeHeight = config.height
-    tracker:UpdateHeight()
-
     -- font
     UpdateFonts(config.font)
-    tracker:Update()
-
-    -- order
-    -- if which == "objectiveTracker" then
-    --     ApplyModuleOrder()
-    -- end
-
-    -- mover
-    AF.UpdateMoverSave(trackerContainer, config.position)
-
-    -- position
-    BFI.funcs.LoadPosition(trackerContainer, config.position)
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateObjectiveTracker)

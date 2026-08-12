@@ -11,12 +11,41 @@ local CreateFrame = CreateFrame
 local GetBuildInfo = GetBuildInfo
 local InCombatLockdown = InCombatLockdown
 local UnitCanAssist = UnitCanAssist
+local UnitCanAttack = UnitCanAttack
 local UnitIsVisible = UnitIsVisible
 local ipairs, next, pairs, setmetatable, type =
     ipairs, next, pairs, setmetatable, type
+local tonumber = tonumber
 
 local CONFIG_COMMIT_DELAY = 0.15
 local RETAIL_12_1_INTERFACE_MIN = 120100
+local nativeAuraRequirementResolved
+local requiresNativeAuraContainer
+
+-- Retail 12.1.0.69273 (wow-ui-source eb941aad) makes general unit-aura
+-- enumeration error whenever unit-aura access is restricted. The legacy
+-- iterator is therefore available only on a positively identified pre-12.1
+-- interface. Unknown and future interfaces stay on the native boundary.
+local function RequiresNativeAuraContainer()
+    if nativeAuraRequirementResolved then
+        return requiresNativeAuraContainer
+    end
+    nativeAuraRequirementResolved = true
+
+    -- These globals exist on every supported WoW client. Missing build data is
+    -- not a positively identified legacy interface and therefore fails closed.
+    if type(GetBuildInfo) ~= "function"
+        or type(tonumber) ~= "function"
+    then
+        requiresNativeAuraContainer = true
+        return true
+    end
+    local _, _, _, reportedInterfaceVersion = GetBuildInfo()
+    local interfaceVersion = tonumber(reportedInterfaceVersion)
+    requiresNativeAuraContainer = interfaceVersion == nil
+        or interfaceVersion >= RETAIL_12_1_INTERFACE_MIN
+    return requiresNativeAuraContainer
+end
 
 local STATE_NEW = "NEW"
 local STATE_WAITING_FOR_UNIT = "WAITING_FOR_UNIT"
@@ -26,20 +55,6 @@ local STATE_PARTITION_DEFERRED = "PARTITION_DEFERRED"
 local STATE_ERROR = "ERROR"
 local STATE_DESTROYED = "DESTROYED"
 local GROUP_EMPTY_UNIT = "none"
-
--- Retail 12.1.0.68914 (wow-ui-source d3915c78) makes general unit-aura
--- enumeration fail with a Lua error whenever unit-aura access is restricted.
--- Select the legacy iterator only on a known pre-12.1 Retail client. A
--- missing, incomplete, or outdated native backend on 12.1 must stay inert;
--- combat state is not a valid proxy for the broader restriction contexts.
-local function RequiresNativeAuraContainer()
-    local _, _, _, interfaceVersion = GetBuildInfo()
-    interfaceVersion = tonumber(interfaceVersion)
-    return interfaceVersion == nil
-        or interfaceVersion >= RETAIL_12_1_INTERFACE_MIN
-end
-
-local requiresNativeAuraContainer = RequiresNativeAuraContainer()
 
 ---------------------------------------------------------------------
 -- native aura data-provider observation
@@ -141,6 +156,10 @@ local function QueueAllWatchedRuntimes()
     end
 end
 
+local function MatchesStableUnit(runtime, unit)
+    return runtime._unit == unit or runtime.root.unit == unit
+end
+
 local function FlushWatchedRuntimes()
     local pending = watcherPendingRuntimes
     watcherPendingRuntimes = {}
@@ -156,16 +175,20 @@ end
 RuntimeSignal = function(_, event, unit)
     if event == "PLAYER_TARGET_CHANGED" then
         for runtime in pairs(activeRuntimes) do
-            if runtime._unit == "target" then
+            if MatchesStableUnit(runtime, "target") then
                 QueueWatchedRuntime(runtime)
             end
         end
     elseif event == "PLAYER_FOCUS_CHANGED" then
         for runtime in pairs(activeRuntimes) do
-            if runtime._unit == "focus" then
+            if MatchesStableUnit(runtime, "focus") then
                 QueueWatchedRuntime(runtime)
             end
         end
+    elseif event == "UNIT_FACTION" and unit == "player" then
+        -- Player relationship changes can alter visibility/partition policy
+        -- for every watched unit even though their own token did not fire.
+        QueueAllWatchedRuntimes()
     elseif UNIT_ROUTED_EVENTS[event] and type(unit) == "string" then
         for runtime in pairs(activeRuntimes) do
             if runtime._unit == unit or runtime.root.unit == unit then
@@ -314,15 +337,16 @@ local function PassesVisibility(runtime)
     if not descriptor or not unit then return false end
 
     -- Blizzard's Edit Mode provider supplies synthetic data for the native
-    -- container independent of the live unit's visibility or reaction.
+    -- container independent of the live unit's visibility or assistability.
+    -- Relation partitions remain controller-owned and are resolved separately.
     if providerUsesTestData then return true end
 
     local visibility = descriptor.visibility
     -- The compiler exposes aggregate group requirements, so a definite gate
-    -- failure intentionally hides the whole plain holder. The native
-    -- container remains enabled. The ordinary visibility/category gates fail
-    -- open on secret results; spell-ID reaction gates below must fail closed
-    -- because Blizzard can otherwise bypass both include and exclude maps.
+    -- failure intentionally hides the whole plain holder. Ordinary category
+    -- gates retain their established fail-open behavior. Spell-ID maps are
+    -- stricter: secret, missing, or opposite unit reaction can bypass the
+    -- native map for secret-capable auras, so those cases fail closed.
     if visibility.requiresVisible
         and not PassesGate(UnitIsVisible(unit))
     then
@@ -332,9 +356,6 @@ local function PassesVisibility(runtime)
         or visibility.spellIDFilterRequiresPublicNonAssist
     then
         local canAssist = UnitCanAssist("player", unit)
-        -- Blizzard skips both include and exclude spell-ID maps in the
-        -- opposite reaction direction, except for NeverSecret spells. A
-        -- secret or indeterminate reaction therefore has to fail closed.
         if not F.isValueNonSecret(canAssist) then
             return false
         end
@@ -356,6 +377,27 @@ local function PassesVisibility(runtime)
     return true
 end
 
+local function ResolvePartitionVariant(runtime)
+    local partition = runtime._descriptor
+        and runtime._descriptor.partition
+    local selector = partition and partition.selector
+    if not runtime._partitionCapable
+        or type(selector) ~= "table"
+        or selector.kind ~= "unitCanAttack"
+    then
+        return "friendly"
+    end
+
+    local canAttack = UnitCanAttack(
+        selector.actorUnit or "player",
+        runtime._unit
+    )
+    if F.isValueNonSecret(canAttack) and canAttack == true then
+        return "hostile"
+    end
+    return "friendly"
+end
+
 local function ShouldShowNative(runtime)
     return runtime._state == STATE_READY
         and runtime._active
@@ -375,13 +417,21 @@ local function SyncWatcher(runtime)
             or visibility.spellIDFilterRequiresPublicAssist
             or visibility.spellIDFilterRequiresPublicNonAssist
         )
-    local hasDynamicUnit = runtime._unit == "target"
-        or runtime._unit == "focus"
+    local hasDynamicUnit = MatchesStableUnit(runtime, "target")
+        or MatchesStableUnit(runtime, "focus")
+    local hasPartitionSelector = runtime._partitionCapable
+        and runtime._descriptor
+        and runtime._descriptor.partition
+        and runtime._descriptor.partition.selector ~= nil
     SetRuntimeWatched(
         runtime,
         runtime._active
             and runtime._state == STATE_READY
-            and (hasLiveGate or hasDynamicUnit)
+            and (
+                hasLiveGate
+                or hasDynamicUnit
+                or hasPartitionSelector
+            )
             and ShouldEnableNative(runtime)
             and not runtime._destroyed
     )
@@ -430,6 +480,10 @@ local function SyncLifecycle(runtime)
         and ShouldEnableNative(runtime)
     local shown = enabled and ShouldShowNative(runtime)
 
+    if runtime._partitionCapable then
+        runtime._partitionVariant = ResolvePartitionVariant(runtime)
+        runtime._controller:SetVariant(runtime._partitionVariant)
+    end
     if not shown then
         runtime._controller:SetShown(false)
         runtime._controller:SetEnabled(enabled)
@@ -442,7 +496,13 @@ local function SyncLifecycle(runtime)
     -- This answer comes only from BFI-owned tracked presentation state. A
     -- presentation still being committed behind its alpha curtain must not
     -- receive a stable-unit refresh.
-    return runtime._controller:IsPresentationApplied()
+    -- Production controllers always provide the write-ledger query. Keep the
+    -- narrow nil fallback for integration adapters that model only lifecycle
+    -- writes; it is not an alternate production presentation path.
+    local isPresentationApplied =
+        runtime._controller.IsPresentationApplied
+    return type(isPresentationApplied) ~= "function"
+        or isPresentationApplied(runtime._controller)
 end
 
 local function Compile(runtime, unit)
@@ -450,6 +510,7 @@ local function Compile(runtime, unit)
         runtime._unit = nil
         runtime._descriptor = nil
         runtime._error = nil
+        runtime._partitionVariant = nil
         runtime._state = STATE_WAITING_FOR_UNIT
         runtime._providerBuildDeferred = nil
         return
@@ -468,7 +529,9 @@ local function Compile(runtime, unit)
         runtime._state = STATE_ERROR
     elseif descriptor.empty then
         runtime._state = STATE_EMPTY
-    elseif not descriptor.migrationReady then
+    elseif not descriptor.migrationReady
+        or (descriptor.partition and not runtime._partitionCapable)
+    then
         runtime._state = STATE_PARTITION_DEFERRED
     else
         runtime._state = STATE_READY
@@ -477,17 +540,28 @@ local function Compile(runtime, unit)
     if runtime._state ~= STATE_READY then
         runtime._providerBuildDeferred = nil
     end
+
+    if runtime._partitionCapable and descriptor and descriptor.partition then
+        runtime._partitionVariant = ResolvePartitionVariant(runtime)
+    else
+        runtime._partitionVariant = nil
+    end
 end
 
+local BuildControllerDescriptor
+
 local function RequiresReloadForDescriptor(runtime, descriptor)
+    local controllerDescriptor = descriptor
+        and BuildControllerDescriptor(runtime, descriptor)
     return runtime._built == true
-        and descriptor ~= nil
+        and controllerDescriptor ~= nil
         and descriptor.migrationReady == true
         and descriptor.empty ~= true
-        and descriptor.constructionKey ~= nil
+        and (descriptor.partition == nil or runtime._partitionCapable)
+        and controllerDescriptor.constructionKey ~= nil
         and not DeepEqual(
             runtime._constructionKey,
-            descriptor.constructionKey
+            controllerDescriptor.constructionKey
         )
 end
 
@@ -551,6 +625,72 @@ local function ApplyPlacement(runtime, descriptor)
             placement.anchorTo
         )
     end)
+end
+
+local function GetVariantField(variant, field)
+    return variant and variant[field] or nil
+end
+
+local function CopyOptional(value)
+    return type(value) == "table" and AF.Copy(value) or value
+end
+
+BuildControllerDescriptor = function(runtime, descriptor)
+    if not runtime._partitionCapable then
+        return {
+            completeSpec = descriptor.completeSpec,
+            tuningSpec = descriptor.tuningSpec,
+            constructionKey = descriptor.constructionKey,
+        }
+    end
+
+    local partition = descriptor.partition
+    local hostile = partition and partition.hostile
+    local main = hostile and hostile.main
+    local complement = hostile and hostile.complement
+    local holder = partition
+        and partition.holder
+        or descriptor.completeSpec.holder
+
+    runtime._partitionVariant = ResolvePartitionVariant(runtime)
+    return {
+        completeSpec = {
+            unit = runtime._unit,
+            enabled = true,
+            shown = false,
+            variant = runtime._partitionVariant,
+            holder = AF.Copy(holder),
+            friendly = AF.Copy(descriptor.completeSpec),
+            main = CopyOptional(GetVariantField(main, "completeSpec")),
+            complement = CopyOptional(
+                GetVariantField(complement, "completeSpec")
+            ),
+            attachment = CopyOptional(hostile and hostile.attachment),
+        },
+        tuningSpec = {
+            holder = AF.Copy(holder),
+            friendly = AF.Copy(descriptor.tuningSpec),
+            main = CopyOptional(GetVariantField(main, "tuningSpec")),
+            complement = CopyOptional(
+                GetVariantField(complement, "tuningSpec")
+            ),
+            attachment = CopyOptional(hostile and hostile.attachment),
+        },
+        -- Construction-only button styles differ between the friendly,
+        -- hostile main, and hostile complement variants. Include every
+        -- prebuilt topology so subframe appearance changes rebuild instead
+        -- of being submitted as unsupported tuning.
+        constructionKey = {
+            kind = "relationPartition",
+            friendly = AF.Copy(descriptor.constructionKey),
+            main = CopyOptional(
+                GetVariantField(main, "constructionKey")
+            ),
+            complement = CopyOptional(
+                GetVariantField(complement, "constructionKey")
+            ),
+        },
+    }
 end
 
 Commit = function(runtime)
@@ -648,29 +788,40 @@ Commit = function(runtime)
     RemoveCombatCommit(runtime)
 
     local descriptor = runtime._descriptor
+    local controllerDescriptor = BuildControllerDescriptor(
+        runtime,
+        descriptor
+    )
+    local constructionChanged = not runtime._built
+        or not DeepEqual(
+            runtime._constructionKey,
+            controllerDescriptor.constructionKey
+        )
 
     if runtime._configDirty then
         ApplyPlacement(runtime, descriptor)
 
-        if not runtime._built then
-            local completeSpec = AF.Copy(descriptor.completeSpec)
+        if constructionChanged then
+            local completeSpec = AF.Copy(
+                controllerDescriptor.completeSpec
+            )
             completeSpec.unit = runtime._unit
             completeSpec.enabled = true
             completeSpec.shown = ShouldShowNative(runtime)
             runtime._controller:Rebuild(completeSpec)
             runtime._built = true
         else
-            runtime._controller:ApplyTuning(descriptor.tuningSpec)
+            runtime._controller:ApplyTuning(
+                controllerDescriptor.tuningSpec
+            )
             if runtime._appliedUnit ~= runtime._unit then
                 runtime._controller:SetUnit(runtime._unit)
             end
         end
 
-        if not runtime._constructionKey then
-            runtime._constructionKey = AF.Copy(
-                descriptor.constructionKey
-            )
-        end
+        runtime._constructionKey = AF.Copy(
+            controllerDescriptor.constructionKey
+        )
     elseif runtime._unitDirty and runtime._built then
         runtime._controller:SetShown(false)
         runtime._controller:SetUnit(runtime._unit)
@@ -745,7 +896,8 @@ local function NativeAuraProviderSignal(_, _, useRealDataProvider)
     end
 end
 
--- Retail 12.1.0.68914 exposes AURA_DATA_PROVIDER_SWITCH as a synchronous
+-- Retail 12.1.0.69273 (wow-ui-source eb941aad) exposes
+-- AURA_DATA_PROVIDER_SWITCH as a synchronous
 -- boolean real-provider state signal (Blizzard_APIDocumentationGenerated /
 -- UnitAuraDocumentation.lua). BFI observes that state only; Blizzard Edit
 -- Mode and AuraContainer remain the sole owners of provider switching.
@@ -798,6 +950,7 @@ local function StageUnit(runtime, unit)
         runtime._unit = nil
         runtime._descriptor = nil
         runtime._error = nil
+        runtime._partitionVariant = nil
         runtime._state = STATE_WAITING_FOR_UNIT
         runtime._providerBuildDeferred = nil
         runtime._unitDirty = true
@@ -1071,11 +1224,22 @@ local function NativeAuras_GetState(self)
         providerBuildDeferred = self._providerBuildDeferred == true,
         migrationReady = descriptor and descriptor.migrationReady or false,
         empty = descriptor and descriptor.empty or false,
-        visibility = descriptor and AF.Copy(descriptor.visibility) or nil,
-        partition = descriptor and AF.Copy(descriptor.partition) or nil,
-        diagnostics = descriptor and AF.Copy(descriptor.diagnostics) or {},
-        degradations = descriptor and AF.Copy(descriptor.degradations) or {},
-        metrics = descriptor and AF.Copy(descriptor.metrics) or {},
+        visibility = CopyOptional(
+            descriptor and descriptor.visibility
+        ),
+        partition = CopyOptional(
+            descriptor and descriptor.partition
+        ),
+        partitionVariant = self._partitionVariant,
+        diagnostics = CopyOptional(
+            descriptor and descriptor.diagnostics
+        ) or {},
+        degradations = CopyOptional(
+            descriptor and descriptor.degradations
+        ) or {},
+        metrics = CopyOptional(
+            descriptor and descriptor.metrics
+        ) or {},
     }
 end
 
@@ -1160,20 +1324,22 @@ end, "low")
 ---------------------------------------------------------------------
 local UnavailableAuraIndicatorMixin = {}
 
-function UnavailableAuraIndicatorMixin:LoadConfig()
+local function QuiesceUnavailableAuraIndicator(self)
     self.enabled = false
 end
 
-function UnavailableAuraIndicatorMixin:Enable()
-    self.enabled = false
-end
-
-UnavailableAuraIndicatorMixin.Disable = UnavailableAuraIndicatorMixin.Enable
-UnavailableAuraIndicatorMixin.Update = UnavailableAuraIndicatorMixin.Enable
+UnavailableAuraIndicatorMixin.LoadConfig =
+    QuiesceUnavailableAuraIndicator
+UnavailableAuraIndicatorMixin.Enable =
+    QuiesceUnavailableAuraIndicator
+UnavailableAuraIndicatorMixin.Disable =
+    QuiesceUnavailableAuraIndicator
+UnavailableAuraIndicatorMixin.Update =
+    QuiesceUnavailableAuraIndicator
 UnavailableAuraIndicatorMixin.EnableConfigMode =
-    UnavailableAuraIndicatorMixin.Enable
+    QuiesceUnavailableAuraIndicator
 UnavailableAuraIndicatorMixin.DisableConfigMode =
-    UnavailableAuraIndicatorMixin.Enable
+    QuiesceUnavailableAuraIndicator
 
 function UnavailableAuraIndicatorMixin:GetNativeAuraState()
     return {
@@ -1188,17 +1354,53 @@ function UnavailableAuraIndicatorMixin:RequiresReloadForConfig()
     return false
 end
 
-local function CreateUnavailableAuraIndicator(parent, name, auraFilter)
+local function CreateUnavailableAuraShell(
+    parent,
+    name,
+    auraFilter,
+    root
+)
     local frame = CreateFrame("Frame", name, parent)
-    frame:SetAllPoints(parent)
-    frame:Hide()
+
+    -- SetAlpha is the constant, write-only curtain that remains valid while
+    -- protected geometry/visibility mutations are unavailable. Outside
+    -- combat, complete the ordinary hidden anchor contract as well.
+    frame:SetAlpha(0)
+    if not InCombatLockdown() then
+        frame:SetAllPoints(parent)
+        frame:Hide()
+    end
+
     for key, value in pairs(UnavailableAuraIndicatorMixin) do
         frame[key] = value
     end
     frame._nativeAuraUnavailable = true
     frame.auraFilter = auraFilter
     frame.enabled = false
-    frame.root = parent
+    frame.root = root or parent
+    return frame
+end
+
+local function CreateUnavailableAuraIndicator(
+    parent,
+    name,
+    auraFilter,
+    hasSubFrame
+)
+    local frame = CreateUnavailableAuraShell(
+        parent,
+        name,
+        auraFilter,
+        parent
+    )
+    if hasSubFrame then
+        frame.subFrame = CreateUnavailableAuraShell(
+            frame,
+            nil,
+            auraFilter,
+            parent
+        )
+    end
     return frame
 end
 
@@ -1208,23 +1410,30 @@ local function CreateLegacyOrUnavailableAuraIndicator(
     auraFilter,
     hasSubFrame
 )
-    if requiresNativeAuraContainer then
-        return CreateUnavailableAuraIndicator(parent, name, auraFilter)
+    if RequiresNativeAuraContainer() then
+        return CreateUnavailableAuraIndicator(
+            parent,
+            name,
+            auraFilter,
+            hasSubFrame
+        )
     end
     return UF.CreateAuras(parent, name, auraFilter, hasSubFrame)
 end
 
-local function CreateNativeAuraRuntime(
+local function InitializeNativeAuraIndicator(
     parent,
     auraFilter,
     hasSubFrame,
     controller,
+    partitionCapable,
     groupManaged
 )
     local frame = controller:GetFrame()
     frame.root = parent
     frame.auraFilter = auraFilter
     frame._hasSubFrame = hasSubFrame == true
+    frame._partitionCapable = partitionCapable == true
     frame._controller = controller
     frame._groupManaged = groupManaged == true
     frame._state = STATE_NEW
@@ -1257,11 +1466,41 @@ function UF.CreateNativeAuraIndicator(parent, name, auraFilter, hasSubFrame)
     if not controller then
         return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
     end
-    return CreateNativeAuraRuntime(
+    return InitializeNativeAuraIndicator(
         parent,
         auraFilter,
         hasSubFrame,
-        controller
+        controller,
+        false,
+        false
+    )
+end
+
+function UF.CreateNativePartitionedAuraIndicator(
+    parent,
+    name,
+    auraFilter,
+    hasSubFrame
+)
+    if not UF.HasNativeAuraContainerBackend() then
+        return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
+    end
+
+    local controller = UF.CreateNativeAuraPartitionController(
+        parent,
+        name
+    )
+    if not controller then
+        return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
+    end
+
+    return InitializeNativeAuraIndicator(
+        parent,
+        auraFilter,
+        hasSubFrame,
+        controller,
+        true,
+        false
     )
 end
 
@@ -1283,18 +1522,19 @@ function UF.CreateNativeGroupAuraIndicator(
     if not controller then
         return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
     end
-    return CreateNativeAuraRuntime(
+    return InitializeNativeAuraIndicator(
         parent,
         auraFilter,
         false,
         controller,
+        false,
         true
     )
 end
 
 -- Group-frame integrations provide a per-child map of explicitly allocated
--- native shells. The backend check comes first so 12.0.7 neither accesses
--- that map nor sets any 12.1-only header/container state.
+-- native shells. The backend check comes first so an unavailable backend
+-- neither accesses that map nor sets native header/container state.
 function UF.CreateGroupNativeAuras(parent, name, auraFilter, containerKey)
     if not UF.HasNativeAuraContainerBackend() then
         return CreateLegacyOrUnavailableAuraIndicator(
@@ -1315,9 +1555,9 @@ function UF.CreateGroupNativeAuras(parent, name, auraFilter, containerKey)
     )
 end
 
--- Keep the known 12.0.7 compatibility path exact. On 12.1, an unavailable
--- backend or an unported complementary subframe is dormant instead of
--- reopening the prohibited legacy iterator.
+-- Keep a positively identified pre-12.1 compatibility path exact. On 12.1,
+-- an unavailable backend or an unadopted complementary subframe stays inert
+-- instead of entering the legacy aura iterator.
 function UF.CreateNativeAuras(parent, name, auraFilter, hasSubFrame)
     if hasSubFrame or not UF.HasNativeAuraContainerBackend() then
         return CreateLegacyOrUnavailableAuraIndicator(
@@ -1328,6 +1568,31 @@ function UF.CreateNativeAuras(parent, name, auraFilter, hasSubFrame)
         )
     end
     return UF.CreateNativeAuraIndicator(
+        parent,
+        name,
+        auraFilter,
+        hasSubFrame
+    )
+end
+
+-- Opt-in builder for frame integrations that have accepted the compiled
+-- relation-partition contract. Only a known pre-12.1 interface may enter the
+-- legacy fallback when the native backend is unavailable.
+function UF.CreateNativePartitionedAuras(
+    parent,
+    name,
+    auraFilter,
+    hasSubFrame
+)
+    if not UF.HasNativeAuraContainerBackend() then
+        return CreateLegacyOrUnavailableAuraIndicator(
+            parent,
+            name,
+            auraFilter,
+            hasSubFrame
+        )
+    end
+    return UF.CreateNativePartitionedAuraIndicator(
         parent,
         name,
         auraFilter,

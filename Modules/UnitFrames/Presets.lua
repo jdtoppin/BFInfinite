@@ -277,7 +277,7 @@ local default_groups = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "healthBar",
                 frameLevel = 1,
@@ -948,7 +948,7 @@ local default_groups = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "healthBar",
                 frameLevel = 1,
@@ -1296,7 +1296,7 @@ local default_1 = {
             },
             portrait = {
                 enabled = true,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"CENTER", "CENTER", 0, -4},
                 anchorTo = "root",
                 frameLevel = 5,
@@ -1740,7 +1740,7 @@ local default_1 = {
             },
             portrait = {
                 enabled = true,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"CENTER", "CENTER", 0, -4},
                 anchorTo = "root",
                 frameLevel = 5,
@@ -2151,7 +2151,7 @@ local default_1 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
@@ -2490,7 +2490,7 @@ local default_1 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 -- anchorTo = "root",
@@ -2830,7 +2830,7 @@ local default_1 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
@@ -3162,7 +3162,7 @@ local default_1 = {
             },
             portrait = {
                 enabled = true,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
@@ -3495,7 +3495,7 @@ local default_1 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 -- anchorTo = "root",
@@ -3852,7 +3852,7 @@ local default_2 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"CENTER", "CENTER", 0, -5},
                 anchorTo = "root",
                 frameLevel = 5,
@@ -4292,7 +4292,7 @@ local default_2 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"CENTER", "CENTER", 0, -5},
                 anchorTo = "root",
                 frameLevel = 5,
@@ -4703,7 +4703,7 @@ local default_2 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
@@ -5042,7 +5042,7 @@ local default_2 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
@@ -5377,7 +5377,7 @@ local default_2 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
@@ -5713,7 +5713,7 @@ local default_2 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
@@ -6046,7 +6046,7 @@ local default_2 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
