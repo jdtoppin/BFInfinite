@@ -14,12 +14,18 @@ local ipairs, next, pairs, type = ipairs, next, pairs, type
 -- groups/slots add-only and restricts their buttons after initialization.
 -- This controller owns only configuration-derived state and never reads aura
 -- data, live buttons, native container geometry, or native visibility.
-local REQUIRED_AF_VERSION = 33
+-- AF #18/r34 adds the construction ledgers consumed by observability on top
+-- of the native group adapter required by the landed unit-frame backend.
+local REQUIRED_AF_VERSION = 34
 local NATIVE_GROUP_AURA_TEMPLATE = "CustomAuraContainerTemplate"
+-- CustomAuraContainerConstants.FrameCreationBatchSize in the pinned build.
+local NATIVE_INITIAL_GROUP_RESERVATIONS = 10
 local REQUIRED_AF_METHODS = {
     "AddCustomAuraGroup",
     "AddCustomAuraSlot",
     "CreateCustomAuraContainer",
+    "GetCustomAuraContainerConstructionStats",
+    "GetCustomAuraContainerConstructionTotals",
     "HasCustomAuraContainer",
     "SetCustomAuraContainerEnabled",
     "SetCustomAuraContainerFlowLayout",
@@ -35,6 +41,68 @@ local REQUIRED_AF_METHODS = {
     "SetCustomAuraSlotSortMethod",
     "UpdateCustomAuraContainer",
 }
+
+local constructionStats = {
+    controllersCreated = 0,
+    destroyRequests = 0,
+    destroyCompletions = 0,
+    seedsAllocated = 0,
+    seedsClaimed = 0,
+    buildAttempts = 0,
+    buildCompletions = 0,
+    frameworkBuilds = 0,
+    adoptedBuilds = 0,
+    expectedGroups = 0,
+    expectedSlots = 0,
+    expectedInitialReservations = 0,
+    retiredNativeShells = 0,
+    retiredInitialReservations = 0,
+    strandedNativeShells = 0,
+    strandedInitialReservations = 0,
+}
+
+local AF_CONSTRUCTION_TOTAL_FIELDS = {
+    containerCreateAttempts = "afContainerCreateAttempts",
+    containerAllocations = "afContainerAllocations",
+    containerCreateCompletions = "afContainerCreateCompletions",
+    trackedContainers = "afTrackedContainers",
+    externalContainersObserved = "afExternalContainersObserved",
+    groupAddAttempts = "afGroupAddAttempts",
+    groupsAdded = "afGroupsAdded",
+    slotAddAttempts = "afSlotAddAttempts",
+    slotsAdded = "afSlotsAdded",
+    itemEnchantmentAddAttempts = "afItemEnchantmentAddAttempts",
+    itemEnchantmentsAdded = "afItemEnchantmentsAdded",
+    initialFrameReservationsAttempted = "afInitialFrameReservationsAttempted",
+    initialFrameReservationsCompleted = "afInitialFrameReservationsCompleted",
+}
+
+-- This is an explicit, cold-path snapshot. It combines BFI's logical
+-- ownership ledger with AF's construction ledger without reading native
+-- containers, groups, slots, restricted buttons, or aura data.
+function UF.GetNativeAuraConstructionStats()
+    local result = {}
+    for field, value in pairs(constructionStats) do
+        result[field] = value
+    end
+    result.liveControllers =
+        constructionStats.controllersCreated - constructionStats.destroyCompletions
+    result.incompleteBuilds =
+        constructionStats.buildAttempts - constructionStats.buildCompletions
+
+    if type(AF.GetCustomAuraContainerConstructionTotals) == "function" then
+        local afTotals = AF.GetCustomAuraContainerConstructionTotals()
+        for sourceField, resultField in pairs(AF_CONSTRUCTION_TOTAL_FIELDS) do
+            result[resultField] = afTotals[sourceField] or 0
+        end
+    else
+        for _, resultField in pairs(AF_CONSTRUCTION_TOTAL_FIELDS) do
+            result[resultField] = 0
+        end
+    end
+
+    return result
+end
 
 local function IsNonEmptyString(value)
     return type(value) == "string" and value ~= ""
@@ -81,6 +149,7 @@ function UF.CreateNativeGroupAuraContainerSeed(parent)
     end
 
     local container = AF.CreateCustomAuraContainer(parent)
+    constructionStats.seedsAllocated = constructionStats.seedsAllocated + 1
     container:Hide()
     AF.SetCustomAuraContainerEnabled(container, false)
     return container
@@ -450,6 +519,21 @@ local function ApplyNativeTuning(controller)
     AF.UpdateCustomAuraContainer(container)
 end
 
+local function MarkBuildShellStranded(controller)
+    assert(not controller._nativeShellStranded,
+        "aura container controller native shell already claimed")
+    controller._nativeShellStranded = true
+    constructionStats.strandedNativeShells =
+        constructionStats.strandedNativeShells + 1
+end
+
+local function AddKnownBuildReservations(controller, count)
+    controller._knownInitialReservations =
+        (controller._knownInitialReservations or 0) + count
+    constructionStats.strandedInitialReservations =
+        constructionStats.strandedInitialReservations + count
+end
+
 function ControllerMixin:_Build()
     assert(not self._buildAttempted and not self._container,
         "aura container controller initial build already attempted")
@@ -461,6 +545,15 @@ function ControllerMixin:_Build()
 
     local spec = self._spec
     local holder = self.frame
+    constructionStats.buildAttempts = constructionStats.buildAttempts + 1
+    constructionStats.expectedGroups =
+        constructionStats.expectedGroups + #spec.groups
+    constructionStats.expectedSlots =
+        constructionStats.expectedSlots + #spec.slots
+    constructionStats.expectedInitialReservations =
+        constructionStats.expectedInitialReservations
+        + (#spec.groups * NATIVE_INITIAL_GROUP_RESERVATIONS)
+        + #spec.slots
 
     -- Build the complete container while the public holder is hidden by the
     -- hover-safe lifecycle gate. Native groups/slots are add-only, so this
@@ -475,6 +568,7 @@ function ControllerMixin:_Build()
         self._container = container
         self._containerIsExternal = true
         self._containerShown = false
+        MarkBuildShellStranded(self)
     end
 
     AF.SetSize(holder, spec.holder.width, spec.holder.height)
@@ -486,6 +580,7 @@ function ControllerMixin:_Build()
         self._container = container
         self._containerIsExternal = false
         self._containerShown = false
+        MarkBuildShellStranded(self)
     end
     container:Hide()
     AF.SetCustomAuraContainerEnabled(container, false)
@@ -508,22 +603,23 @@ function ControllerMixin:_Build()
             sortDirection = group.sortDirection,
             layout = group.layout,
         }, group.buttonStyle)
+        AddKnownBuildReservations(self, NATIVE_INITIAL_GROUP_RESERVATIONS)
     end
 
     for _, slot in ipairs(spec.slots) do
-        local button = AF.AddCustomAuraSlot(container, slot.key, slot.filterString, {
+        AF.AddCustomAuraSlot(container, slot.key, slot.filterString, {
             candidateFilters = slot.candidateFilters,
             sortMethod = slot.sortMethod,
             sortDirection = slot.sortDirection,
+            anchor = {
+                point = slot.point.point,
+                relativeTo = holder,
+                relativePoint = slot.point.relativePoint,
+                x = slot.point.x,
+                y = slot.point.y,
+            },
         }, slot.buttonStyle)
-        button:ClearAllPoints()
-        button:SetPoint(
-            slot.point.point,
-            holder,
-            slot.point.relativePoint,
-            slot.point.x,
-            slot.point.y
-        )
+        AddKnownBuildReservations(self, 1)
     end
 
     -- Unit is assigned only after every source and construction-time slot
@@ -535,6 +631,20 @@ function ControllerMixin:_Build()
     if not containerIsExternal then
         container:Show()
     end
+
+    self._buildCompleted = true
+    constructionStats.buildCompletions = constructionStats.buildCompletions + 1
+    if containerIsExternal then
+        constructionStats.adoptedBuilds = constructionStats.adoptedBuilds + 1
+    else
+        constructionStats.frameworkBuilds = constructionStats.frameworkBuilds + 1
+    end
+    constructionStats.strandedNativeShells =
+        constructionStats.strandedNativeShells - 1
+    constructionStats.strandedInitialReservations =
+        constructionStats.strandedInitialReservations
+        - self._knownInitialReservations
+    self._nativeShellStranded = nil
 end
 
 local function ApplyLiveUnitRetarget(controller)
@@ -598,18 +708,36 @@ function ControllerMixin:_ApplyPending()
         if self._container then
             AF.SetCustomAuraContainerEnabled(self._container, false)
             self._container:Hide()
+            constructionStats.retiredNativeShells =
+                constructionStats.retiredNativeShells + 1
+            constructionStats.retiredInitialReservations =
+                constructionStats.retiredInitialReservations
+                + (self._knownInitialReservations or 0)
+            if self._nativeShellStranded then
+                constructionStats.strandedNativeShells =
+                    constructionStats.strandedNativeShells - 1
+                constructionStats.strandedInitialReservations =
+                    constructionStats.strandedInitialReservations
+                    - (self._knownInitialReservations or 0)
+            end
             self._container = nil
         end
         if self._seedContainer then
             AF.SetCustomAuraContainerEnabled(self._seedContainer, false)
             self._seedContainer:Hide()
+            constructionStats.retiredNativeShells =
+                constructionStats.retiredNativeShells + 1
             self._seedContainer = nil
         end
         self._containerIsExternal = nil
         self._containerShown = nil
+        self._nativeShellStranded = nil
+        self._knownInitialReservations = nil
         self._spec = nil
         self._holderShown = nil
         self._destroyed = true
+        constructionStats.destroyCompletions =
+            constructionStats.destroyCompletions + 1
         pendingControllers[self] = nil
         return
     end
@@ -821,6 +949,7 @@ function ControllerMixin:Destroy()
     if self._destroyed or self._destroyRequested then return end
 
     self._destroyRequested = true
+    constructionStats.destroyRequests = constructionStats.destroyRequests + 1
     self._holderConfig = nil
     self._needsRebuild = nil
     self._needsTuning = nil
@@ -855,9 +984,11 @@ local function CreateController(parent, name, completeSpec, options)
     controller._holderShown = false
     controller._seedContainer = options.seedContainer
     controller._liveUnitChanges = options.liveUnitChanges == true
+    constructionStats.controllersCreated = constructionStats.controllersCreated + 1
 
     if controller._seedContainer then
         claimedGroupAuraContainers[controller._seedContainer] = true
+        constructionStats.seedsClaimed = constructionStats.seedsClaimed + 1
         controller._seedContainer:Hide()
         AF.SetCustomAuraContainerEnabled(controller._seedContainer, false)
     end

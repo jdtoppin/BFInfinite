@@ -10,7 +10,8 @@ local InCombatLockdown = InCombatLockdown
 local UnitCanAssist = UnitCanAssist
 local UnitCanAttack = UnitCanAttack
 local UnitIsVisible = UnitIsVisible
-local ipairs, next, pairs, type = ipairs, next, pairs, type
+local ipairs, next, pairs, setmetatable, type =
+    ipairs, next, pairs, setmetatable, type
 
 local CONFIG_COMMIT_DELAY = 0.15
 
@@ -22,6 +23,22 @@ local STATE_PARTITION_DEFERRED = "PARTITION_DEFERRED"
 local STATE_ERROR = "ERROR"
 local STATE_DESTROYED = "DESTROYED"
 local GROUP_EMPTY_UNIT = "none"
+
+---------------------------------------------------------------------
+-- native aura data-provider observation
+---------------------------------------------------------------------
+local nativeProviderSupported = UF.HasNativeAuraContainerBackend() == true
+local providerUsesTestData
+local providerRuntimes = setmetatable({}, {__mode = "k"})
+local runtimeStats = {
+    runtimesCreated = 0,
+    runtimesDestroyed = 0,
+    providerSwitchEvents = 0,
+    testProviderActivations = 0,
+    liveProviderRestorations = 0,
+    lateBuildDeferrals = 0,
+    lateBuildResumptions = 0,
+}
 
 local function IsCleanUnitToken(unit)
     return F.isValueNonSecret(unit)
@@ -277,6 +294,11 @@ local function PassesVisibility(runtime)
     local unit = runtime._unit
     if not descriptor or not unit then return false end
 
+    -- Blizzard's Edit Mode provider supplies synthetic data for the native
+    -- container independent of the live unit's visibility or assistability.
+    -- Relation partitions remain controller-owned and are resolved separately.
+    if providerUsesTestData then return true end
+
     local visibility = descriptor.visibility
     -- The compiler exposes aggregate group requirements, so a definite gate
     -- failure intentionally hides the whole plain holder. Ordinary category
@@ -345,7 +367,8 @@ end
 local function SyncWatcher(runtime)
     local visibility = runtime._descriptor
         and runtime._descriptor.visibility
-    local hasGate = visibility
+    local hasLiveGate = not providerUsesTestData
+        and visibility
         and (
             visibility.requiresVisible
             or visibility.requiresAssist
@@ -363,7 +386,7 @@ local function SyncWatcher(runtime)
         runtime._active
             and runtime._state == STATE_READY
             and (
-                hasGate
+                hasLiveGate
                 or hasDynamicUnit
                 or hasPartitionSelector
             )
@@ -436,6 +459,7 @@ local function Compile(runtime, unit)
         runtime._error = nil
         runtime._partitionVariant = nil
         runtime._state = STATE_WAITING_FOR_UNIT
+        runtime._providerBuildDeferred = nil
         return
     end
 
@@ -458,6 +482,10 @@ local function Compile(runtime, unit)
         runtime._state = STATE_PARTITION_DEFERRED
     else
         runtime._state = STATE_READY
+    end
+
+    if runtime._state ~= STATE_READY then
+        runtime._providerBuildDeferred = nil
     end
 
     if runtime._partitionCapable and descriptor and descriptor.partition then
@@ -664,6 +692,26 @@ Commit = function(runtime)
         return
     end
 
+    -- A provider switch is Blizzard-owned. If Edit Mode test data became
+    -- active before this runtime's first native build, wait for the real
+    -- provider restoration instead of allocating from BFI during the test
+    -- session. Existing containers continue to consume the provider switch
+    -- intrinsically and never pass through this construction guard.
+    if runtime._configDirty
+        and not runtime._built
+        and providerUsesTestData
+    then
+        RemoveCombatCommit(runtime)
+        if not runtime._providerBuildDeferred then
+            runtime._providerBuildDeferred = true
+            runtimeStats.lateBuildDeferrals =
+                runtimeStats.lateBuildDeferrals + 1
+        end
+        runtime._deferredCommit = true
+        SyncWatcher(runtime)
+        return
+    end
+
     -- Never submit configuration/replacement work to the controller until it
     -- can finish synchronously. This lets a later empty/error/disabled config
     -- supersede the pending descriptor without allocating stale restricted
@@ -756,6 +804,81 @@ local function ScheduleCommit(runtime, immediate)
     end)
 end
 
+local function SyncProviderVisibility(runtime)
+    if runtime._destroyed or not runtime._built then return end
+
+    -- SetShown updates the controller's write-only presentation ledger. Do
+    -- not rebuild, tune, retarget, refresh, or drive Blizzard update methods
+    -- in response to a provider switch.
+    runtime._controller:SetShown(ShouldShowNative(runtime) == true)
+end
+
+local function NativeAuraProviderSignal(_, _, useRealDataProvider)
+    runtimeStats.providerSwitchEvents =
+        runtimeStats.providerSwitchEvents + 1
+
+    local useTestData = useRealDataProvider == false
+    providerUsesTestData = useTestData or nil
+    if useTestData then
+        runtimeStats.testProviderActivations =
+            runtimeStats.testProviderActivations + 1
+    else
+        runtimeStats.liveProviderRestorations =
+            runtimeStats.liveProviderRestorations + 1
+    end
+
+    for runtime in pairs(providerRuntimes) do
+        if not useTestData
+            and not runtime._built
+            and runtime._providerBuildDeferred
+        then
+            runtime._providerBuildDeferred = nil
+            runtimeStats.lateBuildResumptions =
+                runtimeStats.lateBuildResumptions + 1
+            ScheduleCommit(runtime, true)
+        else
+            SyncProviderVisibility(runtime)
+            SyncWatcher(runtime)
+        end
+    end
+end
+
+-- Retail 12.1.0.69273 (wow-ui-source eb941aad) exposes
+-- AURA_DATA_PROVIDER_SWITCH as a synchronous
+-- boolean real-provider state signal (Blizzard_APIDocumentationGenerated /
+-- UnitAuraDocumentation.lua). BFI observes that state only; Blizzard Edit
+-- Mode and AuraContainer remain the sole owners of provider switching.
+if nativeProviderSupported then
+    UF:RegisterEvent(
+        "AURA_DATA_PROVIDER_SWITCH",
+        NativeAuraProviderSignal
+    )
+end
+
+function UF.GetNativeAuraRuntimeStats()
+    local liveRuntimes = 0
+    for runtime in pairs(providerRuntimes) do
+        if not runtime._destroyed then
+            liveRuntimes = liveRuntimes + 1
+        end
+    end
+
+    -- Always return a fresh, flat scalar snapshot. Construction/allocation
+    -- totals are owned separately by UF.GetNativeAuraConstructionStats().
+    return {
+        nativeBackendAvailable = nativeProviderSupported,
+        runtimesCreated = runtimeStats.runtimesCreated,
+        runtimesDestroyed = runtimeStats.runtimesDestroyed,
+        liveRuntimes = liveRuntimes,
+        providerSwitchEvents = runtimeStats.providerSwitchEvents,
+        testProviderActivations = runtimeStats.testProviderActivations,
+        liveProviderRestorations = runtimeStats.liveProviderRestorations,
+        lateBuildDeferrals = runtimeStats.lateBuildDeferrals,
+        lateBuildResumptions = runtimeStats.lateBuildResumptions,
+        testProviderActive = providerUsesTestData == true,
+    }
+end
+
 local function StageUnit(runtime, unit)
     local unitIsNonSecret = F.isValueNonSecret(unit)
     local unitIsEmpty = unitIsNonSecret
@@ -776,6 +899,7 @@ local function StageUnit(runtime, unit)
         runtime._error = nil
         runtime._partitionVariant = nil
         runtime._state = STATE_WAITING_FOR_UNIT
+        runtime._providerBuildDeferred = nil
         runtime._unitDirty = true
         return true
     end
@@ -909,7 +1033,10 @@ local function NativeAuras_Enable(self)
         ScheduleCommit(self, true)
     else
         SyncLifecycle(self)
-        if self._built and self._state == STATE_READY then
+        if self._built
+            and self._state == STATE_READY
+            and not providerUsesTestData
+        then
             self._controller:Refresh()
         end
     end
@@ -952,6 +1079,7 @@ local function NativeAuras_Update(self)
     if self._built
         and self._state == STATE_READY
         and not self._reloadRequired
+        and not providerUsesTestData
     then
         -- Stable tokens such as target/focus can change entity without their
         -- text changing. The native dirty mark remains aura-data opaque.
@@ -1036,6 +1164,8 @@ local function NativeAuras_GetState(self)
             or self._reloadQuiescePending == true,
         configMode = self._configMode == true,
         reloadRequired = self._reloadRequired == true,
+        providerMode = providerUsesTestData and "test" or "live",
+        providerBuildDeferred = self._providerBuildDeferred == true,
         migrationReady = descriptor and descriptor.migrationReady or false,
         empty = descriptor and descriptor.empty or false,
         visibility = CopyOptional(
@@ -1072,6 +1202,9 @@ local function NativeAuras_Destroy(self)
     self._configMode = nil
     self._reloadRequired = nil
     self._reloadQuiescePending = nil
+    self._providerBuildDeferred = nil
+    providerRuntimes[self] = nil
+    runtimeStats.runtimesDestroyed = runtimeStats.runtimesDestroyed + 1
     SetRuntimeWatched(self, false)
     RemoveCombatCommit(self)
 
@@ -1118,6 +1251,8 @@ local function InitializeNativeAuraIndicator(
     frame._groupManaged = groupManaged == true
     frame._state = STATE_NEW
     frame._commitGeneration = 0
+    providerRuntimes[frame] = true
+    runtimeStats.runtimesCreated = runtimeStats.runtimesCreated + 1
 
     frame.LoadConfig = NativeAuras_LoadConfig
     frame.Enable = NativeAuras_Enable

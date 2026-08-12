@@ -711,6 +711,7 @@ local function makeEventRuntimeHarness(
         print = function()
         end,
         select = select,
+        setmetatable = setmetatable,
         strfind = string.find,
         string = string,
         strmatch = string.match,

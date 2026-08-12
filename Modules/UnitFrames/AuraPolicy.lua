@@ -47,12 +47,19 @@ function UF.CompileNativeAuraPolicy(baseFilter, filters)
         return nil, "INVALID_FILTER_SCHEMA"
     end
 
+    -- `isBossAura` is the legacy saved-variable name. The current migration
+    -- preserves the existing saved behavior through Blizzard's curated
+    -- RAID_IN_COMBAT token. It does not claim the exact
+    -- 12.1 `candidateFilters.isBossAura` semantic; relabeling or replacing
+    -- that user-facing control belongs to the dedicated options migration.
+    local bossAuraUsesCuratedRaidInCombat = filters.isBossAura == true
     local defensive = baseFilter == "HELPFUL"
         and (filters.castByOthers or filters.castByUnit or filters.castByNPC)
         or false
     local enabled = {
         player = filters.castByMe == true,
-        raidInCombat = filters.isBossAura == true or filters.castByNPC == true,
+        raidInCombat = bossAuraUsesCuratedRaidInCombat
+            or filters.castByNPC == true,
         raidPlayerDispellable = filters.dispellable == true,
         bigDefensive = defensive,
         externalDefensive = defensive,
@@ -96,6 +103,8 @@ function UF.CompileNativeAuraPolicy(baseFilter, filters)
             perGroupLimit = groupCount > 1,
             perGroupSort = groupCount > 1,
             privateAuraSourceUnseparable = groupCount > 0,
+            bossAuraUsesCuratedRaidInCombat =
+                bossAuraUsesCuratedRaidInCombat,
         },
     }
 end
