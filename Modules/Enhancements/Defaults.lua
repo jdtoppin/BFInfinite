@@ -35,6 +35,9 @@ local defaults = {
     },
     mythicPlus = {
         enabled = true,
+        autoInsertKeystone = {
+            enabled = false,
+        },
         teleportButtons = {
             enabled = true,
         },
