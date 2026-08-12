@@ -16,6 +16,7 @@ local ipairs, next, pairs, setmetatable, type =
 
 local CONFIG_COMMIT_DELAY = 0.15
 local RETAIL_12_1_INTERFACE_MIN = 120100
+local CreateFrame
 local nativeAuraRequirementResolved
 local requiresNativeAuraContainer
 
@@ -29,7 +30,6 @@ local function RequiresNativeAuraContainer()
     end
     nativeAuraRequirementResolved = true
 
-    local CreateFrame
     local GetBuildInfo
     local tonumber
     for globalName, globalValue in pairs(_G) do
@@ -1373,13 +1373,6 @@ local function CreateUnavailableAuraShell(
     auraFilter,
     root
 )
-    local CreateFrame
-    for globalName, globalValue in pairs(_G) do
-        if globalName == "CreateFrame" then
-            CreateFrame = globalValue
-            break
-        end
-    end
     local frame = CreateFrame("Frame", name, parent)
 
     -- SetAlpha is the constant, write-only curtain that remains valid while

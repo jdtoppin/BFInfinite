@@ -171,6 +171,7 @@ local function makeHarness(options)
         backend = options.backend ~= false,
         combatGeometryThrows = options.combatGeometryThrows == true,
         events = {},
+        getBuildInfoCalls = 0,
         timers = {},
         controllers = {},
         legacyFrames = {},
@@ -697,6 +698,7 @@ local function makeHarness(options)
             return frame
         end,
         GetBuildInfo = function()
+            harness.getBuildInfoCalls = harness.getBuildInfoCalls + 1
             return "12.1.0", "69273", "Aug 11 2026",
                 harness.interfaceVersion
         end,
@@ -1189,6 +1191,8 @@ local function testStaticInterfaceBoundaryAcrossSelectors()
             case.label .. " timer count")
         assertEqual(next(harness.registered), nil,
             case.label .. " provider/runtime observer count")
+        assertEqual(harness.getBuildInfoCalls, 1,
+            case.label .. " static interface lookup count")
         local stats = harness.UF.GetNativeAuraRuntimeStats()
         assertEqual(stats.runtimesCreated, 0,
             case.label .. " runtime creation count")
