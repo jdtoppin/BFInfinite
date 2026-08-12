@@ -7,7 +7,6 @@ local AF = _G.AbstractFramework
 
 local UnitGUID = UnitGUID
 local GetUnitName = GetUnitName
-local UnitIsUnit = UnitIsUnit
 local UnitIsPlayer = UnitIsPlayer
 local GetTime = GetTime
 local UnitHasVehicleUI = UnitHasVehicleUI
@@ -145,7 +144,7 @@ local function UnitButton_OnEvent(self, event, unit, arg)
                 UnitButton_UpdateAll(self, true)
             end
         elseif event == "UNIT_TARGET" then
-            if self._updateOnUnitTargetChanged == unit and not UnitIsUnit("player", unit) then
+            if self._updateOnUnitTargetChanged == unit then
                 if UnitExists(self.unit) then
                     UnitButton_UpdateAll(self, true)
                 end
