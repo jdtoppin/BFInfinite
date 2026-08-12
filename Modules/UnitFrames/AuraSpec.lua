@@ -4,7 +4,7 @@ local UF = BFI.modules.UnitFrames
 
 local ceil, floor, huge, max, min =
     math.ceil, math.floor, math.huge, math.max, math.min
-local ipairs, next, pairs, rawget, type = ipairs, next, pairs, rawget, type
+local ipairs, pairs, rawget, type = ipairs, pairs, rawget, type
 local sub = string.sub
 
 -- Retail 12.1.0.69273 (wow-ui-source eb941aad) creates restricted
@@ -241,6 +241,52 @@ local function NormalizePartition(subFrame)
     }
 end
 
+local function NormalizeSpellIDCandidateFilters(config)
+    local mode = config.mode
+    if mode ~= "blacklist" and mode ~= "whitelist" then
+        return nil, nil, "INVALID_SPELL_ID_FILTER_MODE"
+    end
+
+    local list = config[mode]
+    local invalidListError = mode == "blacklist"
+        and "INVALID_SPELL_ID_BLACKLIST"
+        or "INVALID_SPELL_ID_WHITELIST"
+    if type(list) ~= "table" then
+        return nil, nil, invalidListError
+    end
+
+    local count = 0
+    for index, spellID in pairs(list) do
+        if not IsPositiveInteger(index) or not IsPositiveInteger(spellID) then
+            return nil, nil, invalidListError
+        end
+        count = count + 1
+    end
+
+    local spellIDs = {}
+    for index = 1, count do
+        local spellID = rawget(list, index)
+        if not IsPositiveInteger(spellID) then
+            return nil, nil, invalidListError
+        end
+        spellIDs[spellID] = true
+    end
+
+    if mode == "whitelist" then
+        -- An empty include map is intentional: whitelist mode with no entries
+        -- must include no aura identities rather than disable filtering.
+        return {
+            includeSpellIDs = spellIDs,
+        }, true
+    end
+    if count > 0 then
+        return {
+            excludeSpellIDs = spellIDs,
+        }, true
+    end
+    return nil, false
+end
+
 local function GetNativeSchema()
     local anchorUtil = rawget(_G, "AnchorUtil")
     local sortMethod = rawget(_G, "AuraContainerSortMethod")
@@ -397,10 +443,6 @@ local function AddDiagnostic(diagnostics, code)
     diagnostics[#diagnostics + 1] = code
 end
 
-local function HasEntries(value)
-    return type(value) == "table" and next(value) ~= nil
-end
-
 local function EmptyMetrics()
     return {
         groupCount = 0,
@@ -492,7 +534,8 @@ local function CompileContainerVariant(
     tooltip,
     groups,
     appearance,
-    reserveTrailingCrossSpacing
+    reserveTrailingCrossSpacing,
+    candidateFilters
 )
     local groupCount = #groups
     if groupCount == 0 then return nil end
@@ -531,6 +574,7 @@ local function CompileContainerVariant(
             key = policyGroup.key,
             filterString = policyGroup.filterString,
             maxFrameCount = config.numTotal,
+            candidateFilters = Copy(candidateFilters),
             sortMethod = schema.defaultSort,
             sortDirection = schema.normalSort,
             layout = layout,
@@ -540,6 +584,7 @@ local function CompileContainerVariant(
             key = policyGroup.key,
             filterString = policyGroup.filterString,
             maxFrameCount = config.numTotal,
+            candidateFilters = Copy(candidateFilters),
             sortMethod = schema.defaultSort,
             sortDirection = schema.normalSort,
             layout = Copy(layout),
@@ -686,6 +731,12 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         return nil, policyError
     end
 
+    local candidateFilters, identityFilterActive, identityFilterError =
+        NormalizeSpellIDCandidateFilters(config)
+    if identityFilterError then
+        return nil, identityFilterError
+    end
+
     if not IsPosition(config.position) or not IsNonEmptyString(config.anchorTo) then
         return nil, "INVALID_PLACEMENT"
     end
@@ -752,8 +803,13 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     end
 
     local empty = policy.empty
-    local spellListsIgnored = not empty
-        and (HasEntries(config.blacklist) or HasEntries(config.whitelist))
+    -- 12.1 evaluates these maps inside the restricted aura container. For
+    -- secret-capable auras, helpful maps require a publicly assistable unit
+    -- and harmful maps require a publicly non-assistable unit; the opposite
+    -- reaction bypasses the map except for NeverSecret auras. Keep the map
+    -- declarative and let the runtime show the holder only where it cannot be
+    -- bypassed.
+    local spellIDFiltersRestricted = not empty and identityFilterActive
     local sourceColorsIgnored = not empty
         and config.auraTypeColor ~= nil
         and (config.auraTypeColor.castByMe == true
@@ -762,7 +818,9 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     local degradations = Copy(policy.degradations)
     degradations.defaultSortPriority = not empty
     degradations.fixedHolderExtent = not empty
-    degradations.spellIDListsIgnored = spellListsIgnored
+    degradations.spellIDListsIgnored = false
+    degradations.spellIDFiltersRestrictedByUnitReaction =
+        spellIDFiltersRestricted
     degradations.auraTypeColorSourceRulesIgnored = sourceColorsIgnored
     degradations.tooltipPlacementApproximate = not empty and tooltipApproximate
     degradations.partitionDeferred = false
@@ -782,7 +840,15 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         },
         visibility = {
             requiresVisible = policy.requiresVisible,
-            requiresAssist = policy.requiresAssist,
+            requiresAssist = policy.requiresAssist
+                or (
+                    baseFilter == "HELPFUL"
+                    and identityFilterActive
+                ),
+            spellIDFilterRequiresPublicAssist =
+                baseFilter == "HELPFUL" and identityFilterActive,
+            spellIDFilterRequiresPublicNonAssist =
+                baseFilter == "HARMFUL" and identityFilterActive,
         },
         partition = Copy(partition),
         migrationReady = not empty,
@@ -798,8 +864,11 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
 
     AddDiagnostic(descriptor.diagnostics, "NATIVE_DEFAULT_SORT_ADDS_PRIORITY")
     AddDiagnostic(descriptor.diagnostics, "NATIVE_HOLDER_USES_MAXIMUM_EXTENT")
-    if spellListsIgnored then
-        AddDiagnostic(descriptor.diagnostics, "SPELL_ID_LISTS_IGNORED")
+    if spellIDFiltersRestricted then
+        AddDiagnostic(
+            descriptor.diagnostics,
+            "SPELL_ID_FILTERS_RESTRICTED_BY_UNIT_REACTION"
+        )
     end
     if sourceColorsIgnored then
         AddDiagnostic(
@@ -836,7 +905,8 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         tooltip,
         policy.groups,
         mainAppearance,
-        false
+        false,
+        candidateFilters
     )
     descriptor.completeSpec = friendly.completeSpec
     descriptor.tuningSpec = friendly.tuningSpec
@@ -869,7 +939,8 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
             tooltip,
             mainGroups,
             mainAppearance,
-            hasMain and hasComplement
+            hasMain and hasComplement,
+            candidateFilters
         )
         local complementAppearance = {
             width = partition.width,
@@ -886,7 +957,8 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
                 tooltip,
                 complementGroups,
                 complementAppearance,
-                false
+                false,
+                candidateFilters
             )
         local hostileHolder = GetHostileHolder(
             flow,

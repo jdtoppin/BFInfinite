@@ -67,13 +67,17 @@ local function makeHarness()
     local harness = {
         checkButtons = {},
         configLoads = {},
+        dialogs = {},
         dropdowns = {},
         positionLoads = {},
+        reloadChecks = 0,
+        reloadCalls = 0,
         sliders = {},
     }
     local UF = {}
     local AF = {}
     local F = {}
+    local availableDialogs = {}
     local L = setmetatable({}, {
         __index = function(_, key)
             return key
@@ -108,6 +112,51 @@ local function makeHarness()
 
     function AF.GetColorStr()
         return ""
+    end
+
+    local function CreateDialog()
+        local dialog = {}
+
+        function dialog:Hide()
+            if not self.active then return end
+
+            self.shown = false
+            self.active = false
+            self.onConfirm = nil
+            self.onCancel = nil
+            availableDialogs[#availableDialogs + 1] = self
+        end
+
+        function dialog:IsShown()
+            return self.shown == true
+        end
+
+        function dialog:SetOnConfirm(callback)
+            self.onConfirm = callback
+        end
+
+        function dialog:SetOnCancel(callback)
+            self.onCancel = callback
+        end
+
+        return dialog
+    end
+
+    function AF.IsDialogActive(dialog)
+        return dialog and dialog.active == true
+    end
+
+    function AF.GetDialog(owner, text, width)
+        local dialog =
+            table.remove(availableDialogs) or CreateDialog()
+        dialog.active = true
+        dialog.owner = owner
+        dialog.shown = true
+        dialog.text = text
+        dialog.width = width
+
+        harness.dialogs[#harness.dialogs + 1] = dialog
+        return dialog
     end
 
     function AF.SetPoint()
@@ -149,13 +198,19 @@ local function makeHarness()
             UnitFrames = UF,
         },
     }
+    local unitFramesPanel = {}
+    local function ReloadUI()
+        harness.reloadCalls = harness.reloadCalls + 1
+    end
     local environment = {
         _G = false,
         AbstractFramework = AF,
+        BFIOptionsFrame_UnitFramesPanel = unitFramesPanel,
         error = error,
         ipairs = ipairs,
         next = next,
         pairs = pairs,
+        ReloadUI = ReloadUI,
         select = select,
         string = string,
         table = table,
@@ -195,11 +250,26 @@ local function makeHarness()
     harness.AF = AF
     harness.builders = builders
     harness.F = F
+    harness.reloadUI = ReloadUI
     harness.UF = UF
+    harness.unitFramesPanel = unitFramesPanel
+
+    function harness:ConfirmDialog(dialog)
+        local callback = dialog.onConfirm
+        if callback then callback() end
+        dialog:Hide()
+    end
+
+    function harness:CancelDialog(dialog)
+        local callback = dialog.onCancel
+        if callback then callback() end
+        dialog:Hide()
+    end
 
     function harness:ClearLoads()
         self.configLoads = {}
         self.positionLoads = {}
+        self.reloadChecks = 0
     end
 
     return harness
@@ -257,6 +327,285 @@ local function newInfo(id, owner)
     }
     return frame
 end
+
+local function GetInfoFrames(info)
+    if info.owner == "party" or info.owner == "raid" then
+        return info.target.header
+    elseif info.owner == "boss" then
+        return info.target
+    end
+    return {info.target}
+end
+
+local function SetReloadRequirement(info, harness, predicate)
+    for index, frame in ipairs(GetInfoFrames(info)) do
+        frame.indicators[info.id].RequiresReloadForConfig =
+            function(_, config)
+                harness.reloadChecks =
+                    harness.reloadChecks + 1
+                assertEqual(
+                    #harness.configLoads,
+                    0,
+                    "reload query precedes config fan-out"
+                )
+                assertEqual(
+                    config,
+                    info.cfg,
+                    "reload query config identity"
+                )
+                return predicate(index)
+            end
+    end
+end
+
+for _, case in ipairs({
+    {owner = "target", count = 1},
+    {owner = "party", count = 5},
+    {owner = "boss", count = 8},
+}) do
+    local harness = makeHarness()
+    local pane = harness.builders.tooltip({})
+    local info = newInfo("buffs", case.owner)
+    SetReloadRequirement(info, harness, function(index)
+        return index == case.count
+    end)
+    pane.Load(info)
+    harness:ClearLoads()
+    harness.checkButtons[1].onCheck(false)
+
+    assertEqual(
+        #harness.configLoads,
+        case.count,
+        case.owner .. " structural aura fan-out"
+    )
+    assertEqual(
+        harness.reloadChecks,
+        case.count,
+        case.owner .. " structural aura reload checks"
+    )
+    assertEqual(
+        #harness.dialogs,
+        1,
+        case.owner .. " structural aura reload prompt"
+    )
+end
+
+local reloadHarness = makeHarness()
+local reloadPane = reloadHarness.builders.tooltip({})
+local reloadInfo = newInfo("debuffs", "raid")
+SetReloadRequirement(reloadInfo, reloadHarness, function()
+    return true
+end)
+reloadPane.Load(reloadInfo)
+reloadHarness:ClearLoads()
+reloadHarness.checkButtons[1].onCheck(false)
+
+assertEqual(
+    #reloadHarness.configLoads,
+    40,
+    "Raid structural aura fan-out"
+)
+assertEqual(
+    #reloadHarness.dialogs,
+    1,
+    "Raid structural aura prompt count"
+)
+assertEqual(
+    reloadHarness.dialogs[1].owner,
+    reloadHarness.unitFramesPanel,
+    "Raid reload prompt owner"
+)
+assertTrue(
+    reloadHarness.dialogs[1].text:find(
+        "UI reload",
+        1,
+        true
+    ),
+    "Raid reload prompt text"
+)
+assertTrue(
+    type(reloadHarness.dialogs[1].onConfirm) == "function",
+    "Raid reload confirmation callback"
+)
+assertTrue(
+    type(reloadHarness.dialogs[1].onCancel) == "function",
+    "Raid reload cancellation callback"
+)
+assertEqual(
+    reloadHarness.reloadCalls,
+    0,
+    "Raid structural change never auto-reloads"
+)
+
+reloadHarness:ClearLoads()
+reloadHarness.checkButtons[1].onCheck(true)
+assertEqual(
+    #reloadHarness.configLoads,
+    40,
+    "repeated Raid structural aura fan-out"
+)
+assertEqual(
+    #reloadHarness.dialogs,
+    1,
+    "shown Raid reload prompt deduplicated"
+)
+assertEqual(
+    reloadHarness.reloadCalls,
+    0,
+    "deduplicated Raid prompt never auto-reloads"
+)
+
+local releasedReloadDialog = reloadHarness.dialogs[1]
+releasedReloadDialog:Hide()
+assertTrue(
+    not reloadHarness.AF.IsDialogActive(releasedReloadDialog),
+    "hidden Raid reload prompt released"
+)
+
+local otherConfirmationCalls = 0
+local reusedDialog = reloadHarness.AF.GetDialog(
+    reloadHarness.unitFramesPanel,
+    "Another confirmation",
+    250
+)
+assertEqual(
+    reusedDialog,
+    releasedReloadDialog,
+    "released reload frame reused by another confirmation"
+)
+reusedDialog:SetOnConfirm(function()
+    otherConfirmationCalls = otherConfirmationCalls + 1
+    reloadHarness:ClearLoads()
+    reloadHarness.checkButtons[1].onCheck(false)
+end)
+reloadHarness:ConfirmDialog(reusedDialog)
+
+assertEqual(
+    otherConfirmationCalls,
+    1,
+    "reused confirmation callback invoked"
+)
+assertEqual(
+    #reloadHarness.configLoads,
+    40,
+    "reused confirmation triggers Raid aura load"
+)
+assertEqual(
+    #reloadHarness.dialogs,
+    3,
+    "reused non-aura dialog does not suppress reload prompt"
+)
+
+local replacementReloadDialog = reloadHarness.dialogs[3]
+assertTrue(
+    replacementReloadDialog ~= reusedDialog,
+    "reload prompt does not claim active pooled dialog"
+)
+assertTrue(
+    reloadHarness.AF.IsDialogActive(replacementReloadDialog),
+    "replacement reload prompt active"
+)
+assertTrue(
+    replacementReloadDialog.text:find("UI reload", 1, true),
+    "replacement reload prompt text"
+)
+
+reloadHarness:ClearLoads()
+reloadHarness.checkButtons[1].onCheck(true)
+assertEqual(
+    #reloadHarness.dialogs,
+    3,
+    "active replacement reload prompt deduplicated"
+)
+
+reloadHarness:CancelDialog(replacementReloadDialog)
+assertEqual(
+    reloadHarness.reloadCalls,
+    0,
+    "cancelling reload prompt does not reload"
+)
+reloadHarness:ClearLoads()
+reloadHarness.checkButtons[1].onCheck(false)
+assertEqual(
+    #reloadHarness.dialogs,
+    4,
+    "cancelled reload prompt can be shown again"
+)
+
+reloadHarness:ConfirmDialog(reloadHarness.dialogs[4])
+assertEqual(
+    reloadHarness.reloadCalls,
+    1,
+    "confirming reload prompt reloads once"
+)
+
+local tuningHarness = makeHarness()
+local tuningPane = tuningHarness.builders.tooltip({})
+local tuningInfo = newInfo("debuffs", "raid")
+SetReloadRequirement(tuningInfo, tuningHarness, function()
+    return false
+end)
+tuningPane.Load(tuningInfo)
+tuningHarness:ClearLoads()
+tuningHarness.checkButtons[1].onCheck(false)
+assertEqual(
+    tuningHarness.reloadChecks,
+    40,
+    "Raid tuning reload checks"
+)
+assertEqual(
+    #tuningHarness.configLoads,
+    40,
+    "Raid tuning fan-out"
+)
+assertEqual(
+    #tuningHarness.dialogs,
+    0,
+    "Raid tuning avoids reload prompt"
+)
+
+local legacyHarness = makeHarness()
+local legacyPane = legacyHarness.builders.tooltip({})
+local legacyInfo = newInfo("buffs")
+legacyPane.Load(legacyInfo)
+legacyHarness:ClearLoads()
+legacyHarness.checkButtons[1].onCheck(false)
+assertEqual(
+    #legacyHarness.configLoads,
+    1,
+    "legacy aura config load"
+)
+assertEqual(
+    #legacyHarness.dialogs,
+    0,
+    "legacy aura avoids reload prompt"
+)
+
+local nonAuraHarness = makeHarness()
+local nonAuraPane = nonAuraHarness.builders.frameLevel({})
+local nonAuraInfo = newInfo("raidIcon", "raid")
+nonAuraInfo.cfg.frameLevel = 1
+SetReloadRequirement(nonAuraInfo, nonAuraHarness, function()
+    return true
+end)
+nonAuraPane.Load(nonAuraInfo)
+nonAuraHarness:ClearLoads()
+nonAuraHarness.sliders[1].onValueChanged(2)
+assertEqual(
+    nonAuraHarness.reloadChecks,
+    0,
+    "non-aura avoids reload checks"
+)
+assertEqual(
+    #nonAuraHarness.configLoads,
+    40,
+    "non-aura config fan-out"
+)
+assertEqual(
+    #nonAuraHarness.dialogs,
+    0,
+    "non-aura avoids reload prompt"
+)
 
 local positionHarness = makeHarness()
 local positionPane =
