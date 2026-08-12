@@ -1365,12 +1365,12 @@ local function testRetailSpellLists(hasNativeBackend)
         )
         assertContains(
             tip.text,
-            "protected spells may bypass the list",
+            "protected auras may bypass the list",
             version .. " spell-list limitation warning"
         )
         assertContains(
             tip.text,
-            "Spells Blizzard keeps available can still be filtered",
+            "Auras Blizzard keeps available can still be filtered",
             version .. " spell-list exception warning"
         )
         assertContains(
@@ -1481,12 +1481,12 @@ local function testRetailIndicatorAwareNativeWording()
         )
         assertContains(
             tip.text,
-            "protected spells may bypass the list",
+            "protected auras may bypass the list",
             label .. " native limitation message"
         )
         assertContains(
             tip.text,
-            "Spells Blizzard keeps available can still be filtered",
+            "Auras Blizzard keeps available can still be filtered",
             label .. " native exception message"
         )
         assertContains(

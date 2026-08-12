@@ -3936,7 +3936,7 @@ builder["auraBlackListWhitelist"] = function(parent)
                 canEdit = true
                 mode:SetItems(retailModeItems)
                 tip:SetText(
-                    L["Works for buffs on units you can help and debuffs on units you cannot help. In other cases, protected spells may bypass the list, so BFI hides that aura row. Spells Blizzard keeps available can still be filtered"]
+                    L["Works for buffs on units you can help and debuffs on units you cannot help. In other cases, protected auras may bypass the list, so BFI hides that aura row. Auras Blizzard keeps available can still be filtered"]
                         .. "\n"
                         .. editDeleteTip
                 )
