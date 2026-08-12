@@ -7,6 +7,11 @@ code="$(mktemp)"
 matches="$(mktemp)"
 trap 'rm -f "$code" "$matches"' EXIT
 
+command -v rg >/dev/null 2>&1 || {
+    echo "rg (ripgrep) is required for the Cooldown Manager boundary check." >&2
+    exit 127
+}
+
 # Maintenance comments intentionally name the APIs that caused the original
 # taint. Check executable text only so those comments remain useful evidence.
 sed -E 's/--.*$//' "$module" > "$code"
