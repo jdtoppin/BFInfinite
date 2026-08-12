@@ -23,6 +23,7 @@
     <Script file="Style\PlayerSpellsFrame.lua"/>
     <Script file="Style\ProfessionsFrame.lua"/>
     <Script file="Style\ProfessionsBookFrame.lua"/>
+    <Script file="Style\ProfessionsCustomerOrdersFrame.lua"/>
     <Script file="Style\GroupFinder.lua"/>
     <Script file="Style\HousingDashboard.lua"/>
     <Script file="Style\HousingHouseFinder.lua"/>
