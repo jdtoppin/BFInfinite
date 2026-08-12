@@ -14,9 +14,9 @@ local ipairs, next, pairs, type = ipairs, next, pairs, type
 -- groups/slots add-only and restricts their buttons after initialization.
 -- This controller owns only configuration-derived state and never reads aura
 -- data, live buttons, native container geometry, or native visibility.
--- AF #18/r34 adds the construction ledgers consumed by observability on top
--- of the native group adapter required by the landed unit-frame backend.
-local REQUIRED_AF_VERSION = 34
+-- AF #22/r37 includes caller-supplied static Block colors for native groups,
+-- on top of the construction ledgers consumed by observability.
+local REQUIRED_AF_VERSION = 37
 local NATIVE_GROUP_AURA_TEMPLATE = "CustomAuraContainerTemplate"
 -- CustomAuraContainerConstants.FrameCreationBatchSize in the pinned build.
 local NATIVE_INITIAL_GROUP_RESERVATIONS = 10

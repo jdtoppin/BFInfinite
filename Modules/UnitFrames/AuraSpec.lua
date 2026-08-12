@@ -4,13 +4,19 @@ local UF = BFI.modules.UnitFrames
 
 local ceil, floor, huge, max, min =
     math.ceil, math.floor, math.huge, math.max, math.min
-local ipairs, pairs, rawget, type = ipairs, pairs, rawget, type
-local sub = string.sub
+local ipairs, next, pairs, rawget, sort, type =
+    ipairs, next, pairs, rawget, table.sort, type
+local format, sub = string.format, string.sub
 
 -- Retail 12.1.0.69273 (wow-ui-source eb941aad) creates restricted
 -- CustomAuraContainer buttons in batches of ten. Keep the constant here as
 -- audit metadata only; this compiler never creates a frame.
 local NATIVE_BUTTON_BATCH_SIZE = 10
+-- Preserve #90's existing ceiling of eight groups in one active native row.
+-- Integrations that prebuild mutually exclusive relation variants account
+-- those physical copies separately; colour expansion still falls back as a
+-- whole rather than exceeding the active-row layout budget.
+local MAX_NATIVE_COLOR_EXPANDED_GROUPS = 8
 
 local ANCHOR_POINTS = {
     BOTTOM = true,
@@ -138,6 +144,10 @@ end
 
 local function CopyColor(color)
     return {color[1], color[2], color[3], color[4]}
+end
+
+local function IsBlockCooldownStyle(style)
+    return sub(style, 1, 5) == "block"
 end
 
 local function ValidateDurationText(config)
@@ -287,6 +297,142 @@ local function NormalizeSpellIDCandidateFilters(config)
     return nil, false
 end
 
+local function GetColorKey(color)
+    return format(
+        "%.17g|%.17g|%.17g|%.17g",
+        color[1],
+        color[2],
+        color[3],
+        color[4]
+    )
+end
+
+local function NormalizeNativeSpellColorBuckets(config)
+    -- Global Colors apply only to Block rows. Helpful rows require an
+    -- assistable unit and harmful rows require a non-assistable unit later;
+    -- otherwise Blizzard can bypass every identity map and duplicate auras
+    -- across colour groups.
+    if not IsBlockCooldownStyle(config.cooldownStyle)
+        or config.spellColors == nil
+    then
+        return nil, nil, false
+    end
+    if type(config.spellColors) ~= "table" then
+        return nil, nil, nil, "INVALID_SPELL_COLOR_MAP"
+    end
+
+    local bucketByKey = {}
+    local bucketKeys = {}
+    local coloredSpellIDs = {}
+    for spellID, color in pairs(config.spellColors) do
+        if not IsPositiveInteger(spellID)
+            or not IsColor(color)
+            or not IsFiniteNumber(color[4])
+        then
+            return nil, nil, nil, "INVALID_SPELL_COLOR_MAP"
+        end
+
+        local colorKey = GetColorKey(color)
+        local bucket = bucketByKey[colorKey]
+        if not bucket then
+            bucket = {
+                color = CopyColor(color),
+                spellIDs = {},
+            }
+            bucketByKey[colorKey] = bucket
+            bucketKeys[#bucketKeys + 1] = colorKey
+        end
+        bucket.spellIDs[spellID] = true
+        coloredSpellIDs[spellID] = true
+    end
+
+    if not next(coloredSpellIDs) then
+        return nil, nil, false
+    end
+
+    sort(bucketKeys)
+    local buckets = {}
+    for index, colorKey in ipairs(bucketKeys) do
+        local bucket = bucketByKey[colorKey]
+        buckets[index] = {
+            color = CopyColor(bucket.color),
+            spellIDs = Copy(bucket.spellIDs),
+        }
+    end
+    return buckets, coloredSpellIDs, true
+end
+
+local function CopyNonIdentityCandidateFilters(candidateFilters)
+    local copied = {}
+    for key, value in pairs(candidateFilters or {}) do
+        if key ~= "includeSpellIDs"
+            and key ~= "excludeSpellIDs"
+        then
+            copied[key] = Copy(value)
+        end
+    end
+    return copied
+end
+
+local function BuildColoredCandidateFilters(
+    candidateFilters,
+    bucketSpellIDs
+)
+    local baseInclude = candidateFilters
+        and candidateFilters.includeSpellIDs
+    local baseExclude = candidateFilters
+        and candidateFilters.excludeSpellIDs
+    local combined =
+        CopyNonIdentityCandidateFilters(candidateFilters)
+
+    local includeSpellIDs = {}
+    for spellID in pairs(bucketSpellIDs) do
+        if baseInclude == nil or baseInclude[spellID] then
+            includeSpellIDs[spellID] = true
+        end
+    end
+    combined.includeSpellIDs = includeSpellIDs
+    if baseInclude == nil and baseExclude ~= nil then
+        combined.excludeSpellIDs = Copy(baseExclude)
+    end
+    return combined
+end
+
+local function BuildDefaultCandidateFilters(
+    candidateFilters,
+    coloredSpellIDs
+)
+    local baseInclude = candidateFilters
+        and candidateFilters.includeSpellIDs
+    local baseExclude = candidateFilters
+        and candidateFilters.excludeSpellIDs
+    local combined =
+        CopyNonIdentityCandidateFilters(candidateFilters)
+
+    if baseInclude ~= nil then
+        local includeSpellIDs = {}
+        for spellID in pairs(baseInclude) do
+            if not coloredSpellIDs[spellID]
+                and (
+                    baseExclude == nil
+                    or not baseExclude[spellID]
+                )
+            then
+                includeSpellIDs[spellID] = true
+            end
+        end
+        combined.includeSpellIDs = includeSpellIDs
+        return combined
+    end
+
+    local excludeSpellIDs = Copy(coloredSpellIDs)
+    for spellID in pairs(baseExclude or {}) do
+        excludeSpellIDs[spellID] = true
+    end
+    combined.excludeSpellIDs = excludeSpellIDs
+    return combined
+end
+
 local function GetNativeSchema()
     local anchorUtil = rawget(_G, "AnchorUtil")
     local sortMethod = rawget(_G, "AuraContainerSortMethod")
@@ -423,8 +569,14 @@ local function NewLayout(
     }
 end
 
-local function NewButtonStyle(baseFilter, config, tooltip, appearance)
-    return {
+local function NewButtonStyle(
+    baseFilter,
+    config,
+    tooltip,
+    appearance,
+    blockColor
+)
+    local style = {
         noBorder = true,
         width = appearance.width,
         height = appearance.height,
@@ -437,6 +589,16 @@ local function NewButtonStyle(baseFilter, config, tooltip, appearance)
             and config.auraTypeColor.debuffType == true,
         tooltip = Copy(tooltip),
     }
+
+    -- This is ordinary saved configuration, never aura-derived data. Omit it
+    -- for icon styles so an inactive setting cannot affect native construction.
+    if IsBlockCooldownStyle(config.cooldownStyle)
+        and blockColor ~= nil
+    then
+        style.blockColor = CopyColor(blockColor)
+    end
+
+    return style
 end
 
 local function AddDiagnostic(diagnostics, code)
@@ -451,7 +613,59 @@ local function EmptyMetrics()
         nativeBatchSize = 0,
         initialRestrictedButtonCount = 0,
         freshContainerRestrictedButtonCountCeiling = 0,
+        requestedColorBucketCount = 0,
+        requestedColorExpandedGroupCount = 0,
+        requestedColorExpandedCapacity = 0,
+        colorGroupBudgetExceeded = false,
     }
+end
+
+local function ExpandGroupDefinitions(
+    policyGroups,
+    candidateFilters,
+    spellColorsActive,
+    spellColorBuckets,
+    coloredSpellIDs
+)
+    local definitions = {}
+
+    for _, policyGroup in ipairs(policyGroups) do
+        if spellColorsActive then
+            for colorIndex, bucket in ipairs(spellColorBuckets) do
+                definitions[#definitions + 1] = {
+                    key = policyGroup.key
+                        .. "_color_"
+                        .. colorIndex,
+                    filterString = policyGroup.filterString,
+                    playerScope = policyGroup.playerScope,
+                    candidateFilters = BuildColoredCandidateFilters(
+                        candidateFilters,
+                        bucket.spellIDs
+                    ),
+                    blockColor = CopyColor(bucket.color),
+                }
+            end
+
+            definitions[#definitions + 1] = {
+                key = policyGroup.key .. "_default",
+                filterString = policyGroup.filterString,
+                playerScope = policyGroup.playerScope,
+                candidateFilters = BuildDefaultCandidateFilters(
+                    candidateFilters,
+                    coloredSpellIDs
+                ),
+            }
+        else
+            definitions[#definitions + 1] = {
+                key = policyGroup.key,
+                filterString = policyGroup.filterString,
+                playerScope = policyGroup.playerScope,
+                candidateFilters = Copy(candidateFilters),
+            }
+        end
+    end
+
+    return definitions
 end
 
 local function GetContainerGeometry(config, flow, schema, groupCount, appearance)
@@ -534,8 +748,7 @@ local function CompileContainerVariant(
     tooltip,
     groups,
     appearance,
-    reserveTrailingCrossSpacing,
-    candidateFilters
+    reserveTrailingCrossSpacing
 )
     local groupCount = #groups
     if groupCount == 0 then return nil end
@@ -568,13 +781,14 @@ local function CompileContainerVariant(
             baseFilter,
             config,
             tooltip,
-            appearance
+            appearance,
+            policyGroup.blockColor
         )
         completeGroups[index] = {
             key = policyGroup.key,
             filterString = policyGroup.filterString,
             maxFrameCount = config.numTotal,
-            candidateFilters = Copy(candidateFilters),
+            candidateFilters = Copy(policyGroup.candidateFilters),
             sortMethod = schema.defaultSort,
             sortDirection = schema.normalSort,
             layout = layout,
@@ -584,7 +798,7 @@ local function CompileContainerVariant(
             key = policyGroup.key,
             filterString = policyGroup.filterString,
             maxFrameCount = config.numTotal,
-            candidateFilters = Copy(candidateFilters),
+            candidateFilters = Copy(policyGroup.candidateFilters),
             sortMethod = schema.defaultSort,
             sortDirection = schema.normalSort,
             layout = Copy(layout),
@@ -633,20 +847,36 @@ local function SplitPartitionGroups(policyGroups)
             mainGroups[#mainGroups + 1] = {
                 key = group.key,
                 filterString = group.filterString,
+                candidateFilters = Copy(group.candidateFilters),
+                blockColor = group.blockColor
+                    and CopyColor(group.blockColor)
+                    or nil,
             }
         elseif group.playerScope == "notPlayer" then
             complementGroups[#complementGroups + 1] = {
                 key = group.key,
                 filterString = group.filterString,
+                candidateFilters = Copy(group.candidateFilters),
+                blockColor = group.blockColor
+                    and CopyColor(group.blockColor)
+                    or nil,
             }
         else
             mainGroups[#mainGroups + 1] = {
                 key = group.key,
                 filterString = group.filterString .. "|PLAYER",
+                candidateFilters = Copy(group.candidateFilters),
+                blockColor = group.blockColor
+                    and CopyColor(group.blockColor)
+                    or nil,
             }
             complementGroups[#complementGroups + 1] = {
                 key = group.key,
                 filterString = group.filterString .. "|!PLAYER",
+                candidateFilters = Copy(group.candidateFilters),
+                blockColor = group.blockColor
+                    and CopyColor(group.blockColor)
+                    or nil,
             }
         end
     end
@@ -765,6 +995,12 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     if not COOLDOWN_STYLES[config.cooldownStyle] then
         return nil, "INVALID_COOLDOWN_STYLE"
     end
+    local spellColorBuckets, coloredSpellIDs, spellColorsRequested,
+        spellColorError =
+        NormalizeNativeSpellColorBuckets(config)
+    if spellColorError then
+        return nil, spellColorError
+    end
     if not ValidateDurationText(config.durationText) then
         return nil, "INVALID_DURATION_TEXT"
     end
@@ -803,24 +1039,64 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     end
 
     local empty = policy.empty
+    local partitionActive = not empty and partition ~= nil
+    local requestedColorBucketCount =
+        spellColorsRequested and #spellColorBuckets or 0
+    local requestedColorMultiplier =
+        requestedColorBucketCount + 1
+    local requestedFriendlyColorGroupCount =
+        spellColorsRequested
+        and #policy.groups * requestedColorMultiplier
+        or 0
+    local requestedHostileColorGroupCount = 0
+    if spellColorsRequested and partitionActive then
+        local hostilePolicyGroupCount = 0
+        for _, policyGroup in ipairs(policy.groups) do
+            hostilePolicyGroupCount = hostilePolicyGroupCount
+                + (
+                    policyGroup.playerScope == "any"
+                    and 2
+                    or 1
+                )
+        end
+        requestedHostileColorGroupCount =
+            hostilePolicyGroupCount * requestedColorMultiplier
+    end
+    local requestedColorExpandedGroupCount =
+        max(
+            requestedFriendlyColorGroupCount,
+            requestedHostileColorGroupCount
+        )
+    local requestedColorExpandedCapacity =
+        requestedColorExpandedGroupCount * config.numTotal
+    local colorGroupBudgetExceeded =
+        requestedColorExpandedGroupCount
+            > MAX_NATIVE_COLOR_EXPANDED_GROUPS
+    local spellColorsActive = not empty
+        and spellColorsRequested
+        and not colorGroupBudgetExceeded
     -- 12.1 evaluates these maps inside the restricted aura container. For
     -- secret-capable auras, helpful maps require a publicly assistable unit
     -- and harmful maps require a publicly non-assistable unit; the opposite
     -- reaction bypasses the map except for NeverSecret auras. Keep the map
     -- declarative and let the runtime show the holder only where it cannot be
     -- bypassed.
-    local spellIDFiltersRestricted = not empty and identityFilterActive
+    local spellIDFiltersRestricted = not empty
+        and (identityFilterActive or spellColorsActive)
     local sourceColorsIgnored = not empty
         and config.auraTypeColor ~= nil
         and (config.auraTypeColor.castByMe == true
             or config.auraTypeColor.dispellable == true)
-    local partitionActive = not empty and partition ~= nil
     local degradations = Copy(policy.degradations)
     degradations.defaultSortPriority = not empty
     degradations.fixedHolderExtent = not empty
     degradations.spellIDListsIgnored = false
     degradations.spellIDFiltersRestrictedByUnitReaction =
         spellIDFiltersRestricted
+    degradations.globalSpellColorsUseIndependentGroups =
+        not empty and spellColorsActive
+    degradations.globalSpellColorsBudgetExceeded =
+        not empty and colorGroupBudgetExceeded
     degradations.auraTypeColorSourceRulesIgnored = sourceColorsIgnored
     degradations.tooltipPlacementApproximate = not empty and tooltipApproximate
     degradations.partitionDeferred = false
@@ -843,12 +1119,23 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
             requiresAssist = policy.requiresAssist
                 or (
                     baseFilter == "HELPFUL"
-                    and identityFilterActive
+                    and (
+                        identityFilterActive
+                        or spellColorsActive
+                    )
                 ),
             spellIDFilterRequiresPublicAssist =
-                baseFilter == "HELPFUL" and identityFilterActive,
+                baseFilter == "HELPFUL"
+                and (
+                    identityFilterActive
+                    or spellColorsActive
+                ),
             spellIDFilterRequiresPublicNonAssist =
-                baseFilter == "HARMFUL" and identityFilterActive,
+                baseFilter == "HARMFUL"
+                and (
+                    identityFilterActive
+                    or spellColorsActive
+                ),
         },
         partition = Copy(partition),
         migrationReady = not empty,
@@ -868,6 +1155,17 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         AddDiagnostic(
             descriptor.diagnostics,
             "SPELL_ID_FILTERS_RESTRICTED_BY_UNIT_REACTION"
+        )
+    end
+    if spellColorsActive then
+        AddDiagnostic(
+            descriptor.diagnostics,
+            "GLOBAL_SPELL_COLORS_USE_INDEPENDENT_GROUPS"
+        )
+    elseif colorGroupBudgetExceeded then
+        AddDiagnostic(
+            descriptor.diagnostics,
+            "NATIVE_SPELL_COLORS_GROUP_BUDGET_EXCEEDED"
         )
     end
     if sourceColorsIgnored then
@@ -890,6 +1188,16 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         )
     end
 
+    local groupDefinitions = ExpandGroupDefinitions(
+        policy.groups,
+        candidateFilters,
+        spellColorsActive,
+        spellColorBuckets,
+        coloredSpellIDs
+    )
+    local groupCount = #groupDefinitions
+    descriptor.degradations.perGroupLimit = groupCount > 1
+    descriptor.degradations.perGroupSort = groupCount > 1
     local flow = GetFlow(config, schema)
     local mainAppearance = {
         width = config.width,
@@ -903,16 +1211,14 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         schema,
         flow,
         tooltip,
-        policy.groups,
+        groupDefinitions,
         mainAppearance,
-        false,
-        candidateFilters
+        false
     )
     descriptor.completeSpec = friendly.completeSpec
     descriptor.tuningSpec = friendly.tuningSpec
     descriptor.constructionKey = friendly.constructionKey
 
-    local groupCount = #policy.groups
     local capacity = friendly.metrics.nativeVisibleCapacity
     descriptor.metrics = {
         groupCount = groupCount,
@@ -923,11 +1229,19 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
             friendly.metrics.initialRestrictedButtonCount,
         freshContainerRestrictedButtonCountCeiling =
             friendly.metrics.freshContainerRestrictedButtonCountCeiling,
+        requestedColorBucketCount =
+            requestedColorBucketCount,
+        requestedColorExpandedGroupCount =
+            requestedColorExpandedGroupCount,
+        requestedColorExpandedCapacity =
+            requestedColorExpandedCapacity,
+        colorGroupBudgetExceeded =
+            colorGroupBudgetExceeded,
     }
 
     if partitionActive then
         local mainGroups, complementGroups =
-            SplitPartitionGroups(policy.groups)
+            SplitPartitionGroups(groupDefinitions)
         local hasMain = #mainGroups > 0
         local hasComplement = #complementGroups > 0
         local mainVariant, mainGeometry = CompileContainerVariant(
@@ -939,8 +1253,7 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
             tooltip,
             mainGroups,
             mainAppearance,
-            hasMain and hasComplement,
-            candidateFilters
+            hasMain and hasComplement
         )
         local complementAppearance = {
             width = partition.width,
@@ -957,8 +1270,7 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
                 tooltip,
                 complementGroups,
                 complementAppearance,
-                false,
-                candidateFilters
+                false
             )
         local hostileHolder = GetHostileHolder(
             flow,
@@ -1045,6 +1357,14 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
             hostileHolder = Copy(hostileHolder),
             compositeHolder = Copy(compositeHolder),
             variants = variants,
+            requestedColorBucketCount =
+                requestedColorBucketCount,
+            requestedColorExpandedGroupCount =
+                requestedColorExpandedGroupCount,
+            requestedColorExpandedCapacity =
+                requestedColorExpandedCapacity,
+            colorGroupBudgetExceeded =
+                colorGroupBudgetExceeded,
         }
     end
 

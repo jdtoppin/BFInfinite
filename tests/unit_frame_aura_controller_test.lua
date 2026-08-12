@@ -252,7 +252,7 @@ local function makeHarness(options)
     }
     local AF = {
         isRetail = options.isRetail ~= false,
-        versionNum = options.versionNum or 34,
+        versionNum = options.versionNum or 37,
     }
     local UF = {}
     local afConstructionTotals = {
@@ -1062,18 +1062,18 @@ local function assertNoNativeMutation(harness, message)
 end
 
 local function testCapabilityGate()
-    local oldAF = makeHarness({versionNum = 33})
+    local oldAF = makeHarness({versionNum = 36})
     assertEqual(
         oldAF.UF.HasNativeAuraContainerBackend(),
         false,
-        "AF r33 observability gate"
+        "AF r36 block-color gate"
     )
     assertEqual(
         oldAF.UF.CreateNativeAuraContainerController({}, "OldAF"),
         nil,
-        "AF r33 controller"
+        "AF r36 controller"
     )
-    assertEqual(#oldAF.holders, 0, "AF r33 holder count")
+    assertEqual(#oldAF.holders, 0, "AF r36 holder count")
 
     local missingMethod = makeHarness({
         missingMethod = "SetCustomAuraSlotSortMethod",
@@ -1097,6 +1097,54 @@ local function testCapabilityGate()
         "missing-construction-method holder count")
 end
 
+local function testGlobalFrameworkRequirement()
+    local requiredVersion
+    local stopAfterVersionCheck = {}
+    local eventHandler = {}
+
+    function eventHandler:UnregisterEvent() end
+
+    local AF = {
+        CreateSimpleEventHandler = function()
+            return eventHandler
+        end,
+        GetAddOnVersion = function()
+            return "test", 1
+        end,
+        GetColorTable = function()
+            return {}
+        end,
+        RegisterCallback = function() end,
+        RequireVersion = function(version)
+            requiredVersion = version
+            error(stopAfterVersionCheck)
+        end,
+        SetAddonAccentColor = function() end,
+    }
+    local BFI = {
+        funcs = {},
+        name = "BFInfinite",
+        vars = {},
+    }
+    local environment = setmetatable({
+        AbstractFramework = AF,
+        C_SpecializationInfo = {
+            GetNumSpecializationsForClassID = function() return 0 end,
+        },
+    }, {__index = _G})
+    environment._G = environment
+
+    local chunk, loadError = loadfile("Core.lua")
+    assertTrue(chunk, loadError)
+    setfenv(chunk, environment)
+    chunk("BFInfinite", BFI)
+    assertEqual(BFI.requiredAFVersion, 37, "published global AF minimum")
+
+    local ok, versionError = pcall(eventHandler.ADDON_LOADED, eventHandler, BFI.name)
+    assertEqual(ok, false, "global AF version check stops harness")
+    assertEqual(versionError, stopAfterVersionCheck, "global AF version check sentinel")
+    assertEqual(requiredVersion, 37, "global AF minimum")
+end
 local function testBuildContract()
     local harness = makeHarness()
     local parent = {}
@@ -2679,6 +2727,7 @@ local function testGroupVisibilityDoesNotProbeFrameState()
 end
 
 testConstructionStatsContract()
+testGlobalFrameworkRequirement()
 testCapabilityGate()
 testBuildContract()
 testTuningContract()

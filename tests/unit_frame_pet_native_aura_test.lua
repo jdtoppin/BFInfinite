@@ -427,6 +427,9 @@ local function makeDisabledRuntimeHarness()
     function AF.LoadWidgetPosition()
     end
 
+    function AF.RegisterCallback()
+    end
+
     function AF.SetFrameLevel()
     end
 

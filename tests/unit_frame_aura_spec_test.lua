@@ -490,6 +490,10 @@ local function testCompleteSpecContract()
         nativeBatchSize = 10,
         initialRestrictedButtonCount = 20,
         freshContainerRestrictedButtonCountCeiling = 20,
+        requestedColorBucketCount = 0,
+        requestedColorExpandedGroupCount = 0,
+        requestedColorExpandedCapacity = 0,
+        colorGroupBudgetExceeded = false,
     }, "base metrics")
     assertDeepEqual(descriptor.diagnostics, {
         "NATIVE_DEFAULT_SORT_ADDS_PRIORITY",
@@ -508,6 +512,8 @@ local function testCompleteSpecContract()
         fixedHolderExtent = true,
         spellIDListsIgnored = false,
         spellIDFiltersRestrictedByUnitReaction = false,
+        globalSpellColorsUseIndependentGroups = false,
+        globalSpellColorsBudgetExceeded = false,
         auraTypeColorSourceRulesIgnored = true,
         tooltipPlacementApproximate = false,
         partitionDeferred = false,
@@ -730,10 +736,16 @@ local function testStyleProjection()
         config.cooldownStyle = cooldownStyle
         config.filters.isBossAura = false
         local descriptor = compile("target", "HARMFUL", config)
+        local style = descriptor.completeSpec.groups[1].buttonStyle
         assertEqual(
-            descriptor.completeSpec.groups[1].buttonStyle.cooldownStyle,
+            style.cooldownStyle,
             cooldownStyle,
             "cooldown style " .. cooldownStyle
+        )
+        assertEqual(
+            style.blockColor,
+            nil,
+            "unmapped style uses framework default " .. cooldownStyle
         )
     end
 
@@ -983,6 +995,10 @@ local function testEmptyPolicies()
         nativeBatchSize = 0,
         initialRestrictedButtonCount = 0,
         freshContainerRestrictedButtonCountCeiling = 0,
+        requestedColorBucketCount = 0,
+        requestedColorExpandedGroupCount = 0,
+        requestedColorExpandedCapacity = 0,
+        colorGroupBudgetExceeded = false,
     }, "empty metrics")
     assertDeepEqual(empty.diagnostics, {}, "empty diagnostics")
     assertDeepEqual(empty.degradations, {
@@ -997,6 +1013,8 @@ local function testEmptyPolicies()
         fixedHolderExtent = false,
         spellIDListsIgnored = false,
         spellIDFiltersRestrictedByUnitReaction = false,
+        globalSpellColorsUseIndependentGroups = false,
+        globalSpellColorsBudgetExceeded = false,
         auraTypeColorSourceRulesIgnored = false,
         tooltipPlacementApproximate = false,
         partitionDeferred = false,
@@ -1212,6 +1230,10 @@ local function testPartitionMetadata()
         prebuiltContainerCount = 3,
         prebuiltGroupCount = 4,
         maxActiveGroupCount = 2,
+        requestedColorBucketCount = 0,
+        requestedColorExpandedGroupCount = 0,
+        requestedColorExpandedCapacity = 0,
+        colorGroupBudgetExceeded = false,
         hostileHolder = {
             width = 46,
             height = 16,
@@ -1349,6 +1371,10 @@ local function testPartitionScopeSplitting()
         prebuiltContainerCount = 3,
         prebuiltGroupCount = 6,
         maxActiveGroupCount = 4,
+        requestedColorBucketCount = 0,
+        requestedColorExpandedGroupCount = 0,
+        requestedColorExpandedCapacity = 0,
+        colorGroupBudgetExceeded = false,
         hostileHolder = {
             width = 46,
             height = 35,
@@ -1705,6 +1731,10 @@ local function testShippedTargetPartitionMetrics()
         prebuiltContainerCount = 3,
         prebuiltGroupCount = 3,
         maxActiveGroupCount = 2,
+        requestedColorBucketCount = 0,
+        requestedColorExpandedGroupCount = 0,
+        requestedColorExpandedCapacity = 0,
+        colorGroupBudgetExceeded = false,
         hostileHolder = {
             width = 219,
             height = 75,
@@ -1764,6 +1794,10 @@ local function testCapacityMetrics()
         nativeBatchSize = 10,
         initialRestrictedButtonCount = 10,
         freshContainerRestrictedButtonCountCeiling = 10,
+        requestedColorBucketCount = 0,
+        requestedColorExpandedGroupCount = 0,
+        requestedColorExpandedCapacity = 0,
+        colorGroupBudgetExceeded = false,
     }, "single-group metrics")
     assertEqual(
         singleDescriptor.degradations.perGroupLimit,
@@ -1794,6 +1828,10 @@ local function testCapacityMetrics()
         nativeBatchSize = 10,
         initialRestrictedButtonCount = 50,
         freshContainerRestrictedButtonCountCeiling = 150,
+        requestedColorBucketCount = 0,
+        requestedColorExpandedGroupCount = 0,
+        requestedColorExpandedCapacity = 0,
+        colorGroupBudgetExceeded = false,
     }, "five-group metrics")
     assertEqual(
         fiveDescriptor.degradations.perGroupLimit,
@@ -1805,7 +1843,6 @@ local function testCapacityMetrics()
         true,
         "five-group sort degradation"
     )
-
     local spellFilter = baseConfig()
     spellFilter.blacklist = {12345}
     spellFilter.whitelist = {67890}
@@ -2038,6 +2075,785 @@ local function testSpellIDCandidateFilters()
     )
 end
 
+local function onePolicyBlockConfig()
+    local config = baseConfig()
+    config.cooldownStyle = "block_clock"
+    config.filters.isBossAura = false
+    return config
+end
+
+local function testGlobalSpellColorFamiliesAndReactions()
+    local config = baseConfig()
+    config.cooldownStyle = "block_clock"
+    config.spellColors = {
+        [303] = {0.8, 0.2, 0.3, 1},
+        [101] = {0.1, 0.2, 0.3, 1},
+        [202] = {0.1, 0.2, 0.3, 1},
+    }
+    local snapshot = copy(config)
+    local descriptor = compile("target", "HARMFUL", config)
+    local groups = descriptor.completeSpec.groups
+
+    assertEqual(#groups, 6, "two policies by two colors plus gray")
+    assertDeepEqual({
+        groups[1].key,
+        groups[2].key,
+        groups[3].key,
+        groups[4].key,
+        groups[5].key,
+        groups[6].key,
+    }, {
+        "player_color_1",
+        "player_color_2",
+        "player_default",
+        "raidInCombat_color_1",
+        "raidInCombat_color_2",
+        "raidInCombat_default",
+    }, "color group order")
+
+    for _, offset in ipairs({0, 3}) do
+        assertDeepEqual(
+            groups[offset + 1].candidateFilters,
+            {
+                includeSpellIDs = {
+                    [101] = true,
+                    [202] = true,
+                },
+            },
+            "exact-RGBA family " .. offset
+        )
+        assertDeepEqual(
+            groups[offset + 1].buttonStyle.blockColor,
+            {0.1, 0.2, 0.3, 1},
+            "first family color " .. offset
+        )
+        assertTrue(
+            groups[offset + 1].buttonStyle.blockColor
+                ~= config.spellColors[101],
+            "family color aliases saved config " .. offset
+        )
+        assertDeepEqual(
+            groups[offset + 2].candidateFilters,
+            {
+                includeSpellIDs = {
+                    [303] = true,
+                },
+            },
+            "second exact-RGBA family " .. offset
+        )
+        assertDeepEqual(
+            groups[offset + 2].buttonStyle.blockColor,
+            {0.8, 0.2, 0.3, 1},
+            "second family color " .. offset
+        )
+        assertDeepEqual(
+            groups[offset + 3].candidateFilters,
+            {
+                excludeSpellIDs = {
+                    [101] = true,
+                    [202] = true,
+                    [303] = true,
+                },
+            },
+            "gray complement " .. offset
+        )
+        assertEqual(
+            groups[offset + 3].buttonStyle.blockColor,
+            nil,
+            "gray group uses framework default " .. offset
+        )
+        assertEqual(
+            groups[offset + 1].candidateFilters.includeSpellIDs[102],
+            nil,
+            "related but unentered spell is not inferred " .. offset
+        )
+        assertEqual(
+            groups[offset + 3].candidateFilters.excludeSpellIDs[102],
+            nil,
+            "related but unentered spell remains gray " .. offset
+        )
+    end
+
+    assertDeepEqual(descriptor.metrics, {
+        groupCount = 6,
+        legacyMaxFrameCount = 4,
+        nativeVisibleCapacity = 24,
+        nativeBatchSize = 10,
+        initialRestrictedButtonCount = 60,
+        freshContainerRestrictedButtonCountCeiling = 60,
+        requestedColorBucketCount = 2,
+        requestedColorExpandedGroupCount = 6,
+        requestedColorExpandedCapacity = 24,
+        colorGroupBudgetExceeded = false,
+    }, "color family metrics")
+    assertEqual(
+        descriptor.degradations.globalSpellColorsUseIndependentGroups,
+        true,
+        "color groups degradation"
+    )
+    assertEqual(
+        descriptor.degradations.globalSpellColorsBudgetExceeded,
+        false,
+        "color groups stay within budget"
+    )
+    assertDeepEqual(descriptor.visibility, {
+        requiresVisible = false,
+        requiresAssist = false,
+        spellIDFilterRequiresPublicAssist = false,
+        spellIDFilterRequiresPublicNonAssist = true,
+    }, "harmful color reaction gate")
+    assertDeepEqual(descriptor.diagnostics, {
+        "NATIVE_DEFAULT_SORT_ADDS_PRIORITY",
+        "NATIVE_HOLDER_USES_MAXIMUM_EXTENT",
+        "SPELL_ID_FILTERS_RESTRICTED_BY_UNIT_REACTION",
+        "GLOBAL_SPELL_COLORS_USE_INDEPENDENT_GROUPS",
+        "AURA_TYPE_COLOR_SOURCE_RULES_IGNORED",
+    }, "color family diagnostics")
+    assertDeepEqual(config, snapshot, "spell-color input mutation")
+
+    local helpful = compile("target", "HELPFUL", config)
+    assertEqual(
+        helpful.visibility.requiresAssist,
+        true,
+        "helpful color rows require assist"
+    )
+    assertEqual(
+        helpful.visibility.spellIDFilterRequiresPublicAssist,
+        true,
+        "helpful color reaction gate"
+    )
+    assertEqual(
+        helpful.visibility.spellIDFilterRequiresPublicNonAssist,
+        false,
+        "helpful colors do not require non-assist"
+    )
+
+    local reordered = copy(config)
+    reordered.spellColors = {}
+    reordered.spellColors[202] = {0.1, 0.2, 0.3, 1}
+    reordered.spellColors[303] = {0.8, 0.2, 0.3, 1}
+    reordered.spellColors[101] = {0.1, 0.2, 0.3, 1}
+    assertDeepEqual(
+        compile("target", "HARMFUL", reordered),
+        descriptor,
+        "spell-color insertion order"
+    )
+end
+
+local function testTargetPartitionPreservesSpellColorFamilies()
+    local config = baseConfig()
+    config.cooldownStyle = "block_clock"
+    config.spellColors = {
+        [101] = {0.1, 0.2, 0.3, 1},
+        [202] = {0.1, 0.2, 0.3, 1},
+        [303] = {0.8, 0.2, 0.3, 1},
+    }
+    config.subFrame = {
+        enabled = true,
+        desaturated = true,
+        filter = "notCastByMe",
+        width = 8,
+        height = 7,
+    }
+
+    local descriptor = compile("target", "HARMFUL", config)
+    local hostile = descriptor.partition.hostile
+    local friendly = descriptor.completeSpec.groups
+    local main = hostile.main.completeSpec.groups
+    local complement = hostile.complement.completeSpec.groups
+
+    assertEqual(#friendly, 6, "partition color friendly groups")
+    assertEqual(#main, 3, "partition color hostile main groups")
+    assertEqual(#complement, 3,
+        "partition color hostile complement groups")
+    for _, groups in ipairs({friendly, main, complement}) do
+        assertDeepEqual(groups[1].candidateFilters, {
+            includeSpellIDs = {
+                [101] = true,
+                [202] = true,
+            },
+        }, "partition exact-RGBA family")
+        assertDeepEqual(
+            groups[1].buttonStyle.blockColor,
+            {0.1, 0.2, 0.3, 1},
+            "partition family color"
+        )
+        assertDeepEqual(groups[2].candidateFilters, {
+            includeSpellIDs = {
+                [303] = true,
+            },
+        }, "partition second family")
+        assertDeepEqual(groups[3].candidateFilters, {
+            excludeSpellIDs = {
+                [101] = true,
+                [202] = true,
+                [303] = true,
+            },
+        }, "partition gray complement")
+        assertEqual(
+            groups[3].buttonStyle.blockColor,
+            nil,
+            "partition gray framework default"
+        )
+    end
+    assertEqual(
+        descriptor.metrics.requestedColorExpandedGroupCount,
+        6,
+        "partition color budget uses max active variant"
+    )
+    assertEqual(
+        descriptor.metrics.initialRestrictedButtonCount,
+        120,
+        "partition color prebuilt initial reservations"
+    )
+    assertEqual(
+        descriptor.metrics.prebuiltGroupCount,
+        12,
+        "partition color prebuilt group count"
+    )
+    assertEqual(
+        descriptor.metrics.maxActiveGroupCount,
+        6,
+        "partition color active group ceiling"
+    )
+end
+
+local function testGlobalSpellColorCandidateComposition()
+    local whitelist = onePolicyBlockConfig()
+    whitelist.mode = "whitelist"
+    whitelist.whitelist = {101, 303, 999}
+    whitelist.spellColors = {
+        [101] = {0.1, 0, 0, 1},
+        [202] = {0.1, 0, 0, 1},
+        [303] = {0.2, 0, 0, 1},
+        [404] = {0.3, 0, 0, 1},
+    }
+    local whitelistGroups =
+        compile("target", "HELPFUL", whitelist).completeSpec.groups
+    assertEqual(#whitelistGroups, 4, "whitelist color group count")
+    assertDeepEqual(
+        whitelistGroups[1].candidateFilters,
+        {
+            includeSpellIDs = {
+                [101] = true,
+            },
+        },
+        "whitelist first family intersection"
+    )
+    assertDeepEqual(
+        whitelistGroups[2].candidateFilters,
+        {
+            includeSpellIDs = {
+                [303] = true,
+            },
+        },
+        "whitelist second family intersection"
+    )
+    assertDeepEqual(
+        whitelistGroups[3].candidateFilters,
+        {
+            includeSpellIDs = {},
+        },
+        "whitelist preserves empty family intersection"
+    )
+    assertDeepEqual(
+        whitelistGroups[4].candidateFilters,
+        {
+            includeSpellIDs = {
+                [999] = true,
+            },
+        },
+        "whitelist gray remainder"
+    )
+
+    local blacklist = onePolicyBlockConfig()
+    blacklist.blacklist = {202, 999}
+    blacklist.spellColors = {
+        [101] = {0.1, 0, 0, 1},
+        [202] = {0.1, 0, 0, 1},
+        [303] = {0.2, 0, 0, 1},
+    }
+    local blacklistGroups =
+        compile("target", "HARMFUL", blacklist).completeSpec.groups
+    assertEqual(#blacklistGroups, 3, "blacklist color group count")
+    assertDeepEqual(
+        blacklistGroups[1].candidateFilters,
+        {
+            includeSpellIDs = {
+                [101] = true,
+                [202] = true,
+            },
+            excludeSpellIDs = {
+                [202] = true,
+                [999] = true,
+            },
+        },
+        "blacklist first color family"
+    )
+    assertDeepEqual(
+        blacklistGroups[2].candidateFilters,
+        {
+            includeSpellIDs = {
+                [303] = true,
+            },
+            excludeSpellIDs = {
+                [202] = true,
+                [999] = true,
+            },
+        },
+        "blacklist second color family"
+    )
+    assertDeepEqual(
+        blacklistGroups[3].candidateFilters,
+        {
+            excludeSpellIDs = {
+                [101] = true,
+                [202] = true,
+                [303] = true,
+                [999] = true,
+            },
+        },
+        "blacklist gray complement"
+    )
+end
+
+local function makeDistinctSpellColors(count)
+    local colors = {}
+    for index = 1, count do
+        colors[1000 + index] = {index / 10, 0, 0, 1}
+    end
+    return colors
+end
+
+local function testGlobalSpellColorGroupBudget()
+    local exact = baseConfig()
+    exact.cooldownStyle = "block_vertical"
+    exact.spellColors = makeDistinctSpellColors(3)
+    local exactDescriptor = compile("target", "HARMFUL", exact)
+    assertEqual(
+        #exactDescriptor.completeSpec.groups,
+        8,
+        "eight color-expanded groups are accepted"
+    )
+    assertDeepEqual(exactDescriptor.metrics, {
+        groupCount = 8,
+        legacyMaxFrameCount = 4,
+        nativeVisibleCapacity = 32,
+        nativeBatchSize = 10,
+        initialRestrictedButtonCount = 80,
+        freshContainerRestrictedButtonCountCeiling = 80,
+        requestedColorBucketCount = 3,
+        requestedColorExpandedGroupCount = 8,
+        requestedColorExpandedCapacity = 32,
+        colorGroupBudgetExceeded = false,
+    }, "exact color group budget")
+    assertEqual(
+        exactDescriptor.degradations
+            .globalSpellColorsUseIndependentGroups,
+        true,
+        "exact budget uses color groups"
+    )
+
+    local over = baseConfig()
+    over.cooldownStyle = "block_vertical"
+    over.filters.isBossAura = false
+    over.spellColors = makeDistinctSpellColors(8)
+    local overDescriptor = compile("target", "HARMFUL", over)
+    assertEqual(
+        #overDescriptor.completeSpec.groups,
+        1,
+        "over-budget colors fall back as a whole"
+    )
+    assertDeepEqual(overDescriptor.metrics, {
+        groupCount = 1,
+        legacyMaxFrameCount = 4,
+        nativeVisibleCapacity = 4,
+        nativeBatchSize = 10,
+        initialRestrictedButtonCount = 10,
+        freshContainerRestrictedButtonCountCeiling = 10,
+        requestedColorBucketCount = 8,
+        requestedColorExpandedGroupCount = 9,
+        requestedColorExpandedCapacity = 36,
+        colorGroupBudgetExceeded = true,
+    }, "over color group budget")
+    for index, group in ipairs(overDescriptor.completeSpec.groups) do
+        assertEqual(
+            group.buttonStyle.blockColor,
+            nil,
+            "over-budget group is gray " .. index
+        )
+        assertEqual(
+            group.candidateFilters,
+            nil,
+            "over-budget group keeps original candidates " .. index
+        )
+    end
+    assertEqual(
+        overDescriptor.degradations
+            .globalSpellColorsUseIndependentGroups,
+        false,
+        "over budget does not partially color"
+    )
+    assertEqual(
+        overDescriptor.degradations.globalSpellColorsBudgetExceeded,
+        true,
+        "over-budget degradation"
+    )
+    assertEqual(
+        overDescriptor.visibility
+            .spellIDFilterRequiresPublicNonAssist,
+        false,
+        "unused colors do not add a reaction gate"
+    )
+    assertEqual(
+        overDescriptor.visibility
+            .spellIDFilterRequiresPublicAssist,
+        false,
+        "unused colors do not add an assist gate"
+    )
+    assertDeepEqual(overDescriptor.diagnostics, {
+        "NATIVE_DEFAULT_SORT_ADDS_PRIORITY",
+        "NATIVE_HOLDER_USES_MAXIMUM_EXTENT",
+        "NATIVE_SPELL_COLORS_GROUP_BUDGET_EXCEEDED",
+        "AURA_TYPE_COLOR_SOURCE_RULES_IGNORED",
+    }, "over-budget diagnostics")
+end
+
+local function testPartitionColorBudgetUsesMaxActiveVariant()
+    local exact = baseConfig()
+    exact.cooldownStyle = "block_vertical"
+    exact.filters = {
+        player = true,
+    }
+    exact.spellColors = makeDistinctSpellColors(7)
+    exact.subFrame = {
+        enabled = true,
+        desaturated = true,
+        filter = "notCastByMe",
+        width = 8,
+        height = 7,
+    }
+
+    local exactDescriptor = compile("target", "HARMFUL", exact)
+    assertEqual(
+        exactDescriptor.metrics.requestedColorExpandedGroupCount,
+        8,
+        "player partition requested max-active groups"
+    )
+    assertEqual(
+        exactDescriptor.metrics.colorGroupBudgetExceeded,
+        false,
+        "player partition exact budget accepted"
+    )
+    assertEqual(
+        exactDescriptor.metrics.maxActiveGroupCount,
+        8,
+        "player partition max-active groups"
+    )
+    assertEqual(
+        exactDescriptor.metrics.prebuiltGroupCount,
+        16,
+        "player partition prebuilt groups"
+    )
+    assertEqual(
+        exactDescriptor.metrics.initialRestrictedButtonCount,
+        160,
+        "player partition prebuilt reservations"
+    )
+
+    local inverse = copy(exact)
+    inverse.filters = {
+        notPlayer = true,
+    }
+    local inverseDescriptor = compile("target", "HARMFUL", inverse)
+    assertEqual(
+        inverseDescriptor.metrics.requestedColorExpandedGroupCount,
+        8,
+        "not-player partition requested max-active groups"
+    )
+    assertEqual(
+        inverseDescriptor.metrics.colorGroupBudgetExceeded,
+        false,
+        "not-player partition exact budget accepted"
+    )
+    assertEqual(
+        inverseDescriptor.metrics.maxActiveGroupCount,
+        8,
+        "not-player partition max-active groups"
+    )
+    assertEqual(
+        inverseDescriptor.metrics.prebuiltGroupCount,
+        16,
+        "not-player partition prebuilt groups"
+    )
+    assertEqual(
+        inverseDescriptor.metrics.initialRestrictedButtonCount,
+        160,
+        "not-player partition prebuilt reservations"
+    )
+
+    local duplicated = copy(exact)
+    duplicated.filters = {
+        all = true,
+    }
+    local duplicatedDescriptor = compile("target", "HARMFUL", duplicated)
+    local hostile = duplicatedDescriptor.partition.hostile
+    assertEqual(
+        duplicatedDescriptor.metrics.requestedColorExpandedGroupCount,
+        16,
+        "any-scope hostile requested groups"
+    )
+    assertEqual(
+        duplicatedDescriptor.metrics.colorGroupBudgetExceeded,
+        true,
+        "any-scope hostile budget fallback"
+    )
+    assertEqual(
+        duplicatedDescriptor.metrics.maxActiveGroupCount,
+        2,
+        "any-scope gray max-active groups"
+    )
+    assertEqual(
+        duplicatedDescriptor.metrics.prebuiltGroupCount,
+        3,
+        "any-scope gray prebuilt groups"
+    )
+    assertEqual(
+        duplicatedDescriptor.metrics.initialRestrictedButtonCount,
+        30,
+        "any-scope gray prebuilt reservations"
+    )
+    for _, groups in ipairs({
+        duplicatedDescriptor.completeSpec.groups,
+        hostile.main.completeSpec.groups,
+        hostile.complement.completeSpec.groups,
+    }) do
+        assertEqual(#groups, 1, "any-scope gray group count")
+        assertEqual(
+            groups[1].buttonStyle.blockColor,
+            nil,
+            "any-scope fallback has no partial color"
+        )
+        assertEqual(
+            groups[1].candidateFilters,
+            nil,
+            "any-scope fallback has no identity map"
+        )
+    end
+    assertEqual(
+        duplicatedDescriptor.visibility.spellIDFilterRequiresPublicAssist,
+        false,
+        "unused partition colors do not add assist gate"
+    )
+    assertEqual(
+        duplicatedDescriptor.visibility.spellIDFilterRequiresPublicNonAssist,
+        false,
+        "unused partition colors do not add non-assist gate"
+    )
+end
+
+local function testPartitionColorBudgetPreservesLargeGrayBaseline()
+    local baseline = baseConfig()
+    baseline.cooldownStyle = "block_vertical"
+    baseline.filters = {
+        raidInCombat = true,
+        raidPlayerDispellable = true,
+        bigDefensive = true,
+        externalDefensive = true,
+        important = true,
+        anyDispellable = true,
+    }
+    baseline.subFrame = {
+        enabled = true,
+        desaturated = true,
+        filter = "notCastByMe",
+        width = 8,
+        height = 7,
+    }
+
+    local baselineDescriptor = compile("target", "HELPFUL", baseline)
+    assertEqual(
+        baselineDescriptor.metrics.maxActiveGroupCount,
+        12,
+        "large gray baseline active groups"
+    )
+    assertEqual(
+        baselineDescriptor.metrics.prebuiltGroupCount,
+        18,
+        "large gray baseline prebuilt groups"
+    )
+    assertEqual(
+        baselineDescriptor.metrics.initialRestrictedButtonCount,
+        180,
+        "large gray baseline prebuilt reservations"
+    )
+
+    local colored = copy(baseline)
+    colored.spellColors = {
+        [1001] = {0.1, 0.2, 0.3, 1},
+    }
+    local fallbackDescriptor = compile("target", "HELPFUL", colored)
+    assertEqual(
+        fallbackDescriptor.metrics.requestedColorExpandedGroupCount,
+        24,
+        "large baseline requested color groups"
+    )
+    assertEqual(
+        fallbackDescriptor.metrics.colorGroupBudgetExceeded,
+        true,
+        "large baseline color fallback"
+    )
+    assertEqual(
+        fallbackDescriptor.metrics.maxActiveGroupCount,
+        12,
+        "large fallback keeps baseline active groups"
+    )
+    assertEqual(
+        fallbackDescriptor.metrics.prebuiltGroupCount,
+        18,
+        "large fallback keeps baseline prebuilt groups"
+    )
+    assertEqual(
+        fallbackDescriptor.metrics.initialRestrictedButtonCount,
+        180,
+        "large fallback keeps baseline reservations"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.completeSpec,
+        baselineDescriptor.completeSpec,
+        "large fallback friendly baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.partition.hostile.main.completeSpec,
+        baselineDescriptor.partition.hostile.main.completeSpec,
+        "large fallback hostile-main baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.partition.hostile.complement.completeSpec,
+        baselineDescriptor.partition.hostile.complement.completeSpec,
+        "large fallback hostile-complement baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.tuningSpec,
+        baselineDescriptor.tuningSpec,
+        "large fallback friendly tuning baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.partition.hostile.main.tuningSpec,
+        baselineDescriptor.partition.hostile.main.tuningSpec,
+        "large fallback hostile-main tuning baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.partition.hostile.complement.tuningSpec,
+        baselineDescriptor.partition.hostile.complement.tuningSpec,
+        "large fallback hostile-complement tuning baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.constructionKey,
+        baselineDescriptor.constructionKey,
+        "large fallback friendly construction baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.partition.hostile.main.constructionKey,
+        baselineDescriptor.partition.hostile.main.constructionKey,
+        "large fallback hostile-main construction baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.partition.hostile.complement.constructionKey,
+        baselineDescriptor.partition.hostile.complement.constructionKey,
+        "large fallback hostile-complement construction baseline"
+    )
+    for _, key in ipairs({
+        "groupCount",
+        "legacyMaxFrameCount",
+        "nativeVisibleCapacity",
+        "nativeBatchSize",
+        "initialRestrictedButtonCount",
+        "freshContainerRestrictedButtonCountCeiling",
+        "prebuiltContainerCount",
+        "prebuiltGroupCount",
+        "maxActiveGroupCount",
+        "hostileHolder",
+        "compositeHolder",
+        "variants",
+    }) do
+        assertDeepEqual(
+            fallbackDescriptor.metrics[key],
+            baselineDescriptor.metrics[key],
+            "large fallback metric baseline " .. key
+        )
+    end
+    assertEqual(
+        fallbackDescriptor.visibility.spellIDFilterRequiresPublicAssist,
+        false,
+        "large fallback adds no reaction gate"
+    )
+end
+
+local function testGlobalSpellColorConstructionBoundary()
+    local original = onePolicyBlockConfig()
+    original.spellColors = {
+        [101] = {0.1, 0.2, 0.3, 1},
+    }
+    local originalDescriptor = compile("target", "HARMFUL", original)
+
+    local sameFamily = copy(original)
+    sameFamily.spellColors[202] = {0.1, 0.2, 0.3, 1}
+    local sameFamilyDescriptor =
+        compile("target", "HARMFUL", sameFamily)
+    assertDeepEqual(
+        sameFamilyDescriptor.constructionKey,
+        originalDescriptor.constructionKey,
+        "adding an ID to one exact-RGBA family is tuning"
+    )
+    assertEqual(
+        originalDescriptor.tuningSpec.groups[1]
+            .candidateFilters.includeSpellIDs[202],
+        nil,
+        "original tuning map excludes the new family member"
+    )
+    assertEqual(
+        sameFamilyDescriptor.tuningSpec.groups[1]
+            .candidateFilters.includeSpellIDs[202],
+        true,
+        "same-family ID reaches tuning map"
+    )
+
+    local newFamily = copy(sameFamily)
+    newFamily.spellColors[303] = {0.8, 0.2, 0.3, 1}
+    local newFamilyDescriptor =
+        compile("target", "HARMFUL", newFamily)
+    assertEqual(
+        #newFamilyDescriptor.constructionKey.groups,
+        3,
+        "new color family changes group topology"
+    )
+    assertEqual(
+        #originalDescriptor.constructionKey.groups,
+        2,
+        "single family construction group count"
+    )
+
+    local baseline = baseConfig()
+    local baselineDescriptor = compile("target", "HARMFUL", baseline)
+    local malformed = baseConfig()
+    malformed.spellColors = "ignored outside Block styles"
+    assertDeepEqual(
+        compile("target", "HARMFUL", malformed),
+        baselineDescriptor,
+        "ordinary style ignores malformed global colors"
+    )
+    local inactive = baseConfig()
+    inactive.spellColors = {
+        [101] = {0.1, 0.2, 0.3, 1},
+    }
+    assertDeepEqual(
+        compile("target", "HARMFUL", inactive),
+        baselineDescriptor,
+        "ordinary style ignores valid global colors"
+    )
+end
+
 local function testInvalidInputs()
     local config = baseConfig()
     assertCompileError(nil, "HARMFUL", config, "INVALID_UNIT")
@@ -2146,6 +2962,35 @@ local function testInvalidInputs()
         invalid,
         "INVALID_COOLDOWN_STYLE"
     )
+
+    for _, spellColors in ipairs({
+        "not a map",
+        {
+            [0] = {0.1, 0.2, 0.3, 1},
+        },
+        {
+            [101] = "not a color",
+        },
+        {
+            [101] = {0.1, 0.2, 0.3},
+        },
+        {
+            [101] = {0 / 0, 0.2, 0.3, 1},
+        },
+        {
+            [101] = {0.1, math.huge, 0.3, 1},
+        },
+    }) do
+        invalid = baseConfig()
+        invalid.cooldownStyle = "block_vertical"
+        invalid.spellColors = spellColors
+        assertCompileError(
+            "target",
+            "HARMFUL",
+            invalid,
+            "INVALID_SPELL_COLOR_MAP"
+        )
+    end
 
     invalid = baseConfig()
     invalid.durationText = nil
@@ -2351,7 +3196,7 @@ local function testConstructionBoundary()
     local constructionMutations = {
         function(config) config.width = 11 end,
         function(config) config.height = 7 end,
-        function(config) config.cooldownStyle = "none" end,
+        function(config) config.cooldownStyle = "block_clock" end,
         function(config) config.durationText.enabled = false end,
         function(config) config.durationText.font[2] = 12 end,
         function(config) config.stackText.color[1] = 0.25 end,
@@ -2608,6 +3453,7 @@ local function testFreshDeterministicOutput()
     local reordered = {}
     local topKeys = {
         "auraTypeColor",
+        "spellColors",
         "whitelist",
         "blacklist",
         "mode",
@@ -2717,6 +3563,13 @@ testPartitionAttachmentGeometry()
 testShippedTargetPartitionMetrics()
 testCapacityMetrics()
 testSpellIDCandidateFilters()
+testGlobalSpellColorFamiliesAndReactions()
+testTargetPartitionPreservesSpellColorFamilies()
+testGlobalSpellColorCandidateComposition()
+testGlobalSpellColorGroupBudget()
+testPartitionColorBudgetUsesMaxActiveVariant()
+testPartitionColorBudgetPreservesLargeGrayBaseline()
+testGlobalSpellColorConstructionBoundary()
 testInvalidInputs()
 testConstructionBoundary()
 testPartitionConstructionBoundary()

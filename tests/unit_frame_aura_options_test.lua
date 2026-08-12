@@ -66,6 +66,7 @@ end
 local function makeHarness()
     local harness = {
         checkButtons = {},
+        callbacks = {},
         configLoads = {},
         dialogs = {},
         dropdowns = {},
@@ -112,6 +113,10 @@ local function makeHarness()
 
     function AF.GetColorStr()
         return ""
+    end
+
+    function AF.RegisterCallback(event, callback)
+        harness.callbacks[event] = callback
     end
 
     local function CreateDialog()
@@ -270,6 +275,12 @@ local function makeHarness()
         self.configLoads = {}
         self.positionLoads = {}
         self.reloadChecks = 0
+    end
+
+    function harness:FireCallback(event, ...)
+        local callback = self.callbacks[event]
+        assertTrue(callback, "missing callback: " .. event)
+        callback(event, ...)
     end
 
     return harness
@@ -537,6 +548,35 @@ assertEqual(
     reloadHarness.reloadCalls,
     1,
     "confirming reload prompt reloads once"
+)
+
+local globalReloadHarness = makeHarness()
+globalReloadHarness:FireCallback(
+    "BFI_NativeAuraReloadRequired"
+)
+assertEqual(
+    #globalReloadHarness.dialogs,
+    1,
+    "Global Colors reload callback prompt"
+)
+globalReloadHarness:FireCallback(
+    "BFI_NativeAuraReloadRequired"
+)
+assertEqual(
+    #globalReloadHarness.dialogs,
+    1,
+    "Global Colors reload callback deduplicated"
+)
+globalReloadHarness:CancelDialog(
+    globalReloadHarness.dialogs[1]
+)
+globalReloadHarness:FireCallback(
+    "BFI_NativeAuraReloadRequired"
+)
+assertEqual(
+    #globalReloadHarness.dialogs,
+    2,
+    "Global Colors reload callback can reopen"
 )
 
 local tuningHarness = makeHarness()

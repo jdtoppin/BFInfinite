@@ -1,6 +1,7 @@
 ---@type BFI
 local BFI = select(2, ...)
 local UF = BFI.modules.UnitFrames
+local A = BFI.modules.Auras
 local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
@@ -69,6 +70,16 @@ local function DeepEqual(left, right, seen)
         end
     end
     return true
+end
+
+local function CopyCompilerConfig(config)
+    local copied = AF.Copy(config)
+    if A
+        and type(A.GetNativeSpellColorMap) == "function"
+    then
+        copied.spellColors = A.GetNativeSpellColorMap()
+    end
+    return copied
 end
 
 ---------------------------------------------------------------------
@@ -522,7 +533,7 @@ local function CompileComparisonDescriptor(runtime, config)
     local descriptor = UF.CompileNativeAuraSpec(
         unit,
         runtime.auraFilter,
-        AF.Copy(config)
+        CopyCompilerConfig(config)
     )
     return descriptor
 end
@@ -969,7 +980,8 @@ local function NativeAuras_LoadConfig(self, config)
     end
 
     local firstConfig = self._config == nil
-    self._config = AF.Copy(config)
+    self._sourceConfig = AF.Copy(config)
+    self._config = CopyCompilerConfig(config)
     self._configDirty = true
 
     Compile(self, ResolveRuntimeUnit(self))
@@ -1203,6 +1215,7 @@ local function NativeAuras_Destroy(self)
     self._reloadRequired = nil
     self._reloadQuiescePending = nil
     self._providerBuildDeferred = nil
+    self._sourceConfig = nil
     providerRuntimes[self] = nil
     runtimeStats.runtimesDestroyed = runtimeStats.runtimesDestroyed + 1
     SetRuntimeWatched(self, false)
@@ -1230,6 +1243,37 @@ local function NativeAuras_UpdatePixels(self)
         AF.RePoint(holder)
     end)
 end
+
+-- Recompile every native runtime from its profile-local source configuration
+-- after the common Global Colors map changes. Candidate-only changes tune
+-- existing groups; topology or static-colour changes quiesce for reload.
+function UF.RefreshNativeAuraSpellColors()
+    local reloadRequired = false
+    for runtime in pairs(providerRuntimes) do
+        if not runtime._destroyed and runtime._sourceConfig then
+            NativeAuras_LoadConfig(
+                runtime,
+                runtime._sourceConfig
+            )
+            reloadRequired =
+                runtime._reloadRequired == true
+                or reloadRequired
+        end
+    end
+    return reloadRequired
+end
+
+AF.RegisterCallback("BFI_UpdateConfig", function(_, module, which)
+    if module ~= "auras"
+        or (which ~= nil and which ~= "colors")
+    then
+        return
+    end
+
+    if UF.RefreshNativeAuraSpellColors() then
+        AF.Fire("BFI_NativeAuraReloadRequired")
+    end
+end, "low")
 
 ---------------------------------------------------------------------
 -- create
