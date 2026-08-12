@@ -1108,6 +1108,13 @@ local function testCapabilityGate()
         "AF r39 duration-carrier gate"
     )
 
+    local validationAF = makeHarness({versionNum = 42})
+    assertEqual(
+        validationAF.UF.HasNativeAuraContainerBackend(),
+        true,
+        "current AF r42 validation gate"
+    )
+
     local missingMethod = makeHarness({
         missingMethod = "SetCustomAuraSlotSortMethod",
     })
