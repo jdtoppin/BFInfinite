@@ -3,6 +3,8 @@ local BFI = select(2, ...)
 local L = BFI.L
 ---@class Funcs
 local F = BFI.funcs
+---@class ActionBars
+local AB = BFI.modules.ActionBars
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
@@ -466,6 +468,39 @@ local cvarOptions = {
 
         return holder
     end,
+
+    mouseoverCast = function(info)
+        local holder = CreateFrame("Frame", nil, cvarPane)
+        holder.info = info
+
+        local toggle = AF.CreateCheckButton(holder, info.label)
+        AF.SetPoint(toggle, "LEFT")
+        toggle.info = info
+        toggle:HookOnEnter(Option_OnEnter)
+        toggle:HookOnLeave(Option_OnLeave)
+
+        local modifier = AF.CreateDropdown(holder, 90)
+        AF.SetPoint(modifier, "RIGHT", -5, 0)
+        modifier:SetItems(AF.GetDropdownItems_Modifier())
+
+        toggle:SetOnCheck(function(checked)
+            modifier:SetEnabled(checked)
+            AB.SetMouseoverCast(checked)
+        end)
+        modifier:SetOnSelect(function(value)
+            AB.SetMouseoverCast(nil, value)
+        end)
+
+        function holder.Load()
+            local enabled, value = AB.GetMouseoverCast()
+            toggle:SetChecked(enabled)
+            modifier:SetEnabled(enabled)
+            modifier:SetSelectedValue(value)
+        end
+        AF.RegisterCallback("BFI_MouseoverCastChanged", holder.Load)
+
+        return holder
+    end,
 }
 
 local function ResolveCVar(cvar)
@@ -476,6 +511,7 @@ end
 local directionalScaleCVar = ResolveCVar("floatingCombatTextCombatDamageDirectionalScale")
 local cvars = {
     {name = "scriptErrors", type = "toggle", label = SHOW_LUA_ERRORS, tooltip = OPTION_TOOLTIP_SHOW_LUA_ERRORS},
+    {name = "enableMouseoverCast", type = "mouseoverCast", label = L["Mouseover Cast"], tooltip = OPTION_TOOLTIP_ENABLE_MOUSEOVER_CAST},
     {name = "cameraDistanceMaxZoomFactor", type = "slider", min = 1, max = 2.6, step = 0.1, label = MAX_FOLLOW_DIST, tooltip = OPTION_TOOLTIP_MAX_FOLLOW_DIST},
     {name = "SpellQueueWindow", type = "slider", min = 0, max = 400, step = 1, label = LAG_TOLERANCE .. " (" .. MILLISECONDS_ABBR .. ")", tooltip = OPTION_TOOLTIP_REDUCED_LAG_TOLERANCE},
     {name = "ResampleAlwaysSharpen", type = "toggle", label = L["Always Enable Sharpening"]},

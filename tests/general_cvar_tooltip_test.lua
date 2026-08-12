@@ -86,6 +86,9 @@ local function loadGeneral(getCVar, defaults)
     local BFI = {
         L = L,
         funcs = {},
+        modules = {
+            ActionBars = {},
+        },
     }
 
     local chunk, loadError = loadfile("Options/General.lua")
@@ -117,7 +120,7 @@ local function loadGeneral(getCVar, defaults)
 end
 
 local function assertCVarDefinitions(cvars, expected, client)
-    for index = 9, 14 do
+    for index = 10, 15 do
         local actualName = cvars[index].name
         local expectedName = expected[index]
         if type(expectedName) == "table" then
@@ -130,7 +133,7 @@ local function assertCVarDefinitions(cvars, expected, client)
             assertEqual(actualName, expectedName, client .. " CVar " .. index)
         end
     end
-    assertEqual(cvars[14].parent, expected[13],
+    assertEqual(cvars[15].parent, expected[14],
         client .. " directional offset parent CVar")
 end
 
@@ -151,25 +154,25 @@ local versioned = loadGeneral(function()
     return "0"
 end, versionedDefaults)
 local expectedVersioned = {
-    [9] = "WorldTextScale_v2",
-    [10] = {
+    [10] = "WorldTextScale_v2",
+    [11] = {
         "floatingCombatTextCombatDamage_v2",
         "floatingCombatTextCombatLogPeriodicSpells_v2",
     },
-    [11] = {
+    [12] = {
         "floatingCombatTextPetMeleeDamage_v2",
         "floatingCombatTextPetSpellDamage_v2",
     },
-    [12] = {
+    [13] = {
         "floatingCombatTextCombatHealing_v2",
         "floatingCombatTextCombatHealingAbsorbTarget_v2",
     },
-    [13] = "floatingCombatTextCombatDamageDirectionalScale_v2",
-    [14] = "floatingCombatTextCombatDamageDirectionalOffset_v2",
+    [14] = "floatingCombatTextCombatDamageDirectionalScale_v2",
+    [15] = "floatingCombatTextCombatDamageDirectionalOffset_v2",
 }
 assertCVarDefinitions(versioned.cvars, expectedVersioned, "12.0.1+")
 
-for index = 9, 14 do
+for index = 10, 15 do
     local widget = {
         info = {
             label = "Combat text option",
@@ -189,21 +192,21 @@ local legacy = loadGeneral(function(name)
     return "0"
 end, {})
 local expectedLegacy = {
-    [9] = "WorldTextScale",
-    [10] = {
+    [10] = "WorldTextScale",
+    [11] = {
         "floatingCombatTextCombatDamage",
         "floatingCombatTextCombatLogPeriodicSpells",
     },
-    [11] = {
+    [12] = {
         "floatingCombatTextPetMeleeDamage",
         "floatingCombatTextPetSpellDamage",
     },
-    [12] = {
+    [13] = {
         "floatingCombatTextCombatHealing",
         "floatingCombatTextCombatHealingAbsorbTarget",
     },
-    [13] = "floatingCombatTextCombatDamageDirectionalScale",
-    [14] = "floatingCombatTextCombatDamageDirectionalOffset",
+    [14] = "floatingCombatTextCombatDamageDirectionalScale",
+    [15] = "floatingCombatTextCombatDamageDirectionalOffset",
 }
 assertCVarDefinitions(legacy.cvars, expectedLegacy, "12.0.0")
 
