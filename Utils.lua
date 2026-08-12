@@ -367,9 +367,9 @@ function F.GetSecretSafeUnitFrameAuraMatchFilters(baseFilter, config)
         return {baseFilter}
     end
 
-    -- IMPORTANT and DISPELLABLE are 12.1-only native-container choices.
-    -- A 12.0.7 or explicitly legacy unit-frame row cannot represent them
-    -- faithfully, so widen to the base aura type instead of passing an
+    -- IMPORTANT and DISPELLABLE are native-container choices. A legacy
+    -- unit-frame row cannot represent them faithfully, so widen to the base
+    -- aura type instead of passing an
     -- unknown token or silently dropping every requested aura.
     if resolved.important or resolved.anyDispellable then
         return {baseFilter}

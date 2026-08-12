@@ -61,13 +61,6 @@ local function findIndicator(indicators, name)
     end
 end
 
-local function contains(values, expected)
-    for _, value in ipairs(values) do
-        if value == expected then return true end
-    end
-    return false
-end
-
 local function makeHarness(nativeBackendAvailable)
     if nativeBackendAvailable == nil then
         nativeBackendAvailable = true
@@ -816,6 +809,11 @@ local function testShippedFocusPresetBounds()
         )
     end
 end
+
+testFocusActivationAndConstructionOrder()
+testFocusDisableAndReenableLifecycle()
+testFocusConfigModeGuardsAreLocal()
+testFocusUnavailableNativeBackendFallback()
 testShippedFocusPresetBounds()
 
 print("unit_frame_focus_native_aura_test.lua: ok")

@@ -624,6 +624,10 @@ local function testShippedPlayerPresetBounds()
         )
     end
 end
+
+testPlayerActivationAndPreviewIsolation()
+testPlayerDisableAndReenableLifecycle()
+testPlayerConfigModeReenableLifecycle()
 testShippedPlayerPresetBounds()
 
 print("unit_frame_player_native_aura_test.lua: ok")

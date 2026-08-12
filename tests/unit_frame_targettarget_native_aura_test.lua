@@ -1351,6 +1351,12 @@ local function testShippedTargetTargetPresetBounds()
         )
     end
 end
+
+testTargetTargetActivationAndConstructionOrder()
+testTargetTargetDisableAndReenableLifecycle()
+testTargetTargetConfigModeGuardsAreLocal()
+testTargetTargetUnavailableNativeBackendFallback()
+testTargetTargetUnitEventsRefreshNativeRuntime()
 testShippedTargetTargetPresetBounds()
 
 print("unit_frame_targettarget_native_aura_test.lua: ok")

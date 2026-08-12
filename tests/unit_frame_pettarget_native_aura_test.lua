@@ -943,24 +943,6 @@ local function makePresetCompiler()
     return UF
 end
 
-local function assertMetrics(actual, expected, message)
-    for key, value in pairs(expected) do
-        assertEqual(actual[key], value, message .. " " .. key)
-    end
-end
-
-local function assertFilters(descriptor, expected, message)
-    assertEqual(#descriptor.completeSpec.groups, #expected,
-        message .. " count")
-    for index, filterString in ipairs(expected) do
-        assertEqual(
-            descriptor.completeSpec.groups[index].filterString,
-            filterString,
-            message .. " group " .. index
-        )
-    end
-end
-
 local function testPetTargetActivationAndConstructionOrder()
     local harness = makeIntegrationHarness()
     local update = harness.callbacks.BFI_UpdateModule
@@ -1530,6 +1512,14 @@ local function testShippedPetTargetPresetBounds()
         )
     end
 end
+
+testPetTargetActivationAndConstructionOrder()
+testPetTargetDisableAndReenableLifecycle()
+testPetTargetConfigModeGuardsAreLocal()
+testPetTargetDefaultDisabledDoesNotBuild()
+testPetTargetUnitEventsAndTicksRefreshNativeRuntime()
+testPetTargetRuntimeLifecycleHasNoGrowth()
+testPetTargetUnavailableBackendUsesLegacyAuraBuilders()
 testShippedPetTargetPresetBounds()
 
 print("unit_frame_pettarget_native_aura_test.lua: ok")

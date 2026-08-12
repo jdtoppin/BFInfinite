@@ -3621,7 +3621,7 @@ builder["auraBaseFilters"] = function(parent)
 
             allAuras:SetTooltip(
                 L["All Auras"],
-                L["Shows every aura of this type. Legacy Cast By Unit selections widen to All because exact unit-source matching is unavailable across both Retail versions"]
+                L["Shows every aura of this type. Legacy Cast By Unit selections widen to All because exact unit-source matching is unavailable in WoW 12.1"]
             )
             notPlayer:SetTooltip(
                 L["Not Player, Pet, or Vehicle"],

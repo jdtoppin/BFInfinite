@@ -61,13 +61,6 @@ local function findIndicator(indicators, name)
     end
 end
 
-local function contains(values, expected)
-    for _, value in ipairs(values) do
-        if value == expected then return true end
-    end
-    return false
-end
-
 local function readFile(path)
     local file = assert(io.open(path, "r"))
     local source = file:read("*a")
@@ -946,6 +939,11 @@ local function testShippedBossPresetBounds()
             id .. " debuffs assist gate")
     end
 end
+
+testBossActivationAndConstructionOrder()
+testBossDisableAndReenableLifecycle()
+testBossConfigModeGuardsAreLocal()
+testBossUnavailableBackendFallback()
 testShippedBossPresetBounds()
 
 print("unit_frame_boss_native_aura_test.lua: ok")
