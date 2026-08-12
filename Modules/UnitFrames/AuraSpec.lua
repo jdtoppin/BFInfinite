@@ -2,11 +2,12 @@
 local BFI = select(2, ...)
 local UF = BFI.modules.UnitFrames
 
-local ceil, floor, huge, min = math.ceil, math.floor, math.huge, math.min
-local ipairs, pairs, rawget, type = ipairs, pairs, rawget, type
+local ceil, floor, huge, max, min =
+    math.ceil, math.floor, math.huge, math.max, math.min
+local ipairs, next, pairs, rawget, type = ipairs, next, pairs, rawget, type
 local sub = string.sub
 
--- Retail 12.1.0.68914 (wow-ui-source d3915c78) creates restricted
+-- Retail 12.1.0.69273 (wow-ui-source eb941aad) creates restricted
 -- CustomAuraContainer buttons in batches of ten. Keep the constant here as
 -- audit metadata only; this compiler never creates a frame.
 local NATIVE_BUTTON_BATCH_SIZE = 10
@@ -240,52 +241,6 @@ local function NormalizePartition(subFrame)
     }
 end
 
-local function NormalizeSpellIDCandidateFilters(config)
-    local mode = config.mode
-    if mode ~= "blacklist" and mode ~= "whitelist" then
-        return nil, nil, "INVALID_SPELL_ID_FILTER_MODE"
-    end
-
-    local list = config[mode]
-    local invalidListError = mode == "blacklist"
-        and "INVALID_SPELL_ID_BLACKLIST"
-        or "INVALID_SPELL_ID_WHITELIST"
-    if type(list) ~= "table" then
-        return nil, nil, invalidListError
-    end
-
-    local count = 0
-    for index, spellID in pairs(list) do
-        if not IsPositiveInteger(index) or not IsPositiveInteger(spellID) then
-            return nil, nil, invalidListError
-        end
-        count = count + 1
-    end
-
-    local spellIDs = {}
-    for index = 1, count do
-        local spellID = rawget(list, index)
-        if not IsPositiveInteger(spellID) then
-            return nil, nil, invalidListError
-        end
-        spellIDs[spellID] = true
-    end
-
-    if mode == "whitelist" then
-        -- An empty include map is intentional: whitelist mode with no entries
-        -- must include no aura identities rather than disable filtering.
-        return {
-            includeSpellIDs = spellIDs,
-        }, true
-    end
-    if count > 0 then
-        return {
-            excludeSpellIDs = spellIDs,
-        }, true
-    end
-    return nil, false
-end
-
 local function GetNativeSchema()
     local anchorUtil = rawget(_G, "AnchorUtil")
     local sortMethod = rawget(_G, "AuraContainerSortMethod")
@@ -383,25 +338,51 @@ local function GetFlow(config, schema)
     }
 end
 
-local function NewLayout(index, config, primarySpacing, crossSpacing)
+local function NewLayout(
+    index,
+    width,
+    height,
+    primarySpacing,
+    crossSpacing,
+    horizontal,
+    reserveTrailingCrossSpacing
+)
+    local elementWidth = width
+    local elementHeight = height
+    local lineSpacing = crossSpacing
+
+    if reserveTrailingCrossSpacing then
+        -- CustomAuraContainer clamps its empty size to one. Give every
+        -- populated line one extra cross-axis pixel and overlap lines by one;
+        -- the dependent attachment then offsets one pixel back toward the
+        -- origin. Empty displacement becomes zero, while N populated lines
+        -- displace the complementary container by N * (size + spacing).
+        lineSpacing = -1
+        if horizontal then
+            elementHeight = height + crossSpacing + 1
+        else
+            elementWidth = width + crossSpacing + 1
+        end
+    end
+
     return {
         elementSpacing = primarySpacing,
-        lineSpacing = crossSpacing,
+        lineSpacing = lineSpacing,
         groupSpacing = 0,
-        groupLineSpacing = crossSpacing,
+        groupLineSpacing = lineSpacing,
         forceNewLine = false,
-        elementWidth = config.width,
-        elementHeight = config.height,
+        elementWidth = elementWidth,
+        elementHeight = elementHeight,
         layoutIndex = index,
     }
 end
 
-local function NewButtonStyle(baseFilter, config, tooltip)
+local function NewButtonStyle(baseFilter, config, tooltip, appearance)
     return {
         noBorder = true,
-        width = config.width,
-        height = config.height,
-        desaturated = false,
+        width = appearance.width,
+        height = appearance.height,
+        desaturated = appearance.desaturated,
         cooldownStyle = config.cooldownStyle,
         durationText = NormalizeDurationText(config.durationText),
         stackText = NormalizeStackText(config.stackText),
@@ -416,6 +397,10 @@ local function AddDiagnostic(diagnostics, code)
     diagnostics[#diagnostics + 1] = code
 end
 
+local function HasEntries(value)
+    return type(value) == "table" and next(value) ~= nil
+end
+
 local function EmptyMetrics()
     return {
         groupCount = 0,
@@ -424,6 +409,265 @@ local function EmptyMetrics()
         nativeBatchSize = 0,
         initialRestrictedButtonCount = 0,
         freshContainerRestrictedButtonCountCeiling = 0,
+    }
+end
+
+local function GetContainerGeometry(config, flow, schema, groupCount, appearance)
+    local capacity = groupCount * config.numTotal
+    local perLine = min(config.numPerLine, config.numTotal)
+    local lineSlots = min(capacity, perLine)
+    local lines = ceil(capacity / perLine)
+    local primarySize = flow.horizontal
+        and appearance.width
+        or appearance.height
+    local primarySpacing = flow.horizontal
+        and config.spacingX
+        or config.spacingY
+    local crossSpacing = flow.horizontal
+        and config.spacingY
+        or config.spacingX
+    local crossSize = flow.horizontal
+        and appearance.height
+        or appearance.width
+    local maximumLineSize = perLine * primarySize
+        + (perLine - 1) * primarySpacing
+    local primaryExtent = lineSlots * primarySize
+        + (lineSlots - 1) * primarySpacing
+    local crossExtent = lines * crossSize + (lines - 1) * crossSpacing
+    local holder = {
+        width = flow.horizontal and primaryExtent or crossExtent,
+        height = flow.horizontal and crossExtent or primaryExtent,
+    }
+
+    return {
+        capacity = capacity,
+        lines = lines,
+        primaryExtent = primaryExtent,
+        crossExtent = crossExtent,
+        primarySpacing = primarySpacing,
+        crossSpacing = crossSpacing,
+        crossSize = crossSize,
+        holder = holder,
+        containerPoint = {
+            point = flow.anchor,
+            relativePoint = flow.anchor,
+            x = 0,
+            y = 0,
+        },
+        flowLayout = {
+            axis = flow.horizontal
+                and schema.horizontalAxis
+                or schema.verticalAxis,
+            anchorPoint = flow.anchor,
+            horizontalGrowthDirection = flow.horizontalDirection,
+            verticalGrowthDirection = flow.verticalDirection,
+            paddingLeft = 0,
+            paddingRight = 0,
+            paddingTop = 0,
+            paddingBottom = 0,
+            maximumLineSize = maximumLineSize,
+        },
+    }
+end
+
+local function NewVariantMetrics(groupCount, config, geometry)
+    return {
+        groupCount = groupCount,
+        nativeVisibleCapacity = geometry.capacity,
+        initialRestrictedButtonCount =
+            groupCount * NATIVE_BUTTON_BATCH_SIZE,
+        freshContainerRestrictedButtonCountCeiling = groupCount
+            * ceil(config.numTotal / NATIVE_BUTTON_BATCH_SIZE)
+            * NATIVE_BUTTON_BATCH_SIZE,
+        holder = Copy(geometry.holder),
+    }
+end
+
+local function CompileContainerVariant(
+    unit,
+    baseFilter,
+    config,
+    schema,
+    flow,
+    tooltip,
+    groups,
+    appearance,
+    reserveTrailingCrossSpacing
+)
+    local groupCount = #groups
+    if groupCount == 0 then return nil end
+
+    local geometry = GetContainerGeometry(
+        config,
+        flow,
+        schema,
+        groupCount,
+        appearance
+    )
+    local completeGroups = {}
+    local tuningGroups = {}
+    local constructionKey = {
+        groups = {},
+        slots = {},
+    }
+
+    for index, policyGroup in ipairs(groups) do
+        local layout = NewLayout(
+            index,
+            appearance.width,
+            appearance.height,
+            geometry.primarySpacing,
+            geometry.crossSpacing,
+            flow.horizontal,
+            reserveTrailingCrossSpacing
+        )
+        local style = NewButtonStyle(
+            baseFilter,
+            config,
+            tooltip,
+            appearance
+        )
+        completeGroups[index] = {
+            key = policyGroup.key,
+            filterString = policyGroup.filterString,
+            maxFrameCount = config.numTotal,
+            sortMethod = schema.defaultSort,
+            sortDirection = schema.normalSort,
+            layout = layout,
+            buttonStyle = style,
+        }
+        tuningGroups[index] = {
+            key = policyGroup.key,
+            filterString = policyGroup.filterString,
+            maxFrameCount = config.numTotal,
+            sortMethod = schema.defaultSort,
+            sortDirection = schema.normalSort,
+            layout = Copy(layout),
+        }
+        constructionKey.groups[index] = {
+            key = policyGroup.key,
+            buttonStyle = Copy(style),
+        }
+    end
+
+    return {
+        completeSpec = {
+            unit = unit,
+            enabled = config.enabled,
+            shown = false,
+            holder = Copy(geometry.holder),
+            containerPoint = Copy(geometry.containerPoint),
+            flowLayout = Copy(geometry.flowLayout),
+            processing = {
+                policy = schema.noProcessing,
+            },
+            groups = completeGroups,
+            slots = {},
+        },
+        tuningSpec = {
+            holder = Copy(geometry.holder),
+            containerPoint = Copy(geometry.containerPoint),
+            flowLayout = Copy(geometry.flowLayout),
+            processing = {
+                policy = schema.noProcessing,
+            },
+            groups = tuningGroups,
+            slots = {},
+        },
+        constructionKey = constructionKey,
+        metrics = NewVariantMetrics(groupCount, config, geometry),
+    }, geometry
+end
+
+local function SplitPartitionGroups(policyGroups)
+    local mainGroups = {}
+    local complementGroups = {}
+
+    for _, group in ipairs(policyGroups) do
+        if group.playerScope == "player" then
+            mainGroups[#mainGroups + 1] = {
+                key = group.key,
+                filterString = group.filterString,
+            }
+        elseif group.playerScope == "notPlayer" then
+            complementGroups[#complementGroups + 1] = {
+                key = group.key,
+                filterString = group.filterString,
+            }
+        else
+            mainGroups[#mainGroups + 1] = {
+                key = group.key,
+                filterString = group.filterString .. "|PLAYER",
+            }
+            complementGroups[#complementGroups + 1] = {
+                key = group.key,
+                filterString = group.filterString .. "|!PLAYER",
+            }
+        end
+    end
+
+    return mainGroups, complementGroups
+end
+
+local function GetPartitionAttachment(flow)
+    local point = flow.anchor
+    local relativePoint
+    local x, y = 0, 0
+
+    if flow.horizontal then
+        if sub(point, 1, 6) == "BOTTOM" then
+            relativePoint = "TOP" .. sub(point, 7)
+            y = -1
+        else
+            relativePoint = "BOTTOM" .. sub(point, 4)
+            y = 1
+        end
+    elseif sub(point, -5) == "RIGHT" then
+        relativePoint = sub(point, 1, -6) .. "LEFT"
+        x = 1
+    else
+        relativePoint = sub(point, 1, -5) .. "RIGHT"
+        x = -1
+    end
+
+    return {
+        template = "DisableUntrustedLayoutScriptsTemplate",
+        point = point,
+        relativePoint = relativePoint,
+        x = x,
+        y = y,
+    }
+end
+
+local function GetHostileHolder(flow, mainGeometry, complementGeometry)
+    if not mainGeometry then
+        return Copy(complementGeometry.holder)
+    end
+    if not complementGeometry then
+        return Copy(mainGeometry.holder)
+    end
+
+    local attachmentDisplacement = mainGeometry.lines
+        * (mainGeometry.crossSize + mainGeometry.crossSpacing)
+    local crossExtent = max(
+        mainGeometry.crossExtent,
+        attachmentDisplacement + complementGeometry.crossExtent
+    )
+    local primaryExtent = max(
+        mainGeometry.primaryExtent,
+        complementGeometry.primaryExtent
+    )
+
+    return {
+        width = flow.horizontal and primaryExtent or crossExtent,
+        height = flow.horizontal and crossExtent or primaryExtent,
+    }
+end
+
+local function GetCompositeHolder(friendlyHolder, hostileHolder)
+    return {
+        width = max(friendlyHolder.width, hostileHolder.width),
+        height = max(friendlyHolder.height, hostileHolder.height),
     }
 end
 
@@ -440,12 +684,6 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     local policy, policyError = UF.CompileNativeAuraPolicy(baseFilter, config.filters)
     if not policy then
         return nil, policyError
-    end
-
-    local candidateFilters, identityFilterActive, identityFilterError =
-        NormalizeSpellIDCandidateFilters(config)
-    if identityFilterError then
-        return nil, identityFilterError
     end
 
     if not IsPosition(config.position) or not IsNonEmptyString(config.anchorTo) then
@@ -499,6 +737,14 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     if partitionError then
         return nil, partitionError
     end
+    if partition
+        and (
+            partition.width + config.spacingX <= 0
+            or partition.height + config.spacingY <= 0
+        )
+    then
+        return nil, "INVALID_SUBFRAME"
+    end
 
     local schema = GetNativeSchema()
     if not schema then
@@ -506,25 +752,21 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     end
 
     local empty = policy.empty
-    -- 12.1 evaluates these maps inside the restricted aura container.
-    -- Identity matching is reaction-gated there; notably, harmful auras on
-    -- assistable units may be matched only when Blizzard marks them
-    -- NeverSecret. Keep the full config-derived map and report that limit.
-    local spellIDFiltersRestricted = not empty and identityFilterActive
+    local spellListsIgnored = not empty
+        and (HasEntries(config.blacklist) or HasEntries(config.whitelist))
     local sourceColorsIgnored = not empty
         and config.auraTypeColor ~= nil
         and (config.auraTypeColor.castByMe == true
             or config.auraTypeColor.dispellable == true)
-    local partitionDeferred = not empty and partition ~= nil
+    local partitionActive = not empty and partition ~= nil
     local degradations = Copy(policy.degradations)
     degradations.defaultSortPriority = not empty
     degradations.fixedHolderExtent = not empty
-    degradations.spellIDListsIgnored = false
-    degradations.spellIDFiltersRestrictedByUnitReaction =
-        spellIDFiltersRestricted
+    degradations.spellIDListsIgnored = spellListsIgnored
     degradations.auraTypeColorSourceRulesIgnored = sourceColorsIgnored
     degradations.tooltipPlacementApproximate = not empty and tooltipApproximate
-    degradations.partitionDeferred = partitionDeferred
+    degradations.partitionDeferred = false
+    degradations.partitionSecretFallback = partitionActive
 
     local descriptor = {
         completeSpec = nil,
@@ -540,14 +782,10 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         },
         visibility = {
             requiresVisible = policy.requiresVisible,
-            requiresAssist = policy.requiresAssist
-                or (
-                    baseFilter == "HELPFUL"
-                    and identityFilterActive
-                ),
+            requiresAssist = policy.requiresAssist,
         },
         partition = Copy(partition),
-        migrationReady = not empty and not partitionDeferred,
+        migrationReady = not empty,
         empty = empty,
         diagnostics = {},
         degradations = degradations,
@@ -560,11 +798,8 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
 
     AddDiagnostic(descriptor.diagnostics, "NATIVE_DEFAULT_SORT_ADDS_PRIORITY")
     AddDiagnostic(descriptor.diagnostics, "NATIVE_HOLDER_USES_MAXIMUM_EXTENT")
-    if spellIDFiltersRestricted then
-        AddDiagnostic(
-            descriptor.diagnostics,
-            "SPELL_ID_FILTERS_RESTRICTED_BY_UNIT_REACTION"
-        )
+    if spellListsIgnored then
+        AddDiagnostic(descriptor.diagnostics, "SPELL_ID_LISTS_IGNORED")
     end
     if sourceColorsIgnored then
         AddDiagnostic(
@@ -575,112 +810,171 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     if tooltipApproximate then
         AddDiagnostic(descriptor.diagnostics, "TOOLTIP_PLACEMENT_APPROXIMATED")
     end
-    if partitionDeferred then
-        AddDiagnostic(descriptor.diagnostics, "TARGET_PARTITION_DEFERRED")
+    if partitionActive then
+        AddDiagnostic(
+            descriptor.diagnostics,
+            "NATIVE_PARTITION_PREBUILDS_RELATION_VARIANTS"
+        )
+        AddDiagnostic(
+            descriptor.diagnostics,
+            "NATIVE_PARTITION_SECRET_RELATION_USES_UNPARTITIONED"
+        )
     end
+
+    local flow = GetFlow(config, schema)
+    local mainAppearance = {
+        width = config.width,
+        height = config.height,
+        desaturated = false,
+    }
+    local friendly = CompileContainerVariant(
+        unit,
+        baseFilter,
+        config,
+        schema,
+        flow,
+        tooltip,
+        policy.groups,
+        mainAppearance,
+        false
+    )
+    descriptor.completeSpec = friendly.completeSpec
+    descriptor.tuningSpec = friendly.tuningSpec
+    descriptor.constructionKey = friendly.constructionKey
 
     local groupCount = #policy.groups
-    local capacity = groupCount * config.numTotal
-    local perLine = min(config.numPerLine, config.numTotal)
-    local lineSlots = min(capacity, perLine)
-    local lines = ceil(capacity / perLine)
-    local flow = GetFlow(config, schema)
-    local primarySize = flow.horizontal and config.width or config.height
-    local primarySpacing = flow.horizontal and config.spacingX or config.spacingY
-    local crossSpacing = flow.horizontal and config.spacingY or config.spacingX
-    local maximumLineSize = perLine * primarySize
-        + (perLine - 1) * primarySpacing
-    local primaryExtent = lineSlots * primarySize
-        + (lineSlots - 1) * primarySpacing
-    local crossSize = flow.horizontal and config.height or config.width
-    local crossExtent = lines * crossSize + (lines - 1) * crossSpacing
-    local holder = {
-        width = flow.horizontal and primaryExtent or crossExtent,
-        height = flow.horizontal and crossExtent or primaryExtent,
-    }
-    local containerPoint = {
-        point = flow.anchor,
-        relativePoint = flow.anchor,
-        x = 0,
-        y = 0,
-    }
-    local flowLayout = {
-        axis = flow.horizontal and schema.horizontalAxis or schema.verticalAxis,
-        anchorPoint = flow.anchor,
-        horizontalGrowthDirection = flow.horizontalDirection,
-        verticalGrowthDirection = flow.verticalDirection,
-        paddingLeft = 0,
-        paddingRight = 0,
-        paddingTop = 0,
-        paddingBottom = 0,
-        maximumLineSize = maximumLineSize,
-    }
-
-    local completeGroups = {}
-    local tuningGroups = {}
-    for index, policyGroup in ipairs(policy.groups) do
-        local layout = NewLayout(index, config, primarySpacing, crossSpacing)
-        local style = NewButtonStyle(baseFilter, config, tooltip)
-        completeGroups[index] = {
-            key = policyGroup.key,
-            filterString = policyGroup.filterString,
-            maxFrameCount = config.numTotal,
-            candidateFilters = Copy(candidateFilters),
-            sortMethod = schema.defaultSort,
-            sortDirection = schema.normalSort,
-            layout = layout,
-            buttonStyle = style,
-        }
-        tuningGroups[index] = {
-            key = policyGroup.key,
-            filterString = policyGroup.filterString,
-            maxFrameCount = config.numTotal,
-            candidateFilters = Copy(candidateFilters),
-            sortMethod = schema.defaultSort,
-            sortDirection = schema.normalSort,
-            layout = Copy(layout),
-        }
-        descriptor.constructionKey.groups[index] = {
-            key = policyGroup.key,
-            buttonStyle = Copy(style),
-        }
-    end
-
-    descriptor.completeSpec = {
-        unit = unit,
-        enabled = config.enabled,
-        shown = false,
-        holder = Copy(holder),
-        containerPoint = Copy(containerPoint),
-        flowLayout = Copy(flowLayout),
-        processing = {
-            policy = schema.noProcessing,
-        },
-        groups = completeGroups,
-        slots = {},
-    }
-    descriptor.tuningSpec = {
-        holder = Copy(holder),
-        containerPoint = Copy(containerPoint),
-        flowLayout = Copy(flowLayout),
-        processing = {
-            policy = schema.noProcessing,
-        },
-        groups = tuningGroups,
-        slots = {},
-    }
+    local capacity = friendly.metrics.nativeVisibleCapacity
     descriptor.metrics = {
         groupCount = groupCount,
         legacyMaxFrameCount = config.numTotal,
         nativeVisibleCapacity = capacity,
         nativeBatchSize = NATIVE_BUTTON_BATCH_SIZE,
-        initialRestrictedButtonCount = groupCount * NATIVE_BUTTON_BATCH_SIZE,
-        -- Fresh containers can grow only as far as each group's configured
-        -- maximum. Native frame pools do not shrink after later tuning.
-        freshContainerRestrictedButtonCountCeiling = groupCount
-            * ceil(config.numTotal / NATIVE_BUTTON_BATCH_SIZE)
-            * NATIVE_BUTTON_BATCH_SIZE,
+        initialRestrictedButtonCount =
+            friendly.metrics.initialRestrictedButtonCount,
+        freshContainerRestrictedButtonCountCeiling =
+            friendly.metrics.freshContainerRestrictedButtonCountCeiling,
     }
+
+    if partitionActive then
+        local mainGroups, complementGroups =
+            SplitPartitionGroups(policy.groups)
+        local hasMain = #mainGroups > 0
+        local hasComplement = #complementGroups > 0
+        local mainVariant, mainGeometry = CompileContainerVariant(
+            unit,
+            baseFilter,
+            config,
+            schema,
+            flow,
+            tooltip,
+            mainGroups,
+            mainAppearance,
+            hasMain and hasComplement
+        )
+        local complementAppearance = {
+            width = partition.width,
+            height = partition.height,
+            desaturated = partition.desaturated,
+        }
+        local complementVariant, complementGeometry =
+            CompileContainerVariant(
+                unit,
+                baseFilter,
+                config,
+                schema,
+                flow,
+                tooltip,
+                complementGroups,
+                complementAppearance,
+                false
+            )
+        local hostileHolder = GetHostileHolder(
+            flow,
+            mainGeometry,
+            complementGeometry
+        )
+        local compositeHolder = GetCompositeHolder(
+            friendly.metrics.holder,
+            hostileHolder
+        )
+        local hostile = {
+            main = mainVariant,
+            complement = complementVariant,
+            holder = Copy(hostileHolder),
+        }
+        if mainVariant and complementVariant then
+            hostile.attachment = GetPartitionAttachment(flow)
+        end
+
+        descriptor.partition.selector = {
+            kind = "unitCanAttack",
+            actorUnit = "player",
+            secretFallback = "friendly",
+        }
+        descriptor.partition.holder = Copy(compositeHolder)
+        descriptor.partition.hostile = hostile
+
+        local mainMetrics = mainVariant and mainVariant.metrics
+        local complementMetrics =
+            complementVariant and complementVariant.metrics
+        local hostileGroupCount =
+            (mainMetrics and mainMetrics.groupCount or 0)
+            + (complementMetrics and complementMetrics.groupCount or 0)
+        local prebuiltGroupCount = friendly.metrics.groupCount
+            + hostileGroupCount
+        local initialRestrictedButtonCount =
+            friendly.metrics.initialRestrictedButtonCount
+            + (
+                mainMetrics
+                and mainMetrics.initialRestrictedButtonCount
+                or 0
+            )
+            + (
+                complementMetrics
+                and complementMetrics.initialRestrictedButtonCount
+                or 0
+            )
+        local mainCeiling = mainMetrics
+            and mainMetrics.freshContainerRestrictedButtonCountCeiling
+            or 0
+        local complementCeiling = complementMetrics
+            and complementMetrics.freshContainerRestrictedButtonCountCeiling
+            or 0
+        local freshContainerRestrictedButtonCountCeiling =
+            friendly.metrics.freshContainerRestrictedButtonCountCeiling
+            + mainCeiling
+            + complementCeiling
+        local variants = {
+            friendly = Copy(friendly.metrics),
+        }
+        if mainMetrics then
+            variants.hostileMain = Copy(mainMetrics)
+        end
+        if complementMetrics then
+            variants.hostileComplement = Copy(complementMetrics)
+        end
+
+        descriptor.metrics = {
+            groupCount = groupCount,
+            legacyMaxFrameCount = config.numTotal,
+            nativeVisibleCapacity = max(
+                friendly.metrics.nativeVisibleCapacity,
+                hostileGroupCount * config.numTotal
+            ),
+            nativeBatchSize = NATIVE_BUTTON_BATCH_SIZE,
+            initialRestrictedButtonCount = initialRestrictedButtonCount,
+            freshContainerRestrictedButtonCountCeiling =
+                freshContainerRestrictedButtonCountCeiling,
+            prebuiltContainerCount = 1
+                + (mainVariant and 1 or 0)
+                + (complementVariant and 1 or 0),
+            prebuiltGroupCount = prebuiltGroupCount,
+            maxActiveGroupCount = max(groupCount, hostileGroupCount),
+            hostileHolder = Copy(hostileHolder),
+            compositeHolder = Copy(compositeHolder),
+            variants = variants,
+        }
+    end
 
     return descriptor
 end

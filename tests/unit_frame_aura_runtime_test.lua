@@ -108,6 +108,7 @@ local function makeHarness(options)
         registered = {},
         visibleResult = true,
         assistResult = true,
+        attackResult = false,
         inCombat = false,
     }
     local UF = {}
@@ -115,6 +116,8 @@ local function makeHarness(options)
     local F = {}
 
     function AF.Copy(value)
+        assertTrue(type(value) == "table",
+            "mock AF.Copy requires a table")
         return copy(value)
     end
 
@@ -152,7 +155,7 @@ local function makeHarness(options)
         return harness.backend
     end
 
-    local function newController(parent, name, seedContainer)
+    local function newController(parent, name)
         local frame = {
             name = name,
             parent = parent,
@@ -168,7 +171,6 @@ local function makeHarness(options)
         local controller = {
             frame = frame,
             shown = false,
-            seedContainer = seedContainer,
         }
         function controller:GetFrame()
             return self.frame
@@ -207,6 +209,12 @@ local function makeHarness(options)
             if self.spec then self.spec.shown = shown end
             record(harness, "controller.shown", self, shown)
         end
+        function controller:SetVariant(variant)
+            if self.variant == variant then return end
+            self.variant = variant
+            if self.spec then self.spec.variant = variant end
+            record(harness, "controller.variant", self, variant)
+        end
         function controller:Refresh()
             self.refreshCount = (self.refreshCount or 0) + 1
             record(harness, "controller.refresh", self)
@@ -217,14 +225,7 @@ local function makeHarness(options)
         end
 
         harness.controllers[#harness.controllers + 1] = controller
-        record(
-            harness,
-            "uf.controller",
-            controller,
-            parent,
-            name,
-            seedContainer
-        )
+        record(harness, "uf.controller", controller, parent, name)
         return controller
     end
 
@@ -232,12 +233,11 @@ local function makeHarness(options)
         return newController(parent, name)
     end
 
-    function UF.CreateNativeGroupAuraContainerController(
-        parent,
-        name,
-        seedContainer
-    )
-        return newController(parent, name, seedContainer)
+    function UF.CreateNativeAuraPartitionController(parent, name)
+        local controller = newController(parent, name)
+        controller.partitionController = true
+        record(harness, "uf.partition-controller", controller, parent, name)
+        return controller
     end
 
     function UF.CompileNativeAuraSpec(unit, auraFilter, config)
@@ -278,10 +278,8 @@ local function makeHarness(options)
                 requiresVisible = config.requiresVisible == true,
                 requiresAssist = config.requiresAssist == true,
             },
-            partition = partitioned and {
-                filter = "notCastByMe",
-            } or nil,
-            migrationReady = not empty and not partitioned,
+            partition = nil,
+            migrationReady = not empty,
             empty = empty,
             diagnostics = {config.tag},
             degradations = {
@@ -323,6 +321,67 @@ local function makeHarness(options)
                 },
                 slots = {},
             }
+
+            if partitioned then
+                local main = {
+                    completeSpec = copy(descriptor.completeSpec),
+                    tuningSpec = copy(descriptor.tuningSpec),
+                    constructionKey = copy(descriptor.constructionKey),
+                }
+                main.completeSpec.groups[1].filterString =
+                    config.tag .. "|PLAYER"
+                main.tuningSpec.groups[1].filterString =
+                    config.tag .. "|PLAYER"
+
+                local complementStyle =
+                    config.complementStyle or "complement-a"
+                local complement = {
+                    completeSpec = copy(descriptor.completeSpec),
+                    tuningSpec = copy(descriptor.tuningSpec),
+                    constructionKey = copy(descriptor.constructionKey),
+                }
+                complement.completeSpec.holder = {
+                    width = config.complementWidth or 16,
+                    height = config.complementHeight or 8,
+                }
+                complement.tuningSpec.holder =
+                    copy(complement.completeSpec.holder)
+                complement.completeSpec.groups[1].filterString =
+                    config.tag .. "|!PLAYER"
+                complement.tuningSpec.groups[1].filterString =
+                    config.tag .. "|!PLAYER"
+                complement.completeSpec.groups[1].buttonStyle.style =
+                    complementStyle
+                complement.constructionKey.groups[1]
+                    .buttonStyle.style = complementStyle
+
+                local includeComplement =
+                    config.partitionMainOnly ~= true
+                descriptor.partition = {
+                    filter = "notCastByMe",
+                    selector = {
+                        kind = "unitCanAttack",
+                        actorUnit = "player",
+                        secretFallback = "friendly",
+                    },
+                    holder = {
+                        width = config.width or 20,
+                        height = config.compositeHeight or 18,
+                    },
+                    hostile = {
+                        main = main,
+                        complement = includeComplement
+                            and complement
+                            or nil,
+                        attachment = includeComplement and {
+                            point = "BOTTOMLEFT",
+                            relativePoint = "TOPLEFT",
+                            x = 0,
+                            y = -1,
+                        } or nil,
+                    },
+                }
+            end
         end
         return descriptor
     end
@@ -420,6 +479,11 @@ local function makeHarness(options)
             record(harness, "wow.assist", sourceUnit, unit)
             return harness.assistResult
         end,
+        UnitCanAttack = function(sourceUnit, unit)
+            assertEqual(sourceUnit, "player", "attack source unit")
+            record(harness, "wow.attack", sourceUnit, unit)
+            return harness.attackResult
+        end,
         UnitIsVisible = function(unit)
             record(harness, "wow.visible", unit)
             return harness.visibleResult
@@ -512,21 +576,17 @@ local function createRuntime(harness, root, hasSubFrame)
     return runtime, harness.controllers[#harness.controllers]
 end
 
-local function createGroupRuntime(harness, root)
-    local seedContainer = {}
-    root._nativeAuraContainers = {
-        buffs = seedContainer,
-    }
-    local runtime = harness.UF.CreateGroupNativeAuras(
+local function createPartitionRuntime(harness, root)
+    local runtime = harness.UF.CreateNativePartitionedAuraIndicator(
         root,
         root.name .. "_Auras",
-        "HELPFUL",
-        "buffs"
+        "HARMFUL",
+        true
     )
-    assertTrue(runtime, "native group runtime was not created")
+    assertTrue(runtime, "partition runtime was not created")
     runtime.enabled = true
-    root.indicators.buffs = runtime
-    return runtime, harness.controllers[#harness.controllers], seedContainer
+    root.indicators.debuffs = runtime
+    return runtime, harness.controllers[#harness.controllers]
 end
 
 local function testDormancyAndFallback()
@@ -562,6 +622,30 @@ local function testDormancyAndFallback()
     assertEqual(fallback.auraFilter, "HELPFUL", "fallback filter")
     assertEqual(fallback.hasSubFrame, false, "fallback subframe")
 
+    local nativePartitionDirect, nativePartitionError =
+        unavailable.UF.CreateNativePartitionedAuraIndicator(
+            root,
+            "Fallback_PartitionAuras",
+            "HARMFUL",
+            true
+        )
+    assertEqual(nativePartitionDirect, nil,
+        "unavailable direct partition runtime")
+    assertEqual(nativePartitionError,
+        "NATIVE_AURA_BACKEND_UNAVAILABLE",
+        "unavailable direct partition error")
+    local nativePartitionFallback =
+        unavailable.UF.CreateNativePartitionedAuras(
+            root,
+            "Fallback_PartitionAuras",
+            "HARMFUL",
+            true
+        )
+    assertEqual(nativePartitionFallback, unavailable.legacyFrames[2],
+        "backend-unavailable partition legacy fallback")
+    assertEqual(nativePartitionFallback.hasSubFrame, true,
+        "partition fallback subframe")
+
     local partitionFallback = harness.UF.CreateNativeAuras(
         root,
         "Partition_Auras",
@@ -592,6 +676,185 @@ local function testDormancyAndFallback()
     disabledRuntime:LoadConfig(validConfig({enabled = false}))
     assertEqual(disabledController.built, nil,
         "direct disabled config native allocation")
+end
+
+local function testOptInRelationPartitionRuntime()
+    local harness = makeHarness()
+    local root = newRoot("RelationPartition", "party1")
+    local runtime, controller = createPartitionRuntime(harness, root)
+
+    runtime:LoadConfig(validConfig({
+        testState = "partition",
+        tag = "partition-a",
+    }))
+    runtime:Enable()
+
+    local state = runtime:GetNativeAuraState()
+    assertEqual(state.state, "READY", "opt-in partition state")
+    assertEqual(state.partitionVariant, "friendly",
+        "friendly initial partition variant")
+    assertTrue(controller.partitionController,
+        "partition controller selection")
+    assertEqual(controller.variant, "friendly",
+        "friendly controller variant")
+    assertTrue(type(controller.spec.friendly) == "table",
+        "friendly prebuilt spec")
+    assertTrue(type(controller.spec.main) == "table",
+        "hostile-main prebuilt spec")
+    assertTrue(type(controller.spec.complement) == "table",
+        "hostile-complement prebuilt spec")
+    assertEqual(controller.spec.holder.height, 18,
+        "composite holder height")
+    assertTrue(harness.registered.UNIT_FACTION ~= nil,
+        "partition relationship watcher")
+
+    harness:ClearEvents()
+    harness.attackResult = true
+    harness:SetCombat(true)
+    harness:Fire("UNIT_FACTION", "party1")
+    harness:RunTimers(0.05)
+    assertEqual(controller.variant, "hostile",
+        "hostile combat relation variant")
+    assertEqual(runtime:GetNativeAuraState().partitionVariant, "hostile",
+        "hostile state variant")
+    assertEqual(countEvents(harness, "controller.variant"), 1,
+        "hostile visibility switch count")
+    assertEqual(countEvents(harness, "controller.refresh"), 1,
+        "hostile stable-token refresh count")
+    assertEqual(countEvents(harness, "controller.rebuild"), 0,
+        "hostile relation rebuild count")
+    assertEqual(countEvents(harness, "controller.tuning"), 0,
+        "hostile relation tuning count")
+    assertEqual(countEvents(harness, "controller.holder-config"), 0,
+        "hostile relation placement count")
+    assertEqual(countEvents(harness, "controller.unit"), 0,
+        "hostile relation retarget count")
+
+    harness:ClearEvents()
+    harness.attackResult = {secret = true}
+    harness:Fire("UNIT_FACTION", "player")
+    harness:RunTimers(0.05)
+    assertEqual(controller.variant, "friendly",
+        "secret relationship friendly fallback")
+    assertTrue(countEvents(harness, "secret.check") > 0,
+        "secret relationship guard")
+    assertEqual(countEvents(harness, "controller.rebuild"), 0,
+        "secret relationship rebuild count")
+    assertEqual(countEvents(harness, "controller.tuning"), 0,
+        "secret relationship tuning count")
+
+    harness:SetCombat(false)
+    harness.attackResult = false
+    harness:ClearEvents()
+    runtime:LoadConfig(validConfig({
+        testState = "partition",
+        tag = "partition-tuned",
+    }))
+    harness:RunTimers(0.15)
+    assertEqual(countEvents(harness, "controller.tuning"), 1,
+        "partition tuning reuse count")
+    assertEqual(countEvents(harness, "controller.rebuild"), 0,
+        "partition tuning rebuild count")
+    assertEqual(controller.tuning.friendly.tag, "partition-tuned",
+        "friendly partition tuning payload")
+    assertEqual(
+        controller.tuning.main.groups[1].filterString,
+        "partition-tuned|PLAYER",
+        "hostile-main tuning payload"
+    )
+    assertEqual(
+        controller.tuning.complement.groups[1].filterString,
+        "partition-tuned|!PLAYER",
+        "hostile-complement tuning payload"
+    )
+
+    harness:ClearEvents()
+    runtime:LoadConfig(validConfig({
+        testState = "partition",
+        tag = "partition-tuned",
+        complementStyle = "complement-b",
+    }))
+    harness:RunTimers(0.15)
+    assertEqual(countEvents(harness, "controller.rebuild"), 1,
+        "complement construction rebuild count")
+    assertEqual(
+        controller.spec.complement.groups[1].buttonStyle.style,
+        "complement-b",
+        "complement construction payload"
+    )
+
+    local unpartitionedHarness = makeHarness()
+    local unpartitionedRoot = newRoot("OptionalPartition", "target")
+    local unpartitionedRuntime, unpartitionedController =
+        createPartitionRuntime(unpartitionedHarness, unpartitionedRoot)
+    unpartitionedRuntime:LoadConfig(validConfig())
+    unpartitionedRuntime:Enable()
+    assertEqual(unpartitionedRuntime:GetNativeAuraState().state, "READY",
+        "partition-capable unpartitioned state")
+    assertTrue(type(unpartitionedController.spec.friendly) == "table",
+        "unpartitioned friendly spec")
+    assertEqual(unpartitionedController.spec.main, nil,
+        "unpartitioned hostile-main spec")
+    assertEqual(unpartitionedController.spec.complement, nil,
+        "unpartitioned hostile-complement spec")
+
+    unpartitionedHarness:ClearEvents()
+    unpartitionedRuntime:LoadConfig(validConfig({
+        testState = "partition",
+    }))
+    unpartitionedHarness:RunTimers(0.15)
+    assertEqual(
+        countEvents(unpartitionedHarness, "controller.rebuild"),
+        1,
+        "unpartitioned-to-partitioned rebuild count"
+    )
+    assertEqual(
+        countEvents(unpartitionedHarness, "controller.tuning"),
+        0,
+        "unpartitioned-to-partitioned tuning count"
+    )
+
+    unpartitionedHarness:ClearEvents()
+    unpartitionedRuntime:LoadConfig(validConfig())
+    unpartitionedHarness:RunTimers(0.15)
+    assertEqual(
+        countEvents(unpartitionedHarness, "controller.rebuild"),
+        1,
+        "partitioned-to-unpartitioned rebuild count"
+    )
+    assertEqual(
+        countEvents(unpartitionedHarness, "controller.tuning"),
+        0,
+        "partitioned-to-unpartitioned tuning count"
+    )
+
+    local mainOnlyHarness = makeHarness()
+    local mainOnlyRoot = newRoot("MainOnlyPartition", "target")
+    local mainOnlyRuntime, mainOnlyController =
+        createPartitionRuntime(mainOnlyHarness, mainOnlyRoot)
+    mainOnlyRuntime:LoadConfig(validConfig({
+        testState = "partition",
+        partitionMainOnly = true,
+    }))
+    mainOnlyRuntime:Enable()
+    assertEqual(mainOnlyRuntime:GetNativeAuraState().state, "READY",
+        "main-only partition state")
+    assertTrue(type(mainOnlyController.spec.main) == "table",
+        "main-only hostile-main spec")
+    assertEqual(mainOnlyController.spec.complement, nil,
+        "main-only hostile-complement spec")
+    assertEqual(mainOnlyController.spec.attachment, nil,
+        "main-only partition attachment")
+
+    mainOnlyRuntime:SetUnit(nil)
+    assertEqual(mainOnlyRuntime:GetNativeAuraState().state,
+        "WAITING_FOR_UNIT",
+        "partition waiting-unit state")
+    assertEqual(
+        mainOnlyRuntime:GetNativeAuraState().partitionVariant,
+        nil,
+        "partition waiting-unit variant"
+    )
 end
 
 local function testLifecycleAndUnitRefresh()
@@ -717,262 +980,10 @@ local function testDebounceAndConstructionReuse()
         tag = "latest-rebuild",
     }))
     harness:RunTimers(0.15)
-    local reloadState = runtime:GetNativeAuraState()
-    assertEqual(reloadState.reloadRequired, true,
-        "construction change reload state")
-    assertEqual(reloadState.pending, false,
-        "construction change pending state")
-    assertEqual(reloadState.diagnostics[1], "latest-rebuild",
-        "latest reload-required descriptor")
-    assertEqual(countEvents(harness, "controller.rebuild"), 0,
-        "post-build construction rebuild count")
-    assertEqual(countEvents(harness, "controller.holder-config"), 0,
-        "post-build construction placement count")
-    assertEqual(countEvents(harness, "controller.tuning"), 0,
-        "post-build construction tuning count")
-    assertEqual(controller.enabled, false,
-        "reload-required native state")
-    assertEqual(controller.shown, false,
-        "reload-required holder state")
-end
-
-local function testPostBuildConstructionRequiresReload()
-    local harness = makeHarness()
-    local root = newRoot("ReloadRequired", "target")
-    local runtime, controller = createRuntime(harness, root)
-
-    local candidate = validConfig({
-        style = "style-b",
-        tag = "preflight",
-    })
-    local originalCandidate = copy(candidate)
-    assertEqual(runtime:RequiresReloadForConfig(candidate), false,
-        "unbuilt preflight reload state")
-    assertTrue(deepEqual(candidate, originalCandidate),
-        "unbuilt preflight mutated config")
-
-    runtime:LoadConfig(validConfig())
-    runtime:Enable()
-    harness:ClearEvents()
-
-    assertEqual(runtime:RequiresReloadForConfig(validConfig()), false,
-        "same-construction preflight")
-    assertEqual(runtime:RequiresReloadForConfig(candidate), true,
-        "changed-construction preflight")
-    assertEqual(runtime:RequiresReloadForConfig(validConfig({
-        testState = "empty",
-    })), false, "empty preflight reload state")
-    assertEqual(runtime:RequiresReloadForConfig(validConfig({
-        testState = "partition",
-        style = "style-b",
-    })), false, "deferred preflight reload state")
-    assertEqual(runtime:GetNativeAuraState().reloadRequired, false,
-        "preflight runtime mutation")
-    assertEqual(runtime:GetNativeAuraState().diagnostics[1], "initial",
-        "preflight descriptor mutation")
-    assertTrue(deepEqual(candidate, originalCandidate),
-        "built preflight mutated config")
-    assertEqual(countEvents(harness, "controller.rebuild"), 0,
-        "preflight rebuild count")
-    assertEqual(countEvents(harness, "controller.holder-config"), 0,
-        "preflight placement count")
-    assertEqual(countEvents(harness, "controller.tuning"), 0,
-        "preflight tuning count")
-    assertEqual(countEvents(harness, "controller.unit"), 0,
-        "preflight retarget count")
-
-    runtime.enabled = false
-    root.enabled = false
-    harness:ClearEvents()
-    runtime:LoadConfig(validConfig({
-        enabled = false,
-        style = "style-b",
-        tag = "disabled-profile-change",
-    }))
-
-    local state = runtime:GetNativeAuraState()
-    assertEqual(state.reloadRequired, true,
-        "disabled profile reload state")
-    assertEqual(state.pending, false,
-        "disabled profile pending state")
-    assertEqual(controller.enabled, false,
-        "disabled profile native state")
-    assertEqual(controller.shown, false,
-        "disabled profile holder state")
-    assertEqual(countEvents(harness, "controller.rebuild"), 0,
-        "disabled profile rebuild count")
-    assertEqual(countEvents(harness, "controller.holder-config"), 0,
-        "disabled profile placement count")
-    assertEqual(countEvents(harness, "controller.tuning"), 0,
-        "disabled profile tuning count")
-    assertEqual(countEvents(harness, "controller.unit"), 0,
-        "disabled profile retarget count")
-
-    harness:ClearEvents()
-    runtime:LoadConfig(validConfig({
-        enabled = false,
-        style = "style-c",
-        tag = "latest-disabled-profile-change",
-    }))
-    root.effectiveUnit = "focus"
-    runtime:Update()
-    runtime:Enable()
-
-    state = runtime:GetNativeAuraState()
-    assertEqual(state.reloadRequired, true,
-        "repeated construction reload state")
-    assertEqual(state.unit, "focus",
-        "reload-required desired unit")
-    assertEqual(state.diagnostics[1], "latest-disabled-profile-change",
-        "repeated construction latest descriptor")
-    assertEqual(countEvents(harness, "controller.rebuild"), 0,
-        "repeated construction rebuild count")
-    assertEqual(countEvents(harness, "controller.holder-config"), 0,
-        "repeated construction placement count")
-    assertEqual(countEvents(harness, "controller.tuning"), 0,
-        "repeated construction tuning count")
-    assertEqual(countEvents(harness, "controller.unit"), 0,
-        "repeated construction retarget count")
-
-    runtime.enabled = true
-    root.enabled = true
-    harness:ClearEvents()
-    runtime:LoadConfig(validConfig({
-        tag = "exact-reversion",
-        offset = 3,
-    }))
-    harness:RunTimers(0.15)
-
-    state = runtime:GetNativeAuraState()
-    assertEqual(state.reloadRequired, false,
-        "exact reversion reload state")
-    assertEqual(state.pending, false,
-        "exact reversion pending state")
-    assertEqual(countEvents(harness, "controller.rebuild"), 0,
-        "exact reversion rebuild count")
-    assertEqual(countEvents(harness, "controller.holder-config"), 1,
-        "exact reversion placement count")
-    assertEqual(countEvents(harness, "controller.tuning"), 1,
-        "exact reversion tuning count")
-    assertEqual(countEvents(harness, "controller.unit"), 1,
-        "exact reversion retarget count")
-    assertEqual(controller.unit, "focus",
-        "exact reversion retarget unit")
-    assertEqual(controller.enabled, true,
-        "exact reversion native state")
-    assertEqual(controller.shown, true,
-        "exact reversion holder state")
-end
-
-local function testCombatConstructionReloadLatestWins()
-    local harness = makeHarness()
-    local root = newRoot("CombatReload", "target")
-    local runtime, controller = createRuntime(harness, root)
-
-    runtime:LoadConfig(validConfig())
-    runtime:Enable()
-    harness:SetCombat(true)
-    harness:ClearEvents()
-
-    runtime:LoadConfig(validConfig({
-        style = "style-b",
-        tag = "obsolete-combat-topology",
-    }))
-    local state = runtime:GetNativeAuraState()
-    assertEqual(state.reloadRequired, true,
-        "combat construction reload state")
-    assertEqual(state.pending, true,
-        "combat reload quiesce pending state")
-    assertEqual(controller.shown, false,
-        "combat reload immediate holder state")
-    assertEqual(controller.enabled, true,
-        "combat reload deferred native state")
-    assertEqual(countEvents(harness, "controller.enabled"), 0,
-        "combat reload native mutation count")
-    assertEqual(countEvents(harness, "controller.rebuild"), 0,
-        "combat reload rebuild count")
-    assertEqual(countEvents(harness, "controller.holder-config"), 0,
-        "combat reload placement count")
-    assertEqual(countEvents(harness, "controller.tuning"), 0,
-        "combat reload tuning count")
-    assertEqual(countEvents(harness, "controller.unit"), 0,
-        "combat reload retarget count")
-
-    runtime:LoadConfig(validConfig({
-        tag = "latest-same-topology",
-    }))
-    state = runtime:GetNativeAuraState()
-    assertEqual(state.reloadRequired, false,
-        "combat exact reversion reload state")
-    assertEqual(state.pending, true,
-        "combat exact reversion pending state")
-    assertTrue(harness.registered.PLAYER_REGEN_ENABLED,
-        "combat exact reversion regen registration")
-
-    harness:SetCombat(false)
-    harness:Fire("PLAYER_REGEN_ENABLED")
-    harness:RunTimers(0)
-    harness:RunTimers(0.15)
-    state = runtime:GetNativeAuraState()
-    assertEqual(state.pending, false,
-        "combat exact reversion settled state")
-    assertEqual(countEvents(harness, "controller.rebuild"), 0,
-        "combat exact reversion rebuild count")
-    assertEqual(countEvents(harness, "controller.tuning"), 1,
-        "combat exact reversion tuning count")
-    assertEqual(controller.enabled, true,
-        "combat exact reversion native state")
-    assertEqual(controller.shown, true,
-        "combat exact reversion holder state")
-
-    harness:SetCombat(true)
-    harness:ClearEvents()
-    runtime:LoadConfig(validConfig({
-        style = "style-b",
-        tag = "stale-combat-reload",
-    }))
-    runtime:LoadConfig(validConfig({
-        style = "style-c",
-        tag = "latest-combat-reload",
-    }))
-    root.effectiveUnit = "focus"
-    runtime:Update()
-
-    assertEqual(countEvents(harness, "controller.rebuild"), 0,
-        "latest combat reload rebuild count")
-    assertEqual(countEvents(harness, "controller.holder-config"), 0,
-        "latest combat reload placement count")
-    assertEqual(countEvents(harness, "controller.tuning"), 0,
-        "latest combat reload tuning count")
-    assertEqual(countEvents(harness, "controller.unit"), 0,
-        "latest combat reload retarget count")
-    assertEqual(countEvents(harness, "controller.enabled"), 0,
-        "latest combat reload enabled count")
-
-    harness:SetCombat(false)
-    harness:Fire("PLAYER_REGEN_ENABLED")
-    harness:RunTimers(0)
-    state = runtime:GetNativeAuraState()
-    assertEqual(state.reloadRequired, true,
-        "latest combat reload state")
-    assertEqual(state.pending, false,
-        "latest combat reload settled state")
-    assertEqual(state.unit, "focus",
-        "latest combat reload desired unit")
-    assertEqual(state.diagnostics[1], "latest-combat-reload",
-        "latest combat reload descriptor")
-    assertEqual(controller.enabled, false,
-        "latest combat reload native state")
-    assertEqual(controller.shown, false,
-        "latest combat reload holder state")
-    assertEqual(countEvents(harness, "controller.rebuild"), 0,
-        "settled combat reload rebuild count")
-    assertEqual(countEvents(harness, "controller.holder-config"), 0,
-        "settled combat reload placement count")
-    assertEqual(countEvents(harness, "controller.tuning"), 0,
-        "settled combat reload tuning count")
-    assertEqual(countEvents(harness, "controller.unit"), 0,
-        "settled combat reload retarget count")
+    assertEqual(countEvents(harness, "controller.rebuild"), 1,
+        "coalesced construction rebuild count")
+    assertEqual(lastEvent(harness, "controller.rebuild").args[2]
+        .groups[1].filterString, "latest-rebuild", "latest rebuild payload")
 end
 
 local function testControllerLedgerCommitUsesLatestConfig()
@@ -1088,8 +1099,6 @@ local function testCombatConfigSupersession()
 
     assertEqual(runtime:GetNativeAuraState().state, "EMPTY",
         "combat superseded state")
-    assertEqual(runtime:GetNativeAuraState().reloadRequired, false,
-        "combat superseded reload state")
     assertEqual(countEvents(harness, "controller.rebuild"), 0,
         "superseded replacement count")
     assertEqual(countEvents(harness, "controller.tuning"), 0,
@@ -1170,6 +1179,97 @@ local function testWatcherRoutesUnitSignals()
     targetRuntime:Disable()
 end
 
+local function testWatcherRoutesRelationshipSignals()
+    local harness = makeHarness()
+    local focusRoot = newRoot("VehicleFocus", "focus")
+    local targetRoot = newRoot("VehicleTarget", "target")
+    focusRoot.effectiveUnit = "focuspet"
+    targetRoot.effectiveUnit = "targetpet"
+    local focusRuntime, focusController = createRuntime(
+        harness,
+        focusRoot
+    )
+    local targetRuntime, targetController = createRuntime(
+        harness,
+        targetRoot
+    )
+
+    focusRuntime:LoadConfig(validConfig())
+    targetRuntime:LoadConfig(validConfig())
+    focusRuntime:Enable()
+    targetRuntime:Enable()
+    local focusRefreshes = focusController.refreshCount
+    local targetRefreshes = targetController.refreshCount
+
+    harness:Fire("PLAYER_TARGET_CHANGED")
+    harness:RunTimers(0.05)
+    assertEqual(
+        focusController.refreshCount,
+        focusRefreshes,
+        "derived target-event focus suppression"
+    )
+    assertEqual(
+        targetController.refreshCount,
+        targetRefreshes + 1,
+        "derived target-event target refresh"
+    )
+
+    harness:Fire("PLAYER_FOCUS_CHANGED")
+    harness:RunTimers(0.05)
+    assertEqual(
+        focusController.refreshCount,
+        focusRefreshes + 1,
+        "derived focus-event focus refresh"
+    )
+    assertEqual(
+        targetController.refreshCount,
+        targetRefreshes + 1,
+        "derived focus-event target suppression"
+    )
+
+    harness:Fire("UNIT_FACTION", "targetpet")
+    harness:RunTimers(0.05)
+    assertEqual(
+        focusController.refreshCount,
+        focusRefreshes + 1,
+        "effective-faction focus suppression"
+    )
+    assertEqual(
+        targetController.refreshCount,
+        targetRefreshes + 2,
+        "effective-faction target refresh"
+    )
+
+    harness:Fire("UNIT_FACTION", "target")
+    harness:RunTimers(0.05)
+    assertEqual(
+        focusController.refreshCount,
+        focusRefreshes + 1,
+        "root-faction focus suppression"
+    )
+    assertEqual(
+        targetController.refreshCount,
+        targetRefreshes + 3,
+        "root-faction target refresh"
+    )
+
+    harness:Fire("UNIT_FACTION", "player")
+    harness:RunTimers(0.05)
+    assertEqual(
+        focusController.refreshCount,
+        focusRefreshes + 2,
+        "player-faction focus relationship refresh"
+    )
+    assertEqual(
+        targetController.refreshCount,
+        targetRefreshes + 4,
+        "player-faction target relationship refresh"
+    )
+
+    focusRuntime:Disable()
+    targetRuntime:Disable()
+end
+
 local function testQuiesceAndRecovery()
     local harness = makeHarness()
     local root = newRoot("Recovery", "target")
@@ -1183,12 +1283,7 @@ local function testQuiesceAndRecovery()
         tag = "empty",
     }))
     harness:RunTimers(0.15)
-    local emptyState = runtime:GetNativeAuraState()
-    assertEqual(emptyState.state, "EMPTY", "empty state")
-    assertEqual(emptyState.reloadRequired, false,
-        "empty reload state")
-    assertEqual(emptyState.pending, false,
-        "empty pending state")
+    assertEqual(runtime:GetNativeAuraState().state, "EMPTY", "empty state")
     assertEqual(controller.enabled, false, "empty native state")
     assertEqual(controller.shown, false, "empty holder state")
     assertEqual(countEvents(harness, "controller.destroy"), 0,
@@ -1202,8 +1297,6 @@ local function testQuiesceAndRecovery()
     local partitionState = runtime:GetNativeAuraState()
     assertEqual(partitionState.state, "PARTITION_DEFERRED",
         "partition state")
-    assertEqual(partitionState.reloadRequired, false,
-        "partition reload state")
     assertEqual(partitionState.partition.filter, "notCastByMe",
         "partition metadata")
     assertEqual(countEvents(harness, "controller.destroy"), 0,
@@ -1216,10 +1309,6 @@ local function testQuiesceAndRecovery()
     local errorState = runtime:GetNativeAuraState()
     assertEqual(errorState.state, "ERROR", "compile error state")
     assertEqual(errorState.error, "TEST_COMPILE_ERROR", "compile error code")
-    assertEqual(errorState.reloadRequired, false,
-        "compile error reload state")
-    assertEqual(errorState.pending, false,
-        "compile error pending state")
     assertEqual(countEvents(harness, "controller.destroy"), 0,
         "compile error destroy count")
 
@@ -1342,8 +1431,6 @@ local function testConfigModeNeverRetargetsPlayer()
         "config-mode native rebuild count")
     assertEqual(countEvents(harness, "controller.tuning"), 0,
         "config-mode native tuning count")
-    assertEqual(runtime:GetNativeAuraState().reloadRequired, true,
-        "config-mode construction reload state")
     assertEqual(lastEvent(harness, "legacy.load").args[2].tag,
         "preview-edit", "preview config payload")
 
@@ -1361,32 +1448,15 @@ local function testConfigModeNeverRetargetsPlayer()
 
     assertEqual(countEvents(harness, "controller.unit"), 0,
         "restored same-unit retarget count")
-    assertEqual(countEvents(harness, "controller.rebuild"), 0,
+    assertEqual(countEvents(harness, "controller.rebuild"), 1,
         "deferred config-mode rebuild count")
-    assertEqual(runtime:GetNativeAuraState().reloadRequired, true,
-        "config-mode exit reload state")
-    assertEqual(controller.enabled, false, "post-preview native state")
+    assertEqual(lastEvent(harness, "controller.rebuild").args[2].unit,
+        "target", "deferred rebuild unit")
+    assertEqual(controller.enabled, true, "post-preview native prewarm")
     assertEqual(controller.shown, false, "post-preview hidden holder")
 
     runtime:Enable()
-    assertEqual(controller.shown, false,
-        "reload-required post-preview holder")
-
-    harness:ClearEvents()
-    runtime:LoadConfig(validConfig({
-        tag = "preview-reverted",
-    }))
-    harness:RunTimers(0.15)
-    assertEqual(runtime:GetNativeAuraState().reloadRequired, false,
-        "config-mode exact reversion state")
-    assertEqual(countEvents(harness, "controller.rebuild"), 0,
-        "config-mode exact reversion rebuild count")
-    assertEqual(countEvents(harness, "controller.tuning"), 1,
-        "config-mode exact reversion tuning count")
-    assertEqual(controller.enabled, true,
-        "config-mode exact reversion native state")
-    assertEqual(controller.shown, true,
-        "config-mode exact reversion holder")
+    assertEqual(controller.shown, true, "post-preview enabled holder")
 end
 
 local function testDisabledConfigModePreviewCannotEscape()
@@ -1419,6 +1489,7 @@ local function testDisabledConfigModePreviewCannotEscape()
     runtime.enabled = true
     harness:ClearEvents()
     runtime:LoadConfig(validConfig({
+        style = "style-b",
         tag = "live-after-preview",
     }))
     runtime:Enable()
@@ -1465,8 +1536,6 @@ local function testWaitingUnitAndTerminalDestroy()
     runtime:LoadConfig(validConfig({
         style = "style-b",
     }))
-    assertEqual(runtime:GetNativeAuraState().reloadRequired, true,
-        "pre-destroy reload state")
     runtime:Destroy()
     assertEqual(runtime:GetNativeAuraState().state, "DESTROYED",
         "destroyed state")
@@ -1487,8 +1556,6 @@ local function testWaitingUnitAndTerminalDestroy()
     local destroyedState = runtime:GetNativeAuraState()
     assertEqual(destroyedState.active, false, "destroyed active state")
     assertEqual(destroyedState.configMode, false, "destroyed config-mode state")
-    assertEqual(destroyedState.reloadRequired, false,
-        "destroyed reload state")
     assertEqual(destroyedState.pending, false, "destroyed pending state")
 end
 
@@ -1510,320 +1577,22 @@ local function testPolymorphicGlobalRefreshSource()
         "debuff refresh still calls the legacy implementation")
 end
 
-local function testGroupRuntimeSelectionAndFallback()
-    local unavailable = makeHarness({
-        backend = false,
-    })
-    local fallbackRoot = setmetatable({
-        name = "GroupFallback",
-        unit = "party1",
-        indicators = {},
-        enabled = true,
-        shown = true,
-    }, {
-        __index = function(_, key)
-            if key == "_nativeAuraContainers" then
-                error("12.0.7 accessed native group containers", 2)
-            end
-        end,
-    })
-    function fallbackRoot:GetName()
-        return self.name
-    end
-    function fallbackRoot:IsVisible()
-        return self.shown == true
-    end
-
-    local fallback = unavailable.UF.CreateGroupNativeAuras(
-        fallbackRoot,
-        "GroupFallback_Buffs",
-        "HELPFUL",
-        "buffs"
-    )
-    assertEqual(fallback, unavailable.legacyFrames[1],
-        "group 12.0.7 legacy fallback")
-    assertEqual(#unavailable.controllers, 0,
-        "group 12.0.7 native controller count")
-    assertEqual(fallback.parent, fallbackRoot,
-        "group fallback parent")
-    assertEqual(fallback.name, "GroupFallback_Buffs",
-        "group fallback name")
-    assertEqual(fallback.auraFilter, "HELPFUL",
-        "group fallback filter")
-    assertEqual(fallback.hasSubFrame, nil,
-        "group fallback subframe")
-
-    local harness = makeHarness()
-    local root = newRoot("GroupNative", "party1")
-    local seed = {}
-    root._nativeAuraContainers = {
-        buffs = seed,
-    }
-    local runtime = harness.UF.CreateGroupNativeAuras(
-        root,
-        "GroupNative_Buffs",
-        "HELPFUL",
-        "buffs"
-    )
-    assertTrue(runtime, "group native runtime")
-    assertEqual(#harness.controllers, 1, "group native controller count")
-    assertEqual(harness.controllers[1].seedContainer, seed,
-        "group runtime seed forwarding")
-    assertEqual(runtime.root, root, "group runtime root")
-    assertEqual(runtime.auraFilter, "HELPFUL", "group runtime filter")
-    assertEqual(runtime._hasSubFrame, false, "group runtime subframe")
-
-    local missingRoot = newRoot("MissingGroupSeed", "party1")
-    local accepted, message = pcall(
-        harness.UF.CreateGroupNativeAuras,
-        missingRoot,
-        "MissingGroupSeed_Buffs",
-        "HELPFUL",
-        "buffs"
-    )
-    assertEqual(accepted, false, "missing group seed acceptance")
-    assertTrue(
-        tostring(message):find("seed is missing", 1, true) ~= nil,
-        "missing group seed assertion"
-    )
-end
-
-local function testGroupSeedsPrebuildBeforeCombat()
-    local harness = makeHarness()
-    local root = newRoot("GroupBootstrap", nil)
-    local runtime, controller = createGroupRuntime(harness, root)
-
-    runtime:LoadConfig(validConfig())
-    assertEqual(runtime:GetNativeAuraState().state, "READY",
-        "group prebuild ready state")
-    assertEqual(runtime:GetNativeAuraState().unit, "none",
-        "group prebuild inert unit")
-    assertEqual(controller.built, true, "group prebuild initial build")
-    assertEqual(controller.spec.unit, "none",
-        "group prebuild controller unit")
-    assertEqual(controller.shown, false,
-        "group prebuild inactive visibility")
-
-    harness:SetCombat(true)
-    harness:ClearEvents()
-    root.unit = "party5"
-    root.effectiveUnit = "party5"
-    runtime:Enable()
-
-    local state = runtime:GetNativeAuraState()
-    assertEqual(state.state, "READY", "group bootstrap ready state")
-    assertEqual(state.unit, "party5", "group bootstrap unit")
-    assertEqual(state.built, true, "group bootstrap built state")
-    assertEqual(controller.built, true, "group bootstrap controller build")
-    assertEqual(controller.spec.unit, "party5",
-        "group assignment controller unit")
-    assertEqual(controller.shown, true, "group bootstrap visibility")
-    assertEqual(countEvents(harness, "controller.rebuild"), 0,
-        "group assignment combat rebuild count")
-    assertEqual(countEvents(harness, "controller.unit"), 1,
-        "group assignment combat retarget count")
-    assertEqual(next(harness.registered), nil,
-        "group bootstrap regen registration")
-end
-
-local function testGroupUnitRetargetsBeforePendingCombatConfig()
-    local harness = makeHarness()
-    local root = newRoot("GroupPendingConfig", "party1")
-    local runtime, controller = createGroupRuntime(harness, root)
-
-    runtime:LoadConfig(validConfig())
-    runtime:Enable()
-    harness:SetCombat(true)
-    harness:ClearEvents()
-
-    runtime:LoadConfig(validConfig({
-        tag = "pending-combat-config",
-    }))
-    root.unit = "party4"
-    root.effectiveUnit = "party4"
-    runtime:Update()
-
-    assertEqual(controller.unit, "party4",
-        "pending config live group unit")
-    assertEqual(controller.shown, false,
-        "pending config group visibility")
-    assertEqual(countEvents(harness, "controller.unit"), 1,
-        "pending config live retarget count")
-    assertEqual(countEvents(harness, "controller.tuning"), 0,
-        "pending config combat tuning count")
-    assertTrue(harness.registered.PLAYER_REGEN_ENABLED,
-        "pending config regen registration")
-    assertEqual(runtime:GetNativeAuraState().pending, true,
-        "pending config runtime state")
-
-    harness:SetCombat(false)
-    harness:Fire("PLAYER_REGEN_ENABLED")
-    harness:RunTimers(0)
-    assertEqual(countEvents(harness, "controller.unit"), 1,
-        "pending config duplicate regen retarget")
-    assertEqual(countEvents(harness, "controller.tuning"), 1,
-        "pending config regen tuning count")
-    assertEqual(controller.shown, true,
-        "pending config regen visibility")
-end
-
-local function testSecretUnitTokenFailsClosed()
-    local harness = makeHarness()
-    local root = newRoot("SecretUnit", "party1")
-    local runtime, controller = createRuntime(harness, root)
-
-    runtime:LoadConfig(validConfig())
-    runtime:Enable()
-    harness:ClearEvents()
-
-    root.effectiveUnit = {
-        secret = true,
-    }
-    runtime:Update()
-
-    local state = runtime:GetNativeAuraState()
-    assertEqual(state.state, "WAITING_FOR_UNIT", "secret unit state")
-    assertEqual(state.unit, nil, "secret unit storage")
-    assertEqual(controller.shown, false, "secret unit holder visibility")
-    assertEqual(countEvents(harness, "controller.unit"), 0,
-        "secret unit native retarget")
-    assertTrue(countEvents(harness, "secret.check") > 0,
-        "secret unit predicate")
-
-    root.effectiveUnit = "party4"
-    harness:ClearEvents()
-    runtime:Update()
-    state = runtime:GetNativeAuraState()
-    assertEqual(state.state, "READY", "clean unit recovery state")
-    assertEqual(state.unit, "party4", "clean unit recovery token")
-    assertEqual(countEvents(harness, "controller.unit"), 1,
-        "clean unit recovery retarget")
-    assertEqual(controller.shown, true, "clean unit recovery visibility")
-
-    harness:ClearEvents()
-    runtime:SetUnit({
-        secret = true,
-    })
-    state = runtime:GetNativeAuraState()
-    assertEqual(state.state, "WAITING_FOR_UNIT",
-        "direct secret unit state")
-    assertEqual(state.unit, nil, "direct secret unit storage")
-    assertEqual(controller.shown, false,
-        "direct secret unit holder visibility")
-    assertEqual(countEvents(harness, "controller.unit"), 0,
-        "direct secret native retarget")
-end
-
-local function testSecretUnitDefersExactTopologyRecovery()
-    local harness = makeHarness()
-    local root = newRoot("SecretConfigRecovery", "target")
-    local runtime, controller = createRuntime(harness, root)
-
-    runtime:LoadConfig(validConfig())
-    runtime:Enable()
-    harness:ClearEvents()
-
-    runtime:LoadConfig(validConfig({
-        style = "style-b",
-        tag = "reload-before-secret",
-    }))
-    assertEqual(runtime:GetNativeAuraState().reloadRequired, true,
-        "pre-secret structural reload state")
-    assertEqual(countEvents(harness, "controller.rebuild"), 0,
-        "pre-secret structural rebuild count")
-
-    root.effectiveUnit = {
-        secret = true,
-    }
-    runtime:Update()
-    local waitingState = runtime:GetNativeAuraState()
-    assertEqual(waitingState.state, "WAITING_FOR_UNIT",
-        "structural secret waiting state")
-    assertEqual(waitingState.reloadRequired, true,
-        "structural secret reload state")
-
-    runtime:LoadConfig(validConfig({
-        tag = "latest-secret-tuning",
-        offset = 7,
-        width = 24,
-    }))
-    waitingState = runtime:GetNativeAuraState()
-    assertEqual(waitingState.state, "WAITING_FOR_UNIT",
-        "exact reversion waiting state")
-    assertEqual(waitingState.reloadRequired, false,
-        "exact reversion clears reload state")
-    assertEqual(waitingState.pending, true,
-        "exact reversion deferred config state")
-
-    harness:RunTimers(0.15)
-    waitingState = runtime:GetNativeAuraState()
-    assertEqual(waitingState.pending, true,
-        "waiting config remains deferred")
-    assertEqual(#harness.timers, 0,
-        "waiting config dormant timer count")
-    assertEqual(countEvents(harness, "controller.rebuild"), 0,
-        "waiting config rebuild count")
-    assertEqual(countEvents(harness, "controller.holder-config"), 0,
-        "waiting config placement count")
-    assertEqual(countEvents(harness, "controller.tuning"), 0,
-        "waiting config tuning count")
-    assertEqual(countEvents(harness, "controller.unit"), 0,
-        "waiting config retarget count")
-
-    root.effectiveUnit = "focus"
-    harness:ClearEvents()
-    runtime:Update()
-
-    local recoveredState = runtime:GetNativeAuraState()
-    assertEqual(recoveredState.state, "READY",
-        "clean config recovery state")
-    assertEqual(recoveredState.pending, false,
-        "clean config recovery pending state")
-    assertEqual(recoveredState.reloadRequired, false,
-        "clean config recovery reload state")
-    assertEqual(countEvents(harness, "controller.rebuild"), 0,
-        "clean config recovery rebuild count")
-    assertEqual(countEvents(harness, "controller.holder-config"), 1,
-        "clean config recovery placement count")
-    assertEqual(countEvents(harness, "controller.tuning"), 1,
-        "clean config recovery tuning count")
-    assertEqual(countEvents(harness, "controller.unit"), 1,
-        "clean config recovery retarget count")
-    assertEqual(controller.tuning.tag, "latest-secret-tuning",
-        "clean config recovery latest tuning")
-    assertEqual(controller.frame.position[3], 7,
-        "clean config recovery latest placement")
-    assertEqual(controller.unit, "focus",
-        "clean config recovery retarget unit")
-    assertEqual(controller.enabled, true,
-        "clean config recovery native state")
-    assertEqual(controller.shown, true,
-        "clean config recovery holder state")
-    assertEqual(#harness.timers, 0,
-        "clean config recovery timer count")
-end
-
 testDormancyAndFallback()
+testOptInRelationPartitionRuntime()
 testLifecycleAndUnitRefresh()
 testDebounceAndConstructionReuse()
-testPostBuildConstructionRequiresReload()
-testCombatConstructionReloadLatestWins()
 testControllerLedgerCommitUsesLatestConfig()
 testRuntimeHasNoHolderVisibilityReads()
 testSharedCombatCommitQueue()
 testCombatConfigSupersession()
 testUngatedFocusWatcher()
 testWatcherRoutesUnitSignals()
+testWatcherRoutesRelationshipSignals()
 testQuiesceAndRecovery()
 testSecretSafeWholeHolderGates()
 testConfigModeNeverRetargetsPlayer()
 testDisabledConfigModePreviewCannotEscape()
 testWaitingUnitAndTerminalDestroy()
 testPolymorphicGlobalRefreshSource()
-testGroupRuntimeSelectionAndFallback()
-testGroupSeedsPrebuildBeforeCombat()
-testGroupUnitRetargetsBeforePendingCombatConfig()
-testSecretUnitTokenFailsClosed()
-testSecretUnitDefersExactTopologyRecovery()
 
 print("unit_frame_aura_runtime_test.lua: ok")
