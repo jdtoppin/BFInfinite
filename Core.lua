@@ -5,7 +5,9 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local REQUIRED_AF_VERSION = 30
+-- AF #19/r35 provides the legacy complement descriptors emitted when saved
+-- unit-frame filters are materialized by the supported 12.1 controls.
+local REQUIRED_AF_VERSION = 35
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar

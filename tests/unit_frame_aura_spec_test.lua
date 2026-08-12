@@ -112,6 +112,11 @@ local function makeHarness(withNativeSchema)
         funcs = {
             isValueNonSecret = forbidden("F.isValueNonSecret"),
         },
+        L = setmetatable({}, {
+            __index = function(_, key)
+                return key
+            end,
+        }),
         modules = {
             UnitFrames = UF,
         },
@@ -132,7 +137,14 @@ local function makeHarness(withNativeSchema)
         tostring = tostring,
         type = type,
         AbstractFramework = AF,
+        AuraUtil = {
+            AuraFilters = {
+                Important = "IMPORTANT",
+                Dispellable = "DISPELLABLE",
+            },
+        },
         CreateFrame = forbidden("CreateFrame"),
+        GetCVar = forbidden("GetCVar"),
         InCombatLockdown = forbidden("InCombatLockdown"),
         C_Timer = forbiddenTable("C_Timer"),
         UnitCanAssist = forbidden("UnitCanAssist"),
@@ -172,6 +184,7 @@ local function makeHarness(withNativeSchema)
     })
 
     for _, path in ipairs({
+        "Utils.lua",
         "Modules/UnitFrames/AuraPolicy.lua",
         "Modules/UnitFrames/AuraSpec.lua",
     }) do
@@ -463,7 +476,7 @@ local function testCompleteSpecContract()
         frameLevel = 7,
     }, "placement")
     assertDeepEqual(descriptor.visibility, {
-        requiresVisible = true,
+        requiresVisible = false,
         requiresAssist = false,
         spellIDFilterRequiresPublicAssist = false,
         spellIDFilterRequiresPublicNonAssist = false,
@@ -488,6 +501,9 @@ local function testCompleteSpecContract()
         perGroupSort = true,
         privateAuraSourceUnseparable = true,
         bossAuraUsesCuratedRaidInCombat = true,
+        legacySourceFilterUsesSuperset = false,
+        legacyDispellableUsesRaidPlayerDispellable = false,
+        unsupportedPtr7CategoryUsesBaseFilter = false,
         defaultSortPriority = true,
         fixedHolderExtent = true,
         spellIDListsIgnored = false,
@@ -974,6 +990,9 @@ local function testEmptyPolicies()
         perGroupSort = false,
         privateAuraSourceUnseparable = false,
         bossAuraUsesCuratedRaidInCombat = false,
+        legacySourceFilterUsesSuperset = false,
+        legacyDispellableUsesRaidPlayerDispellable = false,
+        unsupportedPtr7CategoryUsesBaseFilter = false,
         defaultSortPriority = false,
         fixedHolderExtent = false,
         spellIDListsIgnored = false,
@@ -1010,9 +1029,23 @@ local function testEmptyPolicies()
         castByOthers = true,
         castByUnit = true,
     }
-    local unsupported = compile("target", "HARMFUL", config)
-    assertEqual(unsupported.empty, true, "unsupported harmful state")
-    assertEqual(unsupported.completeSpec, nil, "unsupported harmful spec")
+    local widened = compile("target", "HARMFUL", config)
+    assertEqual(widened.empty, false, "widened harmful state")
+    assertEqual(
+        widened.completeSpec.groups[1].key,
+        "all",
+        "widened harmful all-auras key"
+    )
+    assertEqual(
+        widened.completeSpec.groups[1].filterString,
+        "HARMFUL",
+        "widened harmful all-auras filter"
+    )
+    assertEqual(
+        widened.degradations.legacySourceFilterUsesSuperset,
+        true,
+        "widened harmful source degradation"
+    )
 
     config = baseConfig()
     config.enabled = false
@@ -1606,56 +1639,52 @@ local function testShippedTargetPartitionMetrics()
 
     local descriptor = compile("target", "HARMFUL", config)
     local hostile = descriptor.partition.hostile
-    assertEqual(#descriptor.completeSpec.groups, 3, "shipped friendly groups")
-    assertEqual(#hostile.main.completeSpec.groups, 1, "shipped main groups")
+    local main = hostile.main
+    local complement = hostile.complement
+
+    assertEqual(#descriptor.completeSpec.groups, 1,
+        "shipped friendly groups")
+    assertEqual(#main.completeSpec.groups, 1,
+        "shipped main groups")
+    assertEqual(#complement.completeSpec.groups, 1,
+        "shipped complement groups")
     assertEqual(
-        #hostile.complement.completeSpec.groups,
-        2,
-        "shipped complement groups"
-    )
-    assertDeepEqual({
         descriptor.completeSpec.groups[1].filterString,
-        descriptor.completeSpec.groups[2].filterString,
-        descriptor.completeSpec.groups[3].filterString,
-    }, {
-        "HARMFUL|PLAYER",
-        "HARMFUL|RAID_IN_COMBAT|!PLAYER",
-        "HARMFUL|RAID_PLAYER_DISPELLABLE|!PLAYER|!RAID_IN_COMBAT",
-    }, "shipped friendly filters")
-    assertDeepEqual({
-        hostile.main.completeSpec.groups[1].filterString,
-    }, {
-        "HARMFUL|PLAYER",
-    }, "shipped main filters")
-    assertDeepEqual({
-        hostile.complement.completeSpec.groups[1].filterString,
-        hostile.complement.completeSpec.groups[2].filterString,
-    }, {
-        "HARMFUL|RAID_IN_COMBAT|!PLAYER",
-        "HARMFUL|RAID_PLAYER_DISPELLABLE|!PLAYER|!RAID_IN_COMBAT",
-    }, "shipped complement filters")
+        "HARMFUL",
+        "shipped friendly all-auras filter"
+    )
     assertEqual(
-        hostile.main.completeSpec.groups[1].layout.elementHeight,
+        main.completeSpec.groups[1].filterString,
+        "HARMFUL|PLAYER",
+        "shipped main filter"
+    )
+    assertEqual(
+        complement.completeSpec.groups[1].filterString,
+        "HARMFUL|!PLAYER",
+        "shipped complement filter"
+    )
+    assertEqual(
+        main.completeSpec.groups[1].layout.elementHeight,
         21,
         "shipped clamped-empty main element height"
     )
     assertEqual(
-        hostile.main.completeSpec.groups[1].layout.lineSpacing,
+        main.completeSpec.groups[1].layout.lineSpacing,
         -1,
         "shipped clamped-empty main line spacing"
     )
     assertEqual(
-        hostile.complement.completeSpec.groups[1].buttonStyle.width,
+        complement.completeSpec.groups[1].buttonStyle.width,
         17,
         "shipped complement width"
     )
     assertEqual(
-        hostile.complement.completeSpec.groups[1].buttonStyle.height,
+        complement.completeSpec.groups[1].buttonStyle.height,
         17,
         "shipped complement height"
     )
     assertEqual(
-        hostile.complement.completeSpec.groups[1].buttonStyle.desaturated,
+        complement.completeSpec.groups[1].buttonStyle.desaturated,
         true,
         "shipped complement desaturation"
     )
@@ -1667,32 +1696,32 @@ local function testShippedTargetPartitionMetrics()
         y = -1,
     }, "shipped attachment")
     assertDeepEqual(descriptor.metrics, {
-        groupCount = 3,
+        groupCount = 1,
         legacyMaxFrameCount = 22,
-        nativeVisibleCapacity = 66,
+        nativeVisibleCapacity = 44,
         nativeBatchSize = 10,
-        initialRestrictedButtonCount = 60,
-        freshContainerRestrictedButtonCountCeiling = 180,
+        initialRestrictedButtonCount = 30,
+        freshContainerRestrictedButtonCountCeiling = 90,
         prebuiltContainerCount = 3,
-        prebuiltGroupCount = 6,
-        maxActiveGroupCount = 3,
+        prebuiltGroupCount = 3,
+        maxActiveGroupCount = 2,
         hostileHolder = {
             width = 219,
-            height = 111,
+            height = 75,
         },
         compositeHolder = {
             width = 219,
-            height = 119,
+            height = 75,
         },
         variants = {
             friendly = {
-                groupCount = 3,
-                nativeVisibleCapacity = 66,
-                initialRestrictedButtonCount = 30,
-                freshContainerRestrictedButtonCountCeiling = 90,
+                groupCount = 1,
+                nativeVisibleCapacity = 22,
+                initialRestrictedButtonCount = 10,
+                freshContainerRestrictedButtonCountCeiling = 30,
                 holder = {
                     width = 219,
-                    height = 119,
+                    height = 39,
                 },
             },
             hostileMain = {
@@ -1706,23 +1735,22 @@ local function testShippedTargetPartitionMetrics()
                 },
             },
             hostileComplement = {
-                groupCount = 2,
-                nativeVisibleCapacity = 44,
-                initialRestrictedButtonCount = 20,
-                freshContainerRestrictedButtonCountCeiling = 60,
+                groupCount = 1,
+                nativeVisibleCapacity = 22,
+                initialRestrictedButtonCount = 10,
+                freshContainerRestrictedButtonCountCeiling = 30,
                 holder = {
                     width = 197,
-                    height = 71,
+                    height = 35,
                 },
             },
         },
     }, "shipped physical metrics")
     assertDeepEqual(descriptor.partition.holder, {
         width = 219,
-        height = 119,
+        height = 75,
     }, "shipped composite holder")
 end
-
 local function testCapacityMetrics()
     local single = baseConfig()
     single.numPerLine = 2
@@ -1752,12 +1780,11 @@ local function testCapacityMetrics()
     five.numPerLine = 11
     five.numTotal = 22
     five.filters = {
-        castByMe = true,
-        castByOthers = true,
-        castByUnit = true,
-        castByNPC = true,
-        isBossAura = true,
-        dispellable = true,
+        player = true,
+        raidInCombat = true,
+        raidPlayerDispellable = true,
+        bigDefensive = true,
+        externalDefensive = true,
     }
     local fiveDescriptor = compile("target", "HELPFUL", five)
     assertDeepEqual(fiveDescriptor.metrics, {

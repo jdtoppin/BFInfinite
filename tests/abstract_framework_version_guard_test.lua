@@ -61,9 +61,9 @@ local function loadInit(sharedFunction)
 end
 
 local unsupported = loadInit()
-assertEqual(unsupported.requiredAFVersion, 30,
+assertEqual(unsupported.requiredAFVersion, 35,
     "global AbstractFramework requirement")
-assertContains(readFile("Core.lua"), "local REQUIRED_AF_VERSION = 30",
+assertContains(readFile("Core.lua"), "local REQUIRED_AF_VERSION = 35",
     "runtime AbstractFramework requirement matches the bootstrap guard")
 assertEqual(type(unsupported.funcs.isValueNonSecret), "function",
     "unsupported AF receives a conservative guard")
