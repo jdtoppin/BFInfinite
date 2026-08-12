@@ -1,8 +1,15 @@
 name: Lua checks
 
 on:
+  merge_group:
   pull_request:
   push:
+    branches:
+      - master
+
+concurrency:
+  group: lua-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -11,11 +18,11 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - name: Install Lua checks
+      - name: Install Lua tools
         run: |
           sudo apt-get update
           sudo apt-get install --yes lua-check lua5.1 luajit ripgrep
@@ -25,25 +32,13 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             mapfile -d '' changed < <(git diff --name-only -z --diff-filter=ACMR "$BASE_SHA...HEAD" -- '*.lua')
-            ./scripts/lint.sh "${changed[@]}"
+          elif [[ -n "$BEFORE_SHA" && ! "$BEFORE_SHA" =~ ^0+$ ]] && git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+            mapfile -d '' changed < <(git diff --name-only -z --diff-filter=ACMR "$BEFORE_SHA...HEAD" -- '*.lua')
           else
-            ./scripts/lint.sh
+            changed=()
           fi
-
-      - name: Test 12.1 unit-frame aura controller
-        run: luajit tests/unit_frame_aura_controller_test.lua
-
-      - name: Test 12.1 unit-frame aura policy
-        run: luajit tests/unit_frame_aura_policy_test.lua
-
-      - name: Test 12.1 unit-frame aura spec
-        run: luajit tests/unit_frame_aura_spec_test.lua
-
-      - name: Test 12.1 unit-frame aura runtime
-        run: luajit tests/unit_frame_aura_runtime_test.lua
-
-      - name: Test unit-frame config-mode lifecycle
-        run: luajit tests/unit_frame_config_mode_lifecycle_test.lua
+          bash ./scripts/verify.sh "${changed[@]}"
