@@ -8,6 +8,7 @@ local legacyHooksInstalled
 local socialHooksInstalled
 local recentAlliesHooksInstalled
 local quickJoinHooksInstalled
+local statusMenuHooksInstalled
 
 -- Blizzard exposes the remote project ID, but ships only Retail and
 -- Classic-family logo atlases. WOW_PROJECT_MISTS_CLASSIC is 19.
@@ -33,6 +34,107 @@ local function StyleDropdown(dropdown)
     if dropdown then
         S.StyleDropdownButton(dropdown)
     end
+end
+
+local function GetStatusIcon(status)
+    if _G.FRIENDS_TEXTURE_ONLINE and status == _G.FRIENDS_TEXTURE_ONLINE then
+        return AF.GetIcon("Circle_Filled"), "lime"
+    elseif _G.FRIENDS_TEXTURE_AFK and status == _G.FRIENDS_TEXTURE_AFK then
+        return AF.GetIcon("Clock_Round"), "gold"
+    elseif _G.FRIENDS_TEXTURE_DND and status == _G.FRIENDS_TEXTURE_DND then
+        return AF.GetIcon("Circle_Filled"), "lightred"
+    end
+
+    -- Enum.SocialUIPresenceType and Appear Offline are new to the 12.1
+    -- Social UI. Keep the legacy string statuses above for the Who fallback.
+    local presenceTypes = _G.Enum and _G.Enum.SocialUIPresenceType
+    if not presenceTypes then return end
+
+    if presenceTypes.Online and status == presenceTypes.Online then
+        return AF.GetIcon("Circle_Filled"), "lime"
+    elseif presenceTypes.Away and status == presenceTypes.Away then
+        return AF.GetIcon("Clock_Round"), "gold"
+    elseif presenceTypes.Busy and status == presenceTypes.Busy then
+        return AF.GetIcon("Circle_Filled"), "lightred"
+    elseif (presenceTypes.AppearOffline and status == presenceTypes.AppearOffline)
+        or (presenceTypes.Offline and status == presenceTypes.Offline)
+        or (presenceTypes.Unknown and status == presenceTypes.Unknown)
+    then
+        return AF.GetIcon("Unavailable"), "disabled"
+    end
+end
+
+local function StyleStatusMenuItem(frame, description)
+    local iconPath, color = GetStatusIcon(description:GetData())
+    if not iconPath then return end
+
+    local icon = frame:AttachTexture()
+    icon:SetTexture(iconPath)
+    icon:SetVertexColor(AF.GetColorRGB(color))
+    AF.SetSize(icon, 16, 16)
+    AF.SetPoint(icon, "LEFT")
+
+    local fontString = frame.fontString
+    local text = _G.MenuUtil.GetElementText(description)
+    if fontString and type(text) == "string" then
+        -- Both status menus put their native texture or atlas markup before
+        -- the localized label. Retain the label while the AF texture replaces
+        -- only that leading artwork.
+        text = text:gsub("^|T.-|t%s*", "")
+        text = text:gsub("^|A.-|a%s*", "")
+        fontString:SetTextToFit(text)
+        AF.ClearPoints(fontString)
+        AF.SetPoint(fontString, "LEFT", icon, "RIGHT", 7, 1)
+    end
+end
+
+local function StyleStatusMenu(_, rootDescription)
+    for _, description in rootDescription:EnumerateElementDescriptions() do
+        if GetStatusIcon(description:GetData()) then
+            description:AddInitializer(StyleStatusMenuItem)
+        end
+    end
+end
+
+local function InstallStatusMenuHooks()
+    if statusMenuHooksInstalled or not (_G.Menu and _G.Menu.ModifyMenu) then return end
+    statusMenuHooksInstalled = true
+
+    _G.Menu.ModifyMenu("MENU_FRIENDS_STATUS", StyleStatusMenu)
+    _G.Menu.ModifyMenu("MENU_SOCIAL_UI_BATTLE_NET_PRESENCE", StyleStatusMenu)
+end
+
+local function RefreshStatusDropdownIcon(dropdown)
+    local owner = dropdown._BFIStatusOwner
+    local status = owner and owner.bnStatus or dropdown.presenceTypeSelf
+    local iconPath, color = GetStatusIcon(status)
+
+    dropdown.BFIStatusIcon:SetShown(iconPath ~= nil)
+    dropdown.Text:SetAlpha(iconPath and 0 or 1)
+    if iconPath then
+        dropdown.BFIStatusIcon:SetTexture(iconPath)
+        dropdown.BFIStatusIcon:SetVertexColor(AF.GetColorRGB(color))
+    end
+end
+
+local function StyleStatusDropdown(dropdown, owner)
+    if not dropdown then return end
+
+    StyleDropdown(dropdown)
+    InstallStatusMenuHooks()
+    dropdown._BFIStatusOwner = owner
+
+    if not dropdown._BFIStatusIconStyled then
+        dropdown._BFIStatusIconStyled = true
+        dropdown.BFIStatusIcon = AF.CreateTexture(dropdown)
+        AF.SetSize(dropdown.BFIStatusIcon, 16, 16)
+        AF.SetPoint(dropdown.BFIStatusIcon, "LEFT", dropdown, 7, 0)
+
+        hooksecurefunc(dropdown, "UpdateToMenuSelections", RefreshStatusDropdownIcon)
+        dropdown:HookScript("OnShow", RefreshStatusDropdownIcon)
+    end
+
+    RefreshStatusDropdownIcon(dropdown)
 end
 
 local function SetFlatTexture(texture, color, alpha, blendMode)
@@ -130,6 +232,49 @@ local function StylePlainDialog(frame)
         AF.ClearPoints(frame.CloseButton)
         AF.SetPoint(frame.CloseButton, "TOPRIGHT")
     end
+end
+
+local function StyleTitledDialog(frame, sourceTitle)
+    if not frame or not sourceTitle then return end
+
+    if frame.Border then
+        frame.Border:SetAlpha(0)
+    end
+
+    -- AddFriendFrame is a ResizeLayoutFrame on PTR 12.1.0.68914. Give the
+    -- shared titled-frame skin a root-owned compatibility title, then remove
+    -- Blizzard's nested title from the content layout so its row collapses.
+    local titleText = sourceTitle:GetText()
+    if not titleText or titleText == "" then
+        titleText = _G.ADD_NEW_FRIEND
+    end
+
+    frame.Title = frame:CreateFontString(nil, "OVERLAY")
+    local fontObject = sourceTitle:GetFontObject()
+    if fontObject then
+        frame.Title:SetFontObject(fontObject)
+    end
+    frame.Title:SetText(titleText)
+    frame.Title.ignoreInLayout = true
+    sourceTitle:SetAlpha(0)
+    sourceTitle.ignoreInLayout = true
+
+    S.StyleTitledFrame(frame, false)
+    frame.BFIBg.ignoreInLayout = true
+    frame.BFIHeader.ignoreInLayout = true
+
+    -- BFIHeader is a child frame above AddFriendFrame's draw level, so a
+    -- root-owned FontString can sit behind it. Keep that root title only as
+    -- the shared skin's compatibility target and draw the visible copy on
+    -- the header itself.
+    frame.Title:SetAlpha(0)
+    frame.BFITitleText = frame.BFIHeader:CreateFontString(nil, "OVERLAY")
+    if fontObject then
+        frame.BFITitleText:SetFontObject(fontObject)
+    end
+    frame.BFITitleText:SetText(titleText)
+    frame.BFITitleText.ignoreInLayout = true
+    AF.SetPoint(frame.BFITitleText, "CENTER")
 end
 
 local function StyleRoleIcon(icon, role)
@@ -400,14 +545,35 @@ local function StyleAddFriendFrame()
     local frame = _G.AddFriendFrame
     if frame and not frame._BFIAddFriendStyled then
         frame._BFIAddFriendStyled = true
-        StylePlainDialog(frame)
+
+        local entryFrame = frame.EntryFrame
+        local titleContainer = entryFrame and entryFrame.TitleContainer
+        if titleContainer and titleContainer.Title then
+            StyleTitledDialog(frame, titleContainer.Title)
+        else
+            StylePlainDialog(frame)
+        end
+
+        local infoButton = (entryFrame and entryFrame.InfoButton)
+            or _G.AddFriendEntryFrameInfoButton
+        if frame.BFIHeader and infoButton then
+            infoButton.ignoreInLayout = true
+            S.StyleTitleBarInfoButton(frame, infoButton)
+            if infoButton.OnTextScaleUpdated
+                and not infoButton._BFITitleBarScaleHooked
+            then
+                infoButton._BFITitleBarScaleHooked = true
+                hooksecurefunc(infoButton, "OnTextScaleUpdated", function(self)
+                    AF.SetSize(self, 20, 20)
+                end)
+            end
+        end
 
         local infoFrame = frame.InfoFrame
         if infoFrame then
             StyleButton(infoFrame.OkayButton or infoFrame.ContinueButton)
         end
 
-        local entryFrame = frame.EntryFrame
         local editBoxContainer = entryFrame and entryFrame.EditBoxContainer
         local nameEditBox = (editBoxContainer and editBoxContainer.NameEditBox)
             or (entryFrame and entryFrame.NameEditBox)
@@ -525,7 +691,7 @@ local function StyleLegacyFriendsFrame()
     StyleLegacyTabs(frame)
 
     local header = frame.FriendsTabHeader
-    StyleDropdown(header.StatusDropdown)
+    StyleStatusDropdown(header.StatusDropdown, header)
     StyleArtworkButton(header.BattlenetFrame.ContactsMenuButton)
 
     S.RemoveTextures(header.BattlenetFrame)
@@ -552,8 +718,56 @@ end
 ---------------------------------------------------------------------
 -- 12.1 SocialUI
 ---------------------------------------------------------------------
+local function LayoutSocialTabIcon(tab, yOffset)
+    local icon = tab and tab.Icon
+    if not icon then return end
+
+    AF.SetSize(icon, 24, 24)
+    AF.ClearPoints(icon)
+    AF.SetPoint(icon, "CENTER", 0, (tab.iconBaseYOffset or 0) + (yOffset or 0))
+end
+
 local function StyleSocialTab(tab)
     S.StyleSideTab(tab)
+
+    if not tab._BFISocialIconLayoutHooked then
+        tab._BFISocialIconLayoutHooked = true
+        hooksecurefunc(tab, "SetChecked", function(self)
+            LayoutSocialTabIcon(self)
+        end)
+        hooksecurefunc(tab, "RefreshIconAnchoring", function(self)
+            LayoutSocialTabIcon(self)
+        end)
+        tab:HookScript("OnMouseDown", function(self, button)
+            if button == "LeftButton" and self:IsEnabled() then
+                LayoutSocialTabIcon(self, -1)
+            end
+        end)
+        tab:HookScript("OnMouseUp", function(self, button)
+            if button == "LeftButton" then
+                LayoutSocialTabIcon(self)
+            end
+        end)
+    end
+
+    LayoutSocialTabIcon(tab)
+end
+
+local function LayoutSocialTabs(frame)
+    local previous
+    for _, tabData in ipairs(frame.availableTabData or {}) do
+        local tab = frame:GetTabByType(tabData.tabType)
+        if tab then
+            StyleSocialTab(tab)
+            AF.ClearPoints(tab)
+            if previous then
+                AF.SetPoint(tab, "TOPLEFT", previous, "BOTTOMLEFT", 0, -1)
+            else
+                AF.SetPoint(tab, "TOPLEFT", frame, "TOPRIGHT", 4, -122)
+            end
+            previous = tab
+        end
+    end
 end
 
 local function StyleSocialCard(card)
@@ -600,6 +814,14 @@ local function StyleFriendRequestCard(card)
     end
 end
 
+local function MatchSocialFilterHeight(filterBar)
+    local dropdown = filterBar and filterBar.SearchFilterDropdown
+    local searchBar = filterBar and filterBar.SearchBar
+    if dropdown and searchBar then
+        dropdown:SetHeight(searchBar:GetHeight())
+    end
+end
+
 local function StyleSocialContent(content)
     if not content or content._BFISocialContentStyled then return end
     content._BFISocialContentStyled = true
@@ -611,9 +833,23 @@ local function StyleSocialContent(content)
         SetFlatTexture(content.BottomDivider, "border", 0.8)
     end
 
-    if content.FilterBar then
-        StyleDropdown(content.FilterBar.SearchFilterDropdown)
-        S.StyleEditBox(content.FilterBar.SearchBar)
+    local filterBar = content.FilterBar
+    if filterBar then
+        StyleDropdown(filterBar.SearchFilterDropdown)
+        S.StyleEditBox(filterBar.SearchBar)
+
+        -- SocialUIShared uses different base heights and text-scale weights
+        -- for these controls. Reconcile after TextSizeManager updates all of
+        -- its registered objects so callback iteration order cannot undo it.
+        if not filterBar._BFIFilterHeightHooked then
+            filterBar._BFIFilterHeightHooked = true
+            _G.EventRegistry:RegisterCallback(
+                "TextSizeManager.OnTextScaleUpdated",
+                MatchSocialFilterHeight,
+                filterBar
+            )
+        end
+        MatchSocialFilterHeight(filterBar)
     end
 
     StyleButton(content.ActionButton, "BFI")
@@ -756,12 +992,14 @@ local function StyleSocialUI()
     battleNetBar.Background:SetAlpha(0)
     local controls = battleNetBar.ControlsContainer
     SetFlatTexture(controls.BattleNetBackground, "widget_dark", 0.8)
-    StyleDropdown(controls.OnlineStatusDropdown)
+    StyleStatusDropdown(controls.OnlineStatusDropdown)
     StyleArtworkButton(controls.BattleNetMenuButton)
 
-    for tab in frame:EnumerateTabs() do
-        StyleSocialTab(tab)
+    if not frame._BFISocialTabLayoutHooked then
+        frame._BFISocialTabLayoutHooked = true
+        hooksecurefunc(frame, "RefreshTabs", LayoutSocialTabs)
     end
+    LayoutSocialTabs(frame)
     frame:RefreshTabStates()
 
     for _, tabData in next, frame.tabDefinitions do
@@ -797,6 +1035,7 @@ local function StyleRaidFrames()
 end
 
 local function StyleBlizzard()
+    InstallStatusMenuHooks()
     StyleLegacyFriendsFrame()
     StyleSocialUI()
     StyleRecentAllies()

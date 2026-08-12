@@ -677,7 +677,7 @@ local function testOrientationAndGeometry()
         height = 6,
     }, "negative-spacing holder")
 
-    -- d3915c78's flow cursor already retains elementSpacing after the prior
+    -- eb941aad's flow cursor already retains elementSpacing after the prior
     -- group's last element. A non-zero groupSpacing would double the 2px gap
     -- and can wrap the next group early.
     local boundary = compile("target", "HARMFUL", baseConfig())
