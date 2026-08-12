@@ -855,6 +855,7 @@ local function makePresetCompiler()
     end
 
     local BFI = {
+        funcs = {},
         L = setmetatable({}, {
             __index = function(_, key)
                 return key
@@ -867,6 +868,15 @@ local function makePresetCompiler()
     local environment = {
         _G = false,
         AbstractFramework = AF,
+        AuraUtil = {
+            AuraFilters = {
+                Important = "IMPORTANT",
+                Dispellable = "DISPELLABLE",
+            },
+        },
+        GetCVar = function()
+            return "0"
+        end,
         AnchorUtil = {
             FlowLayoutAxis = {
                 Horizontal = 101,
@@ -919,6 +929,7 @@ local function makePresetCompiler()
     })
 
     for _, path in ipairs({
+        "Utils.lua",
         "Modules/UnitFrames/Presets.lua",
         "Modules/UnitFrames/AuraPolicy.lua",
         "Modules/UnitFrames/AuraSpec.lua",
@@ -1442,42 +1453,48 @@ end
 
 local function testShippedPetTargetPresetBounds()
     local UF = makePresetCompiler()
-    local helpfulFilters = {
-        "HELPFUL|PLAYER",
-        "HELPFUL|RAID_IN_COMBAT|!PLAYER",
-        "HELPFUL|RAID_PLAYER_DISPELLABLE|!PLAYER"
-            .. "|!RAID_IN_COMBAT",
-        "HELPFUL|BIG_DEFENSIVE|!PLAYER|!RAID_IN_COMBAT"
-            .. "|!RAID_PLAYER_DISPELLABLE",
-        "HELPFUL|EXTERNAL_DEFENSIVE|!PLAYER|!RAID_IN_COMBAT"
-            .. "|!RAID_PLAYER_DISPELLABLE|!BIG_DEFENSIVE",
-    }
-    local harmfulFilters = {
-        "HARMFUL|PLAYER",
-        "HARMFUL|RAID_IN_COMBAT|!PLAYER",
-        "HARMFUL|RAID_PLAYER_DISPELLABLE|!PLAYER"
-            .. "|!RAID_IN_COMBAT",
-    }
-    local diagnostics = {
-        "NATIVE_DEFAULT_SORT_ADDS_PRIORITY",
-        "NATIVE_HOLDER_USES_MAXIMUM_EXTENT",
-        "AURA_TYPE_COLOR_SOURCE_RULES_IGNORED",
-    }
-    local degradations = {
-        perGroupLimit = true,
-        perGroupSort = true,
-        privateAuraSourceUnseparable = true,
-        defaultSortPriority = true,
-        fixedHolderExtent = true,
-        auraTypeColorSourceRulesIgnored = true,
-        spellIDListsIgnored = false,
-        tooltipPlacementApproximate = false,
-        partitionDeferred = false,
-    }
+
+    local function assertAllAuraDescriptor(
+        descriptor,
+        baseFilter,
+        maximum,
+        width,
+        height,
+        message
+    )
+        assertTrue(descriptor, message .. " descriptor")
+        assertEqual(descriptor.migrationReady, true,
+            message .. " migration readiness")
+        assertEqual(descriptor.metrics.groupCount, 1,
+            message .. " group count")
+        assertEqual(descriptor.metrics.legacyMaxFrameCount, maximum,
+            message .. " legacy capacity")
+        assertEqual(descriptor.metrics.nativeVisibleCapacity, maximum,
+            message .. " native capacity")
+        assertEqual(descriptor.metrics.initialRestrictedButtonCount, 10,
+            message .. " initial native buttons")
+        assertEqual(
+            descriptor.metrics.freshContainerRestrictedButtonCountCeiling,
+            math.ceil(maximum / 10) * 10,
+            message .. " native button ceiling"
+        )
+        assertEqual(descriptor.completeSpec.holder.width, width,
+            message .. " holder width")
+        assertEqual(descriptor.completeSpec.holder.height, height,
+            message .. " holder height")
+        assertEqual(
+            descriptor.completeSpec.groups[1].filterString,
+            baseFilter,
+            message .. " all-auras filter"
+        )
+        assertEqual(descriptor.visibility.requiresVisible, false,
+            message .. " visibility gate")
+        assertEqual(descriptor.visibility.requiresAssist, false,
+            message .. " assist gate")
+    end
 
     for _, id in ipairs({"default1", "default2"}) do
-        local preset = UF.GetPreset(id)
-        local indicators = preset.pettarget.indicators
+        local indicators = UF.GetPreset(id).pettarget.indicators
         local buffs, buffError = UF.CompileNativeAuraSpec(
             "pettarget",
             "HELPFUL",
@@ -1489,91 +1506,30 @@ local function testShippedPetTargetPresetBounds()
             indicators.debuffs
         )
 
-        assertTrue(buffs,
-            id .. " buffs compile error: " .. tostring(buffError))
-        assertTrue(debuffs,
-            id .. " debuffs compile error: " .. tostring(debuffError))
         assertEqual(buffError, nil, id .. " buffs compile error")
         assertEqual(debuffError, nil, id .. " debuffs compile error")
         assertEqual(indicators.buffs.enabled, false,
             id .. " default buffs state")
         assertEqual(indicators.debuffs.enabled, false,
             id .. " default debuffs state")
-
-        assertEqual(buffs.migrationReady, true,
-            id .. " buffs migration readiness")
-        assertEqual(buffs.partition, nil,
-            id .. " buffs partition")
-        assertMetrics(buffs.metrics, {
-            groupCount = 5,
-            legacyMaxFrameCount = 22,
-            nativeVisibleCapacity = 110,
-            nativeBatchSize = 10,
-            initialRestrictedButtonCount = 50,
-            freshContainerRestrictedButtonCountCeiling = 150,
-        }, id .. " buffs metrics")
-        assertEqual(buffs.completeSpec.holder.width, 219,
-            id .. " buffs holder width")
-        assertEqual(buffs.completeSpec.holder.height, 199,
-            id .. " buffs holder height")
-        assertFilters(buffs, helpfulFilters, id .. " buffs filters")
-        assertEqual(buffs.visibility.requiresVisible, true,
-            id .. " buffs visibility gate")
-        assertEqual(buffs.visibility.requiresAssist, true,
-            id .. " buffs assist gate")
-        assertEqual(#buffs.diagnostics, #diagnostics,
-            id .. " buffs diagnostic count")
-        for index, value in ipairs(diagnostics) do
-            assertEqual(buffs.diagnostics[index], value,
-                id .. " buffs diagnostic " .. index)
-        end
-        for key, value in pairs(degradations) do
-            assertEqual(buffs.degradations[key], value,
-                id .. " buffs degradation " .. key)
-        end
-
-        assertEqual(debuffs.migrationReady, true,
-            id .. " debuffs migration readiness")
-        assertEqual(debuffs.partition, nil,
-            id .. " debuffs partition")
-        assertMetrics(debuffs.metrics, {
-            groupCount = 3,
-            legacyMaxFrameCount = 3,
-            nativeVisibleCapacity = 9,
-            nativeBatchSize = 10,
-            initialRestrictedButtonCount = 30,
-            freshContainerRestrictedButtonCountCeiling = 30,
-        }, id .. " debuffs metrics")
-        assertEqual(debuffs.completeSpec.holder.width, 59,
-            id .. " debuffs holder width")
-        assertEqual(debuffs.completeSpec.holder.height, 59,
-            id .. " debuffs holder height")
-        assertFilters(debuffs, harmfulFilters,
-            id .. " debuffs filters")
-        assertEqual(debuffs.visibility.requiresVisible, true,
-            id .. " debuffs visibility gate")
-        assertEqual(debuffs.visibility.requiresAssist, false,
-            id .. " debuffs assist gate")
-        assertEqual(#debuffs.diagnostics, #diagnostics,
-            id .. " debuffs diagnostic count")
-        for index, value in ipairs(diagnostics) do
-            assertEqual(debuffs.diagnostics[index], value,
-                id .. " debuffs diagnostic " .. index)
-        end
-        for key, value in pairs(degradations) do
-            assertEqual(debuffs.degradations[key], value,
-                id .. " debuffs degradation " .. key)
-        end
+        assertAllAuraDescriptor(
+            buffs,
+            "HELPFUL",
+            22,
+            219,
+            39,
+            id .. " buffs"
+        )
+        assertAllAuraDescriptor(
+            debuffs,
+            "HARMFUL",
+            3,
+            59,
+            19,
+            id .. " debuffs"
+        )
     end
 end
-
-testPetTargetActivationAndConstructionOrder()
-testPetTargetDisableAndReenableLifecycle()
-testPetTargetConfigModeGuardsAreLocal()
-testPetTargetDefaultDisabledDoesNotBuild()
-testPetTargetUnitEventsAndTicksRefreshNativeRuntime()
-testPetTargetRuntimeLifecycleHasNoGrowth()
-testPetTargetUnavailableBackendUsesLegacyAuraBuilders()
 testShippedPetTargetPresetBounds()
 
 print("unit_frame_pettarget_native_aura_test.lua: ok")

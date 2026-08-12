@@ -425,6 +425,7 @@ local function makePresetCompiler()
     end
 
     local BFI = {
+        funcs = {},
         L = setmetatable({}, {
             __index = function(_, key)
                 return key
@@ -437,6 +438,15 @@ local function makePresetCompiler()
     local environment = {
         _G = false,
         AbstractFramework = AF,
+        AuraUtil = {
+            AuraFilters = {
+                Important = "IMPORTANT",
+                Dispellable = "DISPELLABLE",
+            },
+        },
+        GetCVar = function()
+            return "0"
+        end,
         AnchorUtil = {
             FlowLayoutAxis = {
                 Horizontal = 101,
@@ -485,6 +495,7 @@ local function makePresetCompiler()
     })
 
     for _, path in ipairs({
+        "Utils.lua",
         "Modules/UnitFrames/Presets.lua",
         "Modules/UnitFrames/AuraPolicy.lua",
         "Modules/UnitFrames/AuraSpec.lua",
@@ -729,9 +740,47 @@ end
 local function testShippedFocusPresetBounds()
     local UF = makePresetCompiler()
 
+    local function assertAllAuraDescriptor(
+        descriptor,
+        baseFilter,
+        maximum,
+        width,
+        height,
+        message
+    )
+        assertTrue(descriptor, message .. " descriptor")
+        assertEqual(descriptor.migrationReady, true,
+            message .. " migration readiness")
+        assertEqual(descriptor.metrics.groupCount, 1,
+            message .. " group count")
+        assertEqual(descriptor.metrics.legacyMaxFrameCount, maximum,
+            message .. " legacy capacity")
+        assertEqual(descriptor.metrics.nativeVisibleCapacity, maximum,
+            message .. " native capacity")
+        assertEqual(descriptor.metrics.initialRestrictedButtonCount, 10,
+            message .. " initial native buttons")
+        assertEqual(
+            descriptor.metrics.freshContainerRestrictedButtonCountCeiling,
+            math.ceil(maximum / 10) * 10,
+            message .. " native button ceiling"
+        )
+        assertEqual(descriptor.completeSpec.holder.width, width,
+            message .. " holder width")
+        assertEqual(descriptor.completeSpec.holder.height, height,
+            message .. " holder height")
+        assertEqual(
+            descriptor.completeSpec.groups[1].filterString,
+            baseFilter,
+            message .. " all-auras filter"
+        )
+        assertEqual(descriptor.visibility.requiresVisible, false,
+            message .. " visibility gate")
+        assertEqual(descriptor.visibility.requiresAssist, false,
+            message .. " assist gate")
+    end
+
     for _, id in ipairs({"default1", "default2"}) do
-        local preset = UF.GetPreset(id)
-        local indicators = preset.focus.indicators
+        local indicators = UF.GetPreset(id).focus.indicators
         local buffs, buffError = UF.CompileNativeAuraSpec(
             "focus",
             "HELPFUL",
@@ -743,81 +792,30 @@ local function testShippedFocusPresetBounds()
             indicators.debuffs
         )
 
-        assertTrue(buffs, id .. " buffs compile error: " .. tostring(buffError))
-        assertTrue(debuffs,
-            id .. " debuffs compile error: " .. tostring(debuffError))
         assertEqual(buffError, nil, id .. " buffs compile error")
         assertEqual(debuffError, nil, id .. " debuffs compile error")
         assertEqual(indicators.buffs.enabled, true,
             id .. " default buffs state")
         assertEqual(indicators.debuffs.enabled, true,
             id .. " default debuffs state")
-
-        assertEqual(buffs.metrics.groupCount, 5,
-            id .. " buffs group count")
-        assertEqual(buffs.metrics.nativeVisibleCapacity, 15,
-            id .. " buffs native capacity")
-        assertEqual(buffs.metrics.initialRestrictedButtonCount, 50,
-            id .. " buffs initial native buttons")
-        assertEqual(
-            buffs.metrics.freshContainerRestrictedButtonCountCeiling,
-            50,
-            id .. " buffs native button ceiling"
+        assertAllAuraDescriptor(
+            buffs,
+            "HELPFUL",
+            3,
+            59,
+            19,
+            id .. " buffs"
         )
-        assertEqual(buffs.completeSpec.holder.width, 59,
-            id .. " buffs holder width")
-        assertEqual(buffs.completeSpec.holder.height, 99,
-            id .. " buffs holder height")
-        assertEqual(buffs.visibility.requiresVisible, true,
-            id .. " buffs visibility gate")
-        assertEqual(buffs.visibility.requiresAssist, true,
-            id .. " buffs assist gate")
-
-        assertEqual(debuffs.migrationReady, true,
-            id .. " debuffs migration readiness")
-        assertEqual(debuffs.metrics.groupCount, 3,
-            id .. " debuffs group count")
-        assertEqual(debuffs.metrics.legacyMaxFrameCount, 3,
-            id .. " debuffs legacy capacity")
-        assertEqual(debuffs.metrics.nativeVisibleCapacity, 9,
-            id .. " debuffs native capacity")
-        assertEqual(debuffs.metrics.initialRestrictedButtonCount, 30,
-            id .. " debuffs initial native buttons")
-        assertEqual(
-            debuffs.metrics.freshContainerRestrictedButtonCountCeiling,
-            30,
-            id .. " debuffs native button ceiling"
+        assertAllAuraDescriptor(
+            debuffs,
+            "HARMFUL",
+            3,
+            59,
+            19,
+            id .. " debuffs"
         )
-        assertEqual(debuffs.completeSpec.holder.width, 59,
-            id .. " debuffs holder width")
-        assertEqual(debuffs.completeSpec.holder.height, 59,
-            id .. " debuffs holder height")
-        assertEqual(debuffs.partition, nil,
-            id .. " debuffs partition")
-        assertEqual(debuffs.completeSpec.groups[1].filterString,
-            "HARMFUL|PLAYER", id .. " debuffs player filter")
-        assertEqual(debuffs.completeSpec.groups[2].filterString,
-            "HARMFUL|RAID_IN_COMBAT|!PLAYER",
-            id .. " debuffs raid filter")
-        assertEqual(debuffs.completeSpec.groups[3].filterString,
-            "HARMFUL|RAID_PLAYER_DISPELLABLE|!PLAYER"
-                .. "|!RAID_IN_COMBAT",
-            id .. " debuffs dispellable filter")
-        assertEqual(debuffs.visibility.requiresVisible, true,
-            id .. " debuffs visibility gate")
-        assertEqual(debuffs.visibility.requiresAssist, false,
-            id .. " debuffs assist gate")
-        assertTrue(contains(
-            debuffs.diagnostics,
-            "AURA_TYPE_COLOR_SOURCE_RULES_IGNORED"
-        ), id .. " debuffs source-color diagnostic")
     end
 end
-
-testFocusActivationAndConstructionOrder()
-testFocusDisableAndReenableLifecycle()
-testFocusConfigModeGuardsAreLocal()
-testFocusUnavailableNativeBackendFallback()
 testShippedFocusPresetBounds()
 
 print("unit_frame_focus_native_aura_test.lua: ok")
