@@ -4,6 +4,7 @@
     <Script file="UnitButton.lua"/>
     <Include file="UnitButton.xml"/>
     <Script file="AuraPolicy.lua"/>
+    <Script file="AuraSpec.lua"/>
     <Script file="AuraController.lua"/>
     <!-- indicators -->
     <Script file="Indicators\Auras.lua"/>
