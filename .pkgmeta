@@ -2,6 +2,21 @@ package-as: BFInfinite
 enable-nolib-creation: no
 
 ignore:
+  - .github
+  - .gitignore
+  - .kanban
+  - .lint
+  - .luacheckrc
+  - .pkgmeta
+  - .release
+  - .screenshots
+  - .unused
+  - AGENTS.md
+  - CONTRIBUTING.md
+  - docs
+  - Modules/Blizzard/Style/WorldMapFrame_Test.lua
+  - RELEASE_NOTES.md
+  - scripts
   - tests
 
 manual-changelog:

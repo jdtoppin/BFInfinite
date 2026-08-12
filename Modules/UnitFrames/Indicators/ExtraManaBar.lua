@@ -153,8 +153,6 @@ end
 local function Check(self, event, unitId)
     if unitId and unitId ~= "player" then return end
 
-    print(self.hideIfHasClassPower, UF.ShouldShowClassPower(), UF.ShouldShowExtraMana())
-
     if (self.hideIfHasClassPower and UF.ShouldShowClassPower())
         or not UF.ShouldShowExtraMana() then
 

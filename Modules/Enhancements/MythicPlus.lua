@@ -4,11 +4,129 @@ local BFI = select(2, ...)
 local E = BFI.modules.Enhancements
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
+---@class Funcs
+local F = BFI.funcs
 
 local IsAddOnLoaded = C_AddOns.IsAddOnLoaded
+local CanUseKeystoneInCurrentMap = C_ChallengeMode.CanUseKeystoneInCurrentMap
+local HasSlottedKeystone = C_ChallengeMode.HasSlottedKeystone
+local SlotKeystone = C_ChallengeMode.SlotKeystone
+local GetItemID = C_Item.GetItemID
+local IsItemKeystoneByID = C_Item.IsItemKeystoneByID
 local IsSpellKnownOrInSpellBook = C_SpellBook.IsSpellKnownOrInSpellBook
 local GetSpellName = C_Spell.GetSpellName
 local GetSpellCooldown = C_Spell.GetSpellCooldown
+local IsValueNonSecret = F.isValueNonSecret
+local IteratePlayerInventory = ItemUtil.IteratePlayerInventory
+local PickupBagItem = ItemUtil.PickupBagItem
+
+---------------------------------------------------------------------
+-- Mythic Plus Keystone Auto Insert
+---------------------------------------------------------------------
+local function IsOrdinaryBoolean(value)
+    return IsValueNonSecret(value) and type(value) == "boolean"
+end
+
+local function IsAutoInsertKeystoneEnabled()
+    local config = E.config and E.config.mythicPlus
+    local autoInsertKeystone = config and config.autoInsertKeystone
+    return config and config.enabled
+        and autoInsertKeystone and autoInsertKeystone.enabled
+end
+
+-- Retail 12.1.0.68914, wow-ui-source d3915c78aba77a7a9be76acbfa35c674bbb6abe9:
+-- keep this predicate aligned with Blizzard's MythicKeystone bag filter.
+local function FindUsableKeystone()
+    local usableItemLocation
+    local usableItemID
+
+    IteratePlayerInventory(function(itemLocation)
+        local itemID = GetItemID(itemLocation)
+        if not IsValueNonSecret(itemID) or type(itemID) ~= "number" then
+            return false
+        end
+
+        local isKeystone = IsItemKeystoneByID(itemID)
+        if not IsOrdinaryBoolean(isKeystone) or not isKeystone then
+            return false
+        end
+
+        local canUse = CanUseKeystoneInCurrentMap(itemLocation)
+        if not IsOrdinaryBoolean(canUse) or not canUse then
+            return false
+        end
+
+        usableItemLocation = itemLocation
+        usableItemID = itemID
+        return true
+    end)
+
+    return usableItemLocation, usableItemID
+end
+
+local function TryAutoInsertKeystone()
+    if not IsAutoInsertKeystoneEnabled() then return end
+
+    local inCombat = InCombatLockdown()
+    if not IsOrdinaryBoolean(inCombat) or inCombat then return end
+
+    local hasSlottedKeystone = HasSlottedKeystone()
+    if not IsOrdinaryBoolean(hasSlottedKeystone) or hasSlottedKeystone then return end
+
+    local cursorType = GetCursorInfo()
+    if not IsValueNonSecret(cursorType) or cursorType ~= nil then return end
+
+    local itemLocation, itemID = FindUsableKeystone()
+    if not itemLocation then return end
+
+    PickupBagItem(itemLocation)
+
+    local pickedCursorType, pickedItemID = GetCursorInfo()
+    if not IsValueNonSecret(pickedCursorType)
+        or not IsValueNonSecret(pickedItemID)
+        or pickedCursorType ~= "item"
+        or pickedItemID ~= itemID
+    then
+        return
+    end
+
+    local cursorHasItem = CursorHasItem()
+    if not IsOrdinaryBoolean(cursorHasItem) or not cursorHasItem then return end
+
+    SlotKeystone()
+
+    hasSlottedKeystone = HasSlottedKeystone()
+    if not IsOrdinaryBoolean(hasSlottedKeystone) or hasSlottedKeystone then return end
+
+    cursorHasItem = CursorHasItem()
+    if not IsOrdinaryBoolean(cursorHasItem) or not cursorHasItem then return end
+
+    -- SlotKeystone has no return value. Only put back an item whose public
+    -- cursor type and item ID still match BFI's initially-empty-cursor pickup
+    -- when the synchronous slot event failed.
+    local failedCursorType, failedItemID = GetCursorInfo()
+    if IsValueNonSecret(failedCursorType)
+        and IsValueNonSecret(failedItemID)
+        and failedCursorType == "item"
+        and failedItemID == itemID
+    then
+        ClearCursor()
+    end
+end
+
+local autoInsertKeystoneHooked
+local function InitAutoInsertKeystone()
+    local frame = _G.ChallengesKeystoneFrame
+    if not frame
+        or autoInsertKeystoneHooked
+        or type(frame.ShowKeystoneFrame) ~= "function"
+    then
+        return
+    end
+
+    hooksecurefunc(frame, "ShowKeystoneFrame", TryAutoInsertKeystone)
+    autoInsertKeystoneHooked = true
+end
 
 ---------------------------------------------------------------------
 -- Mythic Plus Teleport Buttons
@@ -464,8 +582,21 @@ local function UpdateConfig(_, module, which)
 
     if not config.enabled then
         AF.Hide(teleportButtonsParent)
+        AF.UnregisterAddonLoaded("Blizzard_ChallengesUI", InitAutoInsertKeystone)
         AF.UnregisterAddonLoaded("Blizzard_ChallengesUI", InitTeleports)
         return
+    end
+
+    -- autoInsertKeystone
+    local autoInsertKeystone = config.autoInsertKeystone
+    if autoInsertKeystone and autoInsertKeystone.enabled then
+        if IsAddOnLoaded("Blizzard_ChallengesUI") then
+            InitAutoInsertKeystone()
+        else
+            AF.RegisterAddonLoaded("Blizzard_ChallengesUI", InitAutoInsertKeystone)
+        end
+    else
+        AF.UnregisterAddonLoaded("Blizzard_ChallengesUI", InitAutoInsertKeystone)
     end
 
     -- teleportButtons

@@ -5,7 +5,7 @@ local UF = BFI.modules.UnitFrames
 local concat = table.concat
 local ipairs, type = ipairs, type
 
--- Retail 12.1.0.68914 (wow-ui-source d3915c78) supports negated native
+-- Retail 12.1.0.69273 (wow-ui-source eb941aad) supports negated native
 -- filter tokens, but each CustomAuraContainer group owns its own limit and
 -- sort. The container also has no selector that separates public from private
 -- aura sources. This compiler records those limitations without reading any
