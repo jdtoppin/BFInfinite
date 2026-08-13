@@ -23,11 +23,11 @@ local auraColorsAvailable = AF.isRetail
 ---------------------------------------------------------------------
 local list = {
     "general",
-    "clickCastings",
     "SEPARATOR",
     "enhancements",
     "colors",
     auraColorsAvailable and "auras" or "-auras",
+    "clickCastings",
     -- "social",
     "SEPARATOR",
     "unitFrames",

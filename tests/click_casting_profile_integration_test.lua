@@ -46,8 +46,12 @@ assertBefore(unitButton, 'self:HookScript("OnEnter", UnitButton_OnEnter)',
     "secure wrapping happens after the unit frame installs its hover hook")
 
 local options = readFile("Options/OptionsFrame.lua")
-assertBefore(options, '"clickCastings"', '"enhancements"',
-    "Click Casting appears near the top of navigation")
+assertContains(options,
+    'auraColorsAvailable and "auras" or "-auras",\n'
+        .. '    "clickCastings",\n'
+        .. '    -- "social",\n'
+        .. '    "SEPARATOR",',
+    "Click Casting appears beneath Auras in the shared settings group")
 
 local profiles = readFile("Options/Profiles.lua")
 assertContains(profiles,
