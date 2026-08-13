@@ -2,6 +2,7 @@
 local BFI = select(2, ...)
 ---@class BuffsDebuffs
 local BD = BFI.modules.BuffsDebuffs
+local IsValueNonSecret = BFI.funcs.isValueNonSecret
 
 local hooksecurefunc = hooksecurefunc
 local InCombatLockdown = InCombatLockdown
@@ -10,6 +11,12 @@ local hasRestrictedAuraButtons = _G.C_AuraContainerUtil ~= nil
 local suppressedStates = {}
 local suppressedRoots = {}
 local hookedRoots = {}
+
+local function HasExpectedParent(object, expected)
+    if not object or type(object.GetParent) ~= "function" then return false end
+    local parent = object:GetParent()
+    return IsValueNonSecret(parent) and parent == expected
+end
 
 local function IsAuraContainer(frame)
     return frame
@@ -29,10 +36,7 @@ local function HasRootPrivateAuraAnchors(frame)
     if type(anchors) ~= "table" or #anchors == 0 then return false end
 
     for _, anchor in ipairs(anchors) do
-        if not anchor
-            or type(anchor.GetParent) ~= "function"
-            or anchor:GetParent() ~= frame
-        then
+        if not HasExpectedParent(anchor, frame) then
             return false
         end
     end
@@ -54,21 +58,24 @@ local function ResolveNativePublicAuraFrame(which)
             or type(frame.UpdateAuraButtons) ~= "function"
             or type(frame.auraFrames) ~= "table"
             or not IsAuraContainer(container)
-            or container:GetParent() ~= frame
+            or not HasExpectedParent(container, frame)
             or not IsVisualControl(collapseButton)
-            or collapseButton:GetParent() ~= frame
+            or not HasExpectedParent(collapseButton, frame)
             or not IsVisualControl(consolidatedBuffs)
-            or consolidatedBuffs:GetParent() ~= frame
+            or not HasExpectedParent(consolidatedBuffs, frame)
             or not consolidatedTooltip
             or type(consolidatedTooltip.Hide) ~= "function"
             or type(consolidatedTooltip.GetParent) ~= "function"
-            or consolidatedTooltip:GetParent() ~= consolidatedBuffs
+            or not HasExpectedParent(consolidatedTooltip, consolidatedBuffs)
             or not consolidatedAuras
             or type(consolidatedAuras.auraFrames) ~= "table"
             or type(consolidatedAuras.GetParent) ~= "function"
             or not IsAuraContainer(consolidatedAuras.AuraContainer)
-            or consolidatedAuras:GetParent() ~= consolidatedTooltip
-            or consolidatedAuras.AuraContainer:GetParent() ~= consolidatedAuras
+            or not HasExpectedParent(consolidatedAuras, consolidatedTooltip)
+            or not HasExpectedParent(
+                consolidatedAuras.AuraContainer,
+                consolidatedAuras
+            )
         then
             return
         end
@@ -87,7 +94,7 @@ local function ResolveNativePublicAuraFrame(which)
             or type(frame.UpdateAuraButtons) ~= "function"
             or type(frame.auraFrames) ~= "table"
             or not IsAuraContainer(container)
-            or container:GetParent() ~= frame
+            or not HasExpectedParent(container, frame)
             or not HasRootPrivateAuraAnchors(frame)
         then
             return
@@ -102,11 +109,11 @@ local function ResolveNativePublicAuraFrame(which)
 end
 
 local function HidePublicAuraOverlays(frame, publicParent)
-    -- Retail 12.1's intrinsic AuraButton type denies tainted access whenever
-    -- aura data is secret. This shared suppression path does not assume which
-    -- child type a native container owns, so it never enumerates 12.1
-    -- children. BlizzardDebuffs.lua separately validates and styles only the
-    -- pinned Blizzard_BuffFrame ordinary Button pool, outside combat.
+    -- Retail 12.1.0.69273 AuraButtons can deny addon access while aura data is
+    -- secret. C_AuraContainerUtil identifies that native path: never enumerate
+    -- intrinsic children or install the update hook that would revisit them.
+    -- BlizzardDebuffs.lua separately validates only the pinned, fixed ordinary
+    -- DebuffFrame pool; it does not weaken this generic restricted-child rule.
     if hasRestrictedAuraButtons then return end
 
     local auraFrames = frame.auraFrames
@@ -115,10 +122,7 @@ local function HidePublicAuraOverlays(frame, publicParent)
     local gameTooltip = _G.GameTooltip
     local helpTip = _G.HelpTip
     for _, button in ipairs(auraFrames) do
-        if button
-            and type(button.GetParent) == "function"
-            and button:GetParent() == publicParent
-        then
+        if HasExpectedParent(button, publicParent) then
             if gameTooltip and gameTooltip:IsOwned(button) then
                 gameTooltip:Hide()
             end
@@ -183,7 +187,8 @@ function BD.SetNativePublicAurasSuppressed(which, suppressed)
     local target = ResolveNativePublicAuraFrame(which)
     if not target then return false end
 
-    -- Retail 12.1.0.68914 (UI source d3915c78aba7) creates the supported public
+    -- Retail 12.1.0.69273 (wow-ui-source
+    -- eb941aad028d73ddc69e3e8ef4da709f4d3cd744) creates the supported public
     -- AuraContainerTemplate shown, with these ordinary controls at alpha 1 and
     -- mouse enabled. Keep only a BFI-owned suppression ledger and restore those
     -- known constants; observing visibility, alpha, or mouse state can return

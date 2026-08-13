@@ -58,10 +58,10 @@ local function GetRetailInterfaceVersion()
 end
 
 -- Retail 12.0.7 loads the implementation and template together from
--- Blizzard_RestrictedAddOnEnvironment/SecureGroupHeaders. Retail 12.1.0.68914
--- (wow-ui-source d3915c78) marks SecureAuraHeader.lua/xml Classic-only. Keep an
--- explicit interface boundary because Lua function globals cannot prove that
--- SecureAuraHeaderTemplate is constructible.
+-- Blizzard_RestrictedAddOnEnvironment/SecureGroupHeaders. Retail 12.1.0.69273
+-- (wow-ui-source eb941aad028d73ddc69e3e8ef4da709f4d3cd744) marks
+-- SecureAuraHeader.lua/xml Classic-only. Keep an explicit interface boundary
+-- because Lua function globals cannot prove that the template is constructible.
 function BD.HasSecureAuraHeaderBackend()
     local interfaceVersion = GetRetailInterfaceVersion()
     return AF.isRetail
@@ -151,11 +151,33 @@ local function HasRegisteredCustomAuraContainerBackend(which)
         and BD.IsCustomAuraContainerAvailable(which) == true
 end
 
+local lastKnownBlizzardDebuffStyleAvailable = false
+
 local function HasBlizzardDebuffStyleBackend()
-    return type(BD.HasBlizzardDebuffStyleCapability) == "function"
+    local adapterAvailable =
+        type(BD.HasBlizzardDebuffStyleCapability) == "function"
         and type(BD.UpdateBlizzardDebuffStyle) == "function"
         and type(BD.DisableBlizzardDebuffStyle) == "function"
-        and BD.HasBlizzardDebuffStyleCapability() == true
+    if not adapterAvailable then
+        lastKnownBlizzardDebuffStyleAvailable = false
+        return false
+    end
+
+    if BD.HasBlizzardDebuffStyleCapability() == true then
+        lastKnownBlizzardDebuffStyleAvailable = true
+        return true
+    end
+
+    -- The adapter deliberately reports unavailable in combat because its
+    -- native preflight cannot run there. Preserve only the last verified
+    -- static policy so an already-selected Debuffs tab can render the queued
+    -- status until PLAYER_REGEN_ENABLED retries the real capability check.
+    if InCombatLockdown() and lastKnownBlizzardDebuffStyleAvailable then
+        return true
+    end
+
+    lastKnownBlizzardDebuffStyleAvailable = false
+    return false
 end
 
 function BD.GetAuraBackend(which)
@@ -557,26 +579,32 @@ end
 local function UpdatePane(which, config, header, createHeader)
     local backend = BD.GetAuraBackend(which)
     if backend == CUSTOM_AURA_CONTAINER_BACKEND then
-        if which == "debuffs"
-            and type(BD.DisableBlizzardDebuffStyle) == "function"
-        then
-            BD.DisableBlizzardDebuffStyle()
+        if which == "debuffs" then
+            if type(BD.DisableBlizzardDebuffStyle) ~= "function"
+                or BD.DisableBlizzardDebuffStyle() ~= true
+            then
+                return header
+            end
         end
         -- Restore Blizzard first. The custom backend may suppress it again
         -- only after its replacement has completed construction.
         if not DisableHeader(which, header) then return header end
         BD.UpdateCustomAuraContainer(which, config)
     elseif backend == BLIZZARD_DEBUFF_STYLE_BACKEND then
+        -- Restore Blizzard's native owner before styling it. A missing Debuffs
+        -- custom controller is expected because #96 registers Buffs only.
         if type(BD.DisableCustomAuraContainer) == "function" then
             BD.DisableCustomAuraContainer(which)
         end
         if not DisableHeader(which, header) then return header end
-        BD.UpdateBlizzardDebuffStyle(config)
+        if BD.UpdateBlizzardDebuffStyle(config) ~= true then return header end
     elseif backend == SECURE_AURA_HEADER_BACKEND then
-        if which == "debuffs"
-            and type(BD.DisableBlizzardDebuffStyle) == "function"
-        then
-            BD.DisableBlizzardDebuffStyle()
+        if which == "debuffs" then
+            if type(BD.DisableBlizzardDebuffStyle) ~= "function"
+                or BD.DisableBlizzardDebuffStyle() ~= true
+            then
+                return header
+            end
         end
         if type(BD.DisableCustomAuraContainer) == "function" then
             BD.DisableCustomAuraContainer(which)
@@ -587,10 +615,12 @@ local function UpdatePane(which, config, header, createHeader)
             DisableHeader(which, header)
         end
     else
-        if which == "debuffs"
-            and type(BD.DisableBlizzardDebuffStyle) == "function"
-        then
-            BD.DisableBlizzardDebuffStyle()
+        if which == "debuffs" then
+            if type(BD.DisableBlizzardDebuffStyle) ~= "function"
+                or BD.DisableBlizzardDebuffStyle() ~= true
+            then
+                return header
+            end
         end
         if type(BD.DisableCustomAuraContainer) == "function" then
             BD.DisableCustomAuraContainer(which)

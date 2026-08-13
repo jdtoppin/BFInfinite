@@ -31,6 +31,16 @@ local defaults = {
             font = {"Expressway", 10, "outline", false},
             color = {
                 normal = AF.GetColorTable("white"),
+                percent = {
+                    enabled = false,
+                    value = 0.5,
+                    rgb = AF.GetColorTable("aura_percent"),
+                },
+                seconds = {
+                    enabled = true,
+                    value = 5,
+                    rgb = AF.GetColorTable("aura_seconds"),
+                },
             },
         },
 
@@ -60,6 +70,16 @@ local defaults = {
             font = {"Expressway", 10, "outline", false},
             color = {
                 normal = AF.GetColorTable("white"),
+                percent = {
+                    enabled = false,
+                    value = 0.5,
+                    rgb = AF.GetColorTable("aura_percent"),
+                },
+                seconds = {
+                    enabled = true,
+                    value = 5,
+                    rgb = AF.GetColorTable("aura_seconds"),
+                },
             },
         },
     },
@@ -157,6 +177,50 @@ local function NormalizeColor(value, fallback)
     return value
 end
 
+local function InferDurationColorMode(config)
+    if type(config) ~= "table" or type(config.color) ~= "table" then
+        return "seconds"
+    end
+
+    local seconds = config.color.seconds
+    local percent = config.color.percent
+    local secondsEnabled
+    local percentEnabled
+    if type(seconds) == "table" then
+        secondsEnabled = seconds.enabled
+    end
+    if type(percent) == "table" then
+        percentEnabled = percent.enabled
+    end
+
+    -- Infer from the raw saved shape before defaults are filled. This keeps a
+    -- percent-only imported profile from acquiring the shipped seconds=true
+    -- flag and changing modes during hydration.
+    if secondsEnabled == true then
+        return "seconds"
+    elseif percentEnabled == true then
+        return "percent"
+    elseif secondsEnabled == false or percentEnabled == false then
+        return "off"
+    end
+    return "seconds"
+end
+
+local function NormalizeDurationRule(rule, fallback, mode, selectedMode)
+    if type(rule) ~= "table" then rule = {} end
+    FillMissing(rule, fallback)
+    rule.enabled = mode == selectedMode
+
+    local value = tonumber(rule.value)
+    local valid = IsFiniteNumber(value) and value > 0
+    if mode == "percent" then
+        valid = valid and value < 1
+    end
+    rule.value = valid and value or fallback.value
+    rule.rgb = NormalizeColor(rule.rgb, fallback.rgb)
+    return rule
+end
+
 local function NormalizeFont(value, fallback)
     if type(value) ~= "table" then value = {} end
     if type(value[1]) ~= "string" or value[1] == "" then
@@ -197,7 +261,7 @@ local function NormalizeHolderPosition(value, fallback)
     }
 end
 
-local function NormalizeTextConfig(config, fallback, isDuration)
+local function NormalizeTextConfig(config, fallback, isDuration, durationMode)
     if type(config) ~= "table" then config = {} end
     FillMissing(config, fallback)
     config.enabled = NormalizeBoolean(config.enabled, fallback.enabled)
@@ -205,9 +269,22 @@ local function NormalizeTextConfig(config, fallback, isDuration)
     config.position = NormalizeTextPosition(config.position, fallback.position)
     if isDuration then
         if type(config.color) ~= "table" then config.color = {} end
+        FillMissing(config.color, fallback.color)
         config.color.normal = NormalizeColor(
             config.color.normal,
             fallback.color.normal
+        )
+        config.color.seconds = NormalizeDurationRule(
+            config.color.seconds,
+            fallback.color.seconds,
+            "seconds",
+            durationMode
+        )
+        config.color.percent = NormalizeDurationRule(
+            config.color.percent,
+            fallback.color.percent,
+            "percent",
+            durationMode
         )
     else
         config.color = NormalizeColor(config.color, fallback.color)
@@ -216,6 +293,9 @@ local function NormalizeTextConfig(config, fallback, isDuration)
 end
 
 local function NormalizePane(config, fallback)
+    local durationMode = InferDurationColorMode(
+        type(config) == "table" and config.duration or nil
+    )
     if type(config) ~= "table" then config = {} end
     FillMissing(config, fallback)
 
@@ -277,9 +357,29 @@ local function NormalizePane(config, fallback)
     config.duration = NormalizeTextConfig(
         config.duration,
         fallback.duration,
-        true
+        true,
+        durationMode
     )
     return config
+end
+
+function BD.GetDurationColorMode(config)
+    return InferDurationColorMode(config)
+end
+
+function BD.SetDurationColorMode(config, mode)
+    if type(config) ~= "table"
+        or type(config.color) ~= "table"
+        or type(config.color.seconds) ~= "table"
+        or type(config.color.percent) ~= "table"
+        or (mode ~= "seconds" and mode ~= "percent" and mode ~= "off")
+    then
+        return false
+    end
+
+    config.color.seconds.enabled = mode == "seconds"
+    config.color.percent.enabled = mode == "percent"
+    return true
 end
 
 AF.RegisterCallback("BFI_UpdateProfile", function(_, t)
