@@ -420,23 +420,28 @@ local function CreatePanel()
     panel:SetAllPoints()
     AF.ApplyCombatProtectionToFrame(panel)
 
-    local title = AF.CreateFontString(
+    local header = AF.CreateTitledPane(
         panel,
-        AF.GetGradientText(L["Click Casting"], "BFI", "white")
+        AF.GetGradientText(L["Click Casting"], "BFI", "white"),
+        nil,
+        nil,
+        "BFI"
     )
-    AF.SetPoint(title, "TOPLEFT", 15, -15)
+    panel.header = header
+    AF.SetPoint(header, "TOPLEFT", 15, -15)
+    AF.SetPoint(header, "TOPRIGHT", -15, -15)
 
-    local profile = AF.CreateFontString(panel)
+    local profile = AF.CreateFontString(header)
     panel.profile = profile
-    AF.SetPoint(profile, "TOPRIGHT", -15, -18)
+    AF.SetPoint(profile, "BOTTOMRIGHT", header.line, "TOPRIGHT", -1, 2)
     profile:SetColor("tip")
 
     local description = AF.CreateFontString(
         panel,
         L["Click Casting bindings apply to every BFI unit frame. They use the active BFI profile; class-specific binding sets remain separate inside profiles shared by multiple classes. Drop a spell, macro, or item onto the Value field to add its ID."]
     )
-    AF.SetPoint(description, "TOPLEFT", title, "BOTTOMLEFT", 0, -8)
-    AF.SetPoint(description, "TOPRIGHT", -15, -38)
+    AF.SetPoint(description, "TOPLEFT", header.line, "BOTTOMLEFT", 0, -8)
+    AF.SetPoint(description, "TOPRIGHT", header.line, "BOTTOMRIGHT", 0, -8)
     description:SetJustifyH("LEFT")
     description:SetJustifyV("TOP")
     description:SetWordWrap(true)
@@ -603,11 +608,13 @@ local function CreatePanel()
 end
 
 local function LoadPanel()
+    local localizedClass = AF.GetLocalizedClassName(AF.player.class)
+    local classText = AF.WrapTextInColor(localizedClass, AF.player.class)
     panel.profile:SetText(
         L["Profile: %s  •  Class: %s  •  Spec: %s"]:format(
             BFI.vars.profileName == "default"
                 and L["Default"] or BFI.vars.profileName,
-            AF.GetLocalizedClassName(AF.player.class),
+            classText,
             AF.player.localizedSpec or L["Unknown"]
         )
     )

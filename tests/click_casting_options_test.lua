@@ -172,6 +172,7 @@ local function createHarness()
         dialogs = {},
         fires = {},
         namedFrames = {},
+        wrapColorCalls = {},
     }
     local L = setmetatable({}, {
         __index = function(_, key) return key end,
@@ -251,6 +252,16 @@ local function createHarness()
         return frame
     end
 
+    function AF.CreateTitledPane(parent, title, _, _, color)
+        local pane = newWidget("titledPane", parent)
+        pane.color = color
+        pane.title = newWidget("fontString", pane)
+        pane.title.text = title
+        pane.line = newWidget("texture", pane)
+        state.headerPane = pane
+        return pane
+    end
+
     function AF.CreateScrollEditBox(parent)
         return newWidget("scrollEditBox", parent)
     end
@@ -309,7 +320,11 @@ local function createHarness()
         widget.tooltip = {...}
     end
 
-    function AF.WrapTextInColor(text)
+    function AF.WrapTextInColor(text, color)
+        state.wrapColorCalls[#state.wrapColorCalls + 1] = {
+            text = text,
+            color = color,
+        }
         return text
     end
 
@@ -431,6 +446,26 @@ assertEqual(harness.cascadingMenuCloseCalls or 0, 0,
 harness:FireCallback("BFI_ShowOptionsPanel", "clickCastings")
 assertEqual(#harness.combatProtected, 1,
     "settings panel receives combat protection")
+assertTrue(harness.headerPane ~= nil,
+    "viewport heading uses the standard titled-pane treatment")
+assertEqual(harness.headerPane.points[1][1], "TOPLEFT",
+    "viewport heading begins at the left content margin")
+assertEqual(harness.headerPane.points[2][1], "TOPRIGHT",
+    "viewport heading line spans the full content width")
+assertEqual(harness.headerPane.color, "BFI",
+    "viewport heading uses the BFI signature accent")
+local clickPanel = harness.namedFrames.BFIOptionsFrame_ClickCastingsPanel
+assertEqual(clickPanel.profile.points[1][2], harness.headerPane.line,
+    "profile, class, and spec metadata sits above the accent line")
+local classColorCall
+for _, call in ipairs(harness.wrapColorCalls) do
+    if call.text == "PRIEST" and call.color == "PRIEST" then
+        classColorCall = call
+        break
+    end
+end
+assertTrue(classColorCall ~= nil,
+    "the localized class value uses the player's class color")
 assertEqual(#harness.list.widgets, 5, "initial binding rows")
 assertEqual(#harness.list.points, 2,
     "binding list uses one top-left and one bottom-right anchor")
