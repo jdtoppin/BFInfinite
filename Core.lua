@@ -5,9 +5,9 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF r37 adds native duration-text color curves driven by Blizzard's opaque
--- remaining-time binding.
-local REQUIRED_AF_VERSION = 37
+-- AF #39/r42 adds native dispel-color textures on top of r41's native
+-- dispel-overlay slots. Selection and color stay inside Blizzard's container.
+local REQUIRED_AF_VERSION = 42
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar
@@ -60,7 +60,7 @@ function eventHandler:ADDON_LOADED(arg)
             AF.SetAddonAccentColor(BFI.name, "blazing_tangerine")
         end
 
-        -- This is global because the supported filter path also runs on 12.0.7.
+        -- check AF version
         AF.RequireVersion(REQUIRED_AF_VERSION)
 
         -- general.language
@@ -268,6 +268,9 @@ local function InitAndBackupCVars()
         "AutoPushSpellToActionBar",
         -- bags
         "combinedBags",
+        -- damage meter
+        "damageMeterEnabled",
+        "damageMeterResetOnNewInstance",
         -- chat
         "chatStyle",
         "whisperMode",

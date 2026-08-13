@@ -83,7 +83,9 @@ local builders = {
     incDmgHealText = UF.CreateIncDmgHealText,
     auras = UF.CreateAuras,
     nativeAuras = UF.CreateNativeAuras,
+    nativePartitionedAuras = UF.CreateNativePartitionedAuras,
     groupNativeAuras = UF.CreateGroupNativeAuras,
+    groupNativeDispels = UF.CreateGroupNativeDispelHighlight,
 }
 
 function UF.CreateIndicators(frame, indicators)
