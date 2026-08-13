@@ -14,6 +14,22 @@ local function assertTrue(value, message)
     end
 end
 
+local function assertDeepEqual(actual, expected, message)
+    if type(actual) ~= type(expected) then
+        error(message or "value types differ", 2)
+    end
+    if type(actual) ~= "table" then
+        assertEqual(actual, expected, message)
+        return
+    end
+    for key, value in pairs(expected) do
+        assertDeepEqual(actual[key], value, message)
+    end
+    for key in pairs(actual) do
+        assertTrue(expected[key] ~= nil, message)
+    end
+end
+
 local function deepMerge(target, source)
     for key, value in pairs(source or {}) do
         if type(value) == "table" then
@@ -168,6 +184,12 @@ local function assertPartyContract(preset)
     )
     assertEqual(buffDescriptor.completeSpec.groups[1].maxFrameCount, 10,
         preset.id .. " buff group capacity")
+    assertDeepEqual(
+        buffDescriptor.completeSpec.groups[1]
+            .buttonStyle.durationText.color.threshold,
+        {mode = "seconds", value = 5, rgb = {1, 1, 1, 1}},
+        preset.id .. " buff low-time color threshold"
+    )
     assertEqual(
         buffDescriptor.completeSpec.groups[1].sortMethod,
         SORT_METHOD.Default,
@@ -181,6 +203,11 @@ local function assertPartyContract(preset)
         preset.id .. " buff visible gate")
     assertEqual(buffDescriptor.visibility.requiresAssist, false,
         preset.id .. " buff assist gate")
+    assertEqual(
+        buffDescriptor.visibility.spellIDFilterRequiresPublicAssist,
+        false,
+        preset.id .. " buff shipped identity-map gate"
+    )
     assertEqual(buffDescriptor.metrics.legacyMaxFrameCount, 10,
         preset.id .. " buff legacy capacity")
     assertEqual(buffDescriptor.metrics.nativeVisibleCapacity, 10,
@@ -192,6 +219,16 @@ local function assertPartyContract(preset)
         10,
         preset.id .. " buff button ceiling"
     )
+
+    local buffsWithoutLowTime = copyMany(buffs)
+    buffsWithoutLowTime.durationText.color.seconds.enabled = false
+    local buffWithoutLowTime = assert(UF.CompileNativeAuraSpec(
+        "party1",
+        "HELPFUL",
+        buffsWithoutLowTime
+    ))
+    assertDeepEqual(buffWithoutLowTime.metrics, buffDescriptor.metrics,
+        preset.id .. " buff low-time threshold does not change metrics")
 
     local debuffDescriptor, debuffError = UF.CompileNativeAuraSpec(
         "party1",
@@ -224,6 +261,11 @@ local function assertPartyContract(preset)
             preset.id .. " debuff native border color " .. index)
         assertEqual(group.buttonStyle.dispelColor, nil,
             preset.id .. " debuff custom border color " .. index)
+        assertDeepEqual(
+            group.buttonStyle.durationText.color.threshold,
+            {mode = "seconds", value = 5, rgb = {1, 1, 1, 1}},
+            preset.id .. " debuff low-time color threshold " .. index
+        )
     end
 
     -- Party's optional player child uses the Party Debuffs configuration; it
@@ -252,6 +294,12 @@ local function assertPartyContract(preset)
         preset.id .. " debuff visible gate")
     assertEqual(debuffDescriptor.visibility.requiresAssist, false,
         preset.id .. " debuff assist gate")
+    assertEqual(
+        debuffDescriptor.visibility.spellIDFilterRequiresPublicNonAssist,
+        false,
+        preset.id
+            .. " debuff stays visible on publicly assistable Party units"
+    )
     assertEqual(debuffDescriptor.metrics.legacyMaxFrameCount, 6,
         preset.id .. " debuff legacy capacity")
     assertEqual(debuffDescriptor.metrics.nativeVisibleCapacity, 6,
@@ -275,6 +323,16 @@ local function assertPartyContract(preset)
         ),
         preset.id .. " debuff source-color diagnostic"
     )
+
+    local debuffsWithoutLowTime = copyMany(debuffs)
+    debuffsWithoutLowTime.durationText.color.seconds.enabled = false
+    local debuffWithoutLowTime = assert(UF.CompileNativeAuraSpec(
+        "party1",
+        "HARMFUL",
+        debuffsWithoutLowTime
+    ))
+    assertDeepEqual(debuffWithoutLowTime.metrics, debuffDescriptor.metrics,
+        preset.id .. " debuff low-time threshold does not change metrics")
 
     return buffs, debuffs
 end

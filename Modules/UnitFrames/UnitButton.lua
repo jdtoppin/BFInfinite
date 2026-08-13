@@ -7,7 +7,6 @@ local AF = _G.AbstractFramework
 
 local UnitGUID = UnitGUID
 local GetUnitName = GetUnitName
-local UnitIsUnit = UnitIsUnit
 local UnitIsPlayer = UnitIsPlayer
 local UnitHasVehicleUI = UnitHasVehicleUI
 local UnitExists = UnitExists
@@ -77,8 +76,24 @@ end
 ---------------------------------------------------------------------
 local function UnitButton_RegisterEvents(self)
     self:RegisterUnitEvent("UNIT_CONNECTION", self.unit)
-    self:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", self.unit)
-    self:RegisterUnitEvent("UNIT_EXITED_VEHICLE", self.unit)
+    -- Pet identity and vehicle transitions are emitted for its owner token.
+    local unitPetOwner = self._updateOnUnitPetChanged
+    if unitPetOwner and unitPetOwner ~= self.unit then
+        self:RegisterUnitEvent(
+            "UNIT_ENTERED_VEHICLE",
+            self.unit,
+            unitPetOwner
+        )
+        self:RegisterUnitEvent(
+            "UNIT_EXITED_VEHICLE",
+            self.unit,
+            unitPetOwner
+        )
+        self:RegisterUnitEvent("UNIT_PET", unitPetOwner)
+    else
+        self:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", self.unit)
+        self:RegisterUnitEvent("UNIT_EXITED_VEHICLE", self.unit)
+    end
     self:RegisterEvent("UNIT_FLAGS")
     self:RegisterEvent("UNIT_NAME_UPDATE")
 
@@ -110,7 +125,17 @@ local function UnitButton_RefreshUnitBinding(self)
 end
 
 local function UnitButton_OnEvent(self, event, unit, arg)
-    if unit and (self.effectiveUnit == unit or self.unit == unit) then
+    local isPetOwnerIdentityEvent =
+        unit == self._updateOnUnitPetChanged
+        and (
+            event == "UNIT_PET"
+            or event == "UNIT_ENTERED_VEHICLE"
+            or event == "UNIT_EXITED_VEHICLE"
+        )
+
+    if isPetOwnerIdentityEvent then
+        self._updateRequired = true
+    elseif unit and (self.effectiveUnit == unit or self.unit == unit) then
         if event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE" or event == "UNIT_CONNECTION"
             or event == "UNIT_FLAGS" or event == "UNIT_NAME_UPDATE"
         then
@@ -124,7 +149,7 @@ local function UnitButton_OnEvent(self, event, unit, arg)
                 UnitButton_UpdateAll(self, true)
             end
         elseif event == "UNIT_TARGET" then
-            if self._updateOnUnitTargetChanged == unit and not UnitIsUnit("player", unit) then
+            if self._updateOnUnitTargetChanged == unit then
                 if UnitExists(self.unit) then
                     UnitButton_UpdateAll(self, true)
                 end
