@@ -18,6 +18,7 @@ if not LOCALE_zhCN then return end
 local L = select(2, ...).L
 
 L["Click Casting"] = "点击施法"
+L["Enable BFI Click Casting"] = "启用 BFI 点击施法"
 L["Click Casting bindings apply to every BFI unit frame. They use the active BFI profile; class-specific binding sets remain separate inside profiles shared by multiple classes. Drop a spell, macro, or item onto the Value field to add its ID."] = "点击施法按键应用于所有 BFI 单位框体，并跟随当前 BFI 配置文件。多个职业共享配置文件时，各职业的整套按键仍分别保存。可将法术、宏或物品拖到内容栏以添加其 ID。"
 L["Add Binding"] = "添加按键"
 L["Set Binding"] = "设置按键"

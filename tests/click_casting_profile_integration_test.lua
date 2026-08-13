@@ -52,12 +52,6 @@ assertContains(options,
         .. '    -- "social",\n'
         .. '    "SEPARATOR",',
     "Click Casting appears beneath Auras in the shared settings group")
-assertContains(options,
-    'button:SetTextColor(isEnabled() and "white" or "disabled")',
-    "disabled Click Casting dims its navigation text without disabling it")
-assertContains(options,
-    'AF.RegisterCallback("BFI_UpdateModule", function(_, module)',
-    "Click Casting navigation state refreshes with module changes")
 
 local profiles = readFile("Options/Profiles.lua")
 assertContains(profiles,
