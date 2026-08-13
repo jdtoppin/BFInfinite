@@ -12,8 +12,8 @@ local HEADER_HEIGHT = 35
 
 local optionsFrame
 local optionButtons = {}
-local buffsDebuffsAvailable = type(BFI.modules.BuffsDebuffs.HasSecureAuraHeaderBackend) == "function"
-    and BFI.modules.BuffsDebuffs.HasSecureAuraHeaderBackend()
+local buffsDebuffsAvailable = type(BFI.modules.BuffsDebuffs.HasAuraBackend) == "function"
+    and BFI.modules.BuffsDebuffs.HasAuraBackend()
 -- Keep the common map editable on 12.0.7 so it can be prepared and carried
 -- forward, while the panel itself explains that only 12.1 native rows apply it.
 local auraColorsAvailable = AF.isRetail

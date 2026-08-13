@@ -2,27 +2,31 @@
 local BFI = select(2, ...)
 ---@class BuffsDebuffs
 local BD = BFI.modules.BuffsDebuffs
+local IsValueNonSecret = BFI.funcs.isValueNonSecret
 
 local hooksecurefunc = hooksecurefunc
 local InCombatLockdown = InCombatLockdown
+local hasRestrictedAuraButtons = _G.C_AuraContainerUtil ~= nil
 
 local suppressedStates = {}
 local suppressedRoots = {}
 local hookedRoots = {}
 
+local function HasExpectedParent(object, expected)
+    if not object or type(object.GetParent) ~= "function" then return false end
+    local parent = object:GetParent()
+    return IsValueNonSecret(parent) and parent == expected
+end
+
 local function IsAuraContainer(frame)
     return frame
-        and type(frame.IsShown) == "function"
-        and type(frame.Hide) == "function"
         and type(frame.SetShown) == "function"
         and type(frame.GetParent) == "function"
 end
 
 local function IsVisualControl(frame)
     return frame
-        and type(frame.GetAlpha) == "function"
         and type(frame.SetAlpha) == "function"
-        and type(frame.IsMouseEnabled) == "function"
         and type(frame.EnableMouse) == "function"
         and type(frame.GetParent) == "function"
 end
@@ -32,10 +36,7 @@ local function HasRootPrivateAuraAnchors(frame)
     if type(anchors) ~= "table" or #anchors == 0 then return false end
 
     for _, anchor in ipairs(anchors) do
-        if not anchor
-            or type(anchor.GetParent) ~= "function"
-            or anchor:GetParent() ~= frame
-        then
+        if not HasExpectedParent(anchor, frame) then
             return false
         end
     end
@@ -57,21 +58,24 @@ local function ResolveNativePublicAuraFrame(which)
             or type(frame.UpdateAuraButtons) ~= "function"
             or type(frame.auraFrames) ~= "table"
             or not IsAuraContainer(container)
-            or container:GetParent() ~= frame
+            or not HasExpectedParent(container, frame)
             or not IsVisualControl(collapseButton)
-            or collapseButton:GetParent() ~= frame
+            or not HasExpectedParent(collapseButton, frame)
             or not IsVisualControl(consolidatedBuffs)
-            or consolidatedBuffs:GetParent() ~= frame
+            or not HasExpectedParent(consolidatedBuffs, frame)
             or not consolidatedTooltip
             or type(consolidatedTooltip.Hide) ~= "function"
             or type(consolidatedTooltip.GetParent) ~= "function"
-            or consolidatedTooltip:GetParent() ~= consolidatedBuffs
+            or not HasExpectedParent(consolidatedTooltip, consolidatedBuffs)
             or not consolidatedAuras
             or type(consolidatedAuras.auraFrames) ~= "table"
             or type(consolidatedAuras.GetParent) ~= "function"
             or not IsAuraContainer(consolidatedAuras.AuraContainer)
-            or consolidatedAuras:GetParent() ~= consolidatedTooltip
-            or consolidatedAuras.AuraContainer:GetParent() ~= consolidatedAuras
+            or not HasExpectedParent(consolidatedAuras, consolidatedTooltip)
+            or not HasExpectedParent(
+                consolidatedAuras.AuraContainer,
+                consolidatedAuras
+            )
         then
             return
         end
@@ -90,7 +94,7 @@ local function ResolveNativePublicAuraFrame(which)
             or type(frame.UpdateAuraButtons) ~= "function"
             or type(frame.auraFrames) ~= "table"
             or not IsAuraContainer(container)
-            or container:GetParent() ~= frame
+            or not HasExpectedParent(container, frame)
             or not HasRootPrivateAuraAnchors(frame)
         then
             return
@@ -105,16 +109,18 @@ local function ResolveNativePublicAuraFrame(which)
 end
 
 local function HidePublicAuraOverlays(frame, publicParent)
+    -- Retail 12.1.0.69273 AuraButtons can deny addon access while aura data is
+    -- secret. C_AuraContainerUtil identifies that native path: never enumerate
+    -- intrinsic children or install the update hook that would revisit them.
+    if hasRestrictedAuraButtons then return end
+
     local auraFrames = frame.auraFrames
     if type(auraFrames) ~= "table" then return end
 
     local gameTooltip = _G.GameTooltip
     local helpTip = _G.HelpTip
     for _, button in ipairs(auraFrames) do
-        if button
-            and type(button.GetParent) == "function"
-            and button:GetParent() == publicParent
-        then
+        if HasExpectedParent(button, publicParent) then
             if gameTooltip and gameTooltip:IsOwned(button) then
                 gameTooltip:Hide()
             end
@@ -134,6 +140,8 @@ local function HideTargetOverlays(target)
 end
 
 local function InstallOverlayCleanupHook(target)
+    if hasRestrictedAuraButtons then return end
+
     local frame = target.frame
     if hookedRoots[frame] then return end
 
@@ -163,10 +171,10 @@ function BD.SetNativePublicAurasSuppressed(which, suppressed)
 
     if state then
         HideTargetOverlays(state.target)
-        state.target.container:SetShown(state.containerShown)
-        for i, control in ipairs(state.target.controls) do
-            control:SetAlpha(state.controls[i].alpha)
-            control:EnableMouse(state.controls[i].mouseEnabled)
+        state.target.container:SetShown(true)
+        for _, control in ipairs(state.target.controls) do
+            control:SetAlpha(1)
+            control:EnableMouse(true)
         end
 
         suppressedStates[which] = nil
@@ -177,24 +185,18 @@ function BD.SetNativePublicAurasSuppressed(which, suppressed)
     local target = ResolveNativePublicAuraFrame(which)
     if not target then return false end
 
-    -- Retail 12.0.7 and 12.1 keep public aura buttons under these two visual
-    -- containers. Private anchors are direct root children and DeadlyDebuffFrame
-    -- is separate; neither is touched here.
-    state = {
-        target = target,
-        containerShown = target.container:IsShown(),
-        controls = {},
-    }
-    for i, control in ipairs(target.controls) do
-        state.controls[i] = {
-            alpha = control:GetAlpha(),
-            mouseEnabled = control:IsMouseEnabled(),
-        }
-    end
+    -- Retail 12.1.0.69273 (wow-ui-source
+    -- eb941aad028d73ddc69e3e8ef4da709f4d3cd744) creates the supported public
+    -- AuraContainerTemplate shown, with these ordinary controls at alpha 1 and
+    -- mouse enabled. Keep only a BFI-owned suppression ledger and restore those
+    -- known constants; observing visibility, alpha, or mouse state can return
+    -- secret values. Private anchors are direct root children and
+    -- DeadlyDebuffFrame is separate; neither is touched here.
+    state = {target = target}
 
     InstallOverlayCleanupHook(target)
     HideTargetOverlays(target)
-    target.container:Hide()
+    target.container:SetShown(false)
     for _, control in ipairs(target.controls) do
         control:SetAlpha(0)
         control:EnableMouse(false)
