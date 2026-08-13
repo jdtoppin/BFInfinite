@@ -214,7 +214,6 @@ do
     liveSuppressionAvailable = true
     local config = deepCopy(defaults.debuffs)
     config.enabled = true
-    config.customHarmfulEnabled = true
     assertTrue(state.compiler(config).enabled,
         "recovered live capability needs no descriptor reload")
 end
@@ -244,7 +243,6 @@ assertEqual(state.suppressionCalls, 0, "registration performs no suppression")
 do
     local config = deepCopy(defaults.debuffs)
     config.enabled = true
-    config.customHarmfulEnabled = true
     config.duration.showSecondsUnit = false
     config.duration.color.percent.enabled = true
     config.duration.color.seconds.value = 99
@@ -255,7 +253,7 @@ do
     assertTablesEqual(config, savedConfig,
         "compiler does not mutate saved Debuffs configuration")
     assertEqual(descriptor.enabled, true,
-        "both explicit toggles activate custom harmful presentation")
+        "Debuffs Enabled alone activates custom harmful presentation")
     assertEqual(descriptor.holder.width, 746, "default row width")
     assertEqual(descriptor.holder.height, 26, "default row height")
     assertEqual(descriptor.holderRolesets, "buffs", "holder roleset")
@@ -297,8 +295,30 @@ do
     local style = group.buttonStyle
     assertEqual(style.width, 26, "button width")
     assertEqual(style.height, 26, "button height")
+    assertTablesEqual({
+        noBorder = style.noBorder,
+        iconInset = style.iconInset,
+        nativeDispelColor = style.nativeDispelColor,
+        iconCrop = style.iconCrop,
+        iconMask = style.iconMask,
+        templateNames = style.templateNames,
+    }, {
+        noBorder = false,
+        iconInset = 1,
+        nativeDispelColor = true,
+    }, "custom harmful buttons use the exact square BFI construction fields")
+    assertEqual(style.noBorder, false,
+        "custom harmful buttons use the square BFI border")
+    assertEqual(style.iconInset, 1,
+        "custom harmful icons use the square BFI inset")
     assertEqual(style.nativeDispelColor, true,
         "AF r42 native square dispel-colour contract")
+    assertNil(style.iconCrop,
+        "custom harmful icons retain AF's canonical 0.08 aura crop")
+    assertNil(style.iconMask,
+        "custom harmful style never requests a rounded icon mask")
+    assertNil(style.templateNames,
+        "custom harmful style never inherits a rounded button template")
     assertNil(style.cancelAuraButtons, "harmful auras are not cancellable")
     assertNil(style.dispelColor, "no caller-provided dispel colour")
     assertEqual(style.tooltip.enabled, true, "native tooltip enabled")
@@ -333,6 +353,8 @@ do
         style.durationText.color.threshold,
         "active threshold belongs to construction identity"
     )
+    assertEqual(descriptor.constructionKey.buttonStyle, style,
+        "square button style belongs to construction identity")
     assertEqual(#descriptor.itemEnchantments, 0,
         "Debuffs have no item enchantments")
 
@@ -355,7 +377,6 @@ end
 do
     local config = deepCopy(defaults.debuffs)
     config.enabled = false
-    config.customHarmfulEnabled = true
     config.width = 20
     config.height = 30
     config.spacingX = 2
@@ -379,18 +400,18 @@ do
     local config = deepCopy(defaults.debuffs)
     config.enabled = true
     config.customHarmfulEnabled = false
-    assertEqual(assert(compile(config)).enabled, false,
-        "appearance enable alone does not opt into replacement")
+    assertEqual(assert(compile(config)).enabled, true,
+        "stale false replacement flag cannot override Debuffs Enabled")
 
     config.enabled = false
     config.customHarmfulEnabled = true
     assertEqual(assert(compile(config)).enabled, false,
-        "replacement opt-in does not override pane disable")
+        "stale true replacement flag cannot override Debuffs disable")
 
     config.enabled = true
     config.customHarmfulEnabled = "true"
-    assertEqual(assert(compile(config)).enabled, false,
-        "malformed replacement opt-in fails closed")
+    assertEqual(assert(compile(config)).enabled, true,
+        "malformed removed flag cannot affect Debuffs Enabled")
 end
 
 do
@@ -528,6 +549,7 @@ do
         "BD.SetNativePublicAurasSuppressed(",
         "PrivateAuraAnchors",
         "privateAuraAnchor",
+        "customHarmfulEnabled",
     }) do
         assertNil(source:find(pattern, 1, true),
             "forbidden direct dependency: " .. pattern)
@@ -540,6 +562,14 @@ do
         ) ~= nil,
         "active Debuffs descriptor is registered"
     )
+    for _, squareField in ipairs({
+        "noBorder = false,",
+        "iconInset = 1,",
+        "nativeDispelColor = true,",
+    }) do
+        assertTrue(source:find(squareField, 1, true) ~= nil,
+            "square construction field remains explicit: " .. squareField)
+    end
     for _, dormantPattern in ipairs({
         "CompileCustomDebuffsDraftDescriptor",
         "activationBlocked",

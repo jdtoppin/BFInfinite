@@ -47,10 +47,6 @@ local defaults = {
     },
     debuffs = {
         enabled = false,
-        -- Separate from the existing appearance toggle. Existing profiles
-        -- must opt in explicitly before BFInfinite replaces Blizzard's
-        -- combined public/private harmful presentation.
-        customHarmfulEnabled = false,
         position = {"TOPRIGHT", -4, -40},
         width = 26,
         height = 26,
@@ -304,12 +300,9 @@ local function NormalizePane(config, fallback)
     FillMissing(config, fallback)
 
     config.enabled = NormalizeBoolean(config.enabled, fallback.enabled)
-    if fallback.customHarmfulEnabled ~= nil then
-        config.customHarmfulEnabled = NormalizeBoolean(
-            config.customHarmfulEnabled,
-            fallback.customHarmfulEnabled
-        )
-    end
+    -- This retired second enable switch must not survive profile hydration or
+    -- override the pane's canonical enabled value.
+    config.customHarmfulEnabled = nil
     config.position = NormalizeHolderPosition(config.position, fallback.position)
     config.width = NormalizeNumber(config.width, fallback.width, 10, 100, true)
     config.height = NormalizeNumber(

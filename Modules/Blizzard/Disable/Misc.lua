@@ -29,7 +29,7 @@ local function DisableBlizzard()
         F.DisableFrame(_G.PetCastingBarFrame)
     end
 
-    -- BuffsDebuffs keeps these roots active. Its explicit harmful opt-in can
+    -- BuffsDebuffs keeps these roots active. Its enabled harmful replacement can
     -- temporarily deregister DebuffFrame's exact six private anchors only
     -- after a replacement exists; DeadlyDebuffFrame remains Blizzard-owned.
 

@@ -18,7 +18,7 @@ local REQUIRED_LEGACY_AF_VERSION = 21
 -- AF #27/r36 registers only the selected native aura duration carrier.
 local REQUIRED_CUSTOM_AF_VERSION = 36
 -- AF r42 is the current repository floor and exposes the native square
--- dispel-colour primitive needed by the explicit harmful-row opt-in.
+-- dispel-colour primitive needed by the enabled harmful row.
 local REQUIRED_HARMFUL_DESCRIPTOR_AF_VERSION = 42
 local RETAIL_12_0_INTERFACE_MIN = 120000
 local RETAIL_12_1_INTERFACE_MIN = 120100
@@ -154,8 +154,9 @@ end
 -- eb941aad028d73ddc69e3e8ef4da709f4d3cd744) can render a native HARMFUL
 -- PublicAndPrivate group, while AF r42 can delegate square dispel colours to
 -- Blizzard. This is deliberately only a descriptor-compilation capability:
--- explicit opt-in plus the live suppression and registered-controller gates
--- separately authorize the finite combined row at runtime.
+-- the saved Debuffs enable switch plus the live suppression and
+-- registered-controller gates separately authorize the finite combined row
+-- at runtime.
 function BD.HasCustomHarmfulAuraDescriptorCapability()
     local afVersion = AF.versionNum
     if type(afVersion) ~= "number"
@@ -197,7 +198,7 @@ local function HasCustomHarmfulAuraContainerCapability(state)
 
     local config = BD.config and BD.config.debuffs
     if type(config) == "table"
-        and config.customHarmfulEnabled == true
+        and config.enabled == true
         and HasCustomHarmfulControllerContract()
         and CustomHarmfulControllerOwnsPresentation(state)
     then
@@ -272,7 +273,7 @@ function BD.GetAuraBackend(which)
                 and BD.GetCustomAuraContainerState(which)
                 or nil
             if type(config) == "table"
-                and config.customHarmfulEnabled == true
+                and config.enabled == true
                 and state ~= nil
                 and HasCustomHarmfulControllerContract()
                 and HasCustomHarmfulAuraContainerCapability(state)

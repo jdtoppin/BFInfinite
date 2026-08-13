@@ -248,9 +248,7 @@ local function NewHarness(options)
                 enabled = true,
             },
             debuffs = {
-                enabled = true,
-                customHarmfulEnabled =
-                    options.customHarmfulEnabled == true,
+                enabled = options.debuffsEnabled == true,
             },
         },
     }
@@ -552,7 +550,7 @@ do
     local options = {
         interfaceVersion = 120100,
         afVersion = 42,
-        customHarmfulEnabled = false,
+        debuffsEnabled = false,
         harmfulSuppressionResult = false,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
@@ -628,7 +626,7 @@ do
     local options = {
         interfaceVersion = 120100,
         afVersion = 42,
-        customHarmfulEnabled = true,
+        debuffsEnabled = true,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
         customPanes = {debuffs = true},
@@ -690,7 +688,7 @@ do
     local options = {
         interfaceVersion = 120100,
         afVersion = 42,
-        customHarmfulEnabled = false,
+        debuffsEnabled = false,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
         customPanes = {debuffs = true},
@@ -734,7 +732,7 @@ do
     local options = {
         interfaceVersion = 120100,
         afVersion = 42,
-        customHarmfulEnabled = true,
+        debuffsEnabled = true,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
         customPanes = {debuffs = true},
@@ -774,7 +772,7 @@ do
     local options = {
         interfaceVersion = 120100,
         afVersion = 42,
-        customHarmfulEnabled = false,
+        debuffsEnabled = false,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
         customPanes = {debuffs = true},
@@ -817,7 +815,7 @@ do
     local options = {
         interfaceVersion = 120100,
         afVersion = 42,
-        customHarmfulEnabled = true,
+        debuffsEnabled = true,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
         customPanes = {debuffs = true},
@@ -901,7 +899,7 @@ do
     local harness = NewHarness({
         interfaceVersion = 120100,
         afVersion = 42,
-        customHarmfulEnabled = true,
+        debuffsEnabled = true,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
         customPanes = {buffs = true},
@@ -1050,7 +1048,7 @@ for _, capabilityCase in ipairs({
         nativeDispelColorMethodValue =
             capabilityCase.nativeDispelColorMethodValue,
         nativeDispelColor = capabilityCase.nativeDispelColor,
-        customHarmfulEnabled = true,
+        debuffsEnabled = true,
         registerCustomBackend = true,
         customPanes = {debuffs = true},
     })
@@ -1099,7 +1097,7 @@ do
     local harness = NewHarness({
         interfaceVersion = 120100,
         afVersion = 42,
-        customHarmfulEnabled = true,
+        debuffsEnabled = true,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
         customPanes = {debuffs = true},
@@ -1108,7 +1106,7 @@ do
 
     assertEqual(BD.GetAuraBackend("debuffs"),
         BD.CUSTOM_AURA_CONTAINER_BACKEND,
-        "explicit opt-in selects complete harmful backend")
+        "Debuffs Enabled selects the complete harmful backend")
     assertEqual(harness.getHarmfulCapabilityCalls(), 1,
         "one backend lookup performs one harmful topology preflight")
     assertEqual(BD.HasAuraBackend("debuffs"), true,
@@ -1125,16 +1123,46 @@ do
     assertEqual(#harness.customUpdateCalls, 1,
         "opted-in Debuffs custom update count")
     assertEqual(harness.customUpdateCalls[1].config, BD.config.debuffs,
-        "opted-in Debuffs forwards its saved configuration")
+        "enabled Debuffs forwards its saved configuration")
     assertEqual(harness.getHarmfulCapabilityCalls(), 3,
         "dispatcher lookup adds one harmful topology preflight")
+end
+
+for _, staleFlagCase in ipairs({
+    {
+        name = "stale false flag with enabled Debuffs",
+        enabled = true,
+        stale = false,
+        expected = "custom",
+    },
+    {
+        name = "stale true flag with disabled Debuffs",
+        enabled = false,
+        stale = true,
+        expected = "style",
+    },
+}) do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 42,
+        debuffsEnabled = staleFlagCase.enabled,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {debuffs = true},
+    })
+    harness.BD.config.debuffs.customHarmfulEnabled = staleFlagCase.stale
+    local expected = staleFlagCase.expected == "custom"
+        and harness.BD.CUSTOM_AURA_CONTAINER_BACKEND
+        or harness.BD.BLIZZARD_DEBUFF_STYLE_BACKEND
+    assertEqual(harness.BD.GetAuraBackend("debuffs"), expected,
+        staleFlagCase.name .. " cannot change backend ownership")
 end
 
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
         afVersion = 42,
-        customHarmfulEnabled = true,
+        debuffsEnabled = true,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
         customPanes = {debuffs = true},
@@ -1178,7 +1206,7 @@ for _, ownershipCase in ipairs({
     local harness = NewHarness({
         interfaceVersion = 120100,
         afVersion = 42,
-        customHarmfulEnabled = true,
+        debuffsEnabled = true,
         harmfulSuppressionCapability = false,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
@@ -1198,7 +1226,7 @@ do
     local harness = NewHarness({
         interfaceVersion = 120100,
         afVersion = 42,
-        customHarmfulEnabled = true,
+        debuffsEnabled = true,
         harmfulSuppressionCapability = false,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
@@ -1213,7 +1241,7 @@ do
     local harness = NewHarness({
         interfaceVersion = 120100,
         afVersion = 42,
-        customHarmfulEnabled = false,
+        debuffsEnabled = false,
         harmfulSuppressionCapability = false,
         registerCustomBackend = true,
         registerBlizzardDebuffStyle = true,
@@ -1224,7 +1252,7 @@ do
     local BD = harness.BD
     assertEqual(BD.GetAuraBackend("debuffs"),
         BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
-        "explicit opt-out selects Blizzard style despite custom ownership")
+        "disabled Debuffs select Blizzard style despite custom ownership")
     harness.clearCallLog()
     harness.update("debuffs")
     assertLog(harness.callLog, {
@@ -1249,7 +1277,7 @@ for _, suppressionCase in ipairs({
     local harness = NewHarness({
         interfaceVersion = 120100,
         afVersion = 42,
-        customHarmfulEnabled = true,
+        debuffsEnabled = true,
         fullHarmfulMethods = suppressionCase.fullHarmfulMethods,
         harmfulSuppressionCapability =
             suppressionCase.harmfulSuppressionCapability,
@@ -1438,7 +1466,7 @@ do
     local harness = NewHarness({
         interfaceVersion = 120200,
         afVersion = 36,
-        customHarmfulEnabled = true,
+        debuffsEnabled = true,
         registerCustomBackend = true,
     })
     local BD = harness.BD

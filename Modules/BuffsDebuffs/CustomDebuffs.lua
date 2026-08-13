@@ -8,7 +8,8 @@ local BD = BFI.modules.BuffsDebuffs
 -- describe ordinary and private presentation without exposing AuraData. The
 -- SetUnit(nil) deregisters each of DebuffFrame's exact six private anchors;
 -- Blizzard's watcher releases and hides the pooled renderers. The finite
--- PublicAndPrivate cap remains behind a separate, explicit saved opt-in.
+-- PublicAndPrivate cap is used only while the saved Debuffs pane is enabled
+-- and every live suppression/controller gate succeeds.
 if type(BD.HasCustomHarmfulAuraDescriptorCapability) ~= "function"
     or BD.HasCustomHarmfulAuraDescriptorCapability() ~= true
     or type(BD.GetDefaults) ~= "function"
@@ -268,8 +269,7 @@ local function CompileDebuffs(config)
     }
 
     local descriptor = {
-        enabled = config.enabled == true
-            and config.customHarmfulEnabled == true,
+        enabled = config.enabled == true,
         constructionKey = {
             schema = CONSTRUCTION_SCHEMA,
             buttonStyle = buttonStyle,
