@@ -8,8 +8,6 @@ local UF = BFI.modules.UnitFrames
 -- functions
 ---------------------------------------------------------------------
 local UnitIsPlayer = UnitIsPlayer
-local IsInInstance = IsInInstance
-local UnitPhaseReason = UnitPhaseReason
 local UnitInOtherParty = UnitInOtherParty
 local UnitHasIncomingResurrection = UnitHasIncomingResurrection
 local HasIncomingSummon = C_IncomingSummon.HasIncomingSummon
@@ -23,12 +21,15 @@ local function UpdateStatus(self, event, unitId)
     local unit = self.root.unit
     if unitId and unitId ~= unit then return end
 
-    if not UnitIsPlayer(unit) then
+    local isPlayer, isPlayerPublic =
+        UF.GetPublicUnitIdentityValue(UnitIsPlayer(unit))
+    if not isPlayerPublic or not isPlayer then
         self:Hide()
         return
     end
 
-    local phaseReason = UnitPhaseReason(unit)
+    local phaseReason, phaseReasonPublic =
+        UF.GetPublicUnitPhaseReason(unit)
 
     if UnitInOtherParty(unit) then
         self.icon:SetVertexColor(1, 1, 1, 1)
@@ -58,7 +59,7 @@ local function UpdateStatus(self, event, unitId)
         end
         self:Show()
 
-    elseif phaseReason then
+    elseif phaseReasonPublic and phaseReason then
         if phaseReason == 3 then -- chromie, yellow
             self.icon:SetVertexColor(1, 1, 0)
         elseif phaseReason == 2 then -- warmode, red

@@ -127,6 +127,56 @@ assertEqual(resolvedDropdown, dropdown, "nested FilterDropdown")
 assertEqual(resolvedPreview, searchPreview,
     "nested SearchPreviewContainer")
 
+local incompleteTopologies = {
+    {
+        label = "HeaderDetails",
+        frame = {},
+    },
+    {
+        label = "Filters",
+        frame = {HeaderDetails = {}},
+    },
+    {
+        label = "SearchBox",
+        frame = {
+            HeaderDetails = {
+                Filters = {FilterDropdown = {}},
+            },
+        },
+    },
+    {
+        label = "FilterDropdown",
+        frame = {
+            HeaderDetails = {
+                Filters = {
+                    SearchBox = {SearchPreviewContainer = {}},
+                },
+            },
+        },
+    },
+    {
+        label = "SearchPreviewContainer",
+        frame = {
+            HeaderDetails = {
+                Filters = {
+                    FilterDropdown = {},
+                    SearchBox = {},
+                },
+            },
+        },
+    },
+}
+
+environment.AchievementFrameTab2 = {}
+for _, incomplete in ipairs(incompleteTopologies) do
+    environment.AchievementFrame = incomplete.frame
+    addonCallback()
+    assertEqual(#styledEditBoxes, 0,
+        "missing " .. incomplete.label .. " skips SearchBox styling")
+    assertEqual(#styledDropdowns, 0,
+        "missing " .. incomplete.label .. " skips dropdown styling")
+end
+
 local styleAchievementFrame =
     findUpvalue(addonCallback, "StyleAchievementFrame")
 local styleSearchControls =
@@ -141,14 +191,6 @@ assertEqual(styledEditBoxes[1].box, searchBox, "styled nested SearchBox")
 assertEqual(styledEditBoxes[1].offset, -4, "SearchBox backdrop offset")
 assertEqual(#styledDropdowns, 1, "FilterDropdown style calls")
 assertEqual(styledDropdowns[1], dropdown, "styled nested FilterDropdown")
-
-local missingSearchBox, missingDropdown = resolveSearchControls({})
-assertEqual(missingSearchBox, nil, "missing 12.1 search hierarchy")
-assertEqual(missingDropdown, nil, "missing 12.1 dropdown hierarchy")
-
-environment.AchievementFrame = {}
-environment.AchievementFrameTab2 = {}
-addonCallback()
 
 local sourceFile = assert(io.open(
     "Modules/Blizzard/Style/AchievementFrame.lua", "rb"
@@ -170,14 +212,41 @@ assertTrue(source:find("AF.SetSize(searchBox", 1, true) == nil,
     "Blizzard owns SearchBox size")
 assertTrue(source:find("AF.ClearPoints(searchBox)", 1, true) == nil,
     "Blizzard owns SearchBox anchors")
+assertTrue(source:find("AF.SetPoint(searchBox", 1, true) == nil,
+    "Blizzard owns SearchBox placement")
 assertTrue(source:find("AF.SetSize(dropdown", 1, true) == nil,
     "Blizzard owns FilterDropdown size")
+assertTrue(source:find("AF.SetSize(filterDropdown", 1, true) == nil,
+    "resolved FilterDropdown keeps Blizzard size")
 assertTrue(source:find("AF.ClearPoints(dropdown)", 1, true) == nil,
     "Blizzard owns FilterDropdown anchors")
+assertTrue(source:find(
+    "AF.ClearPoints(filterDropdown)", 1, true
+) == nil, "resolved FilterDropdown keeps Blizzard anchors")
+assertTrue(source:find("AF.SetPoint(dropdown", 1, true) == nil,
+    "Blizzard owns FilterDropdown placement")
+assertTrue(source:find("AF.SetPoint(filterDropdown", 1, true) == nil,
+    "resolved FilterDropdown keeps Blizzard placement")
+assertTrue(source:find("AF.ClearPoints(container)", 1, true) == nil,
+    "Blizzard owns preview anchors")
+assertTrue(source:find("AF.SetPoint(container,", 1, true) == nil,
+    "Blizzard owns preview placement")
 assertTrue(source:find("SetMenuAnchor", 1, true) == nil,
     "Blizzard owns FilterDropdown menu anchoring")
+assertTrue(source:find("dropdown:SetText", 1, true) == nil,
+    "Blizzard owns FilterDropdown text")
+assertTrue(source:find("filterDropdown:SetText", 1, true) == nil,
+    "resolved FilterDropdown keeps Blizzard text")
+assertTrue(source:find("dropdown.Text", 1, true) == nil,
+    "Blizzard owns FilterDropdown text layout")
+assertTrue(source:find("filterDropdown.Text", 1, true) == nil,
+    "resolved FilterDropdown keeps Blizzard text layout")
+assertTrue(source:find("UpdateToMenuSelections", 1, true) == nil,
+    "Blizzard owns FilterDropdown selection updates")
 assertTrue(source:find(
     "dropdown.displacedRegions = nil", 1, true
 ) == nil, "no redundant dropdown layout mutation")
+assertTrue(source:find("S.RemoveTextures(container)", 1, true) ~= nil,
+    "preview static skin remains")
 
 print("achievement_frame_12_1_topology_test.lua: ok")

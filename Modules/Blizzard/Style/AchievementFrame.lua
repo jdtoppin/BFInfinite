@@ -18,8 +18,10 @@ local EVALUATION_TREE_FLAG_PROGRESS_BAR = _G.EVALUATION_TREE_FLAG_PROGRESS_BAR
 local GetAchievementNumCriteria = GetAchievementNumCriteria
 local GetAchievementCriteriaInfo = GetAchievementCriteriaInfo
 
--- Retail 12.1.0.68914 parents both controls to HeaderDetails.Filters.
--- Source: Blizzard_AchievementUI/Mainline/Blizzard_AchievementUI.xml
+-- Retail 12.1.0.69273 nests both controls under HeaderDetails.Filters and
+-- the preview below SearchBox. Source: wow-ui-source
+-- eb941aad028d73ddc69e3e8ef4da709f4d3cd744,
+-- Blizzard_AchievementUI/Mainline/Blizzard_AchievementUI.xml.
 local function ResolveSearchControls(frame)
     local headerDetails = frame and frame.HeaderDetails
     local filters = headerDetails and headerDetails.Filters
