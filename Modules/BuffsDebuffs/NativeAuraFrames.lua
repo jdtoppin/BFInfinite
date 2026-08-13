@@ -112,6 +112,8 @@ local function HidePublicAuraOverlays(frame, publicParent)
     -- Retail 12.1.0.69273 AuraButtons can deny addon access while aura data is
     -- secret. C_AuraContainerUtil identifies that native path: never enumerate
     -- intrinsic children or install the update hook that would revisit them.
+    -- BlizzardDebuffs.lua separately validates only the pinned, fixed ordinary
+    -- DebuffFrame pool; it does not weaken this generic restricted-child rule.
     if hasRestrictedAuraButtons then return end
 
     local auraFrames = frame.auraFrames

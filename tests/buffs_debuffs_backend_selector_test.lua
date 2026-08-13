@@ -8,6 +8,13 @@ local function assertEqual(actual, expected, message)
     end
 end
 
+local function assertLog(actual, expected, message)
+    assertEqual(#actual, #expected, message .. " length")
+    for index, value in ipairs(expected) do
+        assertEqual(actual[index], value, message .. " " .. index)
+    end
+end
+
 local REQUIRED_CUSTOM_AF_METHODS = {
     "AddCustomAuraGroup",
     "AddCustomItemEnchantment",
@@ -82,6 +89,9 @@ local function NewHarness(options)
     local createFrameCalls = 0
     local customDisableCalls = {}
     local customUpdateCalls = {}
+    local callLog = {}
+    local blizzardStyleDisableCalls = 0
+    local blizzardStyleUpdateCalls = {}
     local eventCallbacks = {}
     local refreshEvents = {}
     local inCombat = options.inCombat == true
@@ -144,7 +154,7 @@ local function NewHarness(options)
 
     local AF = {
         isRetail = options.isRetail ~= false,
-        versionNum = options.afVersion or 36,
+        versionNum = options.afVersion or 42,
         UIParent = {},
     }
     if options.customMethods ~= false then
@@ -176,8 +186,10 @@ local function NewHarness(options)
         CanSuppressNativePublicAuras = function()
             return true
         end,
-        SetNativePublicAurasSuppressed = function()
-            return true
+        SetNativePublicAurasSuppressed = function(which, suppressed)
+            callLog[#callLog + 1] = "native:" .. which .. ":"
+                .. tostring(suppressed)
+            return options.nativeRestoreResult ~= false
         end,
         RegisterEvent = function(_, event, callback)
             eventCallbacks[event] = callback
@@ -215,13 +227,37 @@ local function NewHarness(options)
             return customPanes[which] == true
         end
         BD.UpdateCustomAuraContainer = function(which, config)
+            callLog[#callLog + 1] = "customUpdate:" .. which
             customUpdateCalls[#customUpdateCalls + 1] = {
                 which = which,
                 config = config,
             }
         end
         BD.DisableCustomAuraContainer = function(which)
+            callLog[#callLog + 1] = "customDisable:" .. which
             customDisableCalls[#customDisableCalls + 1] = which
+            return options.customDisableResult ~= false
+        end
+    end
+
+    if options.registerBlizzardDebuffStyle then
+        BD.HasBlizzardDebuffStyleCapability = function()
+            callLog[#callLog + 1] = "styleCapability"
+            if options.styleCapabilityFailsInCombat and inCombat then
+                return false
+            end
+            return options.styleCapability ~= false
+        end
+        BD.UpdateBlizzardDebuffStyle = function(config)
+            callLog[#callLog + 1] = "styleUpdate"
+            blizzardStyleUpdateCalls[#blizzardStyleUpdateCalls + 1] =
+                config
+            return options.styleUpdateResult ~= false
+        end
+        BD.DisableBlizzardDebuffStyle = function()
+            callLog[#callLog + 1] = "styleDisable"
+            blizzardStyleDisableCalls = blizzardStyleDisableCalls + 1
+            return options.styleDisableResult ~= false
         end
     end
 
@@ -232,9 +268,24 @@ local function NewHarness(options)
         end,
         customDisableCalls = customDisableCalls,
         customUpdateCalls = customUpdateCalls,
+        blizzardStyleUpdateCalls = blizzardStyleUpdateCalls,
+        callLog = callLog,
+        clearCallLog = function()
+            for index = #callLog, 1, -1 do
+                callLog[index] = nil
+            end
+        end,
+        getBlizzardStyleDisableCalls = function()
+            return blizzardStyleDisableCalls
+        end,
         refreshEvents = refreshEvents,
         setCombat = function(value)
             inCombat = value == true
+        end,
+        setBackendOverride = function(backend)
+            BD.GetAuraBackend = function(which)
+                if which == "debuffs" then return backend end
+            end
         end,
         fireRegen = function()
             local callback = eventCallbacks.PLAYER_REGEN_ENABLED
@@ -275,6 +326,114 @@ end
 
 do
     local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 42,
+        registerBlizzardDebuffStyle = true,
+        styleCapabilityFailsInCombat = true,
+    })
+    local BD = harness.BD
+
+    assertEqual(BD.GetAuraBackend("debuffs"),
+        BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
+        "out-of-combat capability seeds static style policy")
+    harness.clearCallLog()
+    harness.setCombat(true)
+    assertEqual(BD.GetAuraBackend("debuffs"),
+        BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
+        "combat uses only last verified static style policy")
+    harness.update("debuffs")
+    assertEqual(BD.IsBuffsDebuffsUpdatePending("debuffs"), true,
+        "combat style request remains visible as pending")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 0,
+        "combat does not call the style adapter")
+    harness.setCombat(false)
+    harness.fireRegen()
+    assertEqual(BD.IsBuffsDebuffsUpdatePending("debuffs"), false,
+        "regen clears Debuffs pending state")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 1,
+        "regen applies the verified style")
+end
+
+for _, backendCase in ipairs({
+    {name = "custom", backend = "customAuraContainer"},
+    {name = "secure", backend = "secureAuraHeader"},
+    {name = "nil", backend = nil},
+}) do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 42,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        styleDisableResult = false,
+    })
+    harness.setBackendOverride(backendCase.backend)
+    harness.BD.config.debuffs.enabled = false
+    harness.clearCallLog()
+    harness.update("debuffs")
+    assertLog(harness.callLog, {"styleDisable"},
+        backendCase.name .. " aborts on failed style restore")
+    assertEqual(#harness.customUpdateCalls, 0,
+        backendCase.name .. " performs no downstream custom update")
+end
+
+do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 42,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customDisableResult = false,
+    })
+    harness.setBackendOverride(
+        harness.BD.BLIZZARD_DEBUFF_STYLE_BACKEND
+    )
+    harness.clearCallLog()
+    harness.update("debuffs")
+    assertLog(harness.callLog, {
+        "customDisable:debuffs",
+        "native:debuffs:false",
+        "styleUpdate",
+    }, "style ignores optional custom-disable false")
+end
+
+do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 42,
+        registerBlizzardDebuffStyle = true,
+        nativeRestoreResult = false,
+    })
+    harness.setBackendOverride(
+        harness.BD.BLIZZARD_DEBUFF_STYLE_BACKEND
+    )
+    harness.clearCallLog()
+    harness.update("debuffs")
+    assertLog(harness.callLog, {"native:debuffs:false"},
+        "style aborts when native restore fails")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 0,
+        "native restore failure prevents style update")
+end
+
+do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 42,
+        registerBlizzardDebuffStyle = true,
+        styleUpdateResult = false,
+    })
+    harness.setBackendOverride(
+        harness.BD.BLIZZARD_DEBUFF_STYLE_BACKEND
+    )
+    harness.clearCallLog()
+    harness.update("debuffs")
+    assertLog(harness.callLog, {
+        "native:debuffs:false",
+        "styleUpdate",
+    }, "style false result ends transition")
+end
+
+do
+    local harness = NewHarness({
         missingInterfaceVersion = true,
         afVersion = 36,
         registerCustomBackend = true,
@@ -294,8 +453,10 @@ end
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 36,
+        afVersion = 42,
         registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {buffs = true},
     })
     local BD = harness.BD
 
@@ -308,7 +469,7 @@ do
     )
     assertEqual(
         BD.GetAuraBackend("debuffs"),
-        BD.CUSTOM_AURA_CONTAINER_BACKEND,
+        BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
         "12.1 debuffs backend"
     )
     assertEqual(
@@ -318,20 +479,34 @@ do
     )
     harness.update()
     assertEqual(harness.getCreateFrameCalls(), 0, "12.1 custom selector construction")
-    assertEqual(#harness.customUpdateCalls, 2, "12.1 custom update count")
+    assertEqual(#harness.customUpdateCalls, 1, "12.1 custom update count")
     assertEqual(harness.customUpdateCalls[1].which, "buffs", "12.1 custom buffs update")
     assertEqual(harness.customUpdateCalls[1].config, BD.config.buffs, "12.1 custom buffs config")
-    assertEqual(harness.customUpdateCalls[2].which, "debuffs", "12.1 custom debuffs update")
-    assertEqual(harness.customUpdateCalls[2].config, BD.config.debuffs, "12.1 custom debuffs config")
-    assertEqual(#harness.customDisableCalls, 0, "12.1 custom disable count")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 1,
+        "12.1 Debuffs style update count")
+    assertEqual(harness.blizzardStyleUpdateCalls[1], BD.config.debuffs,
+        "12.1 Debuffs style config")
+    assertEqual(#harness.customDisableCalls, 1,
+        "style transition deactivates optional Debuffs custom controller")
+    assertEqual(harness.customDisableCalls[1], "debuffs",
+        "style transition custom pane")
+    assertEqual(harness.callLog[#harness.callLog - 2],
+        "customDisable:debuffs", "style transition first step")
+    assertEqual(harness.callLog[#harness.callLog - 1],
+        "native:debuffs:false", "style transition second step")
+    assertEqual(harness.callLog[#harness.callLog],
+        "styleUpdate", "style transition final step")
 end
 
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 36,
+        afVersion = 42,
         registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {buffs = true},
         inCombat = true,
+        styleCapabilityFailsInCombat = true,
     })
     local BD = harness.BD
 
@@ -388,7 +563,10 @@ do
     assertEqual(BD.IsBuffsDebuffsUpdatePending(), false, "regen clears queue")
     assertEqual(harness.hasRegenCallback(), false, "regen callback released")
     assertEqual(#harness.refreshEvents, 3, "queue clear refresh")
-    assertEqual(#harness.customUpdateCalls, 2, "wildcard retry updates both panes")
+    assertEqual(#harness.customUpdateCalls, 1,
+        "wildcard retry updates custom Buffs")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 1,
+        "wildcard retry updates Debuffs style")
 end
 
 do

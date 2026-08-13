@@ -41,6 +41,7 @@ local L = setmetatable({}, {
 })
 
 local BD = {
+    BLIZZARD_DEBUFF_STYLE_BACKEND = "blizzardDebuffStyle",
     SECURE_AURA_HEADER_BACKEND = "secureAuraHeader",
     CUSTOM_AURA_CONTAINER_BACKEND = "customAuraContainer",
     config = {
@@ -94,7 +95,7 @@ end
 
 local function SetCustomBuffsBackend()
     backendByPane.buffs = BD.CUSTOM_AURA_CONTAINER_BACKEND
-    backendByPane.debuffs = nil
+    backendByPane.debuffs = BD.BLIZZARD_DEBUFF_STYLE_BACKEND
     stateByPane.buffs = {}
     stateByPane.debuffs = nil
     dispatchPendingByPane.buffs = nil
@@ -131,10 +132,22 @@ do
 
     assertTrue(buffsPolicy.available, "custom Buffs available")
     assertTrue(buffsPolicy.custom, "custom Buffs policy")
-    assertFalse(debuffsPolicy.available,
-        "custom backend leaves Debuffs unavailable")
-    assertEqual(debuffsPolicy.label, "Debuffs (Blizzard controlled)",
-        "custom Debuffs ownership label")
+    assertTrue(debuffsPolicy.available,
+        "ordinary Debuffs style is available")
+    assertTrue(debuffsPolicy.blizzardDebuffStyle,
+        "Debuffs use the static Blizzard style adapter")
+    assertEqual(debuffsPolicy.label, "Debuffs (appearance only)",
+        "Debuffs appearance-only label")
+    assertFalse(debuffsPolicy.layoutControls,
+        "Blizzard owns Debuffs layout")
+    assertEqual(debuffsPolicy.maximumIconSize, 30,
+        "Debuffs size is capped to the fixed native cell")
+    assertFalse(debuffsPolicy.durationAppearanceControls,
+        "Blizzard owns Debuffs duration appearance")
+    assertTrue(debuffsPolicy.durationEnabledControl,
+        "Debuffs duration visibility remains editable")
+    assertTrue(debuffsPolicy.stackAppearanceControls,
+        "ordinary Debuffs stack text remains editable")
     assertNil(buffsPolicy.separateOwnItems[1].disabled,
         "custom Disabled choice remains selectable")
     assertTrue(buffsPolicy.separateOwnItems[2].disabled,
@@ -215,13 +228,20 @@ do
     stateByPane.buffs = {}
     assertNil(BD.GetBuffsDebuffsOptionsStatus("buffs"),
         "ready custom backend has no status")
-    assertNil(BD.GetBuffsDebuffsOptionsStatus("debuffs"),
-        "Blizzard-owned Debuffs have no custom status")
+    local debuffStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(debuffStatus.code, "BLIZZARD_DEBUFF_STYLE",
+        "ready Debuffs style exposes ownership status")
+    dispatchPendingByPane.debuffs = true
+    debuffStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(debuffStatus.code, "PENDING_SAFE_UPDATE",
+        "Debuffs combat queue outranks ownership status")
+    dispatchPendingByPane.debuffs = nil
 end
 
 local function NewOptionsUIHarness(customBackend, afVersion)
     local records = {
         callbacks = {},
+        checkButtonsByLabel = {},
         colorPickersByLabel = {},
         dropdownsByLabel = {},
         editBoxesByLabel = {},
@@ -283,6 +303,10 @@ local function NewOptionsUIHarness(customBackend, afVersion)
         end
         function widget:SetValue(value)
             self.value = value
+        end
+        function widget:SetMinMaxValues(minimum, maximum)
+            self.minimum = minimum
+            self.maximum = maximum
         end
         function widget:SetColor(...)
             local color = {...}
@@ -457,8 +481,10 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     function uiAF.CreateSwitch()
         return NewSwitch()
     end
-    function uiAF.CreateCheckButton()
-        return NewWidget("checkButton")
+    function uiAF.CreateCheckButton(_, label)
+        local checkButton = NewWidget("checkButton", label)
+        if label then records.checkButtonsByLabel[label] = checkButton end
+        return checkButton
     end
     function uiAF.CreateIconButton()
         return NewWidget("iconButton")
@@ -552,6 +578,7 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     uiEnvironment.BFIOptionsFrame_ContentPane = NewWidget("content")
 
     local uiBD = {
+        BLIZZARD_DEBUFF_STYLE_BACKEND = "blizzardDebuffStyle",
         SECURE_AURA_HEADER_BACKEND = "secureAuraHeader",
         CUSTOM_AURA_CONTAINER_BACKEND = "customAuraContainer",
         config = {
@@ -563,10 +590,13 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     records.controllerState = {}
 
     function uiBD.GetAuraBackend(which)
+        records.backendCalls = (records.backendCalls or 0) + 1
         if customBackend then
-            return which == "buffs"
-                and uiBD.CUSTOM_AURA_CONTAINER_BACKEND
-                or nil
+            if which == "buffs" then
+                return uiBD.CUSTOM_AURA_CONTAINER_BACKEND
+            elseif which == "debuffs" then
+                return uiBD.BLIZZARD_DEBUFF_STYLE_BACKEND
+            end
         end
         if which == "buffs" or which == "debuffs" then
             return uiBD.SECURE_AURA_HEADER_BACKEND
@@ -610,6 +640,7 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     records.secondsValue = records.editBoxesByLabel.Seconds
     records.percentValue = records.editBoxesByLabel.Percent
     records.lowTimeColor = records.colorPickersByLabel["Low-Time Color"]
+    records.textEnabled = records.checkButtonsByLabel.Enabled
     return records
 end
 
@@ -619,6 +650,8 @@ do
 
     assertEqual(#custom.events, 0,
         "custom programmatic option load fires no update")
+    assertEqual(custom.backendCalls, 3,
+        "initial panel load performs one backend probe per policy load")
     assertEqual(#custom.topSwitch.labels, 2, "custom has two tabs")
     assertEqual(custom.topSwitch.labels[1].text,
         "Buffs (Public + Private)",
@@ -627,9 +660,9 @@ do
         "WoW 12.1's PublicAndPrivate source list combines public and private authorized Buffs in this native row; the sources cannot be separated.",
         "custom Buffs tab tooltip names the exact native source list")
     assertEqual(custom.topSwitch.labels[2].text,
-        "Debuffs (Blizzard controlled)", "custom Debuffs label")
-    assertFalse(custom.topSwitch.buttons[2].enabled,
-        "custom Debuffs tab disabled")
+        "Debuffs (appearance only)", "Debuffs appearance-only label")
+    assertTrue(custom.topSwitch.buttons[2].enabled,
+        "Debuffs appearance tab enabled")
     assertTrue(custom.separateOwn.items[2].disabled,
         "custom Before item disabled")
     assertTrue(custom.separateOwn.items[3].disabled,
@@ -694,7 +727,10 @@ do
     assertEqual(#custom.events, 1,
         "recovery fires one module update")
 
+    local backendCallsBeforeTextSelection = custom.backendCalls
     custom.textSwitch:SetSelectedValue("duration")
+    assertEqual(custom.backendCalls, backendCallsBeforeTextSelection,
+        "text selection reuses the loaded backend policy")
     assertEqual(custom.durationMode.tooltip,
         "Durations abbreviate automatically to seconds, minutes, hours, and days.",
         "duration abbreviation guidance moves to a non-flow tooltip")
@@ -724,7 +760,10 @@ do
     local percentValue = config.duration.color.percent.value
     local percentColor = config.duration.color.percent.rgb
     custom.events = {}
+    local backendCallsBeforeDurationCallback = custom.backendCalls
     custom.durationMode.onSelect("percent")
+    assertEqual(custom.backendCalls, backendCallsBeforeDurationCallback,
+        "duration callbacks do not re-run native capability preflight")
     assertFalse(config.duration.color.seconds.enabled,
         "percent mode disables seconds")
     assertTrue(config.duration.color.percent.enabled,
@@ -829,6 +868,106 @@ do
         "Off hides low-time color")
     assertEqual(#custom.events, 1,
         "Off mode commits exactly once")
+
+    custom.topSwitch:SetSelectedValue("debuffs")
+    local debuffsConfig = custom.BD.config.debuffs
+    debuffsConfig.width = 45
+    debuffsConfig.height = 37
+    local savedSecondsEnabled =
+        debuffsConfig.duration.color.seconds.enabled
+    local savedPercentEnabled =
+        debuffsConfig.duration.color.percent.enabled
+    local savedSecondsValue = debuffsConfig.duration.color.seconds.value
+    local savedPercentValue = debuffsConfig.duration.color.percent.value
+    custom.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+    assertEqual(debuffsConfig.width, 45,
+        "imported Debuffs width remains saved")
+    assertEqual(debuffsConfig.height, 37,
+        "imported Debuffs height remains saved")
+    assertEqual(custom.slidersByLabel.Width.value, 30,
+        "imported Debuffs width is display-clamped")
+    assertEqual(custom.slidersByLabel.Height.value, 30,
+        "imported Debuffs height is display-clamped")
+    assertEqual(custom.slidersByLabel.Width.minimum, 10,
+        "Debuffs width minimum")
+    assertEqual(custom.slidersByLabel.Width.maximum, 30,
+        "Debuffs width maximum")
+    assertFalse(custom.dropdownsByLabel.Arrangement.enabled,
+        "Debuffs arrangement remains Blizzard-owned")
+    assertFalse(custom.dropdownsByLabel["Sort Method"].enabled,
+        "Debuffs sorting remains Blizzard-owned")
+    assertFalse(custom.dropdownsByLabel["Sort Direction"].enabled,
+        "Debuffs sort direction remains Blizzard-owned")
+    assertFalse(custom.separateOwn.enabled,
+        "Debuffs Separate Own remains Blizzard-owned")
+    assertFalse(custom.slidersByLabel["X Spacing"].enabled,
+        "Debuffs horizontal spacing remains Blizzard-owned")
+    assertFalse(custom.slidersByLabel["Aura Lines"].enabled,
+        "Debuffs line count remains Blizzard-owned")
+    assertEqual(custom.statusText.textValue,
+        "BFInfinite styles ordinary Debuffs only. Blizzard controls their layout and duration text; private and deadly debuffs are unchanged.",
+        "Debuffs ownership status")
+    assertTrue(custom.statusText.shown,
+        "Debuffs ownership status visible")
+    assertTrue(custom.statusText.wordWrap,
+        "Debuffs ownership status wraps within the fitting status row")
+
+    custom.textSwitch:SetSelectedValue("stack")
+    assertTrue(custom.dropdownsByLabel.Font.enabled,
+        "Debuffs stack font remains editable")
+    assertTrue(custom.dropdownsByLabel.Outline.enabled,
+        "Debuffs stack outline remains editable")
+    assertTrue(custom.colorPickersByLabel.Normal.enabled,
+        "Debuffs stack colour remains editable")
+
+    custom.textSwitch:SetSelectedValue("duration")
+    assertTrue(custom.textEnabled.enabled,
+        "Debuffs duration Enabled remains editable")
+    assertFalse(custom.dropdownsByLabel.Font.enabled,
+        "Debuffs duration font remains Blizzard-owned")
+    assertFalse(custom.dropdownsByLabel.Outline.enabled,
+        "Debuffs duration outline remains Blizzard-owned")
+    assertFalse(custom.colorPickersByLabel.Normal.enabled,
+        "Debuffs duration normal colour remains Blizzard-owned")
+    assertFalse(custom.durationMode.enabled,
+        "Debuffs duration mode remains visible but disabled")
+    assertFalse(custom.secondsValue.enabled,
+        "Debuffs seconds value remains visible but disabled")
+    assertFalse(custom.lowTimeColor.enabled,
+        "Debuffs low-time colour remains visible but disabled")
+    assertEqual(custom.durationMode.tooltip,
+        "Blizzard supplies and abbreviates Debuff durations. BFInfinite can only show or hide this text.",
+        "Debuffs duration ownership tooltip")
+
+    custom.events = {}
+    custom.durationMode.onSelect("percent")
+    custom.secondsValue.confirmValue(9.5)
+    custom.lowTimeColor.onConfirm(0.3, 0.4, 0.5)
+    assertEqual(debuffsConfig.duration.color.seconds.enabled,
+        savedSecondsEnabled,
+        "disabled mode control preserves seconds flag")
+    assertEqual(debuffsConfig.duration.color.percent.enabled,
+        savedPercentEnabled,
+        "disabled mode control preserves percent flag")
+    assertEqual(debuffsConfig.duration.color.seconds.value,
+        savedSecondsValue,
+        "disabled seconds editor preserves payload")
+    assertEqual(debuffsConfig.duration.color.percent.value,
+        savedPercentValue,
+        "disabled percent payload remains exact")
+    assertEqual(#custom.events, 0,
+        "disabled duration appearance callbacks are neutral")
+
+    custom.dispatchPending = true
+    custom.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+    assertEqual(custom.statusText.textValue,
+        "Debuffs styling is waiting for combat to end.",
+        "selected Debuffs tab shows pending status")
+    custom.dispatchPending = false
+    custom.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+    assertEqual(custom.statusText.textValue,
+        "BFInfinite styles ordinary Debuffs only. Blizzard controls their layout and duration text; private and deadly debuffs are unchanged.",
+        "Debuffs ownership status returns after pending clears")
 end
 
 do
