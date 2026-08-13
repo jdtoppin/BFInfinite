@@ -140,6 +140,10 @@ local function newWidget(kind, parent)
         self.text = text
     end
 
+    function widget:SetTextColor(...)
+        self.textColor = {...}
+    end
+
     function widget:SetTooltip(...)
         self.tooltip = {...}
     end
@@ -206,13 +210,21 @@ local function createHarness()
         button.width = width
         button.height = height
         if text == L["Add Binding"] then state.addButton = button end
+        if text == L["Blizzard Click Casting"] then
+            state.openBlizzardButton = button
+        end
         return button
     end
 
     function AF.CreateCheckButton(parent, text)
         local checkButton = newWidget("checkButton", parent)
+        -- Checkbox text is owned by its FontString in AbstractFramework.
+        -- Keep the harness honest so a widget-level SetTextColor call cannot
+        -- conceal a live-client API mismatch.
+        checkButton.SetTextColor = nil
+        checkButton.label = newWidget("fontString", checkButton)
         checkButton.text = text
-        if text == L["Enable BFI Click Casting"] then
+        if text == L["Enable"] then
             state.enabledCheckButton = checkButton
         elseif text == L["Prefer Mass Resurrection"] then
             state.preferMassResurrection = checkButton
@@ -296,6 +308,10 @@ local function createHarness()
 
     function AF.GetGradientText(text)
         return text
+    end
+
+    function AF.GetColorRGB(color)
+        return color
     end
 
     function AF.GetLocalizedClassName(class)
@@ -484,8 +500,31 @@ assertEqual(
 local clickPanel = harness.namedFrames.BFIOptionsFrame_ClickCastingsPanel
 assertEqual(clickPanel.profile.points[1][2], harness.headerPane.tips,
     "profile, class, and spec metadata sits beside the info button")
-assertEqual(harness.enabledCheckButton.points[1][2], harness.headerPane,
-    "controls anchor to the resolved heading frame")
+assertEqual(harness.enabledCheckButton.text, "Enable",
+    "title-row toggle uses concise enable text")
+assertEqual(harness.enabledCheckButton.parent, harness.headerPane,
+    "enable toggle belongs to the title row")
+assertEqual(harness.enabledCheckButton.points[1][1], "LEFT",
+    "enable toggle aligns horizontally with the title")
+assertEqual(harness.enabledCheckButton.points[1][2], harness.headerPane.title,
+    "enable toggle follows the Click Casting title")
+assertEqual(harness.enabledCheckButton.points[1][3], "RIGHT",
+    "enable toggle appears after the Click Casting title")
+assertEqual(harness.enabledCheckButton.label.textColor[1], "softlime",
+    "enabled Click Casting uses the standard green label color")
+assertEqual(harness.smartResurrection.points[1][2], harness.headerPane,
+    "Smart Resurrection anchors below the resolved heading frame")
+assertEqual(harness.addButton.points[1][2], harness.headerPane,
+    "Add Binding anchors below the resolved heading frame")
+assertEqual(
+    harness.smartResurrection.points[1][5],
+    harness.addButton.points[1][5],
+    "Smart Resurrection shares the Blizzard/Add Binding action row"
+)
+assertEqual(harness.openBlizzardButton.points[1][2], harness.addButton,
+    "Blizzard Click Casting shares the Add Binding action row")
+assertEqual(harness.openBlizzardButton.points[1][5], 0,
+    "Blizzard Click Casting has no vertical offset from Add Binding")
 local classColorCall
 for _, call in ipairs(harness.wrapColorCalls) do
     if call.text == "PRIEST" and call.color == "PRIEST" then
@@ -654,7 +693,7 @@ local dialog = harness.dialogs[#harness.dialogs]
 dialog.content.box:SetText("/say stale confirmation")
 
 local newConfig = {
-    enabled = true,
+    enabled = false,
     bindings = {
         {"type4", "custom", "/say new profile"},
     },
@@ -664,6 +703,8 @@ closeCalls = harness.cascadingMenuCloseCalls
 harness:FireCallback("BFI_UpdateProfile")
 assertEqual(harness.cascadingMenuCloseCalls, closeCalls + 1,
     "profile changes close the visible panel's stale picker")
+assertEqual(harness.enabledCheckButton.label.textColor[1], "firebrick",
+    "visible profile changes refresh the disabled title-row color")
 dialog.onConfirm()
 assertEqual(newConfig.bindings[1][3], "/say new profile",
     "stale modal cannot mutate the newly active profile")
@@ -672,6 +713,8 @@ assertEqual(oldCustomBinding[3], "/say old",
 
 harness.CC.activeConfig = oldConfig
 harness:FireCallback("BFI_UpdateProfile")
+assertEqual(harness.enabledCheckButton.label.textColor[1], "softlime",
+    "returning to an enabled profile refreshes the title-row color")
 local deleteRow = harness.list.widgets[5]
 local deleteOkay, deleteError = pcall(deleteRow.delete.onClick)
 assertTrue(deleteOkay,
@@ -680,6 +723,12 @@ assertEqual(#oldConfig.bindings, 4, "delete removes one binding")
 
 harness.enabledCheckButton.onCheck(false)
 assertEqual(oldConfig.enabled, false, "module disabled")
+assertEqual(harness.enabledCheckButton.label.textColor[1], "firebrick",
+    "live disable switches the title-row label to red")
+assertEqual(harness.fires[#harness.fires][1], "BFI_UpdateModule",
+    "live enable state changes notify module consumers")
+assertEqual(harness.fires[#harness.fires][2], "clickCastings",
+    "live enable state notification identifies Click Casting")
 assertTrue(harness.addButton.enabled,
     "disabled module still permits adding bindings")
 for index, row in ipairs(harness.list.widgets) do
@@ -690,6 +739,20 @@ for index, row in ipairs(harness.list.widgets) do
     assertTrue(row.delete.enabled,
         "disabled module keeps deletion editable " .. index)
 end
+
+local resetConfig = {
+    enabled = true,
+    smartResurrection = "disabled",
+    preferMassResurrection = true,
+    bindings = {
+        {"type1", "target"},
+        {"type2", "togglemenu"},
+    },
+}
+harness.CC.activeConfig = resetConfig
+harness:FireCallback("BFI_RefreshOptions", "clickCastings")
+assertEqual(harness.enabledCheckButton.label.textColor[1], "softlime",
+    "module reset refreshes the restored enabled color")
 
 harness:FireCallback("BFI_ShowOptionsPanel", "profiles")
 closeCalls = harness.cascadingMenuCloseCalls

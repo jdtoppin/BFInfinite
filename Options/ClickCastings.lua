@@ -99,6 +99,12 @@ UpdateConflictNotice = function()
     end
 end
 
+local function UpdateEnabledState(checked)
+    enabled.label:SetTextColor(
+        AF.GetColorRGB(checked and "softlime" or "firebrick")
+    )
+end
+
 local function SetPayload(row, value)
     local binding = GetConfig().bindings[row.index]
     if not binding then return end
@@ -472,8 +478,8 @@ local function CreatePanel()
     profile:SetColor("tip")
 
     optionsStage = "panel controls"
-    enabled = AF.CreateCheckButton(panel, L["Enable BFI Click Casting"])
-    AF.SetPoint(enabled, "TOPLEFT", header, "BOTTOMLEFT", 0, -14)
+    enabled = AF.CreateCheckButton(header, L["Enable"])
+    AF.SetPoint(enabled, "LEFT", header.title, "RIGHT", 15, 0)
     enabled:SetOnCheck(function(checked)
         GetConfig().enabled = checked
         list.Load()
@@ -487,8 +493,8 @@ local function CreatePanel()
         "TOPLEFT",
         header,
         "BOTTOMLEFT",
-        250,
-        -14
+        0,
+        -30
     )
     smartResurrection:SetLabel(L["Smart Resurrection"], "gray")
     smartResurrection:SetOnSelect(function(value)
@@ -527,7 +533,7 @@ local function CreatePanel()
     )
 
     local add = AF.CreateButton(panel, L["Add Binding"], "BFI_hover", 110, 22)
-    AF.SetPoint(add, "TOPRIGHT", header, "BOTTOMRIGHT", 0, -44)
+    AF.SetPoint(add, "TOPRIGHT", header, "BOTTOMRIGHT", 0, -30)
     add:SetOnClick(function()
         GetConfig().bindings[#GetConfig().bindings + 1] = {
             "notBound",
@@ -554,7 +560,14 @@ local function CreatePanel()
 
     optionsStage = "binding list"
     local bindingHeader = AF.CreateFontString(panel, L["Binding"], "gray")
-    AF.SetPoint(bindingHeader, "TOPLEFT", enabled, "BOTTOMLEFT", 30, -45)
+    AF.SetPoint(
+        bindingHeader,
+        "TOPLEFT",
+        smartResurrection,
+        "BOTTOMLEFT",
+        30,
+        -16
+    )
     local actionHeader = AF.CreateFontString(panel, L["Action"], "gray")
     AF.SetPoint(actionHeader, "LEFT", bindingHeader, 152, 0)
     local valueHeader = AF.CreateFontString(panel, L["Value"], "gray")
@@ -572,6 +585,7 @@ local function CreatePanel()
             and CC.GetSmartResurrectionCapabilities()
             or {normal = true, mass = true, combat = true}
         enabled:SetChecked(config.enabled)
+        UpdateEnabledState(config.enabled)
         smartResurrection:SetItems({
             {text = L["Disabled"], value = "disabled"},
             {
