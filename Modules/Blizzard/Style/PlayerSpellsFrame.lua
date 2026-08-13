@@ -7,6 +7,9 @@ local AF = _G.AbstractFramework
 local spellFrame
 local assistedCombatStylePending
 
+-- Retail 12.1.0.69273 / wow-ui-source eb941aad028d73dd: this block contains
+-- a SecureFrameTemplate button, while ClearAllPoints and SetPoint are
+-- protected. Defer its styling and layout while combat lockdown is active.
 local function StyleAssistedCombatFrame(spellBookFrame)
     if InCombatLockdown() then
         if assistedCombatStylePending then return end

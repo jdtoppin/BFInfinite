@@ -5,9 +5,6 @@ local S = BFI.modules.Style
 local AF = _G.AbstractFramework
 
 local _G = _G
-local PANEL_INSET_BOTTOM_OFFSET = _G.PANEL_INSET_BOTTOM_OFFSET
-local MIN_PLAYER_LEVEL_FOR_ITEM_LEVEL_DISPLAY = _G.MIN_PLAYER_LEVEL_FOR_ITEM_LEVEL_DISPLAY
-local PAPERDOLL_STATINFO = _G.PAPERDOLL_STATINFO
 local EQUIPMENTFLYOUT_FIRST_SPECIAL_LOCATION = _G.EQUIPMENTFLYOUT_FIRST_SPECIAL_LOCATION
 
 local CharacterFrame = _G.CharacterFrame
@@ -230,12 +227,6 @@ end
 ---------------------------------------------------------------------
 -- CharacterFrameInsetRight
 ---------------------------------------------------------------------
-local PAPERDOLL_STATINFO = {
-    CRITCHANCE = {
-        updateFunc = function(statFrame, unit) PaperDollFrame_SetCritChance(statFrame, unit) end
-    }
-}
-
 local function StyleStatsPaneCategory(frame)
     S.RemoveTextures(frame)
     AF.ApplyDefaultBackdropWithColors(frame)
@@ -254,59 +245,32 @@ local function StyleStatsPaneCategory(frame)
     end)
 end
 
-local function PaperDollFrame_UpdateStats()
-    for f in CharacterStatsPane.statsFramePool:EnumerateActive() do
-        -- f.Background:SetAlpha(0)
-        if f.Background:IsShown() then
-            f.Background:SetTexture(AF.GetPlainTexture())
-            f.Background:SetVertexColor(AF.GetColorRGB("darkgray", 0.1))
-            f.Background:ClearAllPoints()
-            f.Background:SetPoint("TOP")
-            f.Background:SetPoint("BOTTOM")
-            f.Background:SetPoint("LEFT", 5, 0)
-            f.Background:SetPoint("RIGHT", -5, 0)
-        end
+-- Unit-stat values may be secret while stats are restricted. This post-hook
+-- must remain presentation-only and ignore the value arguments that follow.
+local function PaperDollFrame_StyleStat(statFrame)
+    if statFrame._BFIStatStyled then return end
+    statFrame._BFIStatStyled = true
+
+    if statFrame == CharacterStatsPane.ItemLevelFrame then
+        AF.UpdateFont(statFrame.Value, nil, 20 + BFI.vars.blizzardFontSizeDelta)
+        return
     end
 
-    -- cant use AdjustPointsOffset
-    -- CharacterStatsPane.ItemLevelCategory:AdjustPointsOffset(0, -10)
-    -- -- if UnitLevel("player") >= MIN_PLAYER_LEVEL_FOR_ITEM_LEVEL_DISPLAY then
-    --     CharacterStatsPane.AttributesCategory:AdjustPointsOffset(0, -10)
-    -- -- end
-    -- CharacterStatsPane.EnhancementsCategory:AdjustPointsOffset(0, -10)
-end
+    statFrame.Background:SetTexture(AF.GetPlainTexture())
+    statFrame.Background:SetVertexColor(AF.GetColorRGB("darkgray", 0.1))
+    statFrame.Background:ClearAllPoints()
+    statFrame.Background:SetPoint("TOP")
+    statFrame.Background:SetPoint("BOTTOM")
+    statFrame.Background:SetPoint("LEFT", 5, 0)
+    statFrame.Background:SetPoint("RIGHT", -5, 0)
 
-local function PaperDollFrame_SetLabelAndText(statFrame, label, text, isPercentage, numericValue)
-    if label == _G.STAT_AVERAGE_ITEM_LEVEL then
-        local _, ilvl = GetAverageItemLevel()
-        ilvl = AF.RoundToDecimal(ilvl, 1)
-        statFrame.Value:SetText(ilvl)
-    elseif label == _G.STAT_HASTE then
-        statFrame.Value:SetFormattedText("%.2f%%", numericValue)
-    elseif isPercentage then
-        if label == _G.STAT_VERSATILITY then
-            -- numericValue = AF.RoundToDecimal(numericValue, 2)
-            statFrame.Value:SetFormattedText("%.2f%%/%.2f%%", numericValue, numericValue / 2)
-        else
-            statFrame.Value:SetFormattedText("%.2f%%", numericValue)
-        end
-    end
-
-    -- font
-    if not statFrame._fontSizeUpdated then
-        statFrame._fontSizeUpdated = true
-        if label == _G.STAT_AVERAGE_ITEM_LEVEL then
-            AF.UpdateFont(statFrame.Value, nil, 20 + BFI.vars.blizzardFontSizeDelta)
-        else
-            AF.UpdateFont(statFrame.Label, nil, 12 + BFI.vars.blizzardFontSizeDelta, "")
-            AF.UpdateFont(statFrame.Value, nil, 12 + BFI.vars.blizzardFontSizeDelta, "")
-        end
-    end
+    AF.UpdateFont(statFrame.Label, nil, 12 + BFI.vars.blizzardFontSizeDelta, "")
+    AF.UpdateFont(statFrame.Value, nil, 12 + BFI.vars.blizzardFontSizeDelta, "")
 end
 
 local function PaperDollFrame_UpdateSidebarTabs()
     local i = 1
-    local tab, last = _G["PaperDollSidebarTab" .. i]
+    local tab = _G["PaperDollSidebarTab" .. i]
     while tab do
         AF.ApplyDefaultBackdropWithColors(tab, "widget")
         AF.AddToPixelUpdater_CustomGroup("BFIStyled", tab)
@@ -342,13 +306,6 @@ end
 
 local function TitleManagerPane_Update(frame)
     frame:ForEachFrame(TitleManagerPane_UpdateEach)
-end
-
-local function GearSetButton_OnEnter(self)
-    if self.setID then
-        GameTooltip_SetDefaultAnchor(GameTooltip, self)
-        GameTooltip:SetEquipmentSet(self.setID)
-    end
 end
 
 -- Modules\Tooltip\Tooltip.lua UpdateAnchor
@@ -408,11 +365,7 @@ local function StyleCharacterFrameInsetRight()
     S.RemoveTextures(CharacterStatsPane.ItemLevelFrame)
     CharacterStatsPane.ItemLevelFrame:SetHeight(30)
 
-    hooksecurefunc("PaperDollFrame_UpdateStats", PaperDollFrame_UpdateStats)
-    hooksecurefunc("PaperDollFrame_SetLabelAndText", PaperDollFrame_SetLabelAndText)
-
-    -- movement speed
-    tinsert(_G.PAPERDOLL_STATCATEGORIES[1].stats, {stat = "MOVESPEED"})
+    hooksecurefunc("PaperDollFrame_SetLabelAndText", PaperDollFrame_StyleStat)
 
     -- title
     hooksecurefunc(PaperDollFrame.TitleManagerPane.ScrollBox, "Update", TitleManagerPane_Update)
@@ -545,7 +498,7 @@ local function UpdateParagon(frame)
     local factionID = frame.factionID
     if factionID then
         if factionID and IsFactionParagon(factionID) then
-            local current, threshold, _, hasRewardPending = GetFactionParagonInfo(factionID)
+            local _, _, _, hasRewardPending = GetFactionParagonInfo(factionID)
             -- print(C_Reputation.GetFactionDataByID(factionID).name, hasRewardPending)
 
             local icon = frame.Content.ParagonIcon
