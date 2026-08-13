@@ -75,7 +75,10 @@ end
 
 local function NewHarness(options)
     options = options or {}
-    local interfaceVersion = options.interfaceVersion or 120100
+    local interfaceVersion = options.interfaceVersion
+    if interfaceVersion == nil and not options.missingInterfaceVersion then
+        interfaceVersion = 120100
+    end
     local createFrameCalls = 0
     local customDisableCalls = {}
     local customUpdateCalls = {}
@@ -85,6 +88,12 @@ local function NewHarness(options)
     local updateCallback
 
     local schema = NewSchema()
+    for name in pairs(schema) do
+        _G[name] = nil
+    end
+    if options.missingSchema then
+        schema[options.missingSchema] = nil
+    end
     for name, value in pairs(schema) do
         _G[name] = value
     end
@@ -135,7 +144,7 @@ local function NewHarness(options)
 
     local AF = {
         isRetail = options.isRetail ~= false,
-        versionNum = options.afVersion or 33,
+        versionNum = options.afVersion or 36,
         UIParent = {},
     }
     if options.customMethods ~= false then
@@ -266,8 +275,26 @@ end
 
 do
     local harness = NewHarness({
+        missingInterfaceVersion = true,
+        afVersion = 36,
+        registerCustomBackend = true,
+    })
+    local BD = harness.BD
+
+    assertEqual(BD.HasSecureAuraHeaderBackend(), false,
+        "missing interface legacy capability")
+    assertEqual(BD.HasCustomAuraContainerCapability(), false,
+        "missing interface custom capability")
+    assertEqual(BD.GetAuraBackend("buffs"), nil,
+        "missing interface backend")
+    assertEqual(harness.getCreateFrameCalls(), 0,
+        "missing interface CreateFrame")
+end
+
+do
+    local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 33,
+        afVersion = 36,
         registerCustomBackend = true,
     })
     local BD = harness.BD
@@ -302,7 +329,7 @@ end
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 33,
+        afVersion = 36,
         registerCustomBackend = true,
         inCombat = true,
     })
@@ -367,7 +394,22 @@ end
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 33,
+        afVersion = 36,
+        isRetail = false,
+        registerCustomBackend = true,
+    })
+    local BD = harness.BD
+
+    assertEqual(BD.HasSecureAuraHeaderBackend(), false, "non-Retail legacy capability")
+    assertEqual(BD.HasCustomAuraContainerCapability(), false,
+        "non-Retail custom capability")
+    assertEqual(BD.GetAuraBackend("buffs"), nil, "non-Retail backend")
+end
+
+do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 36,
     })
     local BD = harness.BD
 
@@ -378,24 +420,65 @@ do
     assertEqual(harness.getCreateFrameCalls(), 0, "unregistered 12.1 legacy fallback")
 end
 
-do
+
+for _, missingSchema in ipairs({
+    "AnchorUtil",
+    "AuraContainerSortMethod",
+    "AuraContainerSortDirection",
+    "AuraContainerItemEnchantmentSlot",
+    "AuraContainerItemEnchantmentSortMethod",
+    "CustomAuraContainerAuraProcessingPolicy",
+    "CustomAuraContainerItemEnchantmentPlacement",
+}) do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 32,
+        afVersion = 36,
+        missingSchema = missingSchema,
         registerCustomBackend = true,
     })
     local BD = harness.BD
 
-    assertEqual(BD.HasCustomAuraContainerCapability(), false, "AF r32 custom capability")
-    assertEqual(BD.GetAuraBackend("buffs"), nil, "AF r32 12.1 backend")
+    assertEqual(BD.HasCustomAuraContainerCapability(), false,
+        "missing schema: " .. missingSchema)
+    assertEqual(BD.GetAuraBackend("buffs"), nil,
+        "missing schema backend: " .. missingSchema)
+    assertEqual(harness.getCreateFrameCalls(), 0,
+        "missing schema CreateFrame: " .. missingSchema)
+end
+
+do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 36,
+        hasCustomAuraContainer = false,
+        registerCustomBackend = true,
+    })
+    local BD = harness.BD
+
+    assertEqual(BD.HasCustomAuraContainerCapability(), false,
+        "false custom capability")
+    assertEqual(BD.GetAuraBackend("buffs"), nil,
+        "false custom backend")
+end
+
+do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 35,
+        registerCustomBackend = true,
+    })
+    local BD = harness.BD
+
+    assertEqual(BD.HasCustomAuraContainerCapability(), false, "AF r35 custom capability")
+    assertEqual(BD.GetAuraBackend("buffs"), nil, "AF r35 12.1 backend")
     harness.update()
-    assertEqual(harness.getCreateFrameCalls(), 0, "AF r32 12.1 legacy fallback")
+    assertEqual(harness.getCreateFrameCalls(), 0, "AF r35 12.1 legacy fallback")
 end
 
 do
     local harness = NewHarness({
         interfaceVersion = 120200,
-        afVersion = 33,
+        afVersion = 36,
         registerCustomBackend = true,
     })
     local BD = harness.BD
@@ -410,7 +493,7 @@ end
 for _, missingMethod in ipairs(REQUIRED_CUSTOM_AF_METHODS) do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 33,
+        afVersion = 36,
         missingCustomMethod = missingMethod,
         registerCustomBackend = true,
     })
@@ -442,7 +525,7 @@ end
 do
     local harness = NewHarness({
         interfaceVersion = 120100,
-        afVersion = 33,
+        afVersion = 36,
         registerCustomBackend = true,
     })
     local BD = harness.BD

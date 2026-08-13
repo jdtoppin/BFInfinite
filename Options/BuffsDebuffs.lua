@@ -8,6 +8,52 @@ local AF = _G.AbstractFramework
 local LoadOptions, UpdateStatus
 local selected, currentConfig, currentTextConfig
 
+local function IsFiniteNumber(value)
+    return type(value) == "number"
+        and value == value
+        and value ~= math.huge
+        and value ~= -math.huge
+end
+
+local SOURCE_DISCLOSURE = L[
+    "WoW 12.1's PublicAndPrivate source list combines public and private authorized Buffs in this native row; the sources cannot be separated."
+]
+
+local function GetDurationColorMode(config)
+    if type(BD.GetDurationColorMode) == "function" then
+        return BD.GetDurationColorMode(config)
+    end
+    local color = type(config) == "table" and config.color or nil
+    if type(color) == "table" then
+        if type(color.seconds) == "table"
+            and color.seconds.enabled == true
+        then
+            return "seconds"
+        elseif type(color.percent) == "table"
+            and color.percent.enabled == true
+        then
+            return "percent"
+        end
+    end
+    return "off"
+end
+
+local function SetDurationColorMode(config, mode)
+    if type(BD.SetDurationColorMode) == "function" then
+        return BD.SetDurationColorMode(config, mode)
+    end
+    if type(config) ~= "table"
+        or type(config.color) ~= "table"
+        or type(config.color.seconds) ~= "table"
+        or type(config.color.percent) ~= "table"
+    then
+        return false
+    end
+    config.color.seconds.enabled = mode == "seconds"
+    config.color.percent.enabled = mode == "percent"
+    return true
+end
+
 local function IsCustomBuffsBackend(which)
     return which == "buffs"
         and BD.GetAuraBackend(which) == BD.CUSTOM_AURA_CONTAINER_BACKEND
@@ -30,7 +76,8 @@ function BD.GetBuffsDebuffsOptionsPolicy(which)
             {text = L["After"], value = -1, disabled = custom},
         },
         constructionOwnedStyle = custom,
-        retiredDurationControls = true,
+        durationColorModes = true,
+        sourceDisclosure = custom and SOURCE_DISCLOSURE or nil,
     }
 end
 
@@ -143,7 +190,7 @@ local function CreateNormalPane()
     --------------------------------------------------
     -- iconsPane
     --------------------------------------------------
-    local iconsPane = AF.CreateTitledPane(normalPane, L["Icons"], nil, 260)
+    local iconsPane = AF.CreateTitledPane(normalPane, L["Icons"], nil, 285)
     AF.SetPoint(iconsPane, "TOPLEFT", 0, -5)
     AF.SetPoint(iconsPane, "TOPRIGHT", 0, -5)
 
@@ -248,6 +295,17 @@ local function CreateNormalPane()
     maxWraps:SetTooltip(enchantmentCapHelp)
     wrapAfter:SetTooltip(enchantmentCapHelp)
 
+    local sourceDisclosure = AF.CreateFontString(
+        iconsPane,
+        SOURCE_DISCLOSURE,
+        "gray"
+    )
+    normalPane.sourceDisclosure = sourceDisclosure
+    AF.SetPoint(sourceDisclosure, "BOTTOMLEFT", 10, 28)
+    AF.SetWidth(sourceDisclosure, 530)
+    sourceDisclosure:SetWordWrap(true)
+    sourceDisclosure:Hide()
+
     local statusText = AF.CreateFontString(
         iconsPane,
         nil,
@@ -274,7 +332,7 @@ local function CreateNormalPane()
     --------------------------------------------------
     -- textsPane
     --------------------------------------------------
-    local textsPane = AF.CreateTitledPane(normalPane, L["Texts"], nil, 235)
+    local textsPane = AF.CreateTitledPane(normalPane, L["Texts"], nil, 315)
     AF.SetPoint(textsPane, "TOPLEFT", iconsPane, "BOTTOMLEFT", 0, -5)
     AF.SetPoint(textsPane, "TOPRIGHT", iconsPane, "BOTTOMRIGHT", 0, -5)
 
@@ -407,6 +465,85 @@ local function CreateNormalPane()
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
 
+    local durationMode = AF.CreateDropdown(textsPane, 150)
+    AF.SetPoint(durationMode, "TOPLEFT", normalColor, "BOTTOMLEFT", 0, -30)
+    durationMode:SetLabel(L["Low-Time Text Color"])
+    durationMode:SetItems({
+        {text = L["Seconds"], value = "seconds"},
+        {text = L["Percent"], value = "percent"},
+        {text = L["Off"], value = "off"},
+    })
+    durationMode:SetOnSelect(function(value)
+        if not SetDurationColorMode(currentTextConfig, value) then return end
+        textsPane.UpdateDurationWidgets()
+        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
+    end)
+
+    local secondsValue = AF.CreateEditBox(
+        textsPane,
+        L["Seconds"],
+        150,
+        20,
+        "decimal"
+    )
+    AF.SetPoint(secondsValue, "TOPLEFT", durationMode, "BOTTOMLEFT", 0, -30)
+    secondsValue:SetLabelAlt(L["Seconds"])
+    secondsValue:SetMaxLetters(12)
+    secondsValue:SetConfirmButton(function(value)
+        value = tonumber(value)
+        if not IsFiniteNumber(value) or value <= 0 then
+            secondsValue:SetText(currentTextConfig.color.seconds.value)
+            return
+        end
+        currentTextConfig.color.seconds.value = value
+        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
+    end, nil, "RIGHT_OUTSIDE")
+    secondsValue:SetOnEditFocusLost(function(self)
+        self:SetText(currentTextConfig.color.seconds.value)
+    end)
+
+    local percentValue = AF.CreateEditBox(
+        textsPane,
+        L["Percent"],
+        150,
+        20,
+        "decimal"
+    )
+    AF.SetPoint(percentValue, "TOPLEFT", durationMode, "BOTTOMLEFT", 0, -30)
+    percentValue:SetLabelAlt(L["Percent"])
+    percentValue:SetMaxLetters(12)
+    percentValue:SetConfirmButton(function(value)
+        value = tonumber(value)
+        if not IsFiniteNumber(value) or value <= 0 or value >= 100 then
+            percentValue:SetText(currentTextConfig.color.percent.value * 100)
+            return
+        end
+        currentTextConfig.color.percent.value = value / 100
+        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
+    end, nil, "RIGHT_OUTSIDE")
+    percentValue:SetOnEditFocusLost(function(self)
+        self:SetText(currentTextConfig.color.percent.value * 100)
+    end)
+
+    local lowTimeColor = AF.CreateColorPicker(textsPane, L["Low-Time Color"])
+    AF.SetPoint(lowTimeColor, "TOPLEFT", secondsValue, "BOTTOMLEFT", 0, -15)
+    lowTimeColor:SetOnChange(function(r, g, b)
+        if IsCustomBuffsBackend(selected) then return end
+        local mode = GetDurationColorMode(currentTextConfig)
+        local rule = currentTextConfig.color[mode]
+        if type(rule) ~= "table" then return end
+        rule.rgb[1], rule.rgb[2], rule.rgb[3] = r, g, b
+        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
+    end)
+    lowTimeColor:SetOnConfirm(function(r, g, b)
+        if not IsCustomBuffsBackend(selected) then return end
+        local mode = GetDurationColorMode(currentTextConfig)
+        local rule = currentTextConfig.color[mode]
+        if type(rule) ~= "table" then return end
+        rule.rgb[1], rule.rgb[2], rule.rgb[3] = r, g, b
+        AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
+    end)
+
     local durationHint = AF.CreateFontString(
         textsPane,
         L[
@@ -414,7 +551,7 @@ local function CreateNormalPane()
         ],
         "gray"
     )
-    AF.SetPoint(durationHint, "TOPLEFT", normalColor, "BOTTOMLEFT", 0, -15)
+    AF.SetPoint(durationHint, "TOPLEFT", lowTimeColor, "BOTTOMLEFT", 0, -15)
     AF.SetWidth(durationHint, 160)
     durationHint:SetWordWrap(true)
     durationHint:Hide()
@@ -425,6 +562,36 @@ local function CreateNormalPane()
     function textsPane.UpdateWidgets()
         AF.SetEnabled(currentConfig.enabled, enabled)
         AF.SetEnabled(currentConfig.enabled and currentTextConfig.enabled, font, size, outline, shadow, anchorPoint, relativePoint, xOffset, yOffset, normalColor)
+        textsPane.UpdateDurationWidgets()
+    end
+
+    function textsPane.UpdateDurationWidgets()
+        local isDuration = textSwitch:GetSelectedValue() == "duration"
+        local mode = isDuration and GetDurationColorMode(currentTextConfig)
+            or "off"
+        local enabledForDuration = isDuration
+            and currentConfig.enabled
+            and currentTextConfig.enabled
+
+        durationMode:SetShown(isDuration)
+        secondsValue:SetShown(isDuration and mode == "seconds")
+        percentValue:SetShown(isDuration and mode == "percent")
+        lowTimeColor:SetShown(isDuration and mode ~= "off")
+        if mode == "seconds" or mode == "percent" then
+            lowTimeColor:SetColor(currentTextConfig.color[mode].rgb)
+        else
+            lowTimeColor:SetColor(1, 1, 1, 1)
+        end
+        AF.SetEnabled(enabledForDuration, durationMode)
+        AF.SetEnabled(
+            enabledForDuration and mode == "seconds",
+            secondsValue
+        )
+        AF.SetEnabled(
+            enabledForDuration and mode == "percent",
+            percentValue
+        )
+        AF.SetEnabled(enabledForDuration and mode ~= "off", lowTimeColor)
     end
 
     function textsPane.Load(which)
@@ -444,13 +611,26 @@ local function CreateNormalPane()
 
         if which == "stack" then
             normalColor:SetColor(currentTextConfig.color)
+            durationMode:SetSelectedValue("off")
+            secondsValue:SetText(5)
+            percentValue:SetText(50)
+            lowTimeColor:SetColor(1, 1, 1, 1)
         else
             normalColor:SetColor(currentTextConfig.color.normal)
+            local mode = GetDurationColorMode(currentTextConfig)
+            durationMode:SetSelectedValue(mode)
+            secondsValue:SetText(currentTextConfig.color.seconds.value)
+            percentValue:SetText(
+                currentTextConfig.color.percent.value * 100
+            )
+            if mode == "seconds" or mode == "percent" then
+                lowTimeColor:SetColor(currentTextConfig.color[mode].rgb)
+            else
+                lowTimeColor:SetColor(1, 1, 1, 1)
+            end
         end
-        durationHint:SetShown(
-            which == "duration"
-                and (tonumber(AF.versionNum) or 0) >= 33
-        )
+        textsPane.UpdateDurationWidgets()
+        durationHint:SetShown(which == "duration")
     end
 
     function normalPane.Load()
@@ -461,6 +641,7 @@ local function CreateNormalPane()
         AF.SetEnabled(currentConfig.enabled, arrangement, sortMethod, sortDirection, width, height, spacingX, spacingY, maxWraps, wrapAfter)
         AF.SetEnabled(policy.custom or currentConfig.enabled, separateOwn)
         separateOwn:SetItems(policy.separateOwnItems)
+        sourceDisclosure:SetShown(policy.sourceDisclosure ~= nil)
         arrangement:SetSelectedValue(currentConfig.orientation)
         sortMethod:SetSelectedValue(currentConfig.sortMethod)
         sortDirection:SetSelectedValue(currentConfig.sortDirection)

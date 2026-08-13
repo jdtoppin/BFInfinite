@@ -143,8 +143,11 @@ do
         "custom After choice disabled")
     assertTrue(buffsPolicy.constructionOwnedStyle,
         "custom button styling is construction-owned")
-    assertTrue(buffsPolicy.retiredDurationControls,
-        "retired duration controls are declared")
+    assertTrue(buffsPolicy.durationColorModes,
+        "one duration color mode control is declared")
+    assertTrue(buffsPolicy.sourceDisclosure:find("PublicAndPrivate", 1, true)
+            ~= nil,
+        "custom policy discloses the native combined source list")
 end
 
 do
@@ -221,6 +224,7 @@ local function NewOptionsUIHarness(customBackend, afVersion)
         callbacks = {},
         colorPickersByLabel = {},
         dropdownsByLabel = {},
+        editBoxesByLabel = {},
         events = {},
         fontStringsByText = {},
         slidersByLabel = {},
@@ -281,7 +285,16 @@ local function NewOptionsUIHarness(customBackend, afVersion)
             self.value = value
         end
         function widget:SetColor(...)
-            self.color = {...}
+            local color = {...}
+            if #color == 1 and type(color[1]) == "table" then
+                color = {
+                    color[1][1],
+                    color[1][2],
+                    color[1][3],
+                    color[1][4],
+                }
+            end
+            self.color = color
         end
         function widget:SetItems(items)
             self.items = items
@@ -324,6 +337,12 @@ local function NewOptionsUIHarness(customBackend, afVersion)
         end
         function widget:SetOnConfirm(callback)
             self.onConfirm = callback
+        end
+        function widget:SetConfirmButton(callback)
+            self.confirmValue = callback
+        end
+        function widget:SetOnEditFocusLost(callback)
+            self.onEditFocusLost = callback
         end
 
         setmetatable(widget, {
@@ -403,6 +422,16 @@ local function NewOptionsUIHarness(customBackend, afVersion)
                 position = {"BOTTOM", "BOTTOM", 1, -3},
                 color = {
                     normal = {1, 1, 1, 1},
+                    seconds = {
+                        enabled = true,
+                        value = 0.5,
+                        rgb = {1, 0, 0, 1},
+                    },
+                    percent = {
+                        enabled = false,
+                        value = 0.955,
+                        rgb = {1, 1, 0, 1},
+                    },
                 },
             },
         }
@@ -441,6 +470,12 @@ local function NewOptionsUIHarness(customBackend, afVersion)
         local slider = NewWidget("slider", label)
         records.slidersByLabel[label] = slider
         return slider
+    end
+    function uiAF.CreateEditBox(_, label, _, _, mode)
+        local editBox = NewWidget("editBox", label)
+        editBox.mode = mode
+        records.editBoxesByLabel[label] = editBox
+        return editBox
     end
     function uiAF.CreateTitledPane(_, title, _, height)
         local pane = NewWidget("titledPane", title)
@@ -572,11 +607,20 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     records.durationHint = records.fontStringsByText[
         "Durations abbreviate automatically to seconds, minutes, hours, and days."
     ]
+    records.sourceDisclosure = records.fontStringsByText[
+        "WoW 12.1's PublicAndPrivate source list combines public and private authorized Buffs in this native row; the sources cannot be separated."
+    ]
+    records.durationMode = records.dropdownsByLabel[
+        "Low-Time Text Color"
+    ]
+    records.secondsValue = records.editBoxesByLabel.Seconds
+    records.percentValue = records.editBoxesByLabel.Percent
+    records.lowTimeColor = records.colorPickersByLabel["Low-Time Color"]
     return records
 end
 
 do
-    local custom = NewOptionsUIHarness(true, 33)
+    local custom = NewOptionsUIHarness(true, 42)
     local config = custom.BD.config.buffs
 
     assertEqual(#custom.events, 0,
@@ -590,8 +634,12 @@ do
         "custom Before item disabled")
     assertTrue(custom.separateOwn.items[3].disabled,
         "custom After item disabled")
-    assertEqual(custom.titledPanesByTitle.Icons.height, 260,
-        "status row reserves pane height")
+    assertEqual(custom.titledPanesByTitle.Icons.height, 285,
+        "status and source disclosure reserve pane height")
+    assertEqual(custom.titledPanesByTitle.Texts.height, 315,
+        "duration mode controls reserve pane height")
+    assertTrue(custom.sourceDisclosure.shown,
+        "custom Buffs visibly disclose combined aura sources")
     assertEqual(custom.statusButton.width, 165,
         "status action has bounded width")
     assertEqual(custom.statusText.width, 350,
@@ -641,15 +689,138 @@ do
 
     custom.textSwitch:SetSelectedValue("duration")
     assertTrue(custom.durationHint.shown,
-        "AF r33 shows abbreviation hint")
+        "current AF shows abbreviation hint")
     assertEqual(custom.durationHint.width, 160,
         "duration hint is bounded to its column")
     assertTrue(custom.durationHint.wordWrap,
         "duration hint wraps inside the pane")
+    assertEqual(custom.durationMode.selected, "seconds",
+        "saved seconds mode loads into the single selector")
+    assertTrue(custom.secondsValue.shown,
+        "seconds value control is shown in seconds mode")
+    assertFalse(custom.percentValue.shown,
+        "percent value control is hidden in seconds mode")
+    assertEqual(custom.secondsValue.textValue, 0.5,
+        "non-grid seconds value loads exactly without an update")
+    assertEqual(custom.percentValue.textValue, 95.5,
+        "arbitrary imported percent displays exactly as a percentage")
+    assertEqual(custom.secondsValue.mode, "decimal",
+        "fractional seconds input uses decimal mode")
+    assertEqual(custom.percentValue.mode, "decimal",
+        "fractional percent input uses decimal mode")
+
+    local secondsValue = config.duration.color.seconds.value
+    local secondsColor = config.duration.color.seconds.rgb
+    local percentValue = config.duration.color.percent.value
+    local percentColor = config.duration.color.percent.rgb
+    custom.events = {}
+    custom.durationMode.onSelect("percent")
+    assertFalse(config.duration.color.seconds.enabled,
+        "percent mode disables seconds")
+    assertTrue(config.duration.color.percent.enabled,
+        "percent mode enables percent")
+    assertEqual(config.duration.color.seconds.value, secondsValue,
+        "mode change preserves inactive seconds payload")
+    assertEqual(config.duration.color.seconds.rgb, secondsColor,
+        "mode change preserves inactive seconds color identity")
+    assertEqual(config.duration.color.percent.value, percentValue,
+        "mode change preserves percent payload")
+    assertEqual(config.duration.color.percent.rgb, percentColor,
+        "mode change preserves percent color identity")
+    assertEqual(#custom.events, 1,
+        "mode change commits exactly one construction update")
+    assertTrue(custom.percentValue.shown,
+        "percent value control is shown in percent mode")
+    assertFalse(custom.secondsValue.shown,
+        "seconds value control hides in percent mode")
+    assertEqual(custom.lowTimeColor.color[1], percentColor[1],
+        "switching to Percent displays the saved percent color")
+    assertEqual(custom.lowTimeColor.color[2], percentColor[2],
+        "Percent display retains the saved percent RGB")
+
+    custom.durationMode.onSelect("seconds")
+    assertEqual(custom.lowTimeColor.color[1], secondsColor[1],
+        "switching back to Seconds restores saved seconds color")
+    assertEqual(custom.lowTimeColor.color[2], secondsColor[2],
+        "Seconds display retains the saved seconds RGB")
+    assertEqual(config.duration.color.seconds.value, secondsValue,
+        "mode round-trip preserves seconds value")
+    assertEqual(config.duration.color.percent.value, percentValue,
+        "mode round-trip preserves percent value")
+    assertEqual(config.duration.color.seconds.rgb, secondsColor,
+        "mode round-trip preserves seconds color identity")
+    assertEqual(config.duration.color.percent.rgb, percentColor,
+        "mode round-trip preserves percent color identity")
+    custom.durationMode.onSelect("percent")
+    assertEqual(custom.lowTimeColor.color[1], percentColor[1],
+        "returning to Percent restores its saved color")
+    assertEqual(#custom.events, 3,
+        "each mode selection commits exactly one update")
+
+    custom.events = {}
+    custom.percentValue.confirmValue(42.5)
+    custom.percentValue.textValue = 42.5
+    custom.percentValue.onEditFocusLost(custom.percentValue)
+    assertEqual(config.duration.color.percent.value, 0.425,
+        "custom percent value commits its exact confirmed value")
+    assertEqual(#custom.events, 1,
+        "custom percent confirmation commits once")
+    custom.events = {}
+    custom.percentValue.confirmValue(100)
+    custom.percentValue.textValue = 100
+    custom.percentValue.onEditFocusLost(custom.percentValue)
+    assertEqual(config.duration.color.percent.value, 0.425,
+        "invalid percent confirmation preserves saved value")
+    assertEqual(custom.percentValue.textValue, 42.5,
+        "invalid percent confirmation restores exact display")
+    assertEqual(#custom.events, 0,
+        "invalid percent confirmation emits no update")
+
+    custom.events = {}
+    custom.secondsValue.confirmValue(0)
+    custom.secondsValue.textValue = 0
+    custom.secondsValue.onEditFocusLost(custom.secondsValue)
+    assertEqual(config.duration.color.seconds.value, 0.5,
+        "invalid seconds confirmation preserves saved value")
+    assertEqual(custom.secondsValue.textValue, 0.5,
+        "invalid seconds confirmation restores exact display")
+    assertEqual(#custom.events, 0,
+        "invalid seconds confirmation emits no update")
+
+    custom.events = {}
+    custom.lowTimeColor.onChange(0.2, 0.4, 0.6)
+    assertEqual(config.duration.color.percent.rgb[1], 1,
+        "custom low-time color preview is configuration-neutral")
+    assertEqual(#custom.events, 0,
+        "custom low-time color preview emits no update")
+    custom.lowTimeColor.onConfirm(0.2, 0.4, 0.6)
+    assertEqual(config.duration.color.percent.rgb[1], 0.2,
+        "custom low-time color commits on confirmation")
+    assertEqual(#custom.events, 1,
+        "custom low-time color confirmation commits once")
+
+    custom.events = {}
+    custom.durationMode.onSelect("off")
+    assertFalse(config.duration.color.seconds.enabled,
+        "Off keeps seconds disabled")
+    assertFalse(config.duration.color.percent.enabled,
+        "Off disables percent")
+    assertEqual(config.duration.color.seconds.value, secondsValue,
+        "Off preserves seconds payload")
+    assertEqual(config.duration.color.percent.value, 0.425,
+        "Off preserves percent payload")
+    assertFalse(custom.secondsValue.shown,
+        "Off hides seconds value")
+    assertFalse(custom.percentValue.shown,
+        "Off hides percent value")
+    assertFalse(custom.lowTimeColor.shown,
+        "Off hides low-time color")
+    assertEqual(#custom.events, 1,
+        "Off mode commits exactly once")
 end
 
 do
-    local legacy = NewOptionsUIHarness(false, 32)
+    local legacy = NewOptionsUIHarness(false, 42)
     local config = legacy.BD.config.buffs
 
     assertEqual(#legacy.events, 0,
@@ -686,8 +857,23 @@ do
         "legacy confirm path fires no second update")
 
     legacy.textSwitch:SetSelectedValue("duration")
-    assertFalse(legacy.durationHint.shown,
-        "AF r32 does not promise abbreviation support")
+    assertTrue(legacy.durationHint.shown,
+        "current AF shows the duration abbreviation hint")
+    assertFalse(legacy.sourceDisclosure.shown,
+        "legacy pane does not claim the combined custom source")
+
+    legacy.events = {}
+    legacy.durationMode.onSelect("percent")
+    assertEqual(#legacy.events, 1,
+        "legacy duration mode remains a live one-event change")
+    legacy.events = {}
+    legacy.percentValue.confirmValue(44.4)
+    legacy.percentValue.textValue = 44.4
+    legacy.percentValue.onEditFocusLost(legacy.percentValue)
+    assertEqual(config.duration.color.percent.value, 0.444,
+        "legacy percent value remains an exact confirmed update")
+    assertEqual(#legacy.events, 1,
+        "legacy percent confirmation fires one update")
 end
 
 do
@@ -699,10 +885,14 @@ do
         "Private Auras pane construction retired")
     assertNil(source:find("Show Seconds Unit", 1, true),
         "seconds-unit control retired")
-    assertNil(source:find("color.percent", 1, true),
-        "percent threshold controls retired")
-    assertNil(source:find("color.seconds", 1, true),
-        "seconds threshold controls retired")
+    assertTrue(source:find("Low-Time Text Color", 1, true) ~= nil,
+        "one Seconds/Percent/Off mode selector is present")
+    assertTrue(source:find("color.percent", 1, true) ~= nil,
+        "percent threshold controls are retained")
+    assertTrue(source:find("color.seconds", 1, true) ~= nil,
+        "seconds threshold controls are retained")
+    assertTrue(source:find("PublicAndPrivate", 1, true) ~= nil,
+        "visible source disclosure names the native source list")
     assertTrue(source:find("SetAfterValueChanged", 1, true) ~= nil,
         "custom construction sliders commit after interaction")
     assertTrue(source:find("SetOnConfirm", 1, true) ~= nil,
