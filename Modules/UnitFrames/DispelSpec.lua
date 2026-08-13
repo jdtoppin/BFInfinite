@@ -7,7 +7,7 @@ local AF = _G.AbstractFramework
 local floor, max, min = math.floor, math.max, math.min
 local type = type
 
--- Retail 12.1.0.68914 (wow-ui-source d3915c78) evaluates the filter string,
+-- Retail 12.1.0.69273 (wow-ui-source eb941aad) evaluates the filter string,
 -- candidate dispel map, private-aura eligibility, selected aura, and dispel
 -- color inside AuraContainer. This compiler consumes saved settings only.
 local SCOPE_FILTERS = {

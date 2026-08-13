@@ -5,9 +5,9 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF r38 adds native dispel-overlay slots whose selection and color stay
--- entirely inside Blizzard's 12.1 AuraContainer implementation.
-local REQUIRED_AF_VERSION = 38
+-- AF #37/r41 adds native dispel-overlay slots on top of r40's duration-text
+-- color curves. Selection and color stay inside Blizzard's AuraContainer.
+local REQUIRED_AF_VERSION = 41
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar
@@ -60,7 +60,7 @@ function eventHandler:ADDON_LOADED(arg)
             AF.SetAddonAccentColor(BFI.name, "blazing_tangerine")
         end
 
-        -- This is global because the supported filter path also runs on 12.0.7.
+        -- check AF version
         AF.RequireVersion(REQUIRED_AF_VERSION)
 
         -- general.language
@@ -268,6 +268,9 @@ local function InitAndBackupCVars()
         "AutoPushSpellToActionBar",
         -- bags
         "combinedBags",
+        -- damage meter
+        "damageMeterEnabled",
+        "damageMeterResetOnNewInstance",
         -- chat
         "chatStyle",
         "whisperMode",

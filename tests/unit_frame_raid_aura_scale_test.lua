@@ -36,6 +36,31 @@ local function tableCount(value)
     return count
 end
 
+local function deepEqual(left, right, seen)
+    if left == right then return true end
+    if type(left) ~= type(right) or type(left) ~= "table" then
+        return false
+    end
+
+    seen = seen or {}
+    if seen[left] then return seen[left] == right end
+    seen[left] = right
+    for key, value in pairs(left) do
+        if not deepEqual(value, right[key], seen) then return false end
+    end
+    for key in pairs(right) do
+        if left[key] == nil then return false end
+    end
+    return true
+end
+
+local function containsValue(values, expected)
+    for _, value in ipairs(values or {}) do
+        if value == expected then return true end
+    end
+    return false
+end
+
 local function record(harness, name, ...)
     harness.events[#harness.events + 1] = {
         name = name,
@@ -287,7 +312,7 @@ local function makeHarness()
     }
     local AF = {
         isRetail = true,
-        versionNum = 38,
+        versionNum = 42,
     }
     local UF = {}
     local F = {}
@@ -571,6 +596,11 @@ local function makeHarness()
         record(harness, "uf.unregister", event, callback)
     end
 
+    local A = {}
+    function A.GetNativeSpellColorMap()
+        return copy(harness.spellColors or {})
+    end
+
     local BFI = {
         L = setmetatable({}, {
             __index = function(_, key)
@@ -579,7 +609,7 @@ local function makeHarness()
         }),
         funcs = F,
         modules = {
-            Auras = {},
+            Auras = A,
             UnitFrames = UF,
         },
     }
@@ -653,6 +683,9 @@ local function makeHarness()
         end,
         UnitCanAssist = function()
             return true
+        end,
+        UnitCanAttack = function()
+            return false
         end,
         UnitIsVisible = function()
             return true
@@ -735,6 +768,12 @@ local function makeHarness()
     return harness
 end
 
+local RAID_DEBUFF_BLACKLIST = {
+    8326, 160029, 255234, 225080, 57723,
+    57724, 80354, 264689, 390435, 206151,
+    195776, 352562, 356419, 387847, 213213,
+}
+
 local function newAuraConfig(auraFilter, revision, constructionRevision)
     constructionRevision = constructionRevision == nil
         and revision
@@ -794,6 +833,26 @@ local function newAuraConfig(auraFilter, revision, constructionRevision)
     }
 end
 
+local function newShippedRaidDebuffConfig()
+    local config = newAuraConfig("HARMFUL", 0)
+    config.filters = {
+        all = false,
+        player = true,
+        notPlayer = false,
+        raidInCombat = true,
+        raidPlayerDispellable = true,
+        bigDefensive = false,
+        externalDefensive = false,
+        important = false,
+        anyDispellable = false,
+    }
+    config.mode = "blacklist"
+    config.blacklist = copy(RAID_DEBUFF_BLACKLIST)
+    config.whitelist = {}
+    config.cooldownStyle = "block_clock"
+    return config
+end
+
 local function newDispelConfig(scope)
     return {
         enabled = true,
@@ -832,6 +891,125 @@ local function assertNoStructuralConfiguration(harness, message)
             message .. " " .. eventName
         )
     end
+end
+
+-- Exercise the exact shipped Raid harmful row through the live group runtime,
+-- not merely the raw compiler projection. Saved identity settings remain
+-- intact while the assistable native row removes maps/colors and stays shown.
+local function testShippedRaidHarmfulLiveSanitizer()
+    local harness = makeHarness()
+    harness.spellColors = {
+        [8326] = {0.2, 0.4, 0.8, 1},
+    }
+    local root = {
+        effectiveUnit = "raid1",
+        enabled = true,
+        inConfigMode = false,
+        indicators = {},
+        name = "RaidShippedDebuffs",
+        unit = "raid1",
+    }
+    local seed = newHeaderBornContainer(harness, root)
+    root._nativeAuraContainers = {debuffs = seed}
+    local runtime = harness.UF.CreateGroupNativeAuras(
+        root,
+        root.name,
+        "HARMFUL",
+        "debuffs"
+    )
+    runtime.enabled = true
+    root.indicators.debuffs = runtime
+
+    local source = newShippedRaidDebuffConfig()
+    runtime:LoadConfig(source)
+    runtime:Enable()
+    local state = runtime:GetNativeAuraState()
+    assertEqual(state.state, "READY", "shipped Raid harmful state")
+    assertEqual(state.unit, "raid1", "shipped Raid harmful unit")
+    assertEqual(state.metrics.groupCount, 3,
+        "shipped Raid harmful category groups")
+    assertEqual(state.visibility.requiresVisible, false,
+        "shipped Raid harmful visible gate")
+    assertEqual(state.visibility.requiresAssist, false,
+        "shipped Raid harmful assist gate")
+    assertEqual(
+        state.visibility.spellIDFilterRequiresPublicNonAssist,
+        false,
+        "shipped Raid harmful identity reaction gate"
+    )
+    assertEqual(seed.enabled, true,
+        "assistable shipped Raid harmful container enabled")
+    assertEqual(runtime._controller:IsPresentationApplied(), true,
+        "assistable shipped Raid harmful row shown")
+    assertTrue(deepEqual(runtime._sourceConfig.blacklist,
+        RAID_DEBUFF_BLACKLIST),
+        "shipped Raid saved blacklist preserved")
+    assertTrue(deepEqual(runtime._sourceConfig, source),
+        "shipped Raid source config preserved")
+    assertEqual(runtime._config.mode, "blacklist",
+        "shipped Raid sanitized list mode")
+    assertEqual(next(runtime._config.blacklist), nil,
+        "shipped Raid compiler blacklist removed")
+    assertEqual(next(runtime._config.whitelist), nil,
+        "shipped Raid compiler whitelist removed")
+    assertEqual(runtime._config.spellColors, nil,
+        "shipped Raid compiler colors removed")
+    for key, group in pairs(seed.groups) do
+        local filters = group.options.candidateFilters or {}
+        assertEqual(filters.includeSpellIDs, nil,
+            "shipped Raid include map removed " .. tostring(key))
+        assertEqual(filters.excludeSpellIDs, nil,
+            "shipped Raid exclude map removed " .. tostring(key))
+        assertEqual(group.buttonStyle.blockColor, nil,
+            "shipped Raid block color removed " .. tostring(key))
+    end
+    assertEqual(state.degradations.spellIDListsIgnored, true,
+        "shipped Raid list suppression degradation")
+    assertEqual(state.degradations.globalSpellColorsIgnored, true,
+        "shipped Raid color suppression degradation")
+    assertTrue(containsValue(
+        state.diagnostics,
+        "GROUP_HARMFUL_IDENTITY_FEATURES_IGNORED"
+    ), "shipped Raid suppression diagnostic")
+
+    local fixedGroups = totalGroupCount(harness)
+    local fixedReservations = harness.staticRestrictedButtonCount
+    harness:ClearEvents()
+    local edited = copy(source)
+    edited.blacklist = {101, 202}
+    runtime:LoadConfig(edited)
+    assertTrue(deepEqual(runtime._sourceConfig.blacklist, {101, 202}),
+        "shipped Raid saved-only edit preserved")
+    assertEqual(totalGroupCount(harness), fixedGroups,
+        "shipped Raid saved-only group growth")
+    assertEqual(harness.staticRestrictedButtonCount, fixedReservations,
+        "shipped Raid saved-only reservation growth")
+    assertEqual(#harness.timers, 0,
+        "shipped Raid saved-only timer work")
+    assertNoStructuralConfiguration(
+        harness,
+        "shipped Raid saved-only edit"
+    )
+
+    root.unit = {secret = true}
+    root.effectiveUnit = root.unit
+    runtime:Update()
+    assertEqual(runtime:GetNativeAuraState().state, "READY",
+        "shipped Raid secret unit state")
+    assertEqual(runtime:GetNativeAuraState().unit, "none",
+        "shipped Raid secret unit sentinel")
+    root.unit = "raid2"
+    root.effectiveUnit = "raid2"
+    harness:ClearEvents()
+    runtime:Update()
+    assertEqual(runtime:GetNativeAuraState().unit, "raid2",
+        "shipped Raid clean reassignment")
+    assertEqual(countEvents(harness, "af.unit"), 1,
+        "shipped Raid reassignment SetUnit count")
+    assertEqual(countEvents(harness, "af.update"), 1,
+        "shipped Raid reassignment refresh count")
+    assertEqual(totalGroupCount(harness), fixedGroups,
+        "shipped Raid reassignment group growth")
 end
 
 -- This is a deterministic construction/lockdown scale test, not an in-client
@@ -1699,6 +1877,7 @@ local function testRaidDispelScaleLockdown()
 end
 
 testRaidAuraScaleLockdown()
+testShippedRaidHarmfulLiveSanitizer()
 testRaidDispelScaleLockdown()
 
 print("unit_frame_raid_aura_scale_test.lua: ok")

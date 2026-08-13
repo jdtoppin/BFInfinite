@@ -463,6 +463,10 @@ local function assertRaidContract(preset)
         preset.id .. " Raid buff source-color degradation"
     )
 
+    -- This raw compiler projection documents what the stored Raid profile
+    -- can express. The live group-managed HARMFUL runtime deliberately
+    -- sanitizes the saved spell list before compilation; that integration
+    -- contract is covered by the Raid scale fixture.
     local debuffDescriptor, debuffError = UF.CompileNativeAuraSpec(
         "raid1",
         "HARMFUL",
@@ -515,9 +519,9 @@ local function assertRaidContract(preset)
         spellIDMap(RAID_DEBUFF_BLACKLIST),
         preset.id .. " Raid debuff blacklist"
     )
-    -- Raid units are assistable. Blizzard can match harmful spell identities
-    -- there only when an aura is NeverSecret, so the complete exclusion map is
-    -- retained while this reaction restriction remains explicit.
+    -- In the raw/stored projection Blizzard could match only NeverSecret
+    -- harmful identities on an assistable Raid unit. The live group runtime
+    -- removes this map and reaction gate so the ordinary row stays visible.
     assertEqual(
         debuffDescriptor.degradations
             .spellIDFiltersRestrictedByUnitReaction,

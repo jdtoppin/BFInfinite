@@ -301,16 +301,17 @@ local function IsAuraIndicator(t)
         or t.id == "dispels"
 end
 
-local nativeHelpfulOwners = {
+-- Keep the disabled-frame fallback synchronized with integrations that have
+-- actually landed. A live runtime remains authoritative when one exists.
+local nativeAuraOwners = {
     boss = true,
     focus = true,
     focustarget = true,
+    party = true,
     player = true,
+    raid = true,
     pet = true,
     pettarget = true,
-    party = true,
-    raid = true,
-    target = true,
     targettarget = true,
 }
 
@@ -400,15 +401,18 @@ local function UsesNativeAuraContainer(t)
     -- Disabled frames may not have an indicator runtime yet. Mirror the
     -- integration contract until the frame exists, then prefer the actual
     -- runtime above so option wording cannot drift from implementation.
+    return nativeAuraOwners[t.owner] == true
+end
+
+local nativeGroupAuraOwners = {
+    party = true,
+    raid = true,
+}
+
+local function IsGroupManagedHarmfulNative(t)
     return t.id == "debuffs"
-        or (
-            t.id == "dispels"
-            and (t.owner == "party" or t.owner == "raid")
-        )
-        or (
-            t.id == "buffs"
-            and nativeHelpfulOwners[t.owner] == true
-        )
+        and nativeGroupAuraOwners[t.owner] == true
+        and UsesNativeAuraContainer(t)
 end
 
 local function RequiresNativeAuraReload(t, count)
@@ -3961,7 +3965,7 @@ builder["auraBaseFilters"] = function(parent)
 
             allAuras:SetTooltip(
                 L["All Auras"],
-                L["Shows every aura of this type. Legacy Cast By Unit selections widen to All because exact unit-source matching is unavailable across both Retail versions"]
+                L["Shows every aura of this type. Legacy Cast By Unit selections widen to All because exact unit-source matching is unavailable in WoW 12.1"]
             )
             notPlayer:SetTooltip(
                 L["Not Player, Pet, or Vehicle"],
@@ -4121,21 +4125,27 @@ end
 -- auraBlackListWhitelist
 ---------------------------------------------------------------------
 local function IsCurrentSpecializationHealer()
-    local getSpecialization = rawget(_G, "GetSpecialization")
-    local getSpecializationRole =
-        rawget(_G, "GetSpecializationRole")
+    local specializationInfo =
+        rawget(_G, "C_SpecializationInfo")
+    local getSpecialization = specializationInfo
+        and specializationInfo.GetSpecialization
+    local getSpecializationInfo = specializationInfo
+        and specializationInfo.GetSpecializationInfo
     if type(getSpecialization) ~= "function"
-        or type(getSpecializationRole) ~= "function"
+        or type(getSpecializationInfo) ~= "function"
     then
         return false
     end
 
     local specialization = getSpecialization()
-    return specialization ~= nil
-        and getSpecializationRole(specialization) == "HEALER"
+    if type(specialization) ~= "number" then return false end
+
+    local _, _, _, _, role =
+        getSpecializationInfo(specialization)
+    return role == "HEALER"
 end
 
--- Retail 12.1.0.68914, wow-ui-source d3915c78:
+-- Retail 12.1.0.69273, wow-ui-source eb941aad:
 -- Blizzard's Group Buff filter uses these spell IDs as aura IDs. Availability
 -- reads are non-mutating; only an explicit user click writes the snapshot.
 local function GetGroupBuffImportAPI()
@@ -4392,11 +4402,16 @@ builder["auraBlackListWhitelist"] = function(parent)
         if AF.isRetail then
             HideEditBox()
             usesNative = UsesNativeAuraContainer(t)
-            if usesNative then
+            if IsGroupManagedHarmfulNative(t) then
+                mode:SetItems(retailModeItems)
+                tip:SetText(
+                    L["Group-frame Debuff spell lists are preserved but not applied on WoW 12.1. WoW cannot safely identity-filter harmful auras on assistable group units, so the unfiltered native Debuffs row remains visible"]
+                )
+            elseif usesNative then
                 canEdit = true
                 mode:SetItems(retailModeItems)
                 tip:SetText(
-                    L["Works for buffs on units you can help and debuffs on units you cannot help. In other cases, protected spells may bypass the list, so BFI hides that aura row. Spells Blizzard keeps available can still be filtered"]
+                    L["Works for buffs on units you can help and debuffs on units you cannot help. In other cases, protected auras may bypass the list, so BFI hides that aura row. Auras Blizzard keeps available can still be filtered"]
                         .. "\n"
                         .. editDeleteTip
                 )
@@ -4795,10 +4810,17 @@ builder["auraArrangement"] = function(parent)
         pane.t = t
         if UsesNativeAuraContainer(t) then
             numTotal:SetLabel(L["Max Per Aura Group"])
-            numTotal:SetTooltip(
-                L["Max Per Aura Group"],
-                L["WoW 12.1 may split a row by enabled category and saved spell colors. This limit applies to each group, so the row can show more auras overall and groups may sort separately"]
-            )
+            if IsGroupManagedHarmfulNative(t) then
+                numTotal:SetTooltip(
+                    L["Max Per Aura Group"],
+                    L["WoW 12.1 may split this row by enabled category. This limit applies to each group, so the row can show more auras overall and groups may sort separately"]
+                )
+            else
+                numTotal:SetTooltip(
+                    L["Max Per Aura Group"],
+                    L["WoW 12.1 may split a row by enabled category and saved spell colors. This limit applies to each group, so the row can show more auras overall and groups may sort separately"]
+                )
+            end
         else
             numTotal:SetLabel(L["Max Displayed"])
             AF.ClearTooltip(numTotal)
@@ -4847,7 +4869,12 @@ builder["cooldownStyle"] = function(parent)
         pane.t = t
         styleDropdown:SetSelectedValue(t.cfg.cooldownStyle)
         if AF.isRetail then
-            if UsesNativeAuraContainer(t) then
+            if IsGroupManagedHarmfulNative(t) then
+                styleDropdown:SetTooltip(
+                    L["Cooldown Style"],
+                    L["Retail cooldown styles change presentation only; Blizzard's opaque aura duration continues to drive the swipe. Global spell colors are preserved but not applied to group Debuffs because harmful identity matching is unsafe on assistable group units"]
+                )
+            elseif UsesNativeAuraContainer(t) then
                 styleDropdown:SetTooltip(
                     L["Cooldown Style"],
                     L["Retail cooldown styles change presentation only; Blizzard's opaque aura duration continues to drive the swipe. Block styles can use the spell colors configured in Auras when WoW can match them safely; unlisted spells use gray"]

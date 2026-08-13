@@ -292,6 +292,7 @@ local function newFrame()
         indicators = {
             buffs = {},
             debuffs = {},
+            dispels = {},
             healthBar = {},
             raidIcon = {},
         },
@@ -369,6 +370,47 @@ local function SetReloadRequirement(info, harness, predicate)
             end
     end
 end
+
+local dependentHarness = makeHarness()
+local dependentPane = dependentHarness.builders.frameLevel({})
+local dependentInfo = newInfo("healthBar", "raid")
+dependentInfo.cfg.frameLevel = 3
+local raidDispels = {sentinel = "raid-dispels"}
+dependentHarness.UF.config = {
+    raid = {
+        indicators = {
+            dispels = raidDispels,
+        },
+    },
+}
+for _, frame in ipairs(dependentInfo.target.header) do
+    frame.indicators.dispels.RequiresReloadForConfig =
+        function(_, config)
+            dependentHarness.reloadChecks =
+                dependentHarness.reloadChecks + 1
+            assertEqual(config, raidDispels,
+                "Raid dependent Dispel config identity")
+            return false
+        end
+end
+dependentPane.Load(dependentInfo)
+dependentHarness:ClearLoads()
+dependentHarness.sliders[1].onValueChanged(4)
+assertEqual(#dependentHarness.configLoads, 80,
+    "Raid Health Bar and Dispel dependent fan-out")
+for index, load in ipairs(dependentHarness.configLoads) do
+    local expectedID = index <= 40 and "healthBar" or "dispels"
+    assertEqual(load.id, expectedID,
+        "Raid dependent ordered load " .. index)
+    if index > 40 then
+        assertEqual(load.config, raidDispels,
+            "Raid dependent Dispel config " .. index)
+    end
+end
+assertEqual(dependentHarness.reloadChecks, 40,
+    "Raid dependent Dispel reload checks")
+assertEqual(#dependentHarness.dialogs, 0,
+    "Raid dependent tuning avoids reload prompt")
 
 for _, case in ipairs({
     {owner = "target", count = 1},

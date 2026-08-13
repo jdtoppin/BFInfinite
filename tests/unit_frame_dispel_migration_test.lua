@@ -14,6 +14,34 @@ local function assertTrue(value, message)
     end
 end
 
+local function assertDeepEqual(actual, expected, message, seen)
+    message = message or "tables differ"
+    if type(actual) ~= type(expected) then
+        error(message .. ": type mismatch", 2)
+    end
+    if type(actual) ~= "table" then
+        assertEqual(actual, expected, message)
+        return
+    end
+
+    seen = seen or {}
+    if seen[actual] == expected then return end
+    seen[actual] = expected
+    for key, value in pairs(expected) do
+        assertDeepEqual(
+            actual[key],
+            value,
+            message .. "." .. tostring(key),
+            seen
+        )
+    end
+    for key in pairs(actual) do
+        if expected[key] == nil then
+            error(message .. ": unexpected key " .. tostring(key), 2)
+        end
+    end
+end
+
 local function copyInto(result, value, seen)
     if type(value) ~= "table" then return value end
     seen = seen or {}
@@ -239,6 +267,56 @@ local function testMigrationDefaultsAndLegacyMapping()
         "new dispel settings win over legacy data")
     assertEqual(preserved.party.indicators.dispels.enabled, false,
         "new explicit disabled state is preserved")
+
+    local preservedRaid = {
+        raid = {
+            indicators = {
+                buffs = {
+                    filters = {castByMe = true},
+                    mode = "whitelist",
+                    whitelist = {101, 202},
+                    blacklist = {},
+                },
+                debuffs = {
+                    filters = {
+                        castByMe = true,
+                        castByUnit = true,
+                        dispellable = true,
+                    },
+                    mode = "blacklist",
+                    blacklist = {
+                        8326, 160029, 255234, 225080, 57723,
+                        57724, 80354, 264689, 390435, 206151,
+                        195776, 352562, 356419, 387847, 213213,
+                    },
+                    whitelist = {},
+                },
+                healthBar = {
+                    dispelHighlight = {
+                        enabled = true,
+                        dispellable = true,
+                    },
+                },
+            },
+        },
+    }
+    local savedRaidBuffs = copy(
+        preservedRaid.raid.indicators.buffs
+    )
+    local savedRaidDebuffs = copy(
+        preservedRaid.raid.indicators.debuffs
+    )
+    UF.MigrateConfig(preservedRaid)
+    assertDeepEqual(
+        preservedRaid.raid.indicators.buffs,
+        savedRaidBuffs,
+        "Raid migration preserves saved Buff filters and lists"
+    )
+    assertDeepEqual(
+        preservedRaid.raid.indicators.debuffs,
+        savedRaidDebuffs,
+        "Raid migration preserves saved Debuff filters and 15-ID list"
+    )
 
     local hiddenBlend = {
         party = {

@@ -528,12 +528,17 @@ end
 
 local function testHealthBarGatePreviewAndReloadDependencies()
     local harness = makeHarness()
+    -- Poison the old Party-global source. The runtime must use this child's
+    -- loaded Health Bar level so Raid and Party can differ safely.
+    harness.UF.config.party.indicators.healthBar.frameLevel = 99
     local runtime, root, healthBar, controller =
         harness:NewRuntime("party1")
     local config = baseConfig()
     runtime.enabled = true
     runtime:LoadConfig(config)
     runtime:Enable()
+    assertEqual(runtime._constructionKey.anchorFrameLevel, 3,
+        "runtime-local Health Bar level wins over Party config")
     assertEqual(controller.enabled, true,
         "enabled runtime drives native overlay")
 

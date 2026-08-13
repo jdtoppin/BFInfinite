@@ -30,6 +30,7 @@ local moduleNames = {
     chat = {localized = L["Chat"], class = "Chat"},
     cooldownManager = {localized = L["Cooldown Manager"], class = "CooldownManager"},
     dataBars = {localized = L["Data Bars"], class = "DataBars"},
+    damageMeter = {localized = L["Damage Meter"], class = "DamageMeter"},
     maps = {localized = L["Maps"], class = "Maps"},
     nameplates = {localized = L["Nameplates"], class = "Nameplates"},
     tooltip = {localized = L["Tooltip"], class = "Tooltip"},
@@ -68,6 +69,7 @@ function F.GetProfileModuleClassNames()
         "Chat",
         "CooldownManager",
         "DataBars",
+        "DamageMeter",
         "Maps",
         "Nameplates",
         "Tooltip",
@@ -161,9 +163,9 @@ local function NewUnitFrameAuraFilterMigration()
     }
 end
 
--- Retail 12.0.7 and 12.1 can both express the base aura set, PLAYER, the
--- C-side complement of PLAYER, and the original curated categories. PTR 5
--- adds IMPORTANT and DISPELLABLE; their settings are exposed only when the
+-- Retail 12.1 can express the base aura set, PLAYER, the C-side complement of
+-- PLAYER, and the original curated categories. It also provides IMPORTANT
+-- and DISPELLABLE; their settings are exposed only when the
 -- client advertises those exact AuraUtil tokens. Legacy source-oriented saved
 -- keys are accepted only as a compatibility input; once a Retail control is
 -- changed, the full canonical state is materialized so retired aliases cannot
@@ -365,9 +367,9 @@ function F.GetSecretSafeUnitFrameAuraMatchFilters(baseFilter, config)
         return {baseFilter}
     end
 
-    -- IMPORTANT and DISPELLABLE are 12.1-only native-container choices.
-    -- A 12.0.7 or explicitly legacy unit-frame row cannot represent them
-    -- faithfully, so widen to the base aura type instead of passing an
+    -- IMPORTANT and DISPELLABLE are native-container choices. A legacy
+    -- unit-frame row cannot represent them faithfully, so widen to the base
+    -- aura type instead of passing an
     -- unknown token or silently dropping every requested aura.
     if resolved.important or resolved.anyDispellable then
         return {baseFilter}
