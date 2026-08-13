@@ -645,7 +645,7 @@ local settings = {
             "general_raid",
             "healthBar", "powerBar",
             "nameText", "healthText", "statusTimer",
-            "buffs", "debuffs",
+            "buffs", "debuffs", "dispels",
             "raidIcon", "leaderIcon", "roleIcon", "readyCheckIcon", "statusIcon",
             "targetHighlight", "mouseoverHighlight", "threatGlow",
         },

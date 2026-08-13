@@ -1870,13 +1870,13 @@ local NATIVE_AURA_OWNERS = {
     "focustarget",
     "party",
     "player",
+    "raid",
     "pet",
     "pettarget",
     "targettarget",
 }
 
 local LEGACY_AURA_OWNERS = {
-    "raid",
     "target",
 }
 
@@ -2195,7 +2195,7 @@ local function testRetailIndicatorAwareNativeWording()
 
     for _, owner in ipairs(NATIVE_AURA_OWNERS) do
         assertNativePresentation("buffs", owner)
-        if owner == "party" then
+        if owner == "party" or owner == "raid" then
             assertGroupHarmfulPresentation(owner)
         else
             assertNativePresentation("debuffs", owner)
@@ -2212,9 +2212,6 @@ local function testRetailIndicatorAwareNativeWording()
     assertLegacyPresentation("debuffs", "player", "legacy")
     assertNativePresentation("buffs", "target", "native")
     assertNativePresentation("debuffs", "target", "native")
-    -- Raid is still legacy in this PR. A real future native runtime makes the
-    -- same group-harmful policy visible without changing the owner fallback.
-    assertGroupHarmfulPresentation("raid", "native")
 end
 
 local COOLDOWN_STYLES = {

@@ -786,12 +786,19 @@ local default_groups = {
                     color = AF.GetColorTable("white"),
                 },
                 filters = {
-                    castByMe = true,
-                    castByOthers = true,
-                    castByUnit = true,
-                    castByNPC = true,
-                    isBossAura = true,
-                    dispellable = true,
+                    -- Keep the compact Raid row's intended three-way native
+                    -- union explicit. The legacy castByUnit alias means All
+                    -- Auras to the canonical resolver and would collapse this
+                    -- shipped topology to one group.
+                    all = false,
+                    player = true,
+                    notPlayer = false,
+                    raidInCombat = true,
+                    raidPlayerDispellable = true,
+                    bigDefensive = false,
+                    externalDefensive = false,
+                    important = false,
+                    anyDispellable = false,
                 },
                 mode = "blacklist",
                 blacklist = AF.Copy(default_blacklist),
@@ -801,6 +808,20 @@ local default_groups = {
                     dispellable = true,
                     debuffType = true,
                 },
+            },
+            dispels = {
+                enabled = true,
+                scope = "player",
+                types = {
+                    magic = true,
+                    curse = true,
+                    disease = true,
+                    poison = true,
+                    bleed = true,
+                },
+                appearance = "bottom_gradient",
+                alpha = 0.5,
+                blendMode = "ADD",
             },
             privateAuras = {
                 enabled = false,
@@ -6273,21 +6294,16 @@ local presets = {
 ---------------------------------------------------------------------
 -- functions
 ---------------------------------------------------------------------
-function UF.MigrateConfig(config)
-    -- A missing module table means a genuinely new profile; hydration below
-    -- should install the enabled Party default. Existing profiles must not
-    -- silently acquire a live native container merely because a new default
-    -- was added.
-    if type(config) ~= "table" then return config end
-
-    config.party = type(config.party) == "table"
-        and config.party
+local function MigrateGroupDispels(config, owner)
+    config[owner] = type(config[owner]) == "table"
+        and config[owner]
         or {}
-    config.party.indicators = type(config.party.indicators) == "table"
-        and config.party.indicators
+    config[owner].indicators =
+        type(config[owner].indicators) == "table"
+        and config[owner].indicators
         or {}
 
-    local indicators = config.party.indicators
+    local indicators = config[owner].indicators
     local healthBar = type(indicators.healthBar) == "table"
         and indicators.healthBar
         or nil
@@ -6332,6 +6348,17 @@ function UF.MigrateConfig(config)
     if healthBar then
         healthBar.dispelHighlight = nil
     end
+end
+
+function UF.MigrateConfig(config)
+    -- A missing module table means a genuinely new profile; hydration below
+    -- should install the enabled Party and Raid defaults. Existing profiles
+    -- must not silently acquire live native containers merely because the
+    -- defaults were added.
+    if type(config) ~= "table" then return config end
+
+    MigrateGroupDispels(config, "party")
+    MigrateGroupDispels(config, "raid")
     return config
 end
 

@@ -14,6 +14,34 @@ local function assertTrue(value, message)
     end
 end
 
+local function assertDeepEqual(actual, expected, message, seen)
+    message = message or "tables differ"
+    if type(actual) ~= type(expected) then
+        error(message .. ": type mismatch", 2)
+    end
+    if type(actual) ~= "table" then
+        assertEqual(actual, expected, message)
+        return
+    end
+
+    seen = seen or {}
+    if seen[actual] == expected then return end
+    seen[actual] = expected
+    for key, value in pairs(expected) do
+        assertDeepEqual(
+            actual[key],
+            value,
+            message .. "." .. tostring(key),
+            seen
+        )
+    end
+    for key in pairs(actual) do
+        if expected[key] == nil then
+            error(message .. ": unexpected key " .. tostring(key), 2)
+        end
+    end
+end
+
 local function copyInto(result, value, seen)
     if type(value) ~= "table" then return value end
     seen = seen or {}
@@ -49,6 +77,17 @@ local function readFile(path)
     local contents = file:read("*a")
     file:close()
     return contents
+end
+
+local function countPlain(haystack, needle)
+    local count = 0
+    local start = 1
+    while true do
+        local found = haystack:find(needle, start, true)
+        if not found then return count end
+        count = count + 1
+        start = found + #needle
+    end
 end
 
 local function loadPresets()
@@ -122,6 +161,8 @@ local function testMigrationDefaultsAndLegacyMapping()
     UF.MigrateConfig(existing)
     assertEqual(existing.party.indicators.dispels.enabled, false,
         "existing profile does not silently enable dispels")
+    assertEqual(existing.raid.indicators.dispels.enabled, false,
+        "existing profile does not silently enable Raid dispels")
 
     local legacy = {
         party = {
@@ -173,6 +214,38 @@ local function testMigrationDefaultsAndLegacyMapping()
     assertEqual(playerDispellable.party.indicators.dispels.scope,
         "player", "legacy player-dispellable scope migrates")
 
+    local raidLegacy = {
+        raid = {
+            indicators = {
+                healthBar = {
+                    dispelHighlight = {
+                        enabled = true,
+                        dispellable = true,
+                        alpha = 0.65,
+                        blendMode = "MOD",
+                    },
+                },
+            },
+        },
+    }
+    UF.MigrateConfig(raidLegacy)
+    local migratedRaid = raidLegacy.raid.indicators.dispels
+    assertEqual(migratedRaid.enabled, true,
+        "legacy Raid player-dispellable mode stays enabled")
+    assertEqual(migratedRaid.scope, "player",
+        "legacy Raid player-dispellable scope migrates")
+    assertEqual(migratedRaid.appearance, "full_solid",
+        "legacy Raid appearance maps to solid")
+    assertEqual(migratedRaid.alpha, 0.65,
+        "legacy Raid alpha migrates")
+    assertEqual(migratedRaid.blendMode, "MOD",
+        "legacy Raid blend mode migrates")
+    assertEqual(
+        raidLegacy.raid.indicators.healthBar.dispelHighlight,
+        nil,
+        "legacy Raid nested setting is retired"
+    )
+
     local preserved = {
         party = {
             indicators = {
@@ -194,6 +267,56 @@ local function testMigrationDefaultsAndLegacyMapping()
         "new dispel settings win over legacy data")
     assertEqual(preserved.party.indicators.dispels.enabled, false,
         "new explicit disabled state is preserved")
+
+    local preservedRaid = {
+        raid = {
+            indicators = {
+                buffs = {
+                    filters = {castByMe = true},
+                    mode = "whitelist",
+                    whitelist = {101, 202},
+                    blacklist = {},
+                },
+                debuffs = {
+                    filters = {
+                        castByMe = true,
+                        castByUnit = true,
+                        dispellable = true,
+                    },
+                    mode = "blacklist",
+                    blacklist = {
+                        8326, 160029, 255234, 225080, 57723,
+                        57724, 80354, 264689, 390435, 206151,
+                        195776, 352562, 356419, 387847, 213213,
+                    },
+                    whitelist = {},
+                },
+                healthBar = {
+                    dispelHighlight = {
+                        enabled = true,
+                        dispellable = true,
+                    },
+                },
+            },
+        },
+    }
+    local savedRaidBuffs = copy(
+        preservedRaid.raid.indicators.buffs
+    )
+    local savedRaidDebuffs = copy(
+        preservedRaid.raid.indicators.debuffs
+    )
+    UF.MigrateConfig(preservedRaid)
+    assertDeepEqual(
+        preservedRaid.raid.indicators.buffs,
+        savedRaidBuffs,
+        "Raid migration preserves saved Buff filters and lists"
+    )
+    assertDeepEqual(
+        preservedRaid.raid.indicators.debuffs,
+        savedRaidDebuffs,
+        "Raid migration preserves saved Debuff filters and 15-ID list"
+    )
 
     local hiddenBlend = {
         party = {
@@ -217,6 +340,13 @@ local function testMigrationDefaultsAndLegacyMapping()
         "new-profile dispel scope")
     assertEqual(defaultDispels.appearance, "bottom_gradient",
         "new-profile dispel appearance")
+    local defaultRaidDispels = defaults.raid.indicators.dispels
+    assertEqual(defaultRaidDispels.enabled, true,
+        "new-profile Raid dispel default")
+    assertEqual(defaultRaidDispels.scope, "player",
+        "new-profile Raid dispel scope")
+    assertEqual(defaultRaidDispels.appearance, "bottom_gradient",
+        "new-profile Raid dispel appearance")
 end
 
 local function testMigrationAndOptionsContracts()
@@ -236,6 +366,10 @@ local function testMigrationAndOptionsContracts()
         1,
         true
     ), "Party Dispels follows Buffs and Debuffs")
+    assertEqual(countPlain(
+        unitFrameOptions,
+        '"buffs", "debuffs", "dispels"'
+    ), 2, "Party and Raid each expose Dispels after aura rows")
 
     local optionBuilders = readFile("Options/UnitFrames_Options.lua")
     assertTrue(optionBuilders:find(
@@ -249,10 +383,10 @@ local function testMigrationAndOptionsContracts()
         true
     ), nil, "old nested dispel option is retired")
     assertTrue(optionBuilders:find(
-        't.owner == "party" and t.id == "healthBar"',
+        't.owner == "party" or t.owner == "raid"',
         1,
         true
-    ), "health-bar mutations reevaluate Party dispels")
+    ), "health-bar mutations reevaluate Party and Raid dispels")
 
     local healthBar = readFile(
         "Modules/UnitFrames/Indicators/HealthBar.lua"
@@ -262,6 +396,11 @@ local function testMigrationAndOptionsContracts()
         1,
         true
     ), nil, "dormant nested health-bar dispel call is removed")
+    assertTrue(healthBar:find(
+        "self._configuredFrameLevel = config.frameLevel",
+        1,
+        true
+    ), "Health Bar records the construction-owned frame level")
 end
 
 testMigrationDefaultsAndLegacyMapping()

@@ -356,6 +356,7 @@ local function makeHarness()
 
     function harness:NewRuntime(unit)
         local healthBar = {
+            _configuredFrameLevel = 3,
             enabled = true,
         }
         local root = setmetatable({
@@ -527,12 +528,17 @@ end
 
 local function testHealthBarGatePreviewAndReloadDependencies()
     local harness = makeHarness()
+    -- Poison the old Party-global source. The runtime must use this child's
+    -- loaded Health Bar level so Raid and Party can differ safely.
+    harness.UF.config.party.indicators.healthBar.frameLevel = 99
     local runtime, root, healthBar, controller =
         harness:NewRuntime("party1")
     local config = baseConfig()
     runtime.enabled = true
     runtime:LoadConfig(config)
     runtime:Enable()
+    assertEqual(runtime._constructionKey.anchorFrameLevel, 3,
+        "runtime-local Health Bar level wins over Party config")
     assertEqual(controller.enabled, true,
         "enabled runtime drives native overlay")
 
@@ -568,7 +574,7 @@ local function testHealthBarGatePreviewAndReloadDependencies()
     assertEqual(lastEvent(harness, "af.fire"), nil,
         "dynamic tuning does not request reload")
 
-    harness.UF.config.party.indicators.healthBar.frameLevel = 4
+    healthBar._configuredFrameLevel = 4
     assertEqual(runtime:RequiresReloadForConfig(dynamic), true,
         "health-bar frame level is a construction dependency")
     harness:ClearEvents()
