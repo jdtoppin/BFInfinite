@@ -455,7 +455,7 @@ local function CreatePanel()
         panel,
         AF.GetGradientText(L["Click Casting"], "BFI", "white"),
         nil,
-        nil,
+        18,
         "BFI"
     )
     panel.header = header
@@ -473,7 +473,7 @@ local function CreatePanel()
 
     optionsStage = "panel controls"
     enabled = AF.CreateCheckButton(panel, L["Enable BFI Click Casting"])
-    AF.SetPoint(enabled, "TOPLEFT", header.line, "BOTTOMLEFT", 0, -15)
+    AF.SetPoint(enabled, "TOPLEFT", header, "BOTTOMLEFT", 0, -14)
     enabled:SetOnCheck(function(checked)
         GetConfig().enabled = checked
         list.Load()
@@ -485,10 +485,10 @@ local function CreatePanel()
     AF.SetPoint(
         smartResurrection,
         "TOPLEFT",
-        header.line,
+        header,
         "BOTTOMLEFT",
         250,
-        -15
+        -14
     )
     smartResurrection:SetLabel(L["Smart Resurrection"], "gray")
     smartResurrection:SetOnSelect(function(value)
@@ -527,7 +527,7 @@ local function CreatePanel()
     )
 
     local add = AF.CreateButton(panel, L["Add Binding"], "BFI_hover", 110, 22)
-    AF.SetPoint(add, "TOPRIGHT", header.line, "BOTTOMRIGHT", 0, -45)
+    AF.SetPoint(add, "TOPRIGHT", header, "BOTTOMRIGHT", 0, -44)
     add:SetOnClick(function()
         GetConfig().bindings[#GetConfig().bindings + 1] = {
             "notBound",

@@ -252,9 +252,10 @@ local function createHarness()
         return frame
     end
 
-    function AF.CreateTitledPane(parent, title, _, _, color)
+    function AF.CreateTitledPane(parent, title, _, height, color)
         if state.failTitledPane then error("injected titled-pane failure") end
         local pane = newWidget("titledPane", parent)
+        pane.height = height
         pane.color = color
         pane.title = newWidget("fontString", pane)
         pane.title.text = title
@@ -471,6 +472,8 @@ assertEqual(harness.headerPane.points[2][1], "TOPRIGHT",
     "viewport heading line spans the full content width")
 assertEqual(harness.headerPane.color, "BFI",
     "viewport heading uses the BFI signature accent")
+assertEqual(harness.headerPane.height, 18,
+    "viewport heading has resolvable vertical geometry")
 assertEqual(harness.headerPane.tips.tips[1], "Click Casting",
     "header information tooltip has a title")
 assertEqual(
@@ -481,8 +484,8 @@ assertEqual(
 local clickPanel = harness.namedFrames.BFIOptionsFrame_ClickCastingsPanel
 assertEqual(clickPanel.profile.points[1][2], harness.headerPane.tips,
     "profile, class, and spec metadata sits beside the info button")
-assertEqual(harness.enabledCheckButton.points[1][2], harness.headerPane.line,
-    "controls reflow directly beneath the accent line")
+assertEqual(harness.enabledCheckButton.points[1][2], harness.headerPane,
+    "controls anchor to the resolved heading frame")
 local classColorCall
 for _, call in ipairs(harness.wrapColorCalls) do
     if call.text == "PRIEST" and call.color == "PRIEST" then
