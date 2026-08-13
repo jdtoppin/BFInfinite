@@ -28,8 +28,9 @@ local indicators = {
     "targetHighlight",
     "mouseoverHighlight",
     "threatGlow",
-    {"auras", "buffs", "HELPFUL"},
-    {"auras", "debuffs", "HARMFUL"},
+    {"groupNativeAuras", "buffs", "HELPFUL", "buffs"},
+    {"groupNativeAuras", "debuffs", "HARMFUL", "debuffs"},
+    {"groupNativeDispels", "dispels", "dispels"},
 }
 
 ---------------------------------------------------------------------
@@ -44,6 +45,7 @@ local function CreateParty()
     party.header = header
     UF.AddToConfigMode("party.header", header)
     header:SetAttribute("template", "BFIUnitButtonTemplate")
+    local hasNativeGroupAuras = UF.PrepareNativeGroupAuraHeader(header)
     header:SetAttribute("showSolo", true)
     header:SetAttribute("showRaid", true)
     header:SetAttribute("showParty", true)
@@ -64,12 +66,28 @@ local function CreateParty()
     party.driverValue = "[@raid1,exists] hide;[@party1,exists] show;[group:party] show;hide"
 
     for i = 1, 5 do
-        header[i]._updateOnGroupUpdate = true
-        header[i]._deferUpdateOnUnitChange = true
-        header[i]._enableUnitButtonMapping = true
-        UF.AddToConfigMode("party", header[i])
-        UF.CreateIndicators(header[i], indicators)
-        UF.CreatePreviewRect(header[i])
+        local button = header[i]
+        if hasNativeGroupAuras then
+            assert(button.AuraContainer,
+                "secure Party child is missing its native aura container")
+            button._nativeAuraContainers = {
+                -- Blizzard supplies one header-born shell. Party's displays
+                -- have independent anchors/flows, so eagerly allocate the
+                -- second bounded shell before indicator construction.
+                buffs = UF.CreateNativeGroupAuraContainerSeed(button),
+                debuffs = button.AuraContainer,
+                -- The full-frame dispel tint has an independent lifecycle
+                -- and topology from the visible harmful-icon row.
+                dispels = UF.CreateNativeGroupAuraContainerSeed(button),
+            }
+        end
+
+        button._updateOnGroupUpdate = true
+        button._deferUpdateOnUnitChange = true
+        button._enableUnitButtonMapping = true
+        UF.AddToConfigMode("party", button)
+        UF.CreateIndicators(button, indicators)
+        UF.CreatePreviewRect(button)
     end
 
     -- mover
@@ -87,6 +105,7 @@ local function UpdateParty(_, module, which, skipIndicatorUpdates)
     if which and which ~= "party" then return end
 
     local config = UF.config.party
+    local wasEnabled = party and party.enabled == true
 
     if not (UF.config.general.enabled and config.general.enabled) then
         if party then
@@ -94,7 +113,6 @@ local function UpdateParty(_, module, which, skipIndicatorUpdates)
             for i = 1, 5 do
                 UF.DisableIndicators(party.header[i])
             end
-            UF.RemoveFromConfigMode("party")
             party.enabled = false -- for mover
             party:Hide()
         end
@@ -106,10 +124,17 @@ local function UpdateParty(_, module, which, skipIndicatorUpdates)
     end
 
     party.enabled = true -- for mover
+    local skipCurrentIndicatorUpdates =
+        skipIndicatorUpdates == true and wasEnabled
 
     -- setup
     local header = party.header
     local unitCount = 5 -- config.general.showPlayer and 5 or 4
+    if party.inConfigMode then
+        -- A disabled config-mode group remains registered. Restore its
+        -- visible parent before indicator setup so previews can re-enable.
+        party:Show()
+    end
 
     -- strata & level
     -- party:SetFrameStrata(config.general.frameStrata)
@@ -144,8 +169,15 @@ local function UpdateParty(_, module, which, skipIndicatorUpdates)
         -- color
         AF.ApplyDefaultBackdropWithColors(button, config.general.bgColor, config.general.borderColor)
         -- indicators
-        if not skipIndicatorUpdates then
+        if not skipCurrentIndicatorUpdates then
             UF.SetupIndicators(button, indicators, config)
+            if party.inConfigMode then
+                for _, indicator in next, button.indicators do
+                    if indicator.EnableConfigMode then
+                        indicator:EnableConfigMode()
+                    end
+                end
+            end
         end
     end
 
@@ -167,9 +199,11 @@ local function UpdateParty(_, module, which, skipIndicatorUpdates)
     header:SetAttribute("unitsPerColumn", 5)
     header:Show()
 
-    if not UF.configModeEnabled then
+    if not party.inConfigMode then
         -- visibility NOTE: show must invoke after settings applied
         RegisterAttributeDriver(party, party.driverKey, party.driverValue)
+    else
+        party:Show()
     end
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateParty)

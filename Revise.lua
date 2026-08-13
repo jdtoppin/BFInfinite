@@ -132,6 +132,11 @@ function F.ReviseProfile(profile, force)
         end
     end
 
+    local unitFrames = BFI.modules.UnitFrames
+    if unitFrames and unitFrames.MigrateConfig then
+        profile.unitFrames = unitFrames.MigrateConfig(profile.unitFrames)
+    end
+
     local nameplates = BFI.modules.Nameplates
     if nameplates and nameplates.MigrateConfig then
         profile.nameplates = nameplates.MigrateConfig(profile.nameplates)

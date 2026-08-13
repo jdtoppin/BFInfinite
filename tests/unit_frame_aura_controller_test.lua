@@ -117,8 +117,8 @@ local function newHolder(harness, name, parent, frameTemplate)
         id = #harness.holders + 1,
         name = name,
         parent = parent,
-        frameTemplate = frameTemplate,
         shown = true,
+        frameTemplate = frameTemplate,
     }
 
     function holder:Hide()
@@ -257,6 +257,11 @@ local function newSlotButton(harness, container, key)
         )
     end
 
+    function button:SetAllPoints(relativeTo)
+        self.allPoints = relativeTo
+        record(harness, "slot.set-all-points", self, relativeTo)
+    end
+
     harness.slotButtons[#harness.slotButtons + 1] = button
     return button
 end
@@ -276,7 +281,7 @@ local function makeHarness(options)
     }
     local AF = {
         isRetail = options.isRetail ~= false,
-        versionNum = options.versionNum or 37,
+        versionNum = options.versionNum or 42,
     }
     local UF = {}
     local afConstructionTotals = {
@@ -315,6 +320,10 @@ local function makeHarness(options)
 
     function AF.HasCustomAuraContainer()
         return options.hasBackend ~= false
+    end
+
+    function AF.HasNativeDispelColorTexture()
+        return options.hasNativeDispelColor ~= false
     end
 
     function AF.CreateCustomAuraContainer(parent)
@@ -510,6 +519,53 @@ local function makeHarness(options)
             slotOptions.anchor.x,
             slotOptions.anchor.y
         )
+    end
+
+    function AF.AddCustomAuraDispelOverlaySlot(
+        container,
+        key,
+        filterString,
+        slotOptions,
+        overlayStyle
+    )
+        afConstructionTotals.slotAddAttempts =
+            afConstructionTotals.slotAddAttempts + 1
+        afConstructionTotals.initialFrameReservationsAttempted =
+            afConstructionTotals.initialFrameReservationsAttempted + 1
+        validateSort(slotOptions.sortMethod, slotOptions.sortDirection)
+        assertTrue(type(slotOptions.anchor) == "table",
+            "missing mock dispel overlay anchor")
+        assertEqual(slotOptions.anchor.matchAnchorBounds, true,
+            "mock dispel overlay bounds mode")
+        assertTrue(slotOptions.anchor.relativeTo ~= nil,
+            "missing mock dispel overlay bounds target")
+        local button = newSlotButton(harness, container, key)
+        container.slots[key] = {
+            filterString = filterString,
+            options = slotOptions,
+            overlayStyle = overlayStyle,
+            button = button,
+            kind = "dispelOverlay",
+        }
+        container.afConstructionStats.slotsAdded =
+            container.afConstructionStats.slotsAdded + 1
+        container.afConstructionStats.initialFrameReservationsCompleted =
+            container.afConstructionStats.initialFrameReservationsCompleted + 1
+        afConstructionTotals.slotsAdded =
+            afConstructionTotals.slotsAdded + 1
+        afConstructionTotals.initialFrameReservationsCompleted =
+            afConstructionTotals.initialFrameReservationsCompleted + 1
+        record(
+            harness,
+            "af.add-dispel-overlay-slot",
+            container,
+            key,
+            filterString,
+            slotOptions,
+            overlayStyle
+        )
+        button:SetAllPoints(slotOptions.anchor.relativeTo)
+        return button
     end
 
     function AF.SetCustomAuraSlotFilterString(container, key, filterString)
@@ -1061,6 +1117,7 @@ local function assertNoNativeMutation(harness, message)
         "af.flow",
         "af.processing",
         "af.add-group",
+        "af.add-dispel-overlay-slot",
         "af.add-slot",
         "af.unit",
         "af.update",
@@ -1088,18 +1145,52 @@ local function assertNoNativeMutation(harness, message)
 end
 
 local function testCapabilityGate()
-    local oldAF = makeHarness({versionNum = 36})
+    local oldAF = makeHarness({versionNum = 40})
     assertEqual(
         oldAF.UF.HasNativeAuraContainerBackend(),
         false,
-        "AF r36 duration-color gate"
+        "AF r40 native Debuff color gate"
     )
     assertEqual(
         oldAF.UF.CreateNativeAuraContainerController({}, "OldAF"),
         nil,
-        "AF r36 controller"
+        "AF r40 controller"
     )
-    assertEqual(#oldAF.holders, 0, "AF r36 holder count")
+    assertEqual(#oldAF.holders, 0, "AF r40 holder count")
+
+    local priorAF = makeHarness({versionNum = 41})
+    assertEqual(
+        priorAF.UF.HasNativeAuraContainerBackend(),
+        false,
+        "AF r41 native Debuff color gate"
+    )
+    assertEqual(
+        priorAF.UF.CreateNativeAuraContainerController({}, "PriorAF"),
+        nil,
+        "AF r41 controller"
+    )
+    assertEqual(#priorAF.holders, 0, "AF r41 holder count")
+
+    local currentAF = makeHarness({versionNum = 42})
+    assertEqual(
+        currentAF.UF.HasNativeAuraContainerBackend(),
+        true,
+        "AF r42 native Debuff color gate"
+    )
+
+    local legacyClient = makeHarness({isRetail = false})
+    assertEqual(
+        legacyClient.UF.HasNativeAuraContainerBackend(),
+        false,
+        "legacy client native backend gate"
+    )
+
+    local unavailableBackend = makeHarness({hasBackend = false})
+    assertEqual(
+        unavailableBackend.UF.HasNativeAuraContainerBackend(),
+        false,
+        "unavailable custom-container fallback gate"
+    )
 
     local missingMethod = makeHarness({
         missingMethod = "SetCustomAuraSlotSortMethod",
@@ -1121,6 +1212,33 @@ local function testCapabilityGate()
     )
     assertEqual(#missingConstructionMethod.holders, 0,
         "missing-construction-method holder count")
+
+    local missingDispelOverlay = makeHarness({
+        missingMethod = "AddCustomAuraDispelOverlaySlot",
+    })
+    assertEqual(
+        missingDispelOverlay.UF.HasNativeAuraContainerBackend(),
+        false,
+        "missing dispel-overlay method gate"
+    )
+
+    local missingNativeDispelColor = makeHarness({
+        missingMethod = "HasNativeDispelColorTexture",
+    })
+    assertEqual(
+        missingNativeDispelColor.UF.HasNativeAuraContainerBackend(),
+        false,
+        "missing native Debuff color method gate"
+    )
+
+    local unavailableNativeDispelColor = makeHarness({
+        hasNativeDispelColor = false,
+    })
+    assertEqual(
+        unavailableNativeDispelColor.UF.HasNativeAuraContainerBackend(),
+        false,
+        "unavailable native Debuff color capability gate"
+    )
 end
 
 local function testGlobalFrameworkRequirement()
@@ -1164,14 +1282,129 @@ local function testGlobalFrameworkRequirement()
     assertTrue(chunk, loadError)
     setfenv(chunk, environment)
     chunk("BFInfinite", BFI)
-    assertEqual(BFI.requiredAFVersion, 37, "published global AF minimum")
+    assertEqual(BFI.requiredAFVersion, 42, "published global AF minimum")
 
     local ok, versionError = pcall(eventHandler.ADDON_LOADED, eventHandler, BFI.name)
     assertEqual(ok, false, "global AF version check stops harness")
     assertEqual(versionError, stopAfterVersionCheck, "global AF version check sentinel")
-    assertEqual(requiredVersion, 37, "global AF minimum")
+    assertEqual(requiredVersion, 42, "global AF minimum")
 end
 
+local function testDispelOverlaySlotContract()
+    local harness = makeHarness()
+    local anchorTarget = {frameLevel = 3}
+    local overlayStyle = {
+        texture = "gradient",
+        alpha = 0.5,
+        blendMode = "ADD",
+        frameLevelOffset = 0,
+    }
+    local controller = harness.UF.CreateNativeAuraContainerController(
+        {},
+        "BFITestDispelOverlay",
+        {
+            unit = "party1",
+            enabled = true,
+            shown = true,
+            holder = {width = 1, height = 1},
+            containerPoint = {
+                point = "CENTER",
+                relativePoint = "CENTER",
+                x = 0,
+                y = 0,
+            },
+            flowLayout = {},
+            processing = {policy = MOCK_PROCESSING_POLICY.None},
+            groups = {},
+            slots = {
+                {
+                    kind = "dispelOverlay",
+                    key = "dispelHighlight",
+                    filterString = "HARMFUL|RAID",
+                    candidateFilters = {
+                        includeDispelTypes = {Magic = true},
+                    },
+                    sortMethod = MOCK_SORT_METHOD.UnitFrameDebuff,
+                    sortDirection = MOCK_SORT_DIRECTION.Normal,
+                    anchorTarget = anchorTarget,
+                    overlayStyle = overlayStyle,
+                },
+            },
+        }
+    )
+
+    local slot = harness.containers[1].slots.dispelHighlight
+    assertTrue(slot, "native dispel overlay slot")
+    assertEqual(slot.kind, "dispelOverlay", "dispel overlay slot kind")
+    assertEqual(slot.filterString, "HARMFUL|RAID",
+        "dispel overlay native filter")
+    assertEqual(slot.options.anchor.relativeTo, anchorTarget,
+        "dispel overlay anchor identity")
+    assertEqual(slot.button.allPoints, anchorTarget,
+        "dispel overlay button bounds")
+    assertTrue(slot.overlayStyle ~= overlayStyle,
+        "dispel overlay style copied as config")
+    assertEqual(slot.overlayStyle.alpha, 0.5,
+        "dispel overlay alpha")
+    assertEqual(countEvents(harness, "af.add-slot"), 0,
+        "ordinary slot adapter bypassed")
+    assertEqual(countEvents(harness, "af.add-dispel-overlay-slot"), 1,
+        "dispel overlay adapter count")
+
+    local constructionBefore = assertConstructionStats(harness, {
+        controllersCreated = 1,
+        buildAttempts = 1,
+        buildCompletions = 1,
+        frameworkBuilds = 1,
+        expectedGroups = 0,
+        expectedSlots = 1,
+        expectedInitialReservations = 1,
+        afContainerAllocations = 1,
+        afGroupsAdded = 0,
+        afSlotsAdded = 1,
+        afInitialFrameReservationsCompleted = 1,
+    }, "dispel overlay construction")
+    local tuning = {
+        holder = {width = 1, height = 1},
+        containerPoint = {
+            point = "CENTER",
+            relativePoint = "CENTER",
+            x = 0,
+            y = 0,
+        },
+        flowLayout = {},
+        processing = {policy = MOCK_PROCESSING_POLICY.None},
+        groups = {},
+        slots = {
+            {
+                key = "dispelHighlight",
+                filterString = "HARMFUL|DISPELLABLE",
+                candidateFilters = {
+                    includeDispelTypes = {Bleed = true},
+                },
+                sortMethod = MOCK_SORT_METHOD.UnitFrameDebuff,
+                sortDirection = MOCK_SORT_DIRECTION.Normal,
+            },
+        },
+    }
+    controller:ApplyTuning(tuning)
+    assertEqual(slot.filterString, "HARMFUL|DISPELLABLE",
+        "dispel overlay tuned filter")
+    assertEqual(slot.options.candidateFilters.includeDispelTypes.Bleed,
+        true, "dispel overlay tuned candidate map")
+
+    controller:ApplyTuning(tuning)
+    local constructionAfter =
+        harness.UF.GetNativeAuraConstructionStats()
+    for field, beforeValue in pairs(constructionBefore) do
+        assertEqual(constructionAfter[field], beforeValue,
+            "repeated dispel tuning construction delta " .. field)
+    end
+    assertEqual(#harness.containers, 1,
+        "repeated dispel tuning container count")
+    assertEqual(countEvents(harness, "af.add-dispel-overlay-slot"), 1,
+        "repeated dispel tuning slot count")
+end
 local function testBuildContract()
     local harness = makeHarness()
     local parent = {}
@@ -1471,9 +1704,11 @@ local function testPlayerVehicleCombatRetarget()
     assertEqual(container.unit, "player",
         "combat Player vehicle native unit")
     assertEqual(controller:GetFrame().shown, true,
-        "combat Player vehicle protected visibility remains unchanged")
+        "combat Player vehicle avoids protected visibility")
     assertEqual(controller:GetFrame().alpha, 0,
         "combat Player vehicle stale-display curtain")
+    assertEqual(countEvents(harness, "holder.shown"), 0,
+        "combat Player vehicle protected visibility writes")
     assertEqual(countEvents(harness, "af.unit"), 0,
         "combat Player vehicle retarget mutation")
     assertEqual(countEvents(harness, "af.create-container"), 0,
@@ -2064,6 +2299,715 @@ local function testRefreshIsDirectDirtyMark()
     assertEqual(harness.regenCallback, nil, "refresh regen handler")
 end
 
+local function testPartitionBuildAndRelationSwap()
+    local harness = makeHarness()
+    local parent = {}
+    local controller = harness.UF.CreateNativeAuraPartitionController(
+        parent,
+        "BFIPartitionAuraHolder"
+    )
+    assertTrue(controller, "partition controller")
+    assertEqual(#harness.holders, 4, "partition holder count")
+
+    local outer = controller:GetFrame()
+    local friendlyHolder = findHolderByName(
+        harness,
+        "BFIPartitionAuraHolder_Friendly"
+    )
+    local mainHolder = findHolderByName(
+        harness,
+        "BFIPartitionAuraHolder_HostileMain"
+    )
+    local complementHolder = findHolderByName(
+        harness,
+        "BFIPartitionAuraHolder_HostileComplement"
+    )
+    assertEqual(outer.parent, parent, "partition outer parent")
+    assertEqual(
+        complementHolder.frameTemplate,
+        "DisableUntrustedLayoutScriptsTemplate",
+        "partition complement forbidden-layout template"
+    )
+
+    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
+
+    assertEqual(#harness.containers, 3, "partition native container count")
+    local friendlyNative = controller.friendly:GetNativeFrame()
+    local mainNative = controller.main:GetNativeFrame()
+    local complementNative = controller.complement:GetNativeFrame()
+    assertEqual(friendlyNative, harness.containers[1],
+        "friendly native identity")
+    assertEqual(mainNative, harness.containers[2],
+        "main native identity")
+    assertEqual(complementNative, harness.containers[3],
+        "complement native identity")
+
+    assertEqual(outer.width, 220, "partition outer width")
+    assertEqual(outer.height, 120, "partition outer height")
+    assertEqual(outer.shown, true, "partition outer visibility")
+    assertEqual(friendlyHolder.shown, true, "friendly initial visibility")
+    assertEqual(mainHolder.shown, false, "main initial visibility")
+    assertEqual(complementHolder.shown, false,
+        "complement initial visibility")
+
+    assertEqual(friendlyHolder.point[1], "TOPLEFT",
+        "friendly holder point")
+    assertEqual(friendlyHolder.point[2], outer,
+        "friendly holder anchor owner")
+    assertEqual(friendlyHolder.point[3], "TOPLEFT",
+        "friendly holder relative point")
+    assertEqual(friendlyHolder.point[4], 0,
+        "friendly holder anchor x")
+    assertEqual(friendlyHolder.point[5], 0,
+        "friendly holder anchor y")
+    assertEqual(mainHolder.point[1], "BOTTOMLEFT", "main holder point")
+    assertEqual(mainHolder.point[2], outer, "main holder anchor owner")
+    assertEqual(mainHolder.point[3], "BOTTOMLEFT",
+        "main holder relative point")
+
+    assertEqual(complementHolder.point[1], "BOTTOMLEFT",
+        "complement attachment point")
+    assertEqual(complementHolder.point[2], mainNative,
+        "complement attaches to secret-sized main native frame")
+    assertEqual(complementHolder.point[3], "TOPLEFT",
+        "complement attachment relative point")
+    assertEqual(complementHolder.point[4], 0,
+        "complement attachment x")
+    assertEqual(complementHolder.point[5], -1,
+        "complement attachment clamp correction")
+    assertEqual(complementNative.point[1], "BOTTOMLEFT",
+        "complement child container point")
+    assertEqual(complementNative.point[2], complementHolder,
+        "complement child container owner")
+    assertEqual(complementNative.point[4], 5,
+        "complement child container x")
+    assertEqual(complementNative.point[5], 6,
+        "complement child container y")
+
+    for _, container in ipairs({
+        friendlyNative,
+        mainNative,
+        complementNative,
+    }) do
+        assertEqual(container.unit, "target", "partition native unit")
+        assertEqual(container.enabled, true, "partition native enabled")
+        assertEqual(container.shown, true, "partition native shown")
+    end
+
+    clearEvents(harness)
+    harness:SetCombat(true)
+    controller:SetVariant("hostile")
+
+    assertEqual(friendlyHolder.shown, true,
+        "combat hostile-swap friendly physical visibility")
+    assertEqual(mainHolder.shown, false,
+        "combat hostile-swap main physical visibility")
+    assertEqual(complementHolder.shown, false,
+        "combat hostile-swap complement physical visibility")
+    assertEqual(outer.shown, true,
+        "combat hostile-swap outer physical visibility")
+    assertEqual(outer.alpha, 0, "combat hostile-swap outer curtain")
+    assertEqual(friendlyHolder.alpha, 1,
+        "combat hostile-swap friendly applied presentation")
+    assertEqual(mainHolder.alpha, 0,
+        "combat hostile-swap main remains hidden")
+    assertEqual(complementHolder.alpha, 0,
+        "combat hostile-swap complement remains hidden")
+    assertEqual(#harness.containers, 3,
+        "hostile swap container allocation")
+    assertEqual(countEvents(harness, "uf.register"), 1,
+        "hostile swap combat queue")
+    assertNoNativeMutation(harness, "hostile relationship swap")
+
+    harness:SetCombat(false)
+    harness:FireRegen()
+
+    assertEqual(friendlyHolder.shown, false,
+        "deferred friendly hostile-swap visibility")
+    assertEqual(mainHolder.shown, true,
+        "deferred main hostile-swap visibility")
+    assertEqual(complementHolder.shown, true,
+        "deferred complement hostile-swap visibility")
+    assertEqual(outer.shown, true,
+        "deferred hostile-swap outer visibility")
+    assertEqual(outer.alpha, 1,
+        "deferred hostile-swap outer curtain removal")
+    assertEqual(countEvents(harness, "uf.unregister"), 1,
+        "hostile swap combat queue drain")
+end
+
+local function testPartitionCombatConstructionQueuesInitialization()
+    local harness = makeHarness()
+    harness:SetCombat(true)
+    clearEvents(harness)
+
+    local controller = harness.UF.CreateNativeAuraPartitionController(
+        {},
+        "BFICombatPartitionConstructionHolder"
+    )
+    local holders = {
+        controller:GetFrame(),
+        controller.friendly:GetFrame(),
+        controller.main:GetFrame(),
+        controller.complement:GetFrame(),
+    }
+
+    for index, holder in ipairs(holders) do
+        assertEqual(holder.shown, true,
+            "combat partition construction physical visibility " .. index)
+        assertEqual(holder.alpha, 0,
+            "combat partition construction curtain " .. index)
+    end
+    assertEqual(countEvents(harness, "holder.hide"), 0,
+        "combat partition construction protected hides")
+    assertEqual(countEvents(harness, "holder.shown"), 0,
+        "combat partition construction protected visibility writes")
+    assertTrue(harness.regenCallback,
+        "combat partition construction recovery registration")
+
+    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
+    assertEqual(#harness.containers, 0,
+        "combat partition construction native allocations")
+    assertNoNativeMutation(harness,
+        "combat partition construction native mutations")
+
+    harness:SetCombat(false)
+    harness:FireRegen()
+
+    assertEqual(#harness.containers, 3,
+        "regen partition construction native allocations")
+    assertEqual(holders[1].shown, true,
+        "regen partition outer visibility")
+    assertEqual(holders[1].alpha, 1,
+        "regen partition outer curtain removal")
+    assertEqual(holders[2].shown, true,
+        "regen partition friendly visibility")
+    assertEqual(holders[2].alpha, 1,
+        "regen partition friendly curtain removal")
+    assertEqual(holders[3].shown, false,
+        "regen partition hostile main visibility")
+    assertEqual(holders[3].alpha, 0,
+        "regen partition hostile main curtain")
+    assertEqual(holders[4].shown, false,
+        "regen partition hostile complement visibility")
+    assertEqual(holders[4].alpha, 0,
+        "regen partition hostile complement curtain")
+    assertEqual(holders[4].frameTemplate,
+        "DisableUntrustedLayoutScriptsTemplate",
+        "regen partition complement template")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "regen partition presentation state")
+    assertEqual(harness.regenCallback, nil,
+        "combat partition construction queue drained")
+
+    controller:Destroy()
+end
+
+local function testPartitionCombatReversalUsesAppliedLedger()
+    local harness = makeHarness()
+    local controller = harness.UF.CreateNativeAuraPartitionController(
+        {},
+        "BFIOpaquePartitionAuraHolder"
+    )
+    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
+
+    local outer = controller:GetFrame()
+    local friendlyHolder = controller.friendly:GetFrame()
+    local mainHolder = controller.main:GetFrame()
+    local complementHolder = controller.complement:GetFrame()
+    local function forbidVisibilityRead(frame, method)
+        frame[method] = function()
+            error("forbidden " .. method .. " visibility read")
+        end
+    end
+    for _, frame in ipairs({
+        outer,
+        friendlyHolder,
+        mainHolder,
+        complementHolder,
+    }) do
+        forbidVisibilityRead(frame, "IsShown")
+        forbidVisibilityRead(frame, "IsMouseOver")
+    end
+
+    clearEvents(harness)
+    harness:SetCombat(true)
+
+    controller:SetVariant("hostile")
+    assertEqual(outer.alpha, 0,
+        "combat partition variant request curtain")
+    assertEqual(friendlyHolder.shown, true,
+        "combat partition variant request friendly visibility")
+    assertEqual(mainHolder.shown, false,
+        "combat partition variant request main visibility")
+    assertEqual(complementHolder.shown, false,
+        "combat partition variant request complement visibility")
+    assertEqual(countEvents(harness, "uf.register"), 1,
+        "combat partition variant request registration")
+
+    controller:SetVariant("friendly")
+    assertEqual(outer.alpha, 1,
+        "combat partition variant reversal curtain removal")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "combat partition variant reversal presentation")
+    assertEqual(harness.regenCallback, nil,
+        "combat partition variant reversal queue drain")
+    assertEqual(countEvents(harness, "uf.unregister"), 1,
+        "combat partition variant reversal unregistration")
+
+    controller:SetShown(false)
+    assertEqual(outer.alpha, 0,
+        "combat partition hide request curtain")
+    assertEqual(friendlyHolder.shown, true,
+        "combat partition hide request child visibility")
+    controller:SetShown(true)
+    assertEqual(outer.alpha, 1,
+        "combat partition show reversal curtain removal")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "combat partition show reversal presentation")
+    assertEqual(harness.regenCallback, nil,
+        "combat partition show reversal queue drain")
+    assertEqual(countEvents(harness, "uf.register"), 2,
+        "combat partition reversal registration count")
+    assertEqual(countEvents(harness, "uf.unregister"), 2,
+        "combat partition reversal unregistration count")
+    assertEqual(#harness.timerCallbacks, 0,
+        "combat partition reversal timer count")
+
+    harness:SetCombat(false)
+    controller:Destroy()
+end
+
+local function testPartitionVisibilityUsesWriteLedger()
+    local harness = makeHarness()
+    local controller = harness.UF.CreateNativeAuraPartitionController(
+        {},
+        "BFIWriteLedgerPartitionAuraHolder"
+    )
+    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
+
+    local outer = controller:GetFrame()
+    local friendlyHolder = controller.friendly:GetFrame()
+    local mainHolder = controller.main:GetFrame()
+    local complementHolder = controller.complement:GetFrame()
+    outer.IsShown = function()
+        error("forbidden partition IsShown read")
+    end
+    outer.IsMouseOver = function()
+        error("forbidden partition IsMouseOver read")
+    end
+    clearEvents(harness)
+
+    controller:SetVariant("hostile")
+
+    assertEqual(#harness.timerCallbacks, 0,
+        "partition visibility retry")
+    assertEqual(friendlyHolder.shown, false,
+        "hostile friendly presentation visibility")
+    assertEqual(mainHolder.shown, true,
+        "hostile main presentation visibility")
+    assertEqual(complementHolder.shown, true,
+        "hostile complement presentation visibility")
+    assertEqual(outer.alpha, 1, "hostile partition alpha")
+    assertEqual(outer.shown, true, "hostile partition visibility")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "hostile partition presentation state")
+    assertNoNativeMutation(harness, "hostile relationship request")
+
+    clearEvents(harness)
+    controller:SetShown(false)
+    assertEqual(outer.alpha, 0, "hidden partition alpha curtain")
+    assertEqual(outer.shown, false, "hidden partition visibility")
+    assertEqual(friendlyHolder.shown, false,
+        "hidden partition friendly visibility")
+    assertEqual(mainHolder.shown, false,
+        "hidden partition main visibility")
+    assertEqual(complementHolder.shown, false,
+        "hidden partition complement visibility")
+    assertEqual(controller:IsPresentationApplied(), false,
+        "hidden partition presentation state")
+    assertNoNativeMutation(harness, "hidden relationship request")
+
+    controller:SetShown(true)
+    assertEqual(outer.alpha, 1, "restored partition alpha")
+    assertEqual(outer.shown, true, "restored partition visibility")
+    assertEqual(friendlyHolder.shown, false,
+        "restored hostile friendly visibility")
+    assertEqual(mainHolder.shown, true,
+        "restored hostile main visibility")
+    assertEqual(complementHolder.shown, true,
+        "restored hostile complement visibility")
+    assertEqual(controller:IsPresentationApplied(), true,
+        "restored partition presentation state")
+end
+
+local function testPartitionTuningReanchorsEveryLayer()
+    local harness = makeHarness()
+    local controller = harness.UF.CreateNativeAuraPartitionController(
+        {},
+        "BFITunedPartitionAuraHolder"
+    )
+    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
+
+    local outer = controller:GetFrame()
+    local friendlyHolder = controller.friendly:GetFrame()
+    local mainHolder = controller.main:GetFrame()
+    local complementHolder = controller.complement:GetFrame()
+    local friendlyNative = controller.friendly:GetNativeFrame()
+    local mainNative = controller.main:GetNativeFrame()
+    local complementNative = controller.complement:GetNativeFrame()
+    harness.recordAlpha = true
+    clearEvents(harness)
+
+    controller:ApplyTuning(partitionTuningSpec())
+
+    assertEqual(#harness.containers, 3,
+        "partition tuning container allocation")
+    assertEqual(countEvents(harness, "af.add-group"), 0,
+        "partition tuning group allocation")
+    assertEqual(outer.width, 230, "partition tuned outer width")
+    assertEqual(outer.height, 130, "partition tuned outer height")
+
+    assertEqual(friendlyHolder.point[1], "TOPRIGHT",
+        "tuned friendly holder point")
+    assertEqual(friendlyHolder.point[2], outer,
+        "tuned friendly holder owner")
+    assertEqual(mainHolder.point[1], "BOTTOMRIGHT",
+        "tuned main holder point")
+    assertEqual(mainHolder.point[2], outer, "tuned main holder owner")
+
+    assertEqual(friendlyNative.point[1], "TOPRIGHT",
+        "tuned friendly native point")
+    assertEqual(friendlyNative.point[2], friendlyHolder,
+        "tuned friendly native owner")
+    assertEqual(friendlyNative.point[4], 21,
+        "tuned friendly native x")
+    assertEqual(friendlyNative.point[5], 22,
+        "tuned friendly native y")
+    assertEqual(mainNative.point[1], "BOTTOMRIGHT",
+        "tuned main native point")
+    assertEqual(mainNative.point[2], mainHolder,
+        "tuned main native owner")
+    assertEqual(mainNative.point[4], 23, "tuned main native x")
+    assertEqual(mainNative.point[5], 24, "tuned main native y")
+    assertEqual(complementNative.point[1], "TOPRIGHT",
+        "tuned complement native point")
+    assertEqual(complementNative.point[2], complementHolder,
+        "tuned complement native owner")
+    assertEqual(complementNative.point[4], 25,
+        "tuned complement native x")
+    assertEqual(complementNative.point[5], 26,
+        "tuned complement native y")
+
+    assertEqual(complementHolder.point[1], "TOPRIGHT",
+        "tuned complement attachment point")
+    assertEqual(complementHolder.point[2], mainNative,
+        "tuned complement main owner")
+    assertEqual(complementHolder.point[3], "BOTTOMRIGHT",
+        "tuned complement relative point")
+    assertEqual(complementHolder.point[4], 1,
+        "tuned complement attachment x")
+    assertEqual(complementHolder.point[5], 2,
+        "tuned complement attachment y")
+    assertEqual(harness.events[1].name, "holder.alpha",
+        "partition transaction starts with a curtain")
+    assertEqual(harness.events[1].args[1], outer,
+        "partition transaction curtain owner")
+    assertEqual(harness.events[1].args[2], 0,
+        "partition transaction curtain alpha")
+    assertEqual(harness.events[#harness.events].name, "holder.alpha",
+        "partition transaction ends with curtain removal")
+    assertEqual(harness.events[#harness.events].args[1], outer,
+        "partition transaction restore owner")
+    assertEqual(harness.events[#harness.events].args[2], 1,
+        "partition transaction restored alpha")
+end
+
+local function testPartitionCombatDefersNativeTuning()
+    local harness = makeHarness()
+    local controller = harness.UF.CreateNativeAuraPartitionController(
+        {},
+        "BFICombatPartitionAuraHolder"
+    )
+    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
+
+    local outer = controller:GetFrame()
+    local complementHolder = controller.complement:GetFrame()
+    local oldAttachmentOwner = complementHolder.point[2]
+    clearEvents(harness)
+    harness:SetCombat(true)
+
+    controller:ApplyTuning(partitionTuningSpec())
+    controller:SetVariant("hostile")
+
+    assertEqual(outer.shown, true,
+        "combat partition protected visibility remains unchanged")
+    assertEqual(outer.alpha, 0,
+        "combat partition stale-display curtain")
+    assertEqual(complementHolder.point[2], oldAttachmentOwner,
+        "combat complement reanchor mutation")
+    assertEqual(countEvents(harness, "uf.register"), 1,
+        "combat partition regen registration")
+    assertEqual(countEvents(harness, "af.update"), 0,
+        "combat partition native tuning")
+
+    harness:SetCombat(false)
+    harness:FireRegen()
+
+    assertEqual(outer.shown, true,
+        "deferred partition outer visibility")
+    assertEqual(controller.friendly:GetFrame().shown, false,
+        "deferred partition friendly visibility")
+    assertEqual(controller.main:GetFrame().shown, true,
+        "deferred partition main visibility")
+    assertEqual(controller.complement:GetFrame().shown, true,
+        "deferred partition complement visibility")
+    assertEqual(complementHolder.point[2],
+        controller.main:GetNativeFrame(),
+        "deferred complement main owner")
+    assertEqual(complementHolder.point[1], "TOPRIGHT",
+        "deferred complement point")
+    assertEqual(countEvents(harness, "uf.unregister"), 1,
+        "combat partition regen unregistration")
+end
+
+local function testPartitionCombatStructuralLatestWinsAndDestroy()
+    local harness = makeHarness()
+    local latest = harness.UF.CreateNativeAuraPartitionController(
+        {},
+        "BFILatestPartitionAuraHolder"
+    )
+    latest:Rebuild(partitionCompleteSpec("target", "friendly"))
+    local retired = harness.UF.CreateNativeAuraPartitionController(
+        {},
+        "BFIRetiredPartitionAuraHolder"
+    )
+    retired:Rebuild(partitionCompleteSpec("focus", "hostile"))
+
+    local latestOuter = latest:GetFrame()
+    local retiredOuter = retired:GetFrame()
+    local staleTuning = partitionTuningSpec()
+    local currentTuning = copy(partitionTuningSpec())
+    currentTuning.holder.width = 260
+    currentTuning.holder.height = 150
+    currentTuning.friendly.groups[1].filterString =
+        "HARMFUL|RAID_PLAYER_DISPELLABLE"
+    local latestChildren = {
+        latest.friendly:GetFrame(),
+        latest.main:GetFrame(),
+        latest.complement:GetFrame(),
+    }
+    local retiredContainers = {
+        retired.friendly:GetNativeFrame(),
+        retired.main:GetNativeFrame(),
+        retired.complement:GetNativeFrame(),
+    }
+
+    harness.recordAlpha = true
+    clearEvents(harness)
+    harness:SetCombat(true)
+
+    latest:ApplyTuning(staleTuning)
+    latest:ApplyTuning(currentTuning)
+    latest:SetUnit("mouseover")
+    latest:SetUnit("boss1")
+    latest:SetVariant("hostile")
+    latest:SetEnabled(false)
+
+    retired:ApplyTuning(staleTuning)
+    retired:SetUnit("boss2")
+    retired:SetEnabled(false)
+    retired:Destroy()
+
+    assertEqual(latestOuter.shown, true,
+        "combat latest partition physical visibility")
+    assertEqual(latestOuter.alpha, 0,
+        "combat latest partition curtain")
+    assertEqual(retiredOuter.shown, true,
+        "combat retired partition physical visibility")
+    assertEqual(retiredOuter.alpha, 0,
+        "combat retired partition curtain")
+    for index, child in ipairs(latestChildren) do
+        assertEqual(child.shown, index == 1,
+            "combat latest partition child visibility " .. index)
+    end
+    assertEqual(countEvents(harness, "holder.shown"), 0,
+        "combat partition protected child/outer writes")
+    assertEqual(countEvents(harness, "holder.hide"), 0,
+        "combat partition protected construction writes")
+    assertNoNativeMutation(harness,
+        "combat partition structural latest-wins mutation")
+    assertEqual(countEvents(harness, "uf.register"), 1,
+        "combat partition shared recovery registration")
+
+    harness:SetCombat(false)
+    harness:FireRegen()
+
+    assertEqual(latestOuter.width, 260,
+        "regen partition latest holder width")
+    assertEqual(latestOuter.height, 150,
+        "regen partition latest holder height")
+    assertEqual(
+        latest.friendly:GetNativeFrame().groups.friendly.filterString,
+        "HARMFUL|RAID_PLAYER_DISPELLABLE",
+        "regen partition latest tuning"
+    )
+    for _, key in ipairs({"friendly", "main", "complement"}) do
+        local container = latest[key]:GetNativeFrame()
+        assertEqual(container.unit, "boss1",
+            "regen partition latest unit " .. key)
+        assertEqual(container.enabled, false,
+            "regen partition disabled state " .. key)
+    end
+    assertEqual(latestOuter.shown, false,
+        "regen disabled partition visibility")
+    assertEqual(latestOuter.alpha, 0,
+        "regen disabled partition curtain")
+    assertEqual(latest:IsPresentationApplied(), false,
+        "regen disabled partition presentation")
+    for index, container in ipairs(retiredContainers) do
+        assertEqual(container.enabled, false,
+            "regen retired partition enabled state " .. index)
+        assertEqual(container.shown, false,
+            "regen retired partition visibility " .. index)
+    end
+    assertEqual(retiredOuter.shown, false,
+        "regen retired partition outer visibility")
+    assertEqual(retiredOuter.alpha, 0,
+        "regen retired partition outer curtain")
+    assertEqual(countEvents(harness, "uf.unregister"), 1,
+        "combat partition shared recovery drain")
+    assertEqual(harness.regenCallback, nil,
+        "combat partition recovery queue drained")
+end
+
+local function testPartitionTopologyShrinkKeepsAbsentChildDormant()
+    local harness = makeHarness()
+    local mainOnlyController = harness.UF.CreateNativeAuraPartitionController(
+        {},
+        "BFIMainOnlyPartitionAuraHolder"
+    )
+    local mainOnly = partitionCompleteSpec("target", "hostile", 2)
+    mainOnly.complement = nil
+    mainOnly.attachment = nil
+    mainOnlyController:Rebuild(mainOnly)
+
+    assertEqual(mainOnlyController.main:GetFrame().shown, true,
+        "main-only hostile-main visibility")
+    assertEqual(mainOnlyController.complement:GetNativeFrame(), nil,
+        "main-only absent complement allocation")
+
+    mainOnlyController:SetEnabled(false)
+    mainOnlyController:SetEnabled(true)
+    assertEqual(mainOnlyController.complement:GetNativeFrame(), nil,
+        "main-only absent complement remains dormant")
+
+    clearEvents(harness)
+    mainOnlyController:SetUnit("focus")
+    assertEqual(countEvents(harness, "af.unit"), 2,
+        "main-only retarget count")
+
+    clearEvents(harness)
+    mainOnlyController:Refresh()
+    assertEqual(countEvents(harness, "af.update"), 2,
+        "main-only refresh count")
+
+    local complementOnlyController =
+        harness.UF.CreateNativeAuraPartitionController(
+            {},
+            "BFIComplementOnlyPartitionAuraHolder"
+        )
+    local complementOnly = partitionCompleteSpec(
+        "focus",
+        "hostile",
+        1
+    )
+    complementOnly.main = nil
+    complementOnly.attachment = nil
+    complementOnlyController:Rebuild(complementOnly)
+
+    assertEqual(complementOnlyController.main:GetNativeFrame(), nil,
+        "complement-only absent main allocation")
+    assertEqual(complementOnlyController.complement:GetFrame().shown, true,
+        "complement-only hostile-complement visibility")
+
+    complementOnlyController:SetEnabled(false)
+    complementOnlyController:SetEnabled(true)
+    assertEqual(complementOnlyController.main:GetNativeFrame(), nil,
+        "complement-only absent main remains dormant")
+end
+
+local function testPartitionRebuildRefreshAndDestroy()
+    local harness = makeHarness()
+    local controller = harness.UF.CreateNativeAuraPartitionController(
+        {},
+        "BFIRebuiltPartitionAuraHolder"
+    )
+    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
+
+    local friendly = controller.friendly:GetNativeFrame()
+    local main = controller.main:GetNativeFrame()
+    local complement = controller.complement:GetNativeFrame()
+    local containerCount = #harness.containers
+    local groupCount = countEvents(harness, "af.add-group")
+    clearEvents(harness)
+
+    local accepted, message = pcall(
+        controller.Rebuild,
+        controller,
+        partitionCompleteSpec("focus", "hostile", 2)
+    )
+    assertEqual(accepted, false, "partition second rebuild acceptance")
+    assertTrue(
+        tostring(message):find("initial build already attempted", 1, true)
+            ~= nil,
+        "partition second rebuild assertion"
+    )
+    assertEqual(#harness.containers, containerCount,
+        "partition second rebuild container count")
+    assertEqual(countEvents(harness, "af.add-group"), 0,
+        "partition second rebuild group count")
+    assertEqual(controller.friendly:GetNativeFrame(), friendly,
+        "partition friendly identity preserved")
+    assertEqual(controller.main:GetNativeFrame(), main,
+        "partition main identity preserved")
+    assertEqual(controller.complement:GetNativeFrame(), complement,
+        "partition complement identity preserved")
+    assertTrue(groupCount > 0, "partition initial group coverage")
+
+    clearEvents(harness)
+    controller:Refresh()
+    assertEqual(countEvents(harness, "af.update"), 3,
+        "partition refresh native count")
+    for _, container in ipairs({
+        friendly,
+        main,
+        complement,
+    }) do
+        assertTrue(
+            findEvent(harness, "af.update", function(args)
+                return args[1] == container
+            end),
+            "partition refresh container"
+        )
+    end
+
+    clearEvents(harness)
+    controller:Destroy()
+    assertEqual(controller:GetFrame().shown, false,
+        "destroyed partition outer visibility")
+    for _, container in ipairs({
+        friendly,
+        main,
+        complement,
+    }) do
+        assertEqual(container.enabled, false,
+            "destroyed partition native disabled")
+        assertEqual(container.shown, false,
+            "destroyed partition native hidden")
+    end
+end
+
 local function testGroupHeaderCapabilityAndSeed()
     local unavailable = makeHarness({
         hasBackend = false,
@@ -2083,14 +3027,15 @@ local function testGroupHeaderCapabilityAndSeed()
     assertEqual(
         unavailableHeader.attributes.auraContainerTemplate,
         nil,
-        "12.0.7 group header attribute"
+        "unavailable-backend group header attribute"
     )
     assertEqual(
         unavailable.UF.CreateNativeGroupAuraContainerSeed({}),
         nil,
-        "12.0.7 extra group seed"
+        "unavailable-backend extra group seed"
     )
-    assertEqual(#unavailable.containers, 0, "12.0.7 native allocation")
+    assertEqual(#unavailable.containers, 0,
+        "unavailable-backend native allocation")
     assertConstructionStats(unavailable, {
         controllersCreated = 0,
         seedsAllocated = 0,
@@ -2551,494 +3496,10 @@ local function testGroupVisibilityDoesNotProbeFrameState()
         "group visibility retry")
 end
 
-local function testPartitionBuildAndRelationSwap()
-    local harness = makeHarness()
-    local parent = {}
-    local controller = harness.UF.CreateNativeAuraPartitionController(
-        parent,
-        "BFIPartitionAuraHolder"
-    )
-    assertTrue(controller, "partition controller")
-    assertEqual(#harness.holders, 4, "partition holder count")
-
-    local outer = controller:GetFrame()
-    local friendlyHolder = findHolderByName(
-        harness,
-        "BFIPartitionAuraHolder_Friendly"
-    )
-    local mainHolder = findHolderByName(
-        harness,
-        "BFIPartitionAuraHolder_HostileMain"
-    )
-    local complementHolder = findHolderByName(
-        harness,
-        "BFIPartitionAuraHolder_HostileComplement"
-    )
-    assertEqual(outer.parent, parent, "partition outer parent")
-    assertEqual(
-        complementHolder.frameTemplate,
-        "DisableUntrustedLayoutScriptsTemplate",
-        "partition complement forbidden-layout template"
-    )
-
-    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
-
-    assertEqual(#harness.containers, 3, "partition native container count")
-    local friendlyNative = controller.friendly:GetNativeFrame()
-    local mainNative = controller.main:GetNativeFrame()
-    local complementNative = controller.complement:GetNativeFrame()
-    assertEqual(friendlyNative, harness.containers[1],
-        "friendly native identity")
-    assertEqual(mainNative, harness.containers[2],
-        "main native identity")
-    assertEqual(complementNative, harness.containers[3],
-        "complement native identity")
-
-    assertEqual(outer.width, 220, "partition outer width")
-    assertEqual(outer.height, 120, "partition outer height")
-    assertEqual(outer.shown, true, "partition outer visibility")
-    assertEqual(friendlyHolder.shown, true, "friendly initial visibility")
-    assertEqual(mainHolder.shown, false, "main initial visibility")
-    assertEqual(complementHolder.shown, false,
-        "complement initial visibility")
-
-    assertEqual(friendlyHolder.point[1], "TOPLEFT",
-        "friendly holder point")
-    assertEqual(friendlyHolder.point[2], outer,
-        "friendly holder anchor owner")
-    assertEqual(friendlyHolder.point[3], "TOPLEFT",
-        "friendly holder relative point")
-    assertEqual(friendlyHolder.point[4], 0,
-        "friendly holder anchor x")
-    assertEqual(friendlyHolder.point[5], 0,
-        "friendly holder anchor y")
-    assertEqual(mainHolder.point[1], "BOTTOMLEFT", "main holder point")
-    assertEqual(mainHolder.point[2], outer, "main holder anchor owner")
-    assertEqual(mainHolder.point[3], "BOTTOMLEFT",
-        "main holder relative point")
-
-    assertEqual(complementHolder.point[1], "BOTTOMLEFT",
-        "complement attachment point")
-    assertEqual(complementHolder.point[2], mainNative,
-        "complement attaches to secret-sized main native frame")
-    assertEqual(complementHolder.point[3], "TOPLEFT",
-        "complement attachment relative point")
-    assertEqual(complementHolder.point[4], 0,
-        "complement attachment x")
-    assertEqual(complementHolder.point[5], -1,
-        "complement attachment clamp correction")
-    assertEqual(complementNative.point[1], "BOTTOMLEFT",
-        "complement child container point")
-    assertEqual(complementNative.point[2], complementHolder,
-        "complement child container owner")
-    assertEqual(complementNative.point[4], 5,
-        "complement child container x")
-    assertEqual(complementNative.point[5], 6,
-        "complement child container y")
-
-    for _, container in ipairs({
-        friendlyNative,
-        mainNative,
-        complementNative,
-    }) do
-        assertEqual(container.unit, "target", "partition native unit")
-        assertEqual(container.enabled, true, "partition native enabled")
-        assertEqual(container.shown, true, "partition native shown")
-    end
-
-    clearEvents(harness)
-    harness:SetCombat(true)
-    controller:SetVariant("hostile")
-
-    assertEqual(friendlyHolder.shown, true,
-        "combat hostile-swap friendly physical visibility")
-    assertEqual(mainHolder.shown, false,
-        "combat hostile-swap main physical visibility")
-    assertEqual(complementHolder.shown, false,
-        "combat hostile-swap complement physical visibility")
-    assertEqual(outer.shown, true,
-        "combat hostile-swap outer physical visibility")
-    assertEqual(outer.alpha, 0, "combat hostile-swap outer curtain")
-    assertEqual(friendlyHolder.alpha, 1,
-        "combat hostile-swap friendly applied presentation")
-    assertEqual(mainHolder.alpha, 0,
-        "combat hostile-swap main remains hidden")
-    assertEqual(complementHolder.alpha, 0,
-        "combat hostile-swap complement remains hidden")
-    assertEqual(#harness.containers, 3,
-        "hostile swap container allocation")
-    assertEqual(countEvents(harness, "uf.register"), 1,
-        "hostile swap combat queue")
-    assertNoNativeMutation(harness, "hostile relationship swap")
-
-    harness:SetCombat(false)
-    harness:FireRegen()
-
-    assertEqual(friendlyHolder.shown, false,
-        "deferred friendly hostile-swap visibility")
-    assertEqual(mainHolder.shown, true,
-        "deferred main hostile-swap visibility")
-    assertEqual(complementHolder.shown, true,
-        "deferred complement hostile-swap visibility")
-    assertEqual(outer.shown, true,
-        "deferred hostile-swap outer visibility")
-    assertEqual(outer.alpha, 1,
-        "deferred hostile-swap outer curtain removal")
-    assertEqual(countEvents(harness, "uf.unregister"), 1,
-        "hostile swap combat queue drain")
-end
-
-local function testPartitionRebuildRejectsAfterInitialBuild()
-    local harness = makeHarness()
-    local controller = harness.UF.CreateNativeAuraPartitionController(
-        {},
-        "BFIPartitionOneShotHolder"
-    )
-    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
-
-    local ok = pcall(
-        controller.Rebuild,
-        controller,
-        partitionCompleteSpec("focus", "hostile", 2)
-    )
-    assertEqual(ok, false, "partition rebuild after initial build")
-end
-
-local function testPartitionCombatConstructionQueuesInitialization()
-    local harness = makeHarness()
-    harness:SetCombat(true)
-    clearEvents(harness)
-
-    local controller = harness.UF.CreateNativeAuraPartitionController(
-        {},
-        "BFICombatPartitionConstructionHolder"
-    )
-    local holders = {
-        controller:GetFrame(),
-        controller.friendly:GetFrame(),
-        controller.main:GetFrame(),
-        controller.complement:GetFrame(),
-    }
-
-    for index, holder in ipairs(holders) do
-        assertEqual(holder.shown, true,
-            "combat partition construction physical visibility " .. index)
-        assertEqual(holder.alpha, 0,
-            "combat partition construction curtain " .. index)
-    end
-    assertEqual(countEvents(harness, "holder.hide"), 0,
-        "combat partition construction protected hides")
-    assertEqual(countEvents(harness, "holder.shown"), 0,
-        "combat partition construction protected visibility writes")
-    assertTrue(harness.regenCallback,
-        "combat partition construction recovery registration")
-
-    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
-    assertEqual(#harness.containers, 0,
-        "combat partition construction native allocations")
-    assertNoNativeMutation(harness,
-        "combat partition construction native mutations")
-
-    harness:SetCombat(false)
-    harness:FireRegen()
-
-    assertEqual(#harness.containers, 3,
-        "regen partition construction native allocations")
-    assertEqual(holders[1].shown, true,
-        "regen partition outer visibility")
-    assertEqual(holders[1].alpha, 1,
-        "regen partition outer curtain removal")
-    assertEqual(holders[2].shown, true,
-        "regen partition friendly visibility")
-    assertEqual(holders[2].alpha, 1,
-        "regen partition friendly curtain removal")
-    assertEqual(holders[3].shown, false,
-        "regen partition hostile main visibility")
-    assertEqual(holders[3].alpha, 0,
-        "regen partition hostile main curtain")
-    assertEqual(holders[4].shown, false,
-        "regen partition hostile complement visibility")
-    assertEqual(holders[4].alpha, 0,
-        "regen partition hostile complement curtain")
-    assertEqual(holders[4].frameTemplate,
-        "DisableUntrustedLayoutScriptsTemplate",
-        "regen partition complement template")
-    assertEqual(controller:IsPresentationApplied(), true,
-        "regen partition presentation state")
-    assertEqual(harness.regenCallback, nil,
-        "combat partition construction queue drained")
-
-    controller:Destroy()
-end
-
-local function testPartitionCombatReversalUsesAppliedLedger()
-    local harness = makeHarness()
-    local controller = harness.UF.CreateNativeAuraPartitionController(
-        {},
-        "BFI_Target_Debuffs"
-    )
-    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
-
-    local outer = controller:GetFrame()
-    local friendlyHolder = controller.friendly:GetFrame()
-    local mainHolder = controller.main:GetFrame()
-    local complementHolder = controller.complement:GetFrame()
-    assertEqual(
-        complementHolder.name,
-        "BFI_Target_Debuffs_HostileComplement",
-        "target hostile-complement holder name"
-    )
-
-    local function forbidVisibilityRead(frame, method)
-        frame[method] = function()
-            error("forbidden " .. method .. " visibility read")
-        end
-    end
-    for _, frame in ipairs({
-        outer,
-        friendlyHolder,
-        mainHolder,
-        complementHolder,
-    }) do
-        forbidVisibilityRead(frame, "IsShown")
-        forbidVisibilityRead(frame, "IsMouseOver")
-    end
-
-    clearEvents(harness)
-    harness:SetCombat(true)
-
-    controller:SetVariant("hostile")
-    assertEqual(outer.alpha, 0,
-        "combat partition variant request curtain")
-    assertEqual(friendlyHolder.shown, true,
-        "combat partition variant request friendly visibility")
-    assertEqual(mainHolder.shown, false,
-        "combat partition variant request main visibility")
-    assertEqual(complementHolder.shown, false,
-        "combat partition variant request complement visibility")
-    assertEqual(countEvents(harness, "uf.register"), 1,
-        "combat partition variant request registration")
-
-    controller:SetVariant("friendly")
-    assertEqual(outer.alpha, 1,
-        "combat partition variant reversal curtain removal")
-    assertEqual(controller:IsPresentationApplied(), true,
-        "combat partition variant reversal presentation")
-    assertEqual(harness.regenCallback, nil,
-        "combat partition variant reversal queue drain")
-    assertEqual(countEvents(harness, "uf.unregister"), 1,
-        "combat partition variant reversal unregistration")
-
-    controller:SetShown(false)
-    assertEqual(outer.alpha, 0,
-        "combat partition hide request curtain")
-    assertEqual(friendlyHolder.shown, true,
-        "combat partition hide request child visibility")
-    controller:SetShown(true)
-    assertEqual(outer.alpha, 1,
-        "combat partition show reversal curtain removal")
-    assertEqual(controller:IsPresentationApplied(), true,
-        "combat partition show reversal presentation")
-    assertEqual(harness.regenCallback, nil,
-        "combat partition show reversal queue drain")
-    assertEqual(countEvents(harness, "uf.register"), 2,
-        "combat partition reversal registration count")
-    assertEqual(countEvents(harness, "uf.unregister"), 2,
-        "combat partition reversal unregistration count")
-    assertEqual(#harness.timerCallbacks, 0,
-        "combat partition reversal timer count")
-
-    harness:SetCombat(false)
-    controller:Destroy()
-end
-
-local function testPartitionVisibilityUsesWriteLedger()
-    local harness = makeHarness()
-    local controller = harness.UF.CreateNativeAuraPartitionController(
-        {},
-        "BFIOpaquePartitionAuraHolder"
-    )
-    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
-
-    local outer = controller:GetFrame()
-    local friendlyHolder = controller.friendly:GetFrame()
-    local mainHolder = controller.main:GetFrame()
-    local complementHolder = controller.complement:GetFrame()
-    outer.IsShown = function()
-        error("forbidden partition IsShown read")
-    end
-    outer.IsMouseOver = function()
-        error("forbidden partition IsMouseOver read")
-    end
-    clearEvents(harness)
-
-    controller:SetVariant("hostile")
-    assertEqual(friendlyHolder.shown, false,
-        "hostile friendly presentation visibility")
-    assertEqual(mainHolder.shown, true,
-        "hostile main presentation visibility")
-    assertEqual(complementHolder.shown, true,
-        "hostile complement presentation visibility")
-    assertEqual(outer.alpha, 1,
-        "hostile partition alpha")
-    assertEqual(outer.shown, true, "hostile partition visibility")
-    assertEqual(controller:IsPresentationApplied(), true,
-        "hostile partition presentation state")
-    assertEqual(#harness.timerCallbacks, 0,
-        "hostile partition visibility retry")
-    assertNoNativeMutation(harness, "hostile relationship request")
-
-    clearEvents(harness)
-    controller:SetShown(false)
-    assertEqual(outer.alpha, 0,
-        "hidden partition alpha curtain")
-    assertEqual(outer.shown, false,
-        "hidden partition visibility")
-    assertEqual(friendlyHolder.shown, false,
-        "hidden partition friendly visibility")
-    assertEqual(mainHolder.shown, false,
-        "hidden partition main visibility")
-    assertEqual(complementHolder.shown, false,
-        "hidden partition complement visibility")
-    assertEqual(controller:IsPresentationApplied(), false,
-        "hidden partition presentation state")
-    assertEqual(#harness.timerCallbacks, 0,
-        "hidden partition visibility retry")
-    assertNoNativeMutation(harness, "hidden relationship request")
-
-    controller:SetShown(true)
-    assertEqual(outer.alpha, 1, "restored partition alpha")
-    assertEqual(outer.shown, true, "restored partition visibility")
-    assertEqual(friendlyHolder.shown, false,
-        "restored hostile friendly visibility")
-    assertEqual(mainHolder.shown, true,
-        "restored hostile main visibility")
-    assertEqual(complementHolder.shown, true,
-        "restored hostile complement visibility")
-    assertEqual(controller:IsPresentationApplied(), true,
-        "restored partition presentation state")
-end
-
-local function testPartitionTuningReanchorsEveryLayer()
-    local harness = makeHarness()
-    local controller = harness.UF.CreateNativeAuraPartitionController(
-        {},
-        "BFITunedPartitionAuraHolder"
-    )
-    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
-
-    local outer = controller:GetFrame()
-    local friendlyHolder = controller.friendly:GetFrame()
-    local mainHolder = controller.main:GetFrame()
-    local complementHolder = controller.complement:GetFrame()
-    local friendlyNative = controller.friendly:GetNativeFrame()
-    local mainNative = controller.main:GetNativeFrame()
-    local complementNative = controller.complement:GetNativeFrame()
-    clearEvents(harness)
-
-    controller:ApplyTuning(partitionTuningSpec())
-
-    assertEqual(#harness.containers, 3,
-        "partition tuning container allocation")
-    assertEqual(countEvents(harness, "af.add-group"), 0,
-        "partition tuning group allocation")
-    assertEqual(outer.width, 230, "partition tuned outer width")
-    assertEqual(outer.height, 130, "partition tuned outer height")
-
-    assertEqual(friendlyHolder.point[1], "TOPRIGHT",
-        "tuned friendly holder point")
-    assertEqual(friendlyHolder.point[2], outer,
-        "tuned friendly holder owner")
-    assertEqual(mainHolder.point[1], "BOTTOMRIGHT",
-        "tuned main holder point")
-    assertEqual(mainHolder.point[2], outer, "tuned main holder owner")
-
-    assertEqual(friendlyNative.point[1], "TOPRIGHT",
-        "tuned friendly native point")
-    assertEqual(friendlyNative.point[2], friendlyHolder,
-        "tuned friendly native owner")
-    assertEqual(friendlyNative.point[4], 21,
-        "tuned friendly native x")
-    assertEqual(friendlyNative.point[5], 22,
-        "tuned friendly native y")
-    assertEqual(mainNative.point[1], "BOTTOMRIGHT",
-        "tuned main native point")
-    assertEqual(mainNative.point[2], mainHolder,
-        "tuned main native owner")
-    assertEqual(mainNative.point[4], 23, "tuned main native x")
-    assertEqual(mainNative.point[5], 24, "tuned main native y")
-    assertEqual(complementNative.point[1], "TOPRIGHT",
-        "tuned complement native point")
-    assertEqual(complementNative.point[2], complementHolder,
-        "tuned complement native owner")
-    assertEqual(complementNative.point[4], 25,
-        "tuned complement native x")
-    assertEqual(complementNative.point[5], 26,
-        "tuned complement native y")
-
-    assertEqual(complementHolder.point[1], "TOPRIGHT",
-        "tuned complement attachment point")
-    assertEqual(complementHolder.point[2], mainNative,
-        "tuned complement main owner")
-    assertEqual(complementHolder.point[3], "BOTTOMRIGHT",
-        "tuned complement relative point")
-    assertEqual(complementHolder.point[4], 1,
-        "tuned complement attachment x")
-    assertEqual(complementHolder.point[5], 2,
-        "tuned complement attachment y")
-end
-
-local function testPartitionCombatDefersNativeTuning()
-    local harness = makeHarness()
-    local controller = harness.UF.CreateNativeAuraPartitionController(
-        {},
-        "BFICombatPartitionAuraHolder"
-    )
-    controller:Rebuild(partitionCompleteSpec("target", "friendly"))
-
-    local outer = controller:GetFrame()
-    local complementHolder = controller.complement:GetFrame()
-    local oldAttachmentOwner = complementHolder.point[2]
-    clearEvents(harness)
-    harness:SetCombat(true)
-
-    controller:ApplyTuning(partitionTuningSpec())
-    controller:SetVariant("hostile")
-
-    assertEqual(outer.shown, true,
-        "combat partition protected visibility remains unchanged")
-    assertEqual(outer.alpha, 0,
-        "combat partition stale-display curtain")
-    assertEqual(complementHolder.point[2], oldAttachmentOwner,
-        "combat complement reanchor mutation")
-    assertEqual(countEvents(harness, "uf.register"), 1,
-        "combat partition regen registration")
-    assertEqual(countEvents(harness, "af.update"), 0,
-        "combat partition native tuning")
-
-    harness:SetCombat(false)
-    harness:FireRegen()
-
-    assertEqual(outer.shown, true,
-        "deferred partition outer visibility")
-    assertEqual(controller.friendly:GetFrame().shown, false,
-        "deferred partition friendly visibility")
-    assertEqual(controller.main:GetFrame().shown, true,
-        "deferred partition main visibility")
-    assertEqual(controller.complement:GetFrame().shown, true,
-        "deferred partition complement visibility")
-    assertEqual(complementHolder.point[2],
-        controller.main:GetNativeFrame(),
-        "deferred complement main owner")
-    assertEqual(complementHolder.point[1], "TOPRIGHT",
-        "deferred complement point")
-    assertEqual(countEvents(harness, "uf.unregister"), 1,
-        "combat partition regen unregistration")
-end
-
 testConstructionStatsContract()
 testGlobalFrameworkRequirement()
 testCapabilityGate()
+testDispelOverlaySlotContract()
 testBuildContract()
 testTuningContract()
 testHolderConfigQueue()
@@ -3057,6 +3518,15 @@ testMaxFrameCountContract()
 testDestroyPrecedence()
 testOutOfBandOOCFlushUnregisters()
 testRefreshIsDirectDirtyMark()
+testPartitionBuildAndRelationSwap()
+testPartitionCombatConstructionQueuesInitialization()
+testPartitionCombatReversalUsesAppliedLedger()
+testPartitionVisibilityUsesWriteLedger()
+testPartitionTuningReanchorsEveryLayer()
+testPartitionCombatDefersNativeTuning()
+testPartitionCombatStructuralLatestWinsAndDestroy()
+testPartitionTopologyShrinkKeepsAbsentChildDormant()
+testPartitionRebuildRefreshAndDestroy()
 testGroupHeaderCapabilityAndSeed()
 testGroupSeedAdoptionAndOneShotClaim()
 testGroupSeedBuildQueuesInCombat()
@@ -3066,12 +3536,5 @@ testGroupCombatLiveRetarget()
 testCombatLiveRetargetFailureKeepsRecovery()
 testGroupRetargetPrecedesStructuralTuning()
 testGroupVisibilityDoesNotProbeFrameState()
-testPartitionBuildAndRelationSwap()
-testPartitionRebuildRejectsAfterInitialBuild()
-testPartitionCombatConstructionQueuesInitialization()
-testPartitionCombatReversalUsesAppliedLedger()
-testPartitionVisibilityUsesWriteLedger()
-testPartitionTuningReanchorsEveryLayer()
-testPartitionCombatDefersNativeTuning()
 
 print("unit_frame_aura_controller_test.lua: ok")
