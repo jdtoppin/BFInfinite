@@ -42,9 +42,12 @@ end
 -- timer
 ---------------------------------------------------------------------
 local timers = {}
+-- Retail 12.1.0.69273 UnitDocumentation.lua (wow-ui-source eb941aad)
+-- marks UnitGUID SecretWhenUnitIdentityRestricted. Gate it before truth tests
+-- or table keys so a restricted result never reaches Lua coercion/indexing.
 local function ShowTimer(self)
     local guid = UnitGUID(self.root.unit)
-    if not guid or not F.isValueNonSecret(guid) then return end
+    if not F.isValueNonSecret(guid) or not guid then return end
 
     if not timers[guid] then
         timers[guid] = {status = self.status, start = GetTime()}
@@ -60,7 +63,7 @@ end
 
 local function HideTimer(self)
     local guid = UnitGUID(self.root.unit)
-    if guid and F.isValueNonSecret(guid) then
+    if F.isValueNonSecret(guid) and guid then
         timers[guid] = nil
     end
     self.updater:Hide()
@@ -97,19 +100,40 @@ local function UpdateStatus(self)
         return
     end
 
-    if not UnitIsConnected(unit) then
+    local isConnected = UnitIsConnected(unit)
+    if not F.isValueNonSecret(isConnected) then
+        SetStatus(self)
+        return
+    end
+    if not isConnected then
         SetStatus(self, "OFFLINE")
-    elseif UnitIsAFK(unit) then
+        return
+    end
+
+    local isAFK = UnitIsAFK(unit)
+    if F.isValueNonSecret(isAFK) and isAFK then
         SetStatus(self, "AFK")
-    elseif UnitIsDeadOrGhost(unit) then
-        if UnitIsGhost(unit) then
+        return
+    end
+
+    local isDeadOrGhost = UnitIsDeadOrGhost(unit)
+    if not F.isValueNonSecret(isDeadOrGhost) then
+        SetStatus(self)
+        return
+    end
+    if isDeadOrGhost then
+        local isGhost = UnitIsGhost(unit)
+        if not F.isValueNonSecret(isGhost) then
+            SetStatus(self)
+        elseif isGhost then
             SetStatus(self, "GHOST")
         else
             SetStatus(self, "DEAD")
         end
-    else
-        SetStatus(self)
+        return
     end
+
+    SetStatus(self)
 end
 
 ---------------------------------------------------------------------

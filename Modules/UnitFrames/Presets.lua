@@ -181,12 +181,6 @@ local default_groups = {
                         color = AF.GetColorTable("heal_absorb", 0.9),
                     },
                 },
-                dispelHighlight = {
-                    enabled = true,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
-                },
             },
             powerBar = {
                 enabled = true,
@@ -283,7 +277,7 @@ local default_groups = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "healthBar",
                 frameLevel = 1,
@@ -511,6 +505,20 @@ local default_groups = {
                     debuffType = true,
                 },
             },
+            dispels = {
+                enabled = true,
+                scope = "player",
+                types = {
+                    magic = true,
+                    curse = true,
+                    disease = true,
+                    poison = true,
+                    bleed = true,
+                },
+                appearance = "bottom_gradient",
+                alpha = 0.5,
+                blendMode = "ADD",
+            },
             privateAuras = {
                 enabled = false,
             },
@@ -586,12 +594,6 @@ local default_groups = {
                         enabled = true,
                         color = AF.GetColorTable("heal_absorb", 0.9),
                     },
-                },
-                dispelHighlight = {
-                    enabled = true,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
                 },
             },
             powerBar = {
@@ -784,12 +786,19 @@ local default_groups = {
                     color = AF.GetColorTable("white"),
                 },
                 filters = {
-                    castByMe = true,
-                    castByOthers = true,
-                    castByUnit = true,
-                    castByNPC = true,
-                    isBossAura = true,
-                    dispellable = true,
+                    -- Keep the compact Raid row's intended three-way native
+                    -- union explicit. The legacy castByUnit alias means All
+                    -- Auras to the canonical resolver and would collapse this
+                    -- shipped topology to one group.
+                    all = false,
+                    player = true,
+                    notPlayer = false,
+                    raidInCombat = true,
+                    raidPlayerDispellable = true,
+                    bigDefensive = false,
+                    externalDefensive = false,
+                    important = false,
+                    anyDispellable = false,
                 },
                 mode = "blacklist",
                 blacklist = AF.Copy(default_blacklist),
@@ -799,6 +808,20 @@ local default_groups = {
                     dispellable = true,
                     debuffType = true,
                 },
+            },
+            dispels = {
+                enabled = true,
+                scope = "player",
+                types = {
+                    magic = true,
+                    curse = true,
+                    disease = true,
+                    poison = true,
+                    bleed = true,
+                },
+                appearance = "bottom_gradient",
+                alpha = 0.5,
+                blendMode = "ADD",
             },
             privateAuras = {
                 enabled = false,
@@ -867,12 +890,6 @@ local default_groups = {
                         enabled = true,
                         color = AF.GetColorTable("heal_absorb", 0.9),
                     },
-                },
-                dispelHighlight = {
-                    enabled = true,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
                 },
             },
             powerBar = {
@@ -952,7 +969,7 @@ local default_groups = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "healthBar",
                 frameLevel = 1,
@@ -1201,12 +1218,6 @@ local default_1 = {
                     enabled = true,
                     color = AF.GetColorTable("heal_absorb"),
                 },
-                dispelHighlight = {
-                    enabled = true,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
-                },
             },
             powerBar = {
                 enabled = true,
@@ -1306,7 +1317,7 @@ local default_1 = {
             },
             portrait = {
                 enabled = true,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"CENTER", "CENTER", 0, -4},
                 anchorTo = "root",
                 frameLevel = 5,
@@ -1688,12 +1699,6 @@ local default_1 = {
                     enabled = true,
                     color = AF.GetColorTable("heal_absorb"),
                 },
-                dispelHighlight = {
-                    enabled = false,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
-                },
             },
             powerBar = {
                 enabled = true,
@@ -1756,7 +1761,7 @@ local default_1 = {
             },
             portrait = {
                 enabled = true,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"CENTER", "CENTER", 0, -4},
                 anchorTo = "root",
                 frameLevel = 5,
@@ -2089,12 +2094,6 @@ local default_1 = {
                         color = AF.GetColorTable("heal_absorb", 0.9),
                     },
                 },
-                dispelHighlight = {
-                    enabled = false,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
-                },
             },
             powerBar = {
                 enabled = true,
@@ -2173,7 +2172,7 @@ local default_1 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
@@ -2427,12 +2426,6 @@ local default_1 = {
                         color = AF.GetColorTable("heal_absorb", 0.9),
                     },
                 },
-                dispelHighlight = {
-                    enabled = false,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
-                },
             },
             powerBar = {
                 enabled = true,
@@ -2518,7 +2511,7 @@ local default_1 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 -- anchorTo = "root",
@@ -2780,12 +2773,6 @@ local default_1 = {
                     enabled = false,
                     color = AF.GetColorTable("heal_absorb"),
                 },
-                dispelHighlight = {
-                    enabled = false,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
-                },
             },
             powerBar = {
                 enabled = true,
@@ -2864,7 +2851,7 @@ local default_1 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
@@ -3118,12 +3105,6 @@ local default_1 = {
                         color = AF.GetColorTable("heal_absorb", 0.9),
                     },
                 },
-                dispelHighlight = {
-                    enabled = false,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
-                },
             },
             powerBar = {
                 enabled = true,
@@ -3202,7 +3183,7 @@ local default_1 = {
             },
             portrait = {
                 enabled = true,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
@@ -3458,12 +3439,6 @@ local default_1 = {
                         color = AF.GetColorTable("heal_absorb", 0.9),
                     },
                 },
-                dispelHighlight = {
-                    enabled = false,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
-                },
             },
             powerBar = {
                 enabled = false,
@@ -3541,7 +3516,7 @@ local default_1 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 -- anchorTo = "root",
@@ -3799,12 +3774,6 @@ local default_2 = {
                         color = AF.GetColorTable("heal_absorb", 0.9),
                     },
                 },
-                dispelHighlight = {
-                    enabled = true,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
-                },
             },
             powerBar = {
                 enabled = true,
@@ -3904,7 +3873,7 @@ local default_2 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"CENTER", "CENTER", 0, -5},
                 anchorTo = "root",
                 frameLevel = 5,
@@ -4282,12 +4251,6 @@ local default_2 = {
                         color = AF.GetColorTable("heal_absorb", 0.9),
                     },
                 },
-                dispelHighlight = {
-                    enabled = false,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
-                },
             },
             powerBar = {
                 enabled = true,
@@ -4350,7 +4313,7 @@ local default_2 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"CENTER", "CENTER", 0, -5},
                 anchorTo = "root",
                 frameLevel = 5,
@@ -4683,12 +4646,6 @@ local default_2 = {
                         color = AF.GetColorTable("heal_absorb", 0.9),
                     },
                 },
-                dispelHighlight = {
-                    enabled = false,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
-                },
             },
             powerBar = {
                 enabled = true,
@@ -4767,7 +4724,7 @@ local default_2 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
@@ -5021,12 +4978,6 @@ local default_2 = {
                         color = AF.GetColorTable("heal_absorb", 0.9),
                     },
                 },
-                dispelHighlight = {
-                    enabled = false,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
-                },
             },
             powerBar = {
                 enabled = true,
@@ -5112,7 +5063,7 @@ local default_2 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
@@ -5369,12 +5320,6 @@ local default_2 = {
                         color = AF.GetColorTable("heal_absorb", 0.9),
                     },
                 },
-                dispelHighlight = {
-                    enabled = false,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
-                },
             },
             powerBar = {
                 enabled = true,
@@ -5453,7 +5398,7 @@ local default_2 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
@@ -5711,12 +5656,6 @@ local default_2 = {
                     enabled = false,
                     color = AF.GetColorTable("heal_absorb"),
                 },
-                dispelHighlight = {
-                    enabled = false,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
-                },
             },
             powerBar = {
                 enabled = true,
@@ -5795,7 +5734,7 @@ local default_2 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
@@ -6051,12 +5990,6 @@ local default_2 = {
                         color = AF.GetColorTable("heal_absorb", 0.9),
                     },
                 },
-                dispelHighlight = {
-                    enabled = false,
-                    alpha = 0.5,
-                    blendMode = "ADD",
-                    dispellable = true,
-                },
             },
             powerBar = {
                 enabled = false,
@@ -6134,7 +6067,7 @@ local default_2 = {
             },
             portrait = {
                 enabled = false,
-                style = "3d", -- 3d, 2d, class_icon
+                style = "2d", -- 3d, 2d, class_icon
                 position = {"TOPLEFT", "TOPLEFT", 0, 0},
                 anchorTo = "root",
                 frameLevel = 1,
@@ -6361,6 +6294,74 @@ local presets = {
 ---------------------------------------------------------------------
 -- functions
 ---------------------------------------------------------------------
+local function MigrateGroupDispels(config, owner)
+    config[owner] = type(config[owner]) == "table"
+        and config[owner]
+        or {}
+    config[owner].indicators =
+        type(config[owner].indicators) == "table"
+        and config[owner].indicators
+        or {}
+
+    local indicators = config[owner].indicators
+    local healthBar = type(indicators.healthBar) == "table"
+        and indicators.healthBar
+        or nil
+    local legacy = healthBar
+        and type(healthBar.dispelHighlight) == "table"
+        and healthBar.dispelHighlight
+        or nil
+
+    if type(indicators.dispels) ~= "table" then
+        local legacyBroadMatch = legacy
+            and legacy.dispellable == false
+        indicators.dispels = {
+            -- The retired unchecked mode meant any harmful aura. A native
+            -- dispel tint cannot preserve that meaning, so keep it off until
+            -- the user deliberately chooses one of the supported scopes.
+            enabled = legacy
+                and legacy.enabled == true
+                and not legacyBroadMatch
+                or false,
+            scope = legacyBroadMatch
+                and "any"
+                or "player",
+            appearance = legacy and "full_solid" or nil,
+        }
+        if legacy and type(legacy.alpha) == "number" then
+            indicators.dispels.alpha = legacy.alpha
+        end
+        if legacy and type(legacy.blendMode) == "string" then
+            indicators.dispels.blendMode = legacy.blendMode
+        end
+    end
+
+    local blendMode = indicators.dispels.blendMode
+    if blendMode ~= nil
+        and blendMode ~= "BLEND"
+        and blendMode ~= "ADD"
+        and blendMode ~= "MOD"
+    then
+        indicators.dispels.blendMode = "BLEND"
+    end
+
+    if healthBar then
+        healthBar.dispelHighlight = nil
+    end
+end
+
+function UF.MigrateConfig(config)
+    -- A missing module table means a genuinely new profile; hydration below
+    -- should install the enabled Party and Raid defaults. Existing profiles
+    -- must not silently acquire live native containers merely because the
+    -- defaults were added.
+    if type(config) ~= "table" then return config end
+
+    MigrateGroupDispels(config, "party")
+    MigrateGroupDispels(config, "raid")
+    return config
+end
+
 function UF.GetDefaults()
     return presets[1].get()
 end

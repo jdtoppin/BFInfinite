@@ -5,6 +5,40 @@ local S = BFI.modules.Style
 local AF = _G.AbstractFramework
 
 local spellFrame
+local assistedCombatStylePending
+
+-- Retail 12.1.0.69273 / wow-ui-source eb941aad028d73dd: this block contains
+-- a SecureFrameTemplate button, while ClearAllPoints and SetPoint are
+-- protected. Defer its styling and layout while combat lockdown is active.
+local function StyleAssistedCombatFrame(spellBookFrame)
+    if InCombatLockdown() then
+        if assistedCombatStylePending then return end
+        assistedCombatStylePending = true
+        S:RegisterEventOnce("PLAYER_REGEN_ENABLED", function()
+            assistedCombatStylePending = nil
+            StyleAssistedCombatFrame(spellBookFrame)
+        end)
+        return
+    end
+
+    local assistedFrame = spellBookFrame.AssistedCombatRotationSpellFrame
+    S.RemoveTextures(assistedFrame)
+    AF.ClearPoints(assistedFrame)
+    AF.SetPoint(
+        assistedFrame,
+        "BOTTOMRIGHT",
+        spellBookFrame.PagedSpellsFrame,
+        "TOPRIGHT",
+        -10,
+        10
+    )
+
+    local button = assistedFrame.Button
+    S.StyleSpellItemButton(button)
+    button.BFIBackdrop:SetBackdropBorderColor(
+        AF.GetColorRGB("border")
+    )
+end
 
 ---------------------------------------------------------------------
 -- icons
@@ -374,14 +408,7 @@ local function StyleSpellBookFrame()
     end)
 
     -- assisted
-    local assistedFrame = spellBookFrame.AssistedCombatRotationSpellFrame
-    S.RemoveTextures(assistedFrame)
-    AF.ClearPoints(assistedFrame)
-    AF.SetPoint(assistedFrame, "BOTTOMRIGHT", spellBookFrame.PagedSpellsFrame, "TOPRIGHT", -10, 10)
-
-    local button = assistedFrame.Button
-    S.StyleSpellItemButton(button)
-    button.BFIBackdrop:SetBackdropBorderColor(AF.GetColorRGB("border"))
+    StyleAssistedCombatFrame(spellBookFrame)
 
     -- Retail 12.0.7.68887 (Gethe wow-ui-source 4383ced): UpdateVisuals reapplies the active/passive icon masks.
     hooksecurefunc(SpellBookItemMixin, "UpdateVisuals", StyleSpellBookItem)
