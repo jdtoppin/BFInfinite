@@ -103,6 +103,11 @@ local function DeepEqual(left, right, seen)
     return true
 end
 
+local function ShouldSuppressGroupHarmfulIdentityFeatures(runtime)
+    return runtime._groupManaged == true
+        and runtime.auraFilter == "HARMFUL"
+end
+
 local function CopyCompilerConfig(config)
     local copied = AF.Copy(config)
     if A
@@ -111,6 +116,71 @@ local function CopyCompilerConfig(config)
         copied.spellColors = A.GetNativeSpellColorMap()
     end
     return copied
+end
+
+local function CopyGroupSafeCompilerConfig(runtime, config)
+    local copied = CopyCompilerConfig(config)
+    if ShouldSuppressGroupHarmfulIdentityFeatures(runtime) then
+        local sourceList = config.mode == "whitelist"
+            and config.whitelist
+            or config.blacklist
+        local identityListRequested = config.mode == "whitelist"
+            or (
+                type(sourceList) == "table"
+                and next(sourceList) ~= nil
+            )
+        local blockStyle = type(config.cooldownStyle) == "string"
+            and config.cooldownStyle:sub(1, 6) == "block_"
+        local globalColorsRequested = blockStyle
+            and type(copied.spellColors) == "table"
+            and next(copied.spellColors) ~= nil
+        -- Blizzard can bypass harmful spell-ID maps for secret-capable auras
+        -- on assistable group units. Preserve SavedVariables, but compile the
+        -- group row without identity maps/colors so it remains safely visible.
+        copied.mode = "blacklist"
+        copied.blacklist = {}
+        copied.whitelist = {}
+        copied.spellColors = nil
+        return copied, {
+            spellIDListsIgnored = identityListRequested,
+            globalSpellColorsIgnored = globalColorsRequested,
+            groupHarmfulIdentityFeaturesIgnored =
+                identityListRequested or globalColorsRequested,
+        }
+    end
+    return copied
+end
+
+local function AnnotateGroupHarmfulIdentitySuppression(runtime, descriptor)
+    if not descriptor
+        or not ShouldSuppressGroupHarmfulIdentityFeatures(runtime)
+    then
+        return
+    end
+
+    local suppression = runtime._groupHarmfulIdentitySuppression or {}
+    local presentationIgnored =
+        suppression.groupHarmfulIdentityFeaturesIgnored == true
+
+    descriptor.degradations = descriptor.degradations or {}
+    descriptor.degradations.spellIDListsIgnored =
+        suppression.spellIDListsIgnored == true
+    descriptor.degradations.globalSpellColorsIgnored =
+        suppression.globalSpellColorsIgnored == true
+    descriptor.degradations.groupHarmfulIdentityFeaturesIgnored =
+        presentationIgnored
+
+    local diagnostics = {}
+    for _, diagnostic in ipairs(descriptor.diagnostics or {}) do
+        if diagnostic ~= "GROUP_HARMFUL_IDENTITY_FEATURES_IGNORED" then
+            diagnostics[#diagnostics + 1] = diagnostic
+        end
+    end
+    if presentationIgnored then
+        diagnostics[#diagnostics + 1] =
+            "GROUP_HARMFUL_IDENTITY_FEATURES_IGNORED"
+    end
+    descriptor.diagnostics = diagnostics
 end
 
 ---------------------------------------------------------------------
@@ -522,6 +592,7 @@ local function Compile(runtime, unit)
         runtime.auraFilter,
         runtime._config
     )
+    AnnotateGroupHarmfulIdentitySuppression(runtime, descriptor)
     runtime._descriptor = descriptor
     runtime._error = compileError
 
@@ -575,7 +646,7 @@ local function CompileComparisonDescriptor(runtime, config)
     local descriptor = UF.CompileNativeAuraSpec(
         unit,
         runtime.auraFilter,
-        CopyCompilerConfig(config)
+        CopyGroupSafeCompilerConfig(runtime, config)
     )
     return descriptor
 end
@@ -1003,8 +1074,12 @@ end
 local function SyncPreview(runtime)
     local preview = EnsurePreview(runtime)
     preview.enabled = runtime.enabled
-    if runtime._config then
-        preview:LoadConfig(AF.Copy(runtime._config))
+    -- The preview is synthetic and never evaluates live aura identity. Feed
+    -- it the preserved profile-local source so its ordinary appearance stays
+    -- faithful even when the native group-harmful compiler copy is sanitized.
+    local previewConfig = runtime._sourceConfig or runtime._config
+    if previewConfig then
+        preview:LoadConfig(AF.Copy(previewConfig))
     end
     preview:EnableConfigMode()
 end
@@ -1022,11 +1097,46 @@ local function NativeAuras_LoadConfig(self, config)
     end
 
     local firstConfig = self._config == nil
-    self._sourceConfig = AF.Copy(config)
-    self._config = CopyCompilerConfig(config)
+    local sourceConfig = AF.Copy(config)
+    local compilerConfig, suppression =
+        CopyGroupSafeCompilerConfig(self, config)
+    local compilerConfigChanged = firstConfig
+        or not DeepEqual(self._config, compilerConfig)
+    local resolvedUnit = ResolveRuntimeUnit(self)
+    local stableSuppressedOnlyEdit =
+        ShouldSuppressGroupHarmfulIdentityFeatures(self)
+        and not compilerConfigChanged
+        and self._built == true
+        and self._state == STATE_READY
+        and IsCleanUnitToken(resolvedUnit)
+        and resolvedUnit == self._unit
+        and resolvedUnit == self._appliedUnit
+        and not self._configDirty
+        and not self._unitDirty
+        and not self._deferredCommit
+        and not self._commitScheduled
+        and not self._reloadRequired
+        and not self._reloadQuiescePending
+        and not self._providerBuildDeferred
+    self._sourceConfig = sourceConfig
+    self._groupHarmfulIdentitySuppression = suppression
+    self._config = compilerConfig
+    if stableSuppressedOnlyEdit then
+        -- Saved spell-list/global-color edits remain observable in profile
+        -- state and diagnostics without submitting a native mutation.
+        AnnotateGroupHarmfulIdentitySuppression(
+            self,
+            self._descriptor
+        )
+        if self._configMode or self.root.inConfigMode then
+            SyncPreview(self)
+        end
+        return
+    end
+
     self._configDirty = true
 
-    Compile(self, ResolveRuntimeUnit(self))
+    Compile(self, resolvedUnit)
 
     local comparisonDescriptor = self._descriptor
     if self._built and not comparisonDescriptor then

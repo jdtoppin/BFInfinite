@@ -1868,6 +1868,7 @@ local NATIVE_AURA_OWNERS = {
     "boss",
     "focus",
     "focustarget",
+    "party",
     "player",
     "pet",
     "pettarget",
@@ -1875,7 +1876,6 @@ local NATIVE_AURA_OWNERS = {
 }
 
 local LEGACY_AURA_OWNERS = {
-    "party",
     "raid",
     "target",
 }
@@ -2029,6 +2029,75 @@ local function testRetailIndicatorAwareNativeWording()
         )
     end
 
+    local function assertGroupHarmfulPresentation(owner, runtimeKind)
+        local label = owner .. " debuffs"
+        local info = newInfo(
+            "debuffs",
+            owner,
+            nil,
+            runtimeKind
+        )
+
+        spellPane.Load(info)
+        local addButton
+        local spellButton
+        for _, widget in ipairs(spellPane.widgets) do
+            if widget.kind == "button" and widget.spell == 12345 then
+                spellButton = widget
+            elseif widget.kind == "button"
+                and widget.initialText == nil
+                and widget.spell == nil
+            then
+                addButton = addButton or widget
+            end
+        end
+        assertEqual(mode.enabled, false,
+            label .. " saved-list mode editability")
+        assertEqual(addButton.enabled, false,
+            label .. " saved-list add editability")
+        assertEqual(spellButton.enabled, false,
+            label .. " saved-list row editability")
+        assertContains(
+            tip.text,
+            "preserved but not applied",
+            label .. " saved-list policy"
+        )
+        assertContains(
+            tip.text,
+            "assistable group units",
+            label .. " identity safety reason"
+        )
+        assertContains(
+            tip.text,
+            "unfiltered native Debuffs row remains visible",
+            label .. " native-row visibility"
+        )
+        assertNotContains(
+            tip.text,
+            "<MouseLeftClick>Edit",
+            label .. " stale edit hint"
+        )
+
+        arrangementPane.Load(info)
+        assertEqual(maximum.label, "Max Per Aura Group",
+            label .. " native maximum label")
+        assertContains(maximum.tooltipBody, "enabled category",
+            label .. " category split warning")
+        assertNotContains(maximum.tooltipBody, "saved spell colors",
+            label .. " inactive color partition")
+
+        cooldownPane.Load(info)
+        assertContains(cooldown.tooltipBody,
+            "Global spell colors are preserved but not applied",
+            label .. " saved-color policy")
+        assertContains(cooldown.tooltipBody,
+            "unsafe on assistable group units",
+            label .. " saved-color safety reason")
+        assertNotContains(cooldown.tooltipBody,
+            "unlisted spells use gray",
+            label .. " stale active color fallback")
+    end
+
     local function assertLegacyPresentation(id, owner, runtimeKind)
         local label = owner .. " " .. id
         local info = newInfo(
@@ -2126,7 +2195,11 @@ local function testRetailIndicatorAwareNativeWording()
 
     for _, owner in ipairs(NATIVE_AURA_OWNERS) do
         assertNativePresentation("buffs", owner)
-        assertNativePresentation("debuffs", owner)
+        if owner == "party" then
+            assertGroupHarmfulPresentation(owner)
+        else
+            assertNativePresentation("debuffs", owner)
+        end
     end
     for _, owner in ipairs(LEGACY_AURA_OWNERS) do
         assertLegacyPresentation("buffs", owner)
@@ -2139,6 +2212,9 @@ local function testRetailIndicatorAwareNativeWording()
     assertLegacyPresentation("debuffs", "player", "legacy")
     assertNativePresentation("buffs", "target", "native")
     assertNativePresentation("debuffs", "target", "native")
+    -- Raid is still legacy in this PR. A real future native runtime makes the
+    -- same group-harmful policy visible without changing the owner fallback.
+    assertGroupHarmfulPresentation("raid", "native")
 end
 
 local COOLDOWN_STYLES = {

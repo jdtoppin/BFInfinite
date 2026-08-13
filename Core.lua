@@ -5,9 +5,9 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF #36/r40 adds native duration-text color curves driven by Blizzard's
--- opaque remaining-time binding, on top of r39's single duration carrier.
-local REQUIRED_AF_VERSION = 40
+-- AF #37/r41 adds native dispel-overlay slots on top of r40's duration-text
+-- color curves. Selection and color stay inside Blizzard's AuraContainer.
+local REQUIRED_AF_VERSION = 41
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar

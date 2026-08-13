@@ -76,6 +76,21 @@ local function countEvents(harness, name)
     return count
 end
 
+local function containsValue(values, expected)
+    for _, value in ipairs(values or {}) do
+        if value == expected then return true end
+    end
+    return false
+end
+
+local function countValue(values, expected)
+    local count = 0
+    for _, value in ipairs(values or {}) do
+        if value == expected then count = count + 1 end
+    end
+    return count
+end
+
 local function lastEvent(harness, name)
     for index = #harness.events, 1, -1 do
         local event = harness.events[index]
@@ -122,6 +137,28 @@ local function assertNoProviderDrivenControllerWork(
     if not allowCompile then
         eventNames[#eventNames + 1] = "uf.compile"
     end
+    for _, eventName in ipairs(eventNames) do
+        assertEqual(
+            countEvents(harness, eventName),
+            0,
+            prefix .. " " .. eventName
+        )
+    end
+end
+
+local function assertNoNativeControllerWork(harness, message)
+    local prefix = message or "native controller"
+    local eventNames = {
+        "uf.compile",
+        "controller.rebuild",
+        "controller.tuning",
+        "controller.unit",
+        "controller.enabled",
+        "controller.shown",
+        "controller.variant",
+        "controller.refresh",
+        "controller.holder-config",
+    }
     for _, eventName in ipairs(eventNames) do
         assertEqual(
             countEvents(harness, eventName),
@@ -281,6 +318,7 @@ local function makeHarness(options)
             callback(self.frame)
         end
         function controller:Rebuild(spec)
+            self.rebuildCount = (self.rebuildCount or 0) + 1
             self.spec = copy(spec)
             self.built = true
             self.enabled = spec.enabled
@@ -383,6 +421,22 @@ local function makeHarness(options)
 
         local empty = config.testState == "empty"
         local partitioned = config.testState == "partition"
+        local selectedList = config.mode == "whitelist"
+            and config.whitelist
+            or config.blacklist
+        local identityListActive = config.mode == "whitelist"
+            or (
+                type(selectedList) == "table"
+                and next(selectedList) ~= nil
+            )
+        local blockStyle = type(config.cooldownStyle) == "string"
+            and config.cooldownStyle:sub(1, 6) == "block_"
+        local identityPresentationActive = identityListActive
+            or (
+                blockStyle
+                and type(config.spellColors) == "table"
+                and next(config.spellColors) ~= nil
+            )
         local descriptor = {
             completeSpec = nil,
             tuningSpec = nil,
@@ -410,9 +464,17 @@ local function makeHarness(options)
                 requiresVisible = config.requiresVisible == true,
                 requiresAssist = config.requiresAssist == true,
                 spellIDFilterRequiresPublicAssist =
-                    config.spellIDFilterRequiresPublicAssist == true,
+                    config.spellIDFilterRequiresPublicAssist == true
+                    or (
+                        auraFilter == "HELPFUL"
+                        and identityPresentationActive
+                    ),
                 spellIDFilterRequiresPublicNonAssist =
-                    config.spellIDFilterRequiresPublicNonAssist == true,
+                    config.spellIDFilterRequiresPublicNonAssist == true
+                    or (
+                        auraFilter == "HARMFUL"
+                        and identityPresentationActive
+                    ),
             },
             partition = nil,
             migrationReady = not empty,
@@ -423,6 +485,7 @@ local function makeHarness(options)
             },
             metrics = {
                 groupCount = empty and 0 or 1,
+                initialRestrictedButtonCount = empty and 0 or 10,
             },
         }
 
@@ -799,20 +862,28 @@ local function createPartitionRuntime(harness, root)
     return runtime, harness.controllers[#harness.controllers]
 end
 
-local function createGroupRuntime(harness, root)
+local function createGroupRuntime(
+    harness,
+    root,
+    auraFilter,
+    indicatorKey
+)
+    auraFilter = auraFilter or "HELPFUL"
+    indicatorKey = indicatorKey
+        or (auraFilter == "HARMFUL" and "debuffs" or "buffs")
     local seedContainer = {}
     root._nativeAuraContainers = {
-        buffs = seedContainer,
+        [indicatorKey] = seedContainer,
     }
     local runtime = harness.UF.CreateGroupNativeAuras(
         root,
         root.name .. "_Auras",
-        "HELPFUL",
-        "buffs"
+        auraFilter,
+        indicatorKey
     )
     assertTrue(runtime, "native group runtime was not created")
     runtime.enabled = true
-    root.indicators.buffs = runtime
+    root.indicators[indicatorKey] = runtime
     return runtime, harness.controllers[#harness.controllers], seedContainer
 end
 
@@ -2782,6 +2853,297 @@ local function testGroupRuntimeSelectionAndFallback()
     )
 end
 
+local function testGroupHarmfulIdentityFeaturesStayVisible()
+    local harness = makeHarness({
+        spellColors = {
+            [101] = {0.1, 0.8, 0.2, 1},
+        },
+    })
+    local root = newRoot("GroupHarmfulIdentity", "party1")
+    local runtime, controller = createGroupRuntime(
+        harness,
+        root,
+        "HARMFUL",
+        "debuffs"
+    )
+    local source = validConfig({
+        mode = "whitelist",
+        whitelist = {101, 202},
+        blacklist = {303},
+        cooldownStyle = "block_clock",
+        tag = "group-harmful",
+    })
+    local sourceSnapshot = copy(source)
+
+    harness.assistResult = true
+    runtime:LoadConfig(source)
+    runtime:Enable()
+
+    local compiled = harness.compiles[#harness.compiles].config
+    local state = runtime:GetNativeAuraState()
+    assertTrue(deepEqual(source, sourceSnapshot),
+        "group harmful source config mutation")
+    assertTrue(deepEqual(runtime._sourceConfig, sourceSnapshot),
+        "group harmful preserved runtime source")
+    assertEqual(compiled.mode, "blacklist",
+        "group harmful compiler mode")
+    assertEqual(next(compiled.blacklist), nil,
+        "group harmful compiler blacklist")
+    assertEqual(next(compiled.whitelist), nil,
+        "group harmful compiler whitelist")
+    assertEqual(compiled.spellColors, nil,
+        "group harmful compiler spell colors")
+    assertEqual(state.state, "READY", "group harmful ready state")
+    assertEqual(state.visibility.spellIDFilterRequiresPublicNonAssist,
+        false, "group harmful assist gate")
+    assertEqual(controller.shown, true,
+        "assistable group harmful visibility")
+    assertEqual(state.metrics.groupCount, 1,
+        "group harmful compiled group count")
+    assertEqual(state.metrics.initialRestrictedButtonCount, 10,
+        "group harmful initial button reservations")
+    assertEqual(state.degradations.spellIDListsIgnored, true,
+        "group harmful list degradation")
+    assertEqual(state.degradations.globalSpellColorsIgnored, true,
+        "group harmful color degradation")
+    assertEqual(
+        state.degradations.groupHarmfulIdentityFeaturesIgnored,
+        true,
+        "group harmful policy degradation"
+    )
+    assertTrue(containsValue(
+        state.diagnostics,
+        "GROUP_HARMFUL_IDENTITY_FEATURES_IGNORED"
+    ), "group harmful policy diagnostic")
+    assertEqual(runtime:RequiresReloadForConfig(source), false,
+        "group harmful source reload")
+
+    local compileCount = #harness.compiles
+    local controllerCount = #harness.controllers
+    local runtimeStats = harness.UF.GetNativeAuraRuntimeStats()
+    local rebuildCount = controller.rebuildCount
+    harness:ClearEvents()
+    local suppressedEdit = copy(source)
+    suppressedEdit.whitelist = {404, 505}
+    runtime:LoadConfig(suppressedEdit)
+    assertEqual(#harness.compiles, compileCount,
+        "suppressed list edit compile count")
+    assertEqual(#harness.controllers, controllerCount,
+        "suppressed list edit controller count")
+    assertNoNativeControllerWork(
+        harness,
+        "suppressed list edit"
+    )
+    assertEqual(countEvents(harness, "timer"), 0,
+        "suppressed list edit timer count")
+    assertEqual(runtime:GetNativeAuraState().pending, false,
+        "suppressed list edit pending state")
+    assertTrue(deepEqual(runtime._sourceConfig, suppressedEdit),
+        "suppressed list edit preserved source")
+    assertEqual(controller.rebuildCount, rebuildCount,
+        "suppressed list edit allocation count")
+    assertEqual(
+        harness.UF.GetNativeAuraRuntimeStats().runtimesCreated,
+        runtimeStats.runtimesCreated,
+        "suppressed list edit runtime growth"
+    )
+
+    harness:SetCombat(true)
+    harness:ClearEvents()
+    suppressedEdit.whitelist = {606}
+    runtime:LoadConfig(suppressedEdit)
+    assertEqual(#harness.compiles, compileCount,
+        "combat suppressed edit compile count")
+    assertEqual(countEvents(harness, "timer"), 0,
+        "combat suppressed edit timer count")
+    assertNoNativeControllerWork(
+        harness,
+        "combat suppressed edit"
+    )
+    assertEqual(runtime:GetNativeAuraState().pending, false,
+        "combat suppressed edit pending state")
+    harness:SetCombat(false)
+
+    harness:Fire("AURA_DATA_PROVIDER_SWITCH", false)
+    harness:ClearEvents()
+    suppressedEdit.whitelist = {707}
+    runtime:LoadConfig(suppressedEdit)
+    assertEqual(#harness.compiles, compileCount,
+        "provider suppressed edit compile count")
+    assertEqual(countEvents(harness, "timer"), 0,
+        "provider suppressed edit timer count")
+    assertNoNativeControllerWork(
+        harness,
+        "provider suppressed edit"
+    )
+    assertEqual(runtime:GetNativeAuraState().pending, false,
+        "provider suppressed edit pending state")
+    harness:Fire("AURA_DATA_PROVIDER_SWITCH", true)
+
+    harness.spellColors = {}
+    local inactive = copy(suppressedEdit)
+    inactive.mode = "blacklist"
+    inactive.blacklist = {}
+    inactive.whitelist = {}
+    harness:ClearEvents()
+    runtime:LoadConfig(inactive)
+    state = runtime:GetNativeAuraState()
+    assertEqual(#harness.compiles, compileCount,
+        "inactive suppressed edit compile count")
+    assertEqual(state.degradations.spellIDListsIgnored, false,
+        "inactive group harmful list degradation")
+    assertEqual(state.degradations.globalSpellColorsIgnored, false,
+        "inactive group harmful color degradation")
+    assertEqual(
+        state.degradations.groupHarmfulIdentityFeaturesIgnored,
+        false,
+        "inactive group harmful policy degradation"
+    )
+    assertEqual(containsValue(
+        state.diagnostics,
+        "GROUP_HARMFUL_IDENTITY_FEATURES_IGNORED"
+    ), false, "inactive group harmful stale diagnostic")
+    assertEqual(countEvents(harness, "controller.tuning"), 0,
+        "inactive group harmful tuning count")
+
+    harness:ClearEvents()
+    runtime:LoadConfig(source)
+    runtime:LoadConfig(inactive)
+    runtime:LoadConfig(source)
+    state = runtime:GetNativeAuraState()
+    assertEqual(countValue(
+        state.diagnostics,
+        "GROUP_HARMFUL_IDENTITY_FEATURES_IGNORED"
+    ), 1, "group harmful unique policy diagnostic")
+    assertEqual(countEvents(harness, "uf.compile"), 0,
+        "group harmful diagnostic toggle compile count")
+
+    harness:ClearEvents()
+    local meaningful = copy(source)
+    meaningful.tag = "meaningful-group-harmful"
+    runtime:LoadConfig(meaningful)
+    assertEqual(countEvents(harness, "uf.compile"), 1,
+        "meaningful group harmful compile count")
+    assertEqual(runtime:GetNativeAuraState().pending, true,
+        "meaningful group harmful pending state")
+    local pendingSuppressed = copy(meaningful)
+    pendingSuppressed.whitelist = {808, 909}
+    runtime:LoadConfig(pendingSuppressed)
+    assertEqual(countEvents(harness, "uf.compile"), 2,
+        "pending suppressed edit compile count")
+    assertEqual(runtime:GetNativeAuraState().pending, true,
+        "pending suppressed edit preserves pending state")
+    harness:RunTimers(0.15)
+    assertEqual(countEvents(harness, "controller.tuning"), 1,
+        "pending meaningful edit tuning count")
+    assertEqual(controller.tuning.tag, "meaningful-group-harmful",
+        "pending meaningful edit latest tuning")
+    assertEqual(runtime:GetNativeAuraState().pending, false,
+        "pending meaningful edit settled state")
+
+    harness:ClearEvents()
+    harness.spellColors[111] = {0.2, 0.4, 0.8, 1}
+    assertEqual(harness.UF.RefreshNativeAuraSpellColors(), false,
+        "group harmful color refresh reload state")
+    assertNoNativeControllerWork(
+        harness,
+        "group harmful color refresh"
+    )
+    assertEqual(countEvents(harness, "timer"), 0,
+        "group harmful color refresh timer count")
+
+    root.inConfigMode = true
+    runtime:EnableConfigMode()
+    harness:ClearEvents()
+    local previewEdit = copy(meaningful)
+    previewEdit.whitelist = {1001, 1002}
+    runtime:LoadConfig(previewEdit)
+    assertEqual(countEvents(harness, "uf.compile"), 0,
+        "group harmful preview compile count")
+    assertNoNativeControllerWork(
+        harness,
+        "group harmful preview edit"
+    )
+    assertTrue(deepEqual(
+        harness.legacyFrames[#harness.legacyFrames].config,
+        previewEdit
+    ), "group harmful preview source config")
+
+    local helpfulHarness = makeHarness({
+        spellColors = {
+            [101] = {0.1, 0.8, 0.2, 1},
+        },
+    })
+    local helpfulRoot = newRoot("GroupHelpfulIdentity", "party2")
+    local helpful, helpfulController = createGroupRuntime(
+        helpfulHarness,
+        helpfulRoot
+    )
+    local helpfulSource = validConfig({
+        mode = "whitelist",
+        whitelist = {101},
+        cooldownStyle = "block_clock",
+    })
+    helpfulHarness.assistResult = true
+    helpful:LoadConfig(helpfulSource)
+    helpful:Enable()
+    local helpfulCompiled =
+        helpfulHarness.compiles[#helpfulHarness.compiles].config
+    assertEqual(helpfulCompiled.mode, "whitelist",
+        "group helpful compiler mode")
+    assertEqual(helpfulCompiled.whitelist[1], 101,
+        "group helpful compiler whitelist")
+    assertTrue(helpfulCompiled.spellColors[101] ~= nil,
+        "group helpful compiler spell colors")
+    assertEqual(
+        helpful:GetNativeAuraState().visibility
+            .spellIDFilterRequiresPublicAssist,
+        true,
+        "group helpful assist gate"
+    )
+    assertEqual(helpfulController.shown, true,
+        "group helpful assist visibility")
+    assertEqual(
+        helpful:GetNativeAuraState().degradations
+            .groupHarmfulIdentityFeaturesIgnored,
+        nil,
+        "group helpful suppression marker"
+    )
+
+    local ordinaryHarness = makeHarness({
+        spellColors = {
+            [101] = {0.1, 0.8, 0.2, 1},
+        },
+    })
+    local ordinaryRoot = newRoot("OrdinaryHarmfulIdentity", "party3")
+    local ordinary = ordinaryHarness.UF.CreateNativeAuraIndicator(
+        ordinaryRoot,
+        "OrdinaryHarmfulIdentity_Auras",
+        "HARMFUL",
+        false
+    )
+    ordinary.enabled = true
+    ordinaryHarness.assistResult = true
+    ordinary:LoadConfig(source)
+    ordinary:Enable()
+    local ordinaryCompiled =
+        ordinaryHarness.compiles[#ordinaryHarness.compiles].config
+    assertEqual(ordinaryCompiled.mode, "whitelist",
+        "ordinary harmful compiler mode")
+    assertEqual(ordinaryCompiled.whitelist[1], 101,
+        "ordinary harmful compiler whitelist")
+    assertTrue(ordinaryCompiled.spellColors[101] ~= nil,
+        "ordinary harmful compiler spell colors")
+    assertEqual(
+        ordinary:GetNativeAuraState().visibility
+            .spellIDFilterRequiresPublicNonAssist,
+        true,
+        "ordinary harmful nonassist gate"
+    )
+    assertEqual(ordinaryHarness.controllers[#ordinaryHarness.controllers].shown,
+        false, "ordinary assistable harmful visibility")
+end
+
 local function testGroupSeedsPrebuildBeforeCombat()
     local harness = makeHarness()
     local root = newRoot("GroupBootstrap", nil)
@@ -2861,6 +3223,109 @@ local function testGroupUnitRetargetsBeforePendingCombatConfig()
         "pending config regen tuning count")
     assertEqual(controller.shown, true,
         "pending config regen visibility")
+end
+
+local function testGroupHarmfulEmptySeedUsesLatestSuppressedSource()
+    local harness = makeHarness({
+        spellColors = {
+            [101] = {0.1, 0.8, 0.2, 1},
+        },
+    })
+    local root = newRoot("GroupHarmfulEmptySeed", nil)
+    local runtime, controller = createGroupRuntime(
+        harness,
+        root,
+        "HARMFUL",
+        "debuffs"
+    )
+    local initial = validConfig({
+        mode = "whitelist",
+        whitelist = {101},
+        cooldownStyle = "block_clock",
+        tag = "empty-seed-harmful",
+    })
+    runtime:LoadConfig(initial)
+    assertEqual(runtime:GetNativeAuraState().state,
+        "READY", "group harmful empty-seed state")
+    assertEqual(runtime:GetNativeAuraState().unit,
+        "none", "group harmful empty-seed unit")
+    assertTrue(runtime._descriptor ~= nil,
+        "group harmful empty-seed descriptor")
+    assertEqual(controller.shown, false,
+        "group harmful empty-seed visibility")
+
+    root.unit = {secret = true}
+    root.effectiveUnit = root.unit
+    harness:ClearEvents()
+    runtime:Update()
+    assertEqual(runtime:GetNativeAuraState().state,
+        "READY", "group harmful secret seed state")
+    assertEqual(runtime:GetNativeAuraState().unit,
+        "none", "group harmful secret seed unit")
+    assertEqual(countEvents(harness, "controller.unit"), 0,
+        "group harmful secret seed retarget count")
+    assertEqual(countEvents(harness, "controller.rebuild"), 0,
+        "group harmful secret seed rebuild count")
+    assertEqual(countEvents(harness, "controller.tuning"), 0,
+        "group harmful secret seed tuning count")
+
+    harness:ClearEvents()
+    local rebuildCount = controller.rebuildCount
+    local latest = copy(initial)
+    latest.whitelist = {202}
+    runtime:LoadConfig(latest)
+    latest.whitelist = {303, 404}
+    runtime:LoadConfig(latest)
+    assertEqual(runtime:GetNativeAuraState().state,
+        "READY", "group harmful latest empty-seed state")
+    assertTrue(deepEqual(runtime._sourceConfig, latest),
+        "group harmful latest empty-seed source")
+    assertEqual(countEvents(harness, "uf.compile"), 0,
+        "group harmful empty-seed suppressed compile count")
+    assertNoNativeControllerWork(
+        harness,
+        "group harmful empty-seed suppressed edits"
+    )
+    assertEqual(countEvents(harness, "timer"), 0,
+        "group harmful empty-seed timer count")
+    assertEqual(controller.rebuildCount, rebuildCount,
+        "group harmful empty-seed allocation count")
+
+    harness:ClearEvents()
+    root.unit = "party4"
+    root.effectiveUnit = "party4"
+    runtime:Enable()
+
+    local state = runtime:GetNativeAuraState()
+    local compiled = harness.compiles[#harness.compiles].config
+    assertEqual(state.state, "READY",
+        "group harmful empty-seed assignment state")
+    assertEqual(compiled.mode, "blacklist",
+        "group harmful assignment compiler mode")
+    assertEqual(next(compiled.blacklist), nil,
+        "group harmful assignment compiler blacklist")
+    assertEqual(next(compiled.whitelist), nil,
+        "group harmful assignment compiler whitelist")
+    assertEqual(compiled.spellColors, nil,
+        "group harmful assignment compiler colors")
+    assertTrue(deepEqual(runtime._sourceConfig, latest),
+        "group harmful assignment latest source")
+    assertEqual(state.degradations.spellIDListsIgnored, true,
+        "group harmful assignment list diagnostic")
+    assertEqual(countValue(
+        state.diagnostics,
+        "GROUP_HARMFUL_IDENTITY_FEATURES_IGNORED"
+    ), 1, "group harmful assignment policy diagnostic")
+    assertEqual(countEvents(harness, "controller.rebuild"), 0,
+        "group harmful assignment rebuild count")
+    assertEqual(countEvents(harness, "controller.tuning"), 0,
+        "group harmful assignment tuning count")
+    assertEqual(countEvents(harness, "controller.unit"), 1,
+        "group harmful assignment retarget count")
+    assertEqual(countEvents(harness, "controller.refresh"), 0,
+        "group harmful assignment refresh count")
+    assertEqual(controller.shown, true,
+        "group harmful assignment visibility")
 end
 
 local function testSecretUnitTokenFailsClosed()
@@ -3505,8 +3970,10 @@ testPolymorphicGlobalRefreshSource()
 testGlobalSpellColorRefresh()
 testLegacyPathDoesNotReadAuraIdentityForColors()
 testGroupRuntimeSelectionAndFallback()
+testGroupHarmfulIdentityFeaturesStayVisible()
 testGroupSeedsPrebuildBeforeCombat()
 testGroupUnitRetargetsBeforePendingCombatConfig()
+testGroupHarmfulEmptySeedUsesLatestSuppressedSource()
 testSecretUnitTokenFailsClosed()
 testSecretUnitDefersExactTopologyRecovery()
 testNativeProviderVisibilityAndRuntimeCounters()
