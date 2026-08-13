@@ -309,7 +309,6 @@ local function CreateGeneralOptionsPane()
             self.healAbsorb:Hide()
             self.healAbsorbExcessGlow:Hide()
             self.healPrediction:Hide()
-            self.dispelHighlight:Hide()
         end,
 
         healthText = function(self)
@@ -638,7 +637,7 @@ local settings = {
             "general_party",
             "healthBar", "powerBar", "portrait", "castBar",
             "nameText", "healthText", "powerText", "leaderText", "levelText", "targetCounter", "statusTimer",
-            "buffs", "debuffs",
+            "buffs", "debuffs", "dispels",
             "raidIcon", "leaderIcon", "roleIcon", "combatIcon", "readyCheckIcon", "factionIcon", "statusIcon",
             "targetHighlight", "mouseoverHighlight", "threatGlow",
         },
@@ -646,7 +645,7 @@ local settings = {
             "general_raid",
             "healthBar", "powerBar",
             "nameText", "healthText", "statusTimer",
-            "buffs", "debuffs",
+            "buffs", "debuffs", "dispels",
             "raidIcon", "leaderIcon", "roleIcon", "readyCheckIcon", "statusIcon",
             "targetHighlight", "mouseoverHighlight", "threatGlow",
         },
@@ -668,6 +667,7 @@ local settings = {
 ---------------------------------------------------------------------
 local listItems = {}
 local lastIndicator, lastScroll
+local optionLoadGeneration = 0
 
 local itemPool = AF.CreateObjectPool(function()
     local button = AF.CreateButton(frameOptionsPane.indicatorList, "", "BFI_transparent", nil, nil, nil, "none", "")
@@ -691,14 +691,18 @@ local function ListItem_LoadOptions(self)
     -- button carries frame/indicator/config data
 
     lastIndicator = self.id
+    optionLoadGeneration = optionLoadGeneration + 1
+    local generation = optionLoadGeneration
 
     local scroll = frameOptionsPane.scrollSettings
     local options = F.GetUnitFrameOptions(scroll.scrollContent, self)
 
     local heights = {}
+    local pendingOptions = {}
     local last
 
-    for i, pane in next, options do
+    for i, pane in ipairs(options) do
+        pendingOptions[i] = pane
         pane.index = i -- for re-height
 
         -- FIXME: seems cause weird issues that option values are not loaded properly (visible)
@@ -718,19 +722,27 @@ local function ListItem_LoadOptions(self)
 
     scroll:SetContentHeights(heights, 10)
 
-    --! NOTE: sometimes option panes won't show, but if scrolled or BFIOptionsFrame is dragged they will appear
-    --! maybe it's a WoW UI bug? or intentional?
-    --! ScrollFrame SUCKS!!! so repoint to force update, hope it works
-    C_Timer.After(0, function()
-        AF.RePoint(scroll)
-    end)
+    local function LoadOptions()
+        for _, pane in ipairs(pendingOptions) do
+            pane.Load(self)
+        end
+    end
+
+    -- Cached panes are already visible here. Bind the selected indicator
+    -- before returning so Buffs and Debuffs never render each other's values.
+    LoadOptions()
 
     --! NOTE: fix weird issues that option values are not loaded properly (slider editbox text invisible)
     --! 王德发！！啥破玩意儿？！
     C_Timer.After(0, function()
-        for _, pane in next, options do
-            pane.Load(self)
-        end
+        if generation ~= optionLoadGeneration then return end
+
+        LoadOptions()
+
+        --! NOTE: sometimes option panes won't show, but if scrolled or BFIOptionsFrame is dragged they will appear
+        --! maybe it's a WoW UI bug? or intentional?
+        --! ScrollFrame SUCKS!!! so repoint to force update, hope it works
+        AF.RePoint(scroll)
     end)
 end
 

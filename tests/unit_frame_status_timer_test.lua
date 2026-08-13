@@ -8,6 +8,31 @@ local function assertEqual(actual, expected, message)
     end
 end
 
+local sourceFile = assert(io.open(
+    "Modules/UnitFrames/Indicators/StatusTimer.lua",
+    "r"
+))
+local source = sourceFile:read("*a")
+sourceFile:close()
+assertEqual(
+    source:find(
+        "if not F.isValueNonSecret(guid) or not guid then return end",
+        1,
+        true
+    ) ~= nil,
+    true,
+    "ShowTimer gates GUID before truth test"
+)
+assertEqual(
+    source:find(
+        "if F.isValueNonSecret(guid) and guid then",
+        1,
+        true
+    ) ~= nil,
+    true,
+    "HideTimer gates GUID before truth test"
+)
+
 local state = {
     afk = true,
     afkCalls = 0,

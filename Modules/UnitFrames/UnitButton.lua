@@ -7,9 +7,7 @@ local AF = _G.AbstractFramework
 
 local UnitGUID = UnitGUID
 local GetUnitName = GetUnitName
-local UnitIsUnit = UnitIsUnit
 local UnitIsPlayer = UnitIsPlayer
-local GetTime = GetTime
 local UnitHasVehicleUI = UnitHasVehicleUI
 local UnitExists = UnitExists
 local UnitClassBase = AF.UnitClassBase
@@ -78,8 +76,24 @@ end
 ---------------------------------------------------------------------
 local function UnitButton_RegisterEvents(self)
     self:RegisterUnitEvent("UNIT_CONNECTION", self.unit)
-    self:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", self.unit)
-    self:RegisterUnitEvent("UNIT_EXITED_VEHICLE", self.unit)
+    -- Pet identity and vehicle transitions are emitted for its owner token.
+    local unitPetOwner = self._updateOnUnitPetChanged
+    if unitPetOwner and unitPetOwner ~= self.unit then
+        self:RegisterUnitEvent(
+            "UNIT_ENTERED_VEHICLE",
+            self.unit,
+            unitPetOwner
+        )
+        self:RegisterUnitEvent(
+            "UNIT_EXITED_VEHICLE",
+            self.unit,
+            unitPetOwner
+        )
+        self:RegisterUnitEvent("UNIT_PET", unitPetOwner)
+    else
+        self:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", self.unit)
+        self:RegisterUnitEvent("UNIT_EXITED_VEHICLE", self.unit)
+    end
     self:RegisterEvent("UNIT_FLAGS")
     self:RegisterEvent("UNIT_NAME_UPDATE")
 
@@ -104,8 +118,24 @@ local function UnitButton_UnregisterEvents(self)
     self:UnregisterAllEvents()
 end
 
+local function UnitButton_RefreshUnitBinding(self)
+    UnitButton_UpdateStates(self)
+    UnitButton_UpdateInRange(self)
+    UF.OnButtonShow(self)
+end
+
 local function UnitButton_OnEvent(self, event, unit, arg)
-    if unit and (self.effectiveUnit == unit or self.unit == unit) then
+    local isPetOwnerIdentityEvent =
+        unit == self._updateOnUnitPetChanged
+        and (
+            event == "UNIT_PET"
+            or event == "UNIT_ENTERED_VEHICLE"
+            or event == "UNIT_EXITED_VEHICLE"
+        )
+
+    if isPetOwnerIdentityEvent then
+        self._updateRequired = true
+    elseif unit and (self.effectiveUnit == unit or self.unit == unit) then
         if event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE" or event == "UNIT_CONNECTION"
             or event == "UNIT_FLAGS" or event == "UNIT_NAME_UPDATE"
         then
@@ -119,7 +149,7 @@ local function UnitButton_OnEvent(self, event, unit, arg)
                 UnitButton_UpdateAll(self, true)
             end
         elseif event == "UNIT_TARGET" then
-            if self._updateOnUnitTargetChanged == unit and not UnitIsUnit("player", unit) then
+            if self._updateOnUnitTargetChanged == unit then
                 if UnitExists(self.unit) then
                     UnitButton_UpdateAll(self, true)
                 end
@@ -138,6 +168,13 @@ end
 BFI.vars.units = {} -- unitid to button
 
 local function UnitButton_OnTick(self)
+    if self._unitChangeUpdatePending then
+        self._unitChangeUpdatePending = nil
+        UnitButton_UnregisterEvents(self)
+        UnitButton_RegisterEvents(self)
+        UnitButton_RefreshUnitBinding(self)
+    end
+
     self.__tickCount = (self.__tickCount or 0) + 1
     if self.__tickCount >= 2 then -- every 0.5 second
         self.__tickCount = 0
@@ -204,6 +241,7 @@ end
 ---------------------------------------------------------------------
 local function UnitButton_OnShow(self)
     -- print(AF.WrapTextInColor(GetTime(), "darkgray"), "[OnShow]", self:GetName(), self.effectiveUnit)
+    self._unitChangeUpdatePending = nil
     self._updateRequired = nil -- prevent UnitButton_UpdateAll twice. when convert party <-> raid, GROUP_ROSTER_UPDATE fired.
 
     UnitButton_RegisterEvents(self)
@@ -238,13 +276,9 @@ end
 -- onAttributeChanged
 ---------------------------------------------------------------------
 local function UnitButton_OnUnitChanged(self)
-    print(AF.WrapTextInColor(GetTime(), "darkgray"), "[OnUnitChanged]", self:GetName(), self.effectiveUnit)
-
     -- TODO: private auras indicator
 
-    UnitButton_UpdateStates(self)
-    UnitButton_UpdateInRange(self)
-    UF.OnButtonShow(self)
+    UnitButton_RefreshUnitBinding(self)
 end
 
 local function UnitButton_OnAttributeChanged(self, name, value)
@@ -263,6 +297,8 @@ local function UnitButton_OnAttributeChanged(self, name, value)
             if self.unit and self._enableUnitButtonMapping then
                 BFI.vars.units[self.unit] = nil
             end
+            self.__unitGuid = nil
+            self.__effectiveGuid = nil
             wipe(self.states)
         end
 
@@ -272,6 +308,12 @@ local function UnitButton_OnAttributeChanged(self, name, value)
             self.effectiveUnit = value
             if self._updateOnUnitChange then
                 UnitButton_OnUnitChanged(self)
+            elseif self._deferUpdateOnUnitChange then
+                -- SecureGroupHeaderTemplate can reassign a visible child
+                -- without an OnHide/OnShow cycle. Defer event rebinding and
+                -- indicator refresh until the next ordinary frame tick so
+                -- the attribute handler never performs aura work directly.
+                self._unitChangeUpdatePending = true
             end
         end
     end

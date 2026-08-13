@@ -14,21 +14,22 @@ local C_PlayerInfo_GetContentDifficultyCreatureForPlayer =
 local DISABLED_FONT_COLOR = _G.DISABLED_FONT_COLOR
 local GetDifficultyColor = _G.GetDifficultyColor
 local GetFactionColor = _G.GetFactionColor
-local GetGuildInfo = _G.GetGuildInfo
 local GREEN_FONT_COLOR = _G.GREEN_FONT_COLOR
 local IsAltKeyDown = _G.IsAltKeyDown
 local HIGHLIGHT_FONT_COLOR = _G.HIGHLIGHT_FONT_COLOR
 local InCombatLockdown = _G.InCombatLockdown
+local IsPlayerInGuildFromGUID = _G.IsPlayerInGuildFromGUID
 local IsShiftKeyDown = _G.IsShiftKeyDown
 local NORMAL_FONT_COLOR = _G.NORMAL_FONT_COLOR
 local UnitClassBase = _G.UnitClassBase
 local UnitExists = _G.UnitExists
 local UnitFactionGroup = _G.UnitFactionGroup
+local UnitIsPVP = _G.UnitIsPVP
 local UnitIsPlayer = _G.UnitIsPlayer
 
 local NATIVE_STATUS_BAR_HEIGHT = 8
-local MOUSEOVER_UNIT = "mouseover"
 local NONE_LINE = Enum.TooltipDataLineType.None
+local UNIT_NAME_LINE = Enum.TooltipDataLineType.UnitName
 local UNIT_LEVEL_LINE = Enum.TooltipDataLineType.UnitLevel
 local UNIT_TYPE_LINE = Enum.TooltipDataLineType.UnitType
 local DUNGEON_SCORE_LABEL = _G.DUNGEON_SCORE or L["Dungeon Score"]
@@ -58,22 +59,31 @@ local oppositePoints = {
 local tooltipAnchor
 local dungeonBests = {}
 
----------------------------------------------------------------------
--- anchor
----------------------------------------------------------------------
 local function IsObjectAccessible(object)
     if not F.isValueNonSecret(object) then return false end
     if object == nil then return true end
 
-    -- Retail 12.0.7.68887 Blizzard_NamePlates.lua creates its forbidden pool
-    -- with forbidden=true, and SimpleFrameScriptObjectAPIDocumentation.lua
-    -- marks IsForbidden's result ObjectSecurity-secret. GameTooltip.lua
-    -- SetWorldCursor also warns addon-touched state can taint secret lines.
+    -- Retail 12.1.0.68914 adds CanBeAccessedInContext. Its result and the
+    -- 12.0.7 IsForbidden fallback are ObjectSecurity-secret, so both must be
+    -- sanitized before control flow or object access.
+    local canBeAccessedInContext = object.CanBeAccessedInContext
+    if canBeAccessedInContext then
+        local accessible = canBeAccessedInContext(object)
+        return F.isValueNonSecret(accessible) and accessible or false
+    end
+
     local forbidden = object:IsForbidden()
-    if not F.isValueNonSecret(forbidden) or forbidden then return false end
-    return true
+    return F.isValueNonSecret(forbidden) and not forbidden or false
 end
 
+local function IsAccessibleGameTooltip(tooltip)
+    if not F.isValueNonSecret(tooltip) or tooltip ~= GameTooltip then return false end
+    return IsObjectAccessible(tooltip)
+end
+
+---------------------------------------------------------------------
+-- anchor
+---------------------------------------------------------------------
 local function GetOwnerConfig(owner)
     if not IsObjectAccessible(owner) or owner == nil then return end
 
@@ -129,7 +139,7 @@ local function ApplyOwnerAnchor(tooltip, parent)
 end
 
 local function UpdateAnchor(tooltip, parent, resetCursorOwner)
-    if not IsObjectAccessible(tooltip) or tooltip ~= GameTooltip then return end
+    if not IsAccessibleGameTooltip(tooltip) then return end
     if not IsObjectAccessible(parent) then return end
 
     if ApplyOwnerAnchor(tooltip, parent) then return end
@@ -142,12 +152,8 @@ local function UpdateAnchor(tooltip, parent, resetCursorOwner)
         return
     elseif mode == "fixed" then
         local point = oppositePoints[config.anchorPoint] and config.anchorPoint or "BOTTOMRIGHT"
-        -- Retail 12.0.7.68887 SharedTooltipTemplates.lua
-        -- GameTooltip_SetDefaultAnchor and Blizzard_GameTooltip/Mainline/
-        -- GameTooltip.lua SetWorldCursor(Nameplate) establish ANCHOR_NONE.
-        -- Inaccessible owners already returned above. Preserve the native
-        -- owner here; only the Cursor branch needs its UIParent owner mode
-        -- reset before applying a fixed point.
+        -- Preserve native Default/Nameplate ownership. Only Cursor needs its
+        -- UIParent owner mode reset before applying a fixed BFI point.
         if resetCursorOwner then
             tooltip:SetOwner(AF.UIParent, "ANCHOR_NONE")
         end
@@ -173,113 +179,243 @@ end
 -- unit visibility
 ---------------------------------------------------------------------
 local unitTooltipActive
-local unitTooltipRefreshQueued
-local refreshingUnitTooltip
+local unitTooltipUnit
 
-local function GetPlayerIdentityLineIndices(data)
+local function GetUnitTooltipLineInfo(data)
     if not data.lines then return end
 
-    local previousNoneLineIndex
-    local lastNoneLineIndex
+    local unit
+    local unitNameLineIndex
+    local conflictingUnit
+    local unitLevelLineIndex
     local unitTypeLineIndex
+    local lineTypesByIndex = {}
+    local noneLineIndices = {}
 
     for _, line in ipairs(data.lines) do
-        if UNIT_TYPE_LINE and line.type == UNIT_TYPE_LINE then
-            unitTypeLineIndex = line.lineIndex
-        elseif not UNIT_TYPE_LINE and line.type == NONE_LINE and line.lineIndex then
-            previousNoneLineIndex = lastNoneLineIndex
-            lastNoneLineIndex = line.lineIndex
+        local lineType = line.type
+        local lineIndex = line.lineIndex
+        if F.isValueNonSecret(lineType) and F.isValueNonSecret(lineIndex) and lineIndex then
+            lineTypesByIndex[lineIndex] = lineType
+            if lineType == UNIT_NAME_LINE then
+                local lineUnit = line.unitToken
+                if F.isValueNonSecret(lineUnit) and lineUnit ~= nil then
+                    if unit == nil then
+                        unit = lineUnit
+                        unitNameLineIndex = lineIndex
+                    elseif unit ~= lineUnit then
+                        conflictingUnit = true
+                    end
+                end
+            elseif UNIT_LEVEL_LINE and lineType == UNIT_LEVEL_LINE then
+                unitLevelLineIndex = lineIndex
+            elseif UNIT_TYPE_LINE and lineType == UNIT_TYPE_LINE then
+                unitTypeLineIndex = lineIndex
+            elseif lineType == NONE_LINE then
+                noneLineIndices[#noneLineIndices + 1] = lineIndex
+            end
         end
     end
 
-    if unitTypeLineIndex then
-        -- Retail 12.1 gives the class/specification line its own type. The
-        -- faction line is the following native identity line.
-        return unitTypeLineIndex, unitTypeLineIndex + 1
+    if conflictingUnit then
+        unit = nil
+        unitNameLineIndex = nil
     end
 
-    -- Retail 12.0.7 (Gethe/wow-ui-source 4383ced) does not give the
-    -- specialization/class line its own type. In the native player identity
-    -- block it is the penultimate generic line, immediately before faction.
-    -- Retail 12.1 adds TooltipDataLineType.UnitType, handled above.
-    return previousNoneLineIndex, lastNoneLineIndex
+    return unit,
+        unitNameLineIndex,
+        unitLevelLineIndex,
+        unitTypeLineIndex,
+        lineTypesByIndex,
+        noneLineIndices
 end
 
-local function ApplyPlayerIdentityColors(tooltip, data, config)
-    -- UnitIsPlayer remains non-secret in the generated 12.0.7 and 12.1 API
-    -- contracts. UnitClassBase may return a secret in 12.1; pass that value
-    -- directly through the C-level class-color API, then pass the resulting
-    -- visual values directly to FontString:SetTextColor.
-    if not UnitIsPlayer(MOUSEOVER_UNIT) then return end
+local function GetTooltipPlayerGuildState(data)
+    local guid = data.guid
+    if not F.isValueNonSecret(guid) or type(guid) ~= "string" then return end
 
-    local color = C_ClassColor_GetClassColor(UnitClassBase(MOUSEOVER_UNIT))
-    if not color then return end
+    -- Retail 12.0.7 and 12.1.0.68914 document this GUID query as returning
+    -- an ordinary boolean. Sanitize it defensively before using it to resolve
+    -- the otherwise ambiguous four/five-row generic player identity block.
+    local isInGuild = IsPlayerInGuildFromGUID(guid)
+    if F.isValueNonSecret(isInGuild) and type(isInGuild) == "boolean" then
+        return isInGuild
+    end
+end
 
-    tooltip:GetLeftLine(1):SetTextColor(color.r, color.g, color.b)
+local function GetUnitPVPState(unit)
+    -- Retail 12.1.0.68914 makes UnitIsPVP secret with restricted unit
+    -- identity. Preserve public true and false as distinct layout facts and
+    -- return nil for a secret or unavailable result.
+    local isPVP = UnitIsPVP(unit)
+    if F.isValueNonSecret(isPVP) and type(isPVP) == "boolean" then
+        return isPVP
+    end
+end
 
-    -- Player guilds occupy the second native unit-tooltip line. GetGuildInfo
-    -- is used only to establish whether that line exists; its text remains
-    -- entirely under Blizzard's control. The literal mouseover token is valid
-    -- on both 12.0.7 and 12.1 (12.1 only rejects compound unit tokens).
-    if GetGuildInfo(MOUSEOVER_UNIT) then
-        tooltip:GetLeftLine(2):SetTextColor(GREEN_FONT_COLOR:GetRGB())
+local function GetPlayerIdentityLineIndices(
+    unitNameLineIndex,
+    unitLevelLineIndex,
+    unitTypeLineIndex,
+    lineTypesByIndex,
+    noneLineIndices,
+    playerInGuildState,
+    unitPVPState
+)
+    local levelLineIndex = unitLevelLineIndex
+    local classLineIndex = unitTypeLineIndex
+    local factionLineIndex
+
+    if unitTypeLineIndex then
+        if not levelLineIndex and lineTypesByIndex[unitTypeLineIndex - 1] == NONE_LINE then
+            levelLineIndex = unitTypeLineIndex - 1
+        end
+        if lineTypesByIndex[unitTypeLineIndex + 1] == NONE_LINE then
+            factionLineIndex = unitTypeLineIndex + 1
+        end
+    elseif unitLevelLineIndex then
+        if lineTypesByIndex[unitLevelLineIndex + 1] == NONE_LINE then
+            classLineIndex = unitLevelLineIndex + 1
+        end
+        if classLineIndex and lineTypesByIndex[classLineIndex + 1] == NONE_LINE then
+            factionLineIndex = classLineIndex + 1
+        end
+    else
+        local count = #noneLineIndices
+        local identityRowCount
+        if count == 3 then
+            identityRowCount = 3
+        elseif count == 4 then
+            if playerInGuildState == true and unitPVPState == false then
+                identityRowCount = 4
+            elseif playerInGuildState == false and unitPVPState == true then
+                identityRowCount = 3
+            end
+        elseif count == 5
+            and playerInGuildState == true
+            and unitPVPState == true
+        then
+            identityRowCount = 4
+        end
+
+        local rowsAreContiguous = identityRowCount and unitNameLineIndex ~= nil
+        if rowsAreContiguous then
+            for index, lineIndex in ipairs(noneLineIndices) do
+                if lineIndex ~= unitNameLineIndex + index then
+                    rowsAreContiguous = false
+                    break
+                end
+            end
+        end
+
+        if rowsAreContiguous then
+            local guildOffset = identityRowCount == 4 and 1 or 0
+            levelLineIndex = noneLineIndices[1 + guildOffset]
+            classLineIndex = noneLineIndices[2 + guildOffset]
+            factionLineIndex = noneLineIndices[3 + guildOffset]
+        end
     end
 
-    local classLineIndex, factionLineIndex = GetPlayerIdentityLineIndices(data)
+    local guildLineIndex
+    if unitNameLineIndex
+        and levelLineIndex == unitNameLineIndex + 2
+        and lineTypesByIndex[unitNameLineIndex + 1] == NONE_LINE
+    then
+        guildLineIndex = unitNameLineIndex + 1
+    end
+
+    -- Retail 12.1.0.68914 (wow-ui-source d3915c78) adds UnitLevel and UnitType
+    -- enum values, but the native producer can still emit a generic identity
+    -- block. Exact public guild and PvP state disambiguate the reported
+    -- four/five-row variants; their trailing PvP status row remains native.
+    return levelLineIndex, classLineIndex, factionLineIndex, guildLineIndex
+end
+
+local function ApplyPlayerIdentityColors(
+    tooltip,
+    unit,
+    nameLineIndex,
+    guildLineIndex,
+    classLineIndex,
+    factionLineIndex,
+    config
+)
+    -- Retail 12.1 can hide unit identity. Project policy requires a neutral
+    -- presentation when the class token is secret, so sanitize at the
+    -- UnitClassBase boundary before deriving a class color.
+    local color
+    local classFilename = UnitClassBase(unit)
+    if F.isValueNonSecret(classFilename) and classFilename then
+        color = C_ClassColor_GetClassColor(classFilename)
+    end
+
+    -- Neutralize all class-derived presentation when identity is secret or
+    -- unavailable so a previous unit's class color cannot survive the pass.
+    color = color or HIGHLIGHT_FONT_COLOR
+    local nameLine = nameLineIndex and tooltip:GetLeftLine(nameLineIndex)
+    if nameLine then
+        nameLine:SetTextColor(color.r, color.g, color.b)
+    end
+
     if classLineIndex then
-        tooltip:GetLeftLine(classLineIndex):SetTextColor(color.r, color.g, color.b)
+        local classLine = tooltip:GetLeftLine(classLineIndex)
+        if classLine then
+            classLine:SetTextColor(color.r, color.g, color.b)
+        end
+    end
+
+    if config.healthBar.enabled and config.healthBar.colorMode == "class" then
+        GameTooltipStatusBar:SetStatusBarColor(color.r, color.g, color.b)
+    end
+
+    -- A guild line is accepted only after the documented GUID query and the
+    -- exact public name/guild/level topology agree, avoiding undocumented
+    -- GetGuildInfo return behavior.
+    if guildLineIndex then
+        local guildLine = tooltip:GetLeftLine(guildLineIndex)
+        if guildLine then
+            guildLine:SetTextColor(GREEN_FONT_COLOR:GetRGB())
+        end
     end
 
     -- UnitFactionGroup is documented as non-secret in both versions. Use
     -- Blizzard's standard PLAYER_FACTION_COLORS mapping.
-    local factionColor = GetFactionColor(UnitFactionGroup(MOUSEOVER_UNIT))
+    local factionColor = GetFactionColor(UnitFactionGroup(unit))
     if factionColor and factionLineIndex then
-        tooltip:GetLeftLine(factionLineIndex):SetTextColor(
-            factionColor.r,
-            factionColor.g,
-            factionColor.b
-        )
-    end
-
-    -- StatusBar:SetStatusBarColor accepts secret visual values on both
-    -- 12.0.7 and 12.1. Forward the C-side class color directly.
-    if config.healthBar.enabled and config.healthBar.colorMode == "class" then
-        GameTooltipStatusBar:SetStatusBarColor(color.r, color.g, color.b)
+        local factionLine = tooltip:GetLeftLine(factionLineIndex)
+        if factionLine then
+            factionLine:SetTextColor(factionColor.r, factionColor.g, factionColor.b)
+        end
     end
 end
 
-local function ApplyUnitLevelDifficultyColor(tooltip, lineData)
+local function ApplyUnitLevelDifficultyColor(tooltip, unit, lineIndex)
     local config = T.config
-    if not IsObjectAccessible(tooltip)
-        or tooltip ~= GameTooltip
+    if not lineIndex
         or not config
         or not config.enabled
         or not config.levelDifficultyColor
-        or not refreshingUnitTooltip
-        or not UnitExists(MOUSEOVER_UNIT)
+        or not UnitExists(unit)
     then
         return
     end
 
-    -- Blizzard explicitly recommends this C-side classifier instead of
-    -- calculating relative difficulty from unit levels in Lua. Its returned
-    -- enum is non-secret in both 12.0.7 and 12.1.
-    local difficulty = C_PlayerInfo_GetContentDifficultyCreatureForPlayer(MOUSEOVER_UNIT)
+    -- Retail 12.1.0.68914 TargetFrame (wow-ui-source d3915c78) uses this
+    -- C-side classifier. Its returned enum is non-secret in 12.0.7 and 12.1.
+    local difficulty = C_PlayerInfo_GetContentDifficultyCreatureForPlayer(unit)
     local color = GetDifficultyColor(difficulty)
-    tooltip:GetLeftLine(lineData.lineIndex):SetTextColor(color.r, color.g, color.b)
+    local levelLine = tooltip:GetLeftLine(lineIndex)
+    if levelLine then
+        levelLine:SetTextColor(color.r, color.g, color.b)
+    end
 end
 
 local function OnUnitTooltipPreCall(tooltip)
     local config = T.config
-    if not IsObjectAccessible(tooltip)
-        or tooltip ~= GameTooltip
-        or not config
-        or not config.enabled
-    then
-        return
-    end
+    if not IsAccessibleGameTooltip(tooltip) or not config or not config.enabled then return end
 
     unitTooltipActive = true
+    unitTooltipUnit = nil
 
     -- This callback never inspects tooltip data. Blizzard remains the sole
     -- renderer of unit identity, health, and other potentially secret values.
@@ -290,33 +426,22 @@ local function OnUnitTooltipPreCall(tooltip)
 end
 
 local function RefreshActiveUnitTooltip()
+    local unit = unitTooltipUnit
     if not unitTooltipActive
-        or not UnitExists(MOUSEOVER_UNIT)
-        or not IsObjectAccessible(GameTooltip)
+        or not F.isValueNonSecret(unit)
+        or unit == nil
+        or not UnitExists(unit)
+        or not IsAccessibleGameTooltip(GameTooltip)
     then
         return
     end
 
-    -- Retail 12.0.7.68887 SimpleFrameAPIDocumentation.lua marks IsShown's
-    -- result Shown-secret. Gate it before deciding whether to refresh.
     local shown = GameTooltip:IsShown()
     if not F.isValueNonSecret(shown) or not shown then return end
 
-    -- SetUnit is a native secure delegate intended to rebuild standard
-    -- tooltips for addon callers without exposing the displayed unit.
-    refreshingUnitTooltip = true
-    GameTooltip:SetUnit(MOUSEOVER_UNIT)
-    refreshingUnitTooltip = nil
-end
-
-local function QueueInitialUnitTooltipRefresh()
-    if refreshingUnitTooltip or unitTooltipRefreshQueued then return end
-
-    unitTooltipRefreshQueued = true
-    C_Timer.After(0, function()
-        unitTooltipRefreshQueued = nil
-        RefreshActiveUnitTooltip()
-    end)
+    -- A public unit token can remap before a delayed refresh. Use it only as a
+    -- best-effort native refresh handle, never as an identity comparison.
+    GameTooltip:SetUnit(unit)
 end
 
 ---------------------------------------------------------------------
@@ -359,13 +484,12 @@ local function CollectDungeonBests(runs)
     end)
 end
 
-local function AddMythicPlus(tooltip, mythicPlus, extrasAdded)
+local function AddMythicPlus(tooltip, unit, mythicPlus, extrasAdded)
     if not mythicPlus or not mythicPlus.enabled then return extrasAdded end
 
-    -- Use the literal mouseover token throughout. Reading a displayed unit,
-    -- name, GUID, or comparison result back into Lua is unnecessary. The
-    -- native rating query returning a summary is the player classification.
-    local rating = C_PlayerInfo.GetPlayerMythicPlusRatingSummary(MOUSEOVER_UNIT)
+    -- Query the same public token Blizzard attached to this rendered tooltip.
+    -- The native rating query returning a summary is the player classification.
+    local rating = C_PlayerInfo.GetPlayerMythicPlusRatingSummary(unit)
     if not rating then return extrasAdded end
 
     local bestRunLevel = GetBestTimedRunLevel(rating.runs)
@@ -425,17 +549,17 @@ end
 ---------------------------------------------------------------------
 -- item level
 ---------------------------------------------------------------------
-local function AddItemLevel(tooltip, itemLevel, extrasAdded)
+local function AddItemLevel(tooltip, unit, itemLevel, extrasAdded)
     if not itemLevel or not itemLevel.enabled or (itemLevel.showOnAlt and not IsAltKeyDown()) then
         return extrasAdded
     end
 
     if not RequestItemLevel then return extrasAdded end
 
-    -- AbstractFramework passes this literal token through Blizzard's native
-    -- inspection APIs and returns only the documented non-secret item level.
-    -- No unit GUID or equipment tooltip data enters BFI.
-    local equippedItemLevel = RequestItemLevel(MOUSEOVER_UNIT)
+    -- AbstractFramework passes the rendered public token through Blizzard's
+    -- native inspection APIs and returns only the documented non-secret item
+    -- level. No unit GUID or equipment tooltip data enters BFI.
+    local equippedItemLevel = RequestItemLevel(unit)
     if not equippedItemLevel then return extrasAdded end
 
     if not extrasAdded then
@@ -456,8 +580,7 @@ end
 
 local function OnUnitTooltipPostCall(tooltip, data)
     local config = T.config
-    if not IsObjectAccessible(tooltip)
-        or tooltip ~= GameTooltip
+    if not IsAccessibleGameTooltip(tooltip)
         or not config
         or not config.enabled
         or (config.hideUnitTooltipsInCombat and InCombatLockdown())
@@ -465,20 +588,64 @@ local function OnUnitTooltipPostCall(tooltip, data)
         return
     end
 
-    -- Native unit tooltip processing reaches its post-call before Show().
-    -- On the first world mouseover, the literal mouseover token may not yet
-    -- describe the rendered unit. Leave that pass untouched and rebuild once
-    -- on the next frame. The synchronous refresh guard prevents recursion and
-    -- ensures identity colors are only derived from the settled token.
-    if not refreshingUnitTooltip then
-        QueueInitialUnitTooltipRefresh()
-        return
+    -- Style the exact unit Blizzard rendered in this native tooltip pass.
+    -- Rebuilding with GameTooltip:SetUnit("mouseover") is both unnecessary
+    -- and unreliable in 12.1 restricted contexts.
+    local unit,
+        unitNameLineIndex,
+        unitLevelLineIndex,
+        unitTypeLineIndex,
+        lineTypesByIndex,
+        noneLineIndices = GetUnitTooltipLineInfo(data)
+    if not unit or not UnitExists(unit) then return end
+    unitTooltipUnit = unit
+
+    local isPlayer = UnitIsPlayer(unit)
+    if not F.isValueNonSecret(isPlayer) then return end
+
+    local levelLineIndex = unitLevelLineIndex
+    if isPlayer then
+        local classLineIndex
+        local factionLineIndex
+        local guildLineIndex
+        local playerInGuildState
+        local unitPVPState
+        local genericLineCount = #noneLineIndices
+        if not unitLevelLineIndex
+            and not unitTypeLineIndex
+            and genericLineCount >= 4
+            and genericLineCount <= 5
+        then
+            playerInGuildState = GetTooltipPlayerGuildState(data)
+            unitPVPState = GetUnitPVPState(unit)
+        end
+        levelLineIndex,
+            classLineIndex,
+            factionLineIndex,
+            guildLineIndex = GetPlayerIdentityLineIndices(
+            unitNameLineIndex,
+            unitLevelLineIndex,
+            unitTypeLineIndex,
+            lineTypesByIndex,
+            noneLineIndices,
+            playerInGuildState,
+            unitPVPState
+        )
+        ApplyPlayerIdentityColors(
+            tooltip,
+            unit,
+            unitNameLineIndex,
+            guildLineIndex,
+            classLineIndex,
+            factionLineIndex,
+            config
+        )
     end
 
-    ApplyPlayerIdentityColors(tooltip, data, config)
+    ApplyUnitLevelDifficultyColor(tooltip, unit, levelLineIndex)
 
-    local extrasAdded = AddMythicPlus(tooltip, config.mythicPlus)
-    AddItemLevel(tooltip, config.itemLevel, extrasAdded)
+    local extrasAdded = AddMythicPlus(tooltip, unit, config.mythicPlus)
+    AddItemLevel(tooltip, unit, config.itemLevel, extrasAdded)
 end
 
 local function MODIFIER_STATE_CHANGED(_, _, key)
@@ -509,7 +676,7 @@ local function CHALLENGE_MODE_MAPS_UPDATE()
 end
 
 local function AF_UNIT_ITEM_LEVEL_READY(_, unit)
-    if unit ~= MOUSEOVER_UNIT then return end
+    if not F.isValueNonSecret(unit) or unit ~= unitTooltipUnit then return end
 
     local config = T.config
     local itemLevel = config and config.itemLevel
@@ -523,10 +690,11 @@ end
 
 local function ClearUnitTooltipState()
     unitTooltipActive = nil
+    unitTooltipUnit = nil
 end
 
 local function OnTooltipShow(tooltip)
-    if not IsObjectAccessible(tooltip) or tooltip ~= GameTooltip then return end
+    if not IsAccessibleGameTooltip(tooltip) then return end
 
     local owner = tooltip:GetOwner()
     if not IsObjectAccessible(owner) then return end
@@ -539,7 +707,7 @@ local function OnTooltipShow(tooltip)
 end
 
 local function PLAYER_REGEN_DISABLED()
-    if not IsObjectAccessible(GameTooltip) then return end
+    if not IsAccessibleGameTooltip(GameTooltip) then return end
 
     local owner = GameTooltip:GetOwner()
     local ownerConfig
@@ -576,7 +744,6 @@ local function Initialize()
         -- method completes. None is a leave-state update and must not move a
         -- GameTooltip that may already have another owner.
         if anchorType == Enum.WorldCursorAnchorType.Cursor then
-            -- Retail 12.0.7.68887 always gives this branch UIParent ownership.
             UpdateAnchor(tooltip, AF.UIParent, true)
         elseif anchorType == Enum.WorldCursorAnchorType.Nameplate then
             UpdateAnchor(tooltip, parent)
@@ -587,9 +754,6 @@ local function Initialize()
     GameTooltip:HookScript("OnTooltipCleared", ClearUnitTooltipState)
     TooltipDataProcessor.AddTooltipPreCall(Enum.TooltipDataType.Unit, OnUnitTooltipPreCall)
     TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, OnUnitTooltipPostCall)
-    if UNIT_LEVEL_LINE then
-        TooltipDataProcessor.AddLinePostCall(UNIT_LEVEL_LINE, ApplyUnitLevelDifficultyColor)
-    end
     T:RegisterEvent("PLAYER_REGEN_DISABLED", PLAYER_REGEN_DISABLED)
     T:RegisterEvent("MODIFIER_STATE_CHANGED", MODIFIER_STATE_CHANGED)
     T:RegisterEvent("CHALLENGE_MODE_MAPS_UPDATE", CHALLENGE_MODE_MAPS_UPDATE)
