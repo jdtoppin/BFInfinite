@@ -505,6 +505,18 @@ local function assertRaidContract(preset)
             expected[2],
             preset.id .. " Raid debuff group " .. index
         )
+        assertEqual(
+            debuffDescriptor.completeSpec.groups[index]
+                .buttonStyle.nativeDispelColor,
+            true,
+            preset.id .. " Raid debuff native border color " .. index
+        )
+        assertEqual(
+            debuffDescriptor.completeSpec.groups[index]
+                .buttonStyle.dispelColor,
+            nil,
+            preset.id .. " Raid debuff custom border color " .. index
+        )
     end
     assertIndependentCandidateFilters(
         {

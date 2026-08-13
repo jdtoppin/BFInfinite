@@ -5,9 +5,9 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF #37/r41 adds native dispel-overlay slots on top of r40's duration-text
--- color curves. Selection and color stay inside Blizzard's AuraContainer.
-local REQUIRED_AF_VERSION = 41
+-- AF #39/r42 adds native dispel-color textures on top of r41's native
+-- dispel-overlay slots. Selection and color stay inside Blizzard's container.
+local REQUIRED_AF_VERSION = 42
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar

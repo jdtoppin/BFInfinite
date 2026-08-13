@@ -343,6 +343,10 @@ local function makeHarness()
         return true
     end
 
+    function AF.HasNativeDispelColorTexture()
+        return true
+    end
+
     function AF.CreateCustomAuraContainer(parent)
         assertOutOfCombat(harness, "container creation")
         local container = newContainer(harness, parent)
@@ -962,6 +966,12 @@ local function testShippedRaidHarmfulLiveSanitizer()
             "shipped Raid exclude map removed " .. tostring(key))
         assertEqual(group.buttonStyle.blockColor, nil,
             "shipped Raid block color removed " .. tostring(key))
+        assertEqual(group.buttonStyle.nativeDispelColor, true,
+            "shipped Raid native border color retained " .. tostring(key))
+        assertEqual(group.buttonStyle.dispelColor, nil,
+            "shipped Raid custom border color absent " .. tostring(key))
+        assertEqual(group.buttonStyle.dispelColorCurve, nil,
+            "shipped Raid custom border curve absent " .. tostring(key))
     end
     assertEqual(state.degradations.spellIDListsIgnored, true,
         "shipped Raid list suppression degradation")

@@ -257,12 +257,34 @@ local function assertPartyContract(preset)
             preset.id .. " debuff sort " .. index)
         assertEqual(group.sortDirection, SORT_DIRECTION.Normal,
             preset.id .. " debuff sort direction " .. index)
+        assertEqual(group.buttonStyle.nativeDispelColor, true,
+            preset.id .. " debuff native border color " .. index)
+        assertEqual(group.buttonStyle.dispelColor, nil,
+            preset.id .. " debuff custom border color " .. index)
         assertDeepEqual(
             group.buttonStyle.durationText.color.threshold,
             {mode = "seconds", value = 5, rgb = {1, 1, 1, 1}},
             preset.id .. " debuff low-time color threshold " .. index
         )
     end
+
+    -- Party's optional player child uses the Party Debuffs configuration; it
+    -- does not borrow the standalone Player frame's aura style.
+    local playerMemberDescriptor, playerMemberError =
+        UF.CompileNativeAuraSpec("player", "HARMFUL", debuffs)
+    assertTrue(playerMemberDescriptor, playerMemberError)
+    assertEqual(
+        playerMemberDescriptor.completeSpec.groups[1]
+            .buttonStyle.nativeDispelColor,
+        true,
+        preset.id .. " Party player child native border color"
+    )
+    assertEqual(
+        playerMemberDescriptor.completeSpec.groups[1]
+            .buttonStyle.dispelColor,
+        nil,
+        preset.id .. " Party player child custom border color"
+    )
 
     assertEqual(debuffDescriptor.completeSpec.holder.width, 59,
         preset.id .. " debuff holder width")

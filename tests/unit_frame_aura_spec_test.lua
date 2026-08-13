@@ -316,7 +316,7 @@ local function expectedStackText()
     }
 end
 
-local function expectedButtonStyle(dispelColor)
+local function expectedButtonStyle(nativeDispelColor)
     return {
         noBorder = true,
         width = 10,
@@ -325,7 +325,7 @@ local function expectedButtonStyle(dispelColor)
         cooldownStyle = "clock_with_leading_edge",
         durationText = expectedDurationText(),
         stackText = expectedStackText(),
-        dispelColor = dispelColor,
+        nativeDispelColor = nativeDispelColor,
         tooltip = {
             enabled = true,
             anchorPoint = "ANCHOR_BOTTOMRIGHT",
@@ -787,9 +787,9 @@ local function testStyleProjection()
     helpful.filters.isBossAura = false
     local helpfulDescriptor = compile("target", "HELPFUL", helpful)
     assertEqual(
-        helpfulDescriptor.completeSpec.groups[1].buttonStyle.dispelColor,
+        helpfulDescriptor.completeSpec.groups[1].buttonStyle.nativeDispelColor,
         false,
-        "helpful dispel color"
+        "helpful native dispel color"
     )
 
     local harmfulNoColor = baseConfig()
@@ -797,9 +797,9 @@ local function testStyleProjection()
     harmfulNoColor.auraTypeColor.debuffType = false
     local noColorDescriptor = compile("target", "HARMFUL", harmfulNoColor)
     assertEqual(
-        noColorDescriptor.completeSpec.groups[1].buttonStyle.dispelColor,
+        noColorDescriptor.completeSpec.groups[1].buttonStyle.nativeDispelColor,
         false,
-        "disabled harmful dispel color"
+        "disabled harmful native dispel color"
     )
 
     harmfulNoColor.auraTypeColor.debuffType = true
@@ -807,9 +807,24 @@ local function testStyleProjection()
     harmfulNoColor.auraTypeColor.dispellable = false
     local colorDescriptor = compile("target", "HARMFUL", harmfulNoColor)
     assertEqual(
-        colorDescriptor.completeSpec.groups[1].buttonStyle.dispelColor,
+        colorDescriptor.completeSpec.groups[1].buttonStyle.nativeDispelColor,
         true,
-        "harmful dispel color"
+        "harmful native dispel color"
+    )
+    assertEqual(
+        colorDescriptor.completeSpec.groups[1].buttonStyle.dispelColor,
+        nil,
+        "harmful custom dispel color is retired"
+    )
+    assertEqual(
+        colorDescriptor.completeSpec.groups[1].buttonStyle.dispelColorCurve,
+        nil,
+        "harmful custom dispel color curve is not emitted"
+    )
+    assertDeepEqual(
+        colorDescriptor.metrics,
+        noColorDescriptor.metrics,
+        "native dispel color does not change topology or metrics"
     )
 
     local noSourceRules = baseConfig()
@@ -830,9 +845,9 @@ local function testStyleProjection()
     noSourceRules.auraTypeColor = nil
     local noAuraColorDescriptor = compile("target", "HARMFUL", noSourceRules)
     assertEqual(
-        noAuraColorDescriptor.completeSpec.groups[1].buttonStyle.dispelColor,
+        noAuraColorDescriptor.completeSpec.groups[1].buttonStyle.nativeDispelColor,
         false,
-        "missing aura color config"
+        "missing native aura color config"
     )
 
     local fractional = baseConfig()

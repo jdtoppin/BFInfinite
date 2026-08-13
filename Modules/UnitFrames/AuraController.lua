@@ -14,10 +14,10 @@ local ipairs, next, pairs, type = ipairs, next, pairs, type
 -- groups/slots add-only and restricts their buttons after initialization.
 -- This controller owns only configuration-derived state and never reads aura
 -- data, live buttons, native container geometry, or native visibility.
--- AF #37/r41 adds native dispel-overlay slots on top of r40's duration-text
--- color curves, static Block colors, construction ledgers, and duration
--- carrier consumed here.
-local REQUIRED_AF_VERSION = 41
+-- AF #39/r42 adds native dispel-color textures on top of r41's native
+-- dispel-overlay slots, static Block colors, construction ledgers, and the
+-- duration carrier consumed here.
+local REQUIRED_AF_VERSION = 42
 local NATIVE_GROUP_AURA_TEMPLATE = "CustomAuraContainerTemplate"
 -- CustomAuraContainerConstants.FrameCreationBatchSize in the pinned build.
 local NATIVE_INITIAL_GROUP_RESERVATIONS = 10
@@ -29,6 +29,7 @@ local REQUIRED_AF_METHODS = {
     "GetCustomAuraContainerConstructionStats",
     "GetCustomAuraContainerConstructionTotals",
     "HasCustomAuraContainer",
+    "HasNativeDispelColorTexture",
     "SetCustomAuraContainerEnabled",
     "SetCustomAuraContainerFlowLayout",
     "SetCustomAuraContainerProcessingPolicy",
@@ -127,6 +128,7 @@ function UF.HasNativeAuraContainerBackend()
     end
 
     return AF.HasCustomAuraContainer()
+        and AF.HasNativeDispelColorTexture()
 end
 
 -- Retail 12.1 SecureGroupHeaderTemplate creates one unconfigured
