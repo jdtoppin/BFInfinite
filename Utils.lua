@@ -15,6 +15,17 @@ function F.GetCVarNumber(name)
 end
 
 ---------------------------------------------------------------------
+-- ui scale
+---------------------------------------------------------------------
+local BFI_REFERENCE_UI_SCALE = 0.71
+
+function F.GetAutoUIScale()
+    -- AbstractFramework's recommendation follows display density. BFI's Auto
+    -- option also preserves its 1080p reference composition on larger screens.
+    return math.max(AF.GetBestScale(), BFI_REFERENCE_UI_SCALE)
+end
+
+---------------------------------------------------------------------
 -- module
 ---------------------------------------------------------------------
 local moduleNames = {
