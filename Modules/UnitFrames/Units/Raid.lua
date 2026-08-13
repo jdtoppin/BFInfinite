@@ -154,6 +154,7 @@ local function UpdateRaid(_, module, which, skipIndicatorUpdates)
         if not skipIndicatorUpdates then
             UF.SetupIndicators(button, indicators, config)
         end
+        UF.RefreshRangeFade(button)
     end
 
     -- header

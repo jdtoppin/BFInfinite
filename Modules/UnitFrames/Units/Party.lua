@@ -175,6 +175,7 @@ local function UpdateParty(_, module, which, skipIndicatorUpdates)
                 end
             end
         end
+        UF.RefreshRangeFade(button)
     end
 
     -- header

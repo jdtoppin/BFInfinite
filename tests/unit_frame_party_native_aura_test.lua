@@ -458,6 +458,11 @@ local function makeHarness(hasNativeBackend)
         )
     end
 
+    -- Party refreshes its buttons' event-driven range fade after updating
+    -- settings. This harness loads Party without the UnitButton module.
+    function UF.RefreshRangeFade()
+    end
+
     local function RegisterAttributeDriver(frame, key, value)
         local call = {
             frame = frame,

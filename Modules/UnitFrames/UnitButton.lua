@@ -11,7 +11,16 @@ local UnitIsUnit = UnitIsUnit
 local UnitIsPlayer = UnitIsPlayer
 local UnitHasVehicleUI = UnitHasVehicleUI
 local UnitExists = UnitExists
+local UnitInRange = UnitInRange
+local GetBuildInfo = GetBuildInfo
 local UnitClassBase = AF.UnitClassBase
+
+-- Secret UnitInRange returns and native alpha sinks are verified in Retail
+-- 12.0.7.68453 and 12.1.0.68914. Earlier supported TOC clients fail open.
+local RANGE_FADE_API_SUPPORTED = C_CurveUtil
+    and C_CurveUtil.EvaluateColorValueFromBoolean
+    and GetBuildInfo
+    and select(4, GetBuildInfo()) >= 120007
 
 ---------------------------------------------------------------------
 -- states
@@ -19,6 +28,8 @@ local UnitClassBase = AF.UnitClassBase
 local function UnitButton_UpdateStates(self)
     local unit = self.unit
     if not unit then return end
+
+    local previousEffectiveUnit = self.effectiveUnit
 
     self.states.name = GetUnitName(unit, true)
     self.states.class = UnitClassBase(unit)
@@ -46,13 +57,63 @@ local function UnitButton_UpdateStates(self)
             self.effectiveUnit = "pet"
         end
     end
+
+    return previousEffectiveUnit ~= self.effectiveUnit
 end
 
 ---------------------------------------------------------------------
 -- range
 ---------------------------------------------------------------------
-local function UnitButton_UpdateInRange()
-    -- FIXME: disabled until the range path is made secret-safe.
+local function UnitButton_HasRangeFade(self)
+    return RANGE_FADE_API_SUPPORTED
+        and self.oorAlpha ~= nil
+        and self.oorAlpha < 1
+        and self.effectiveUnit
+end
+
+local function UnitButton_ResetRangeFade(self)
+    self:SetAlpha(1)
+
+    local model = self._rangeFadeModel
+    if model then
+        model:SetAlpha(1)
+    end
+end
+
+local function UnitButton_UpdateInRange(self)
+    if not self:IsVisible() or self.inConfigMode or not UnitButton_HasRangeFade(self) then
+        UnitButton_ResetRangeFade(self)
+        return
+    end
+
+    local model = self._rangeFadeModel
+    local inRange, checkedRange = UnitInRange(self.effectiveUnit)
+
+    -- Retail 12.1.0.68914 / d3915c78: keep UnitInRange's secret returns
+    -- opaque and compose them only through native alpha-safe operations.
+    -- Alpha animation endpoints do not accept secret values, so this is an
+    -- immediate alpha mapping rather than the legacy Lua tween.
+    self:SetAlpha(C_CurveUtil.EvaluateColorValueFromBoolean(
+        checkedRange,
+        C_CurveUtil.EvaluateColorValueFromBoolean(inRange, 1, self.oorAlpha),
+        1
+    ))
+
+    if model then
+        model:SetAlpha(C_CurveUtil.EvaluateColorValueFromBoolean(
+            checkedRange,
+            C_CurveUtil.EvaluateColorValueFromBoolean(inRange, 1, self.oorAlpha),
+            1
+        ))
+    end
+end
+
+local function UnitButton_UpdateRangeEventRegistration(self)
+    self:UnregisterEvent("UNIT_IN_RANGE_UPDATE")
+
+    if self:IsVisible() and not self.inConfigMode and UnitButton_HasRangeFade(self) then
+        self:RegisterUnitEvent("UNIT_IN_RANGE_UPDATE", self.effectiveUnit)
+    end
 end
 
 ---------------------------------------------------------------------
@@ -63,13 +124,21 @@ local function UnitButton_UpdateAll(self, force)
     if not self:IsVisible() or self.inConfigMode then return end
 
     -- states
-    UnitButton_UpdateStates(self)
+    local effectiveUnitChanged = UnitButton_UpdateStates(self)
 
     -- update indicators
     UF.UpdateIndicators(self, force)
 
-    -- range
-    UnitButton_UpdateInRange(self)
+    if effectiveUnitChanged then
+        UnitButton_UpdateRangeEventRegistration(self)
+    end
+
+    -- Range is event driven. Force updates cover connection, roster, and
+    -- target changes without putting a UnitInRange query back on the ticker.
+    if force or effectiveUnitChanged or self._rangeUpdateRequired then
+        self._rangeUpdateRequired = nil
+        UnitButton_UpdateInRange(self)
+    end
 end
 
 ---------------------------------------------------------------------
@@ -77,8 +146,13 @@ end
 ---------------------------------------------------------------------
 local function UnitButton_RegisterEvents(self)
     self:RegisterUnitEvent("UNIT_CONNECTION", self.unit)
-    self:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", self.unit)
-    self:RegisterUnitEvent("UNIT_EXITED_VEHICLE", self.unit)
+    if self.unit == "pet" then
+        self:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", self.unit, "player")
+        self:RegisterUnitEvent("UNIT_EXITED_VEHICLE", self.unit, "player")
+    else
+        self:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", self.unit)
+        self:RegisterUnitEvent("UNIT_EXITED_VEHICLE", self.unit)
+    end
     self:RegisterEvent("UNIT_FLAGS")
     self:RegisterEvent("UNIT_NAME_UPDATE")
 
@@ -97,6 +171,8 @@ local function UnitButton_RegisterEvents(self)
     if self._updateOnEvent then
         self:RegisterEvent(self._updateOnEvent)
     end
+
+    UnitButton_UpdateRangeEventRegistration(self)
 end
 
 local function UnitButton_UnregisterEvents(self)
@@ -104,13 +180,26 @@ local function UnitButton_UnregisterEvents(self)
 end
 
 local function UnitButton_RefreshUnitBinding(self)
+    UnitButton_UnregisterEvents(self)
     UnitButton_UpdateStates(self)
+    UnitButton_RegisterEvents(self)
     UnitButton_UpdateInRange(self)
     UF.OnButtonShow(self)
 end
 
-local function UnitButton_OnEvent(self, event, unit, arg)
-    if unit and (self.effectiveUnit == unit or self.unit == unit) then
+local function UnitButton_OnEvent(self, event, ...)
+    if event == "UNIT_IN_RANGE_UPDATE" then
+        -- The C-filtered registration selects this button's effective unit.
+        -- Both payloads are secret, so use the event only as a refresh wakeup.
+        UnitButton_UpdateInRange(self)
+        return
+    end
+
+    local unit = ...
+    if unit and (self.effectiveUnit == unit or self.unit == unit
+        or (self.unit == "pet" and unit == "player"
+            and (event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE")))
+    then
         if event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE" or event == "UNIT_CONNECTION"
             or event == "UNIT_FLAGS" or event == "UNIT_NAME_UPDATE"
         then
@@ -145,8 +234,6 @@ BFI.vars.units = {} -- unitid to button
 local function UnitButton_OnTick(self)
     if self._unitChangeUpdatePending then
         self._unitChangeUpdatePending = nil
-        UnitButton_UnregisterEvents(self)
-        UnitButton_RegisterEvents(self)
         UnitButton_RefreshUnitBinding(self)
     end
 
@@ -192,8 +279,6 @@ local function UnitButton_OnTick(self)
         end
     end
 
-    UnitButton_UpdateInRange(self)
-
     if self._refreshOnUpdate then
         --! for Xtarget
         UnitButton_UpdateAll(self)
@@ -218,11 +303,9 @@ local function UnitButton_OnShow(self)
     -- print(AF.WrapTextInColor(GetTime(), "darkgray"), "[OnShow]", self:GetName(), self.effectiveUnit)
     self._unitChangeUpdatePending = nil
     self._updateRequired = nil -- prevent UnitButton_UpdateAll twice. when convert party <-> raid, GROUP_ROSTER_UPDATE fired.
+    self._rangeUpdateRequired = nil
 
-    UnitButton_RegisterEvents(self)
-    UnitButton_UpdateStates(self)
-    UnitButton_UpdateInRange(self)
-    UF.OnButtonShow(self)
+    UnitButton_RefreshUnitBinding(self)
 end
 
 local function UnitButton_OnHide(self)
@@ -253,7 +336,9 @@ end
 local function UnitButton_OnUnitChanged(self)
     -- TODO: private auras indicator
 
-    UnitButton_RefreshUnitBinding(self)
+    if self:IsVisible() then
+        UnitButton_RefreshUnitBinding(self)
+    end
 end
 
 local function UnitButton_OnAttributeChanged(self, name, value)
@@ -351,6 +436,14 @@ end
 ---------------------------------------------------------------------
 BFI.vars.unitButtons = {}
 
+function UF.RefreshRangeFade(self)
+    if not self:IsVisible() then return end
+
+    UnitButton_UpdateStates(self)
+    UnitButton_UpdateRangeEventRegistration(self)
+    UnitButton_UpdateInRange(self)
+end
+
 function BFIUnitButton_OnLoad(self)
     BFI.vars.unitButtons[self:GetName()] = self
 
@@ -389,7 +482,10 @@ end
 ---------------------------------------------------------------------
 local function UpdateAllUnitButtons()
     for _, b in next, BFI.vars.unitButtons do
-        UnitButton_UpdateAll(b)
+        if b:IsVisible() then
+            b._rangeUpdateRequired = true
+            UnitButton_UpdateAll(b)
+        end
     end
 end
 AF.RegisterCallback("AF_INSTANCE_CHANGE", UpdateAllUnitButtons)

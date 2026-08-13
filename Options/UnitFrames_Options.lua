@@ -3915,24 +3915,24 @@ builder["oorAlpha"] = function(parent)
         -- AF.Fire("BFI_UpdateModule", "unitFrames", pane.t.owner, true)
         if pane.t.id == "general_single" then
             pane.t.target.oorAlpha = value
-            pane.t.target.states.wasInRange = nil
+            UF.RefreshRangeFade(pane.t.target)
         elseif pane.t.id == "general_party" then
             for i = 1, 5 do
                 local b = pane.t.target.header[i]
                 b.oorAlpha = value
-                b.states.wasInRange = nil
+                UF.RefreshRangeFade(b)
             end
         elseif pane.t.id == "general_raid" then
             for i = 1, 40 do
                 local b = pane.t.target.header[i]
                 b.oorAlpha = value
-                b.states.wasInRange = nil
+                UF.RefreshRangeFade(b)
             end
         elseif pane.t.id == "general_boss" then
             for i = 1, 8 do
                 local b = pane.t.target[i]
                 b.oorAlpha = value
-                b.states.wasInRange = nil
+                UF.RefreshRangeFade(b)
             end
         end
     end)

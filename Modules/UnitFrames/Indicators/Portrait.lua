@@ -11,13 +11,6 @@ local UnitIsConnected = UnitIsConnected
 local UnitIsVisible = UnitIsVisible
 local UnitClassBase = AF.UnitClassBase
 
-local function UpdatePortrait3DAlpha(parent, alpha)
-    local portrait = parent.indicators.portrait
-    if portrait and portrait.enabled and portrait.style == "3d" then
-        portrait.model:SetModelAlpha(alpha)
-    end
-end
-
 --! only for non-smooth health bar
 -- local function UpdatePortrait3DCutaway(self, _, unitId)
 --     local unit = self.root.effectiveUnit
@@ -56,7 +49,6 @@ local function UpdatePortrait3D(self, unit)
         model:SetModel([[Interface\Buttons\TalkToMeQuestionMark.m2]])
     end
 
-    model:SetModelAlpha(self.root:GetAlpha())
 end
 
 local function UpdatePortrait2D(self, unit)
@@ -215,13 +207,15 @@ function UF.CreatePortrait(parent, name)
     portrait:Hide()
     AF.ApplyDefaultBackdrop(portrait)
 
-    hooksecurefunc(parent, "SetAlpha", UpdatePortrait3DAlpha)
-
     -- events
     AF.AddEventHandler(portrait)
 
     -- 3d
     portrait.model = CreateFrame("PlayerModel", nil, portrait)
+    -- Range alpha can be secret. Keep the PlayerModel independent of the
+    -- parent alpha and let UnitButton feed its inherited Frame alpha sink.
+    portrait.model:SetIgnoreParentAlpha(true)
+    parent._rangeFadeModel = portrait.model
 
     -- NOTE: LIKE A SHIT!
     -- portrait.model:SetPoint("TOPLEFT", 1, -0.5)
