@@ -197,12 +197,23 @@ function CC.Compile(config)
                     virtualButton = "BFI_CC_" .. (#compiled.actions + 1)
                     runtimeAttribute = "*type-" .. virtualButton
                 end
+                local smartResurrection
+                if binding[2] == "spell"
+                    and type(CC.GetSmartResurrectionAction) == "function"
+                then
+                    smartResurrection = CC.GetSmartResurrectionAction(
+                        binding[3],
+                        config
+                    )
+                end
                 compiled.actions[#compiled.actions + 1] = {
                     sourceAttribute = typeAttribute,
                     typeAttribute = runtimeAttribute,
                     actionType = binding[2],
                     payload = binding[3],
-                    useProxy = CC.IsProxyAction(typeAttribute, binding[2]),
+                    smartResurrection = smartResurrection,
+                    useProxy = smartResurrection ~= nil
+                        or CC.IsProxyAction(typeAttribute, binding[2]),
                 }
                 if isHover then
                     local bindingKey = modifiers:upper()

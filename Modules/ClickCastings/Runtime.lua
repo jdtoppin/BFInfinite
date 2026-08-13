@@ -18,6 +18,91 @@ local ClearOverrideBindings = ClearOverrideBindings
 -- is unbound; unlike SecureUnitButton_OnClick, that delegated menu does not
 -- consume an active spell-targeting cursor before opening.
 
+-- Smart Resurrection must retain the protected frame's resolved unit rather
+-- than substituting the global mouseover token. The proxy's secure pre-click
+-- handler selects a numeric spell attribute for the current unit state, then
+-- SecureActionButtonTemplate performs the cast with its normal unit and
+-- vehicle routing. This is a restricted snippet and remains valid in combat.
+local smartResurrectionSnippet = [[
+    local payload = self:GetEffectiveAttribute(
+        "bfi-smart-payload", button
+    )
+    if payload then
+        local spell = self:GetEffectiveAttribute(
+            "bfi-smart-original", button
+        )
+        local unit = self:GetEffectiveAttribute("unit", button)
+        if unit then
+            local unitsuffix = self:GetEffectiveAttribute(
+                "unitsuffix", button
+            )
+            if unitsuffix then
+                unit = unit .. unitsuffix
+                unit = unit:gsub(
+                    "^([^%d]+)([%d]+)[pP][eE][tT]",
+                    "%1pet%2"
+                )
+                unit = unit:gsub(
+                    "^[pP][lL][aA][yY][eE][rR][pP][eE][tT]",
+                    "pet"
+                )
+            end
+
+            local noPet, hadPet = unit:gsub(
+                "[pP][eE][tT](%d)",
+                "%1"
+            )
+            if hadPet == 0 then
+                noPet, hadPet = unit:gsub(
+                    "^[pP][eE][tT]",
+                    "player"
+                )
+            end
+            local noPetNoTarget, hadTarget = noPet:gsub(
+                "[tT][aA][rR][gG][eE][tT]",
+                ""
+            )
+            if UnitHasVehicleUI(noPetNoTarget)
+                and self:GetEffectiveAttribute(
+                    "toggleForVehicle", button
+                )
+                and noPetNoTarget == noPetNoTarget
+                    :gsub("^[mM][oO][uU][sS][eE][oO][vV][eE][rR]", "")
+                    :gsub("^[fF][oO][cC][uU][sS]", "")
+                    :gsub("^[aA][rR][eE][nN][aA]%d", "")
+            then
+                if hadPet ~= 0 then
+                    unit = noPet
+                elseif hadTarget == 0
+                    or self:GetEffectiveAttribute(
+                        "allowVehicleTarget", button
+                    )
+                then
+                    unit = unit
+                        :gsub(
+                            "^[pP][lL][aA][yY][eE][rR]",
+                            "pet"
+                        )
+                        :gsub("^([%a]+)([%d]+)", "%1pet%2")
+                end
+            end
+        end
+
+        if unit and (UnitIsDead(unit) or UnitIsGhost(unit)) then
+            if SecureCmdOptionParse("[combat] true; false") == "true" then
+                spell = self:GetEffectiveAttribute(
+                    "bfi-smart-combat", button
+                )
+            else
+                spell = self:GetEffectiveAttribute(
+                    "bfi-smart-normal", button
+                )
+            end
+        end
+        self:SetAttribute(payload, spell)
+    end
+]]
+
 local manager = CreateFrame(
     "Frame",
     "BFIClickCastingSecureManager",
@@ -81,6 +166,7 @@ local function CreateProxy(frame)
     proxy:SetAttribute("useparent-unitsuffix", true)
     proxy:SetAttribute("useparent-toggleForVehicle", true)
     proxy:SetAttribute("useparent-allowVehicleTarget", true)
+    manager:WrapScript(proxy, "OnClick", smartResurrectionSnippet)
     frame._bfiClickCastingProxy = proxy
     return proxy
 end
@@ -123,7 +209,47 @@ local function ApplyAction(frame, proxy, action)
         local clickButtonAttribute = CC.GetClickButtonAttribute(typeAttribute)
         SetOwnedAttribute(frame, typeAttribute, "click")
         SetOwnedAttribute(frame, clickButtonAttribute, proxy)
-        SetOwnedAttribute(proxy, typeAttribute, actionType)
+        if action.smartResurrection then
+            local spellAttribute = CC.GetAttributeForPayload(
+                typeAttribute,
+                "spell"
+            )
+            local function SmartAttribute(kind)
+                return typeAttribute:gsub(
+                    "type",
+                    "bfi-smart-" .. kind,
+                    1
+                )
+            end
+            SetOwnedAttribute(proxy, typeAttribute, "spell")
+            SetOwnedAttribute(
+                proxy,
+                spellAttribute,
+                action.smartResurrection.original
+            )
+            SetOwnedAttribute(
+                proxy,
+                SmartAttribute("payload"),
+                spellAttribute
+            )
+            SetOwnedAttribute(
+                proxy,
+                SmartAttribute("original"),
+                action.smartResurrection.original
+            )
+            SetOwnedAttribute(
+                proxy,
+                SmartAttribute("normal"),
+                action.smartResurrection.normal
+            )
+            SetOwnedAttribute(
+                proxy,
+                SmartAttribute("combat"),
+                action.smartResurrection.combat
+            )
+        else
+            SetOwnedAttribute(proxy, typeAttribute, actionType)
+        end
         return
     end
 
@@ -328,3 +454,15 @@ AF.RegisterCallback("BFI_UpdateModule", function(_, module)
     if module and module ~= "clickCastings" then return end
     UpdateAll()
 end)
+
+-- A spec swap can resolve to the same BFI profile table, in which case Core
+-- intentionally skips BFI_UpdateProfile/BFI_UpdateModule. Smart Resurrection
+-- still has to derive a new spell for the active specialization.
+AF.RegisterCallback("AF_PLAYER_SPEC_UPDATE", function()
+    UpdateAll()
+end, "low")
+
+local function SpellAvailabilityChanged()
+    UpdateAll()
+end
+CC:RegisterEvent("SPELLS_CHANGED", SpellAvailabilityChanged)

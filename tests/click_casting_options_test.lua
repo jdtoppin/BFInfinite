@@ -136,6 +136,10 @@ local function newWidget(kind, parent)
         self.text = text
     end
 
+    function widget:SetTooltip(...)
+        self.tooltip = {...}
+    end
+
     function widget:SetToOkayCancel()
         self.okayCancel = true
     end
@@ -169,7 +173,10 @@ local function createHarness()
         __index = function(_, key) return key end,
     })
     local AF = {
-        player = {class = "PRIEST"},
+        player = {
+            class = "PRIEST",
+            localizedSpec = "Discipline",
+        },
     }
     local CC = {}
     local root = newWidget("root")
@@ -200,13 +207,18 @@ local function createHarness()
     function AF.CreateCheckButton(parent, text)
         local checkButton = newWidget("checkButton", parent)
         checkButton.text = text
-        state.enabledCheckButton = checkButton
+        if text == L["Enable BFI Click Casting"] then
+            state.enabledCheckButton = checkButton
+        elseif text == L["Prefer Mass Resurrection"] then
+            state.preferMassResurrection = checkButton
+        end
         return checkButton
     end
 
     function AF.CreateDropdown(parent, width)
         local dropdown = newWidget("dropdown", parent)
         dropdown.width = width
+        if width == 180 then state.smartResurrection = dropdown end
         return dropdown
     end
 
@@ -268,6 +280,15 @@ local function createHarness()
         return class
     end
 
+    function AF.CloseCascadingMenu()
+        state.cascadingMenuCloseCalls =
+            (state.cascadingMenuCloseCalls or 0) + 1
+    end
+
+    function AF.ShowCascadingMenu(owner, items)
+        state.cascadingMenu = {owner = owner, items = items}
+    end
+
     function AF.RegisterCallback(event, callback)
         state.callbacks[event] = callback
     end
@@ -276,12 +297,18 @@ local function createHarness()
         widget.points[#widget.points + 1] = {...}
     end
 
+    function AF.SetTooltip(widget, ...)
+        widget.tooltip = {...}
+    end
+
     function AF.WrapTextInColor(text)
         return text
     end
 
     local config = {
         enabled = true,
+        smartResurrection = "disabled",
+        preferMassResurrection = true,
         bindings = {
             {"type1", "spell", 2061},
             {"type2", "macro", "NamedMacro"},
@@ -293,6 +320,26 @@ local function createHarness()
     CC.activeConfig = config
     function CC.GetNativeConflicts()
         return state.nativeConflicts or {}
+    end
+    function CC.GetSuggestedSpells()
+        return {
+            {
+                spellID = 2061,
+                name = "Flash Heal",
+                iconID = 135907,
+                category = "class",
+            },
+            {
+                spellID = 47540,
+                name = "Penance",
+                iconID = 237545,
+                category = "spec",
+            },
+        }
+    end
+    function CC.GetSmartResurrectionCapabilities()
+        return state.resurrectionCapabilities
+            or {normal = true, mass = true, combat = false}
     end
 
     local BFI = {
@@ -367,12 +414,90 @@ local function compiledContains(compiled, sourceAttribute)
 end
 
 local harness = createHarness()
+harness:FireCallback("BFI_UpdateProfile")
+harness:FireCallback("AF_PLAYER_SPEC_UPDATE")
+harness:FireCallback("AF_COMBAT_ENTER")
+assertEqual(harness.cascadingMenuCloseCalls or 0, 0,
+    "profile, spec, and combat callbacks leave unrelated menus alone before panel creation")
+
 harness:FireCallback("BFI_ShowOptionsPanel", "clickCastings")
 assertEqual(#harness.combatProtected, 1,
     "settings panel receives combat protection")
 assertEqual(#harness.list.widgets, 5, "initial binding rows")
+assertEqual(#harness.list.points, 2,
+    "binding list uses one top-left and one bottom-right anchor")
+assertEqual(harness.list.points[1][1], "TOPLEFT",
+    "binding list top follows the binding header")
+assertEqual(harness.list.points[2][1], "BOTTOMRIGHT",
+    "binding list bottom and right share the panel anchor")
 
 local firstRow = harness.list.widgets[1]
+firstRow.editPayload.onClick()
+assertEqual(harness.cascadingMenu.owner, firstRow.editPayload,
+    "spell picker anchors to the row action button")
+assertEqual(harness.cascadingMenu.items[1].text, "Class Spells",
+    "spell picker groups class spells")
+assertEqual(harness.cascadingMenu.items[2].text, "Specialization Spells",
+    "spell picker groups current-spec spells")
+harness.cascadingMenu.items[2].children[1].callback()
+assertEqual(harness.config.bindings[1][3], 47540,
+    "suggested spell selection persists its spell ID")
+
+local closeCalls = harness.cascadingMenuCloseCalls or 0
+harness:FireCallback("AF_PLAYER_SPEC_UPDATE")
+assertEqual(harness.cascadingMenuCloseCalls, closeCalls + 1,
+    "specialization changes close the visible panel's stale picker")
+closeCalls = harness.cascadingMenuCloseCalls
+harness:FireCallback("AF_COMBAT_ENTER")
+assertEqual(harness.cascadingMenuCloseCalls, closeCalls + 1,
+    "combat entry closes the picker outside the panel combat mask")
+
+harness.resurrectionCapabilities = {
+    normal = false,
+    mass = false,
+    combat = false,
+}
+harness:FireCallback("AF_PLAYER_SPEC_UPDATE")
+assertTrue(not harness.smartResurrection.enabled,
+    "classes without resurrection disable Smart Resurrection")
+assertTrue(harness.smartResurrection.items[2].disabled,
+    "classes without normal resurrection disable the normal mode")
+assertTrue(harness.smartResurrection.items[3].disabled,
+    "classes without any resurrection disable the combined mode")
+assertTrue(not harness.preferMassResurrection.enabled,
+    "classes without mass resurrection disable the mass preference")
+
+harness.resurrectionCapabilities = {
+    normal = false,
+    mass = false,
+    combat = true,
+}
+harness:FireCallback("AF_PLAYER_SPEC_UPDATE")
+assertTrue(harness.smartResurrection.enabled,
+    "combat-only resurrection classes retain Smart Resurrection")
+assertTrue(harness.smartResurrection.items[2].disabled,
+    "combat-only resurrection classes cannot select normal-only mode")
+assertTrue(not harness.smartResurrection.items[3].disabled,
+    "combat-only resurrection classes can select combined mode")
+assertTrue(not harness.preferMassResurrection.enabled,
+    "combat-only resurrection classes keep mass preference disabled")
+
+harness.resurrectionCapabilities = {
+    normal = true,
+    mass = false,
+    combat = false,
+}
+harness.config.smartResurrection = "normal"
+harness:FireCallback("AF_PLAYER_SPEC_UPDATE")
+assertTrue(harness.smartResurrection.enabled,
+    "normal resurrection classes retain Smart Resurrection")
+assertTrue(not harness.preferMassResurrection.enabled,
+    "specs without mass resurrection disable the mass preference")
+
+harness.resurrectionCapabilities = nil
+harness.config.smartResurrection = "disabled"
+harness:FireCallback("AF_PLAYER_SPEC_UPDATE")
+
 firstRow.action.onSelect("custom")
 assertEqual(harness.config.bindings[1][2], "custom",
     "action switch updates action type")
@@ -381,6 +506,15 @@ assertEqual(harness.config.bindings[1][3], "",
 firstRow.action.onSelect("target")
 assertEqual(harness.config.bindings[1][3], nil,
     "payload-free action clears the custom payload slot")
+
+harness.smartResurrection.onSelect("normal+combat")
+assertEqual(harness.config.smartResurrection, "normal+combat",
+    "smart resurrection mode is stored in the active class config")
+assertTrue(harness.preferMassResurrection.enabled,
+    "mass resurrection preference enables with smart resurrection")
+harness.preferMassResurrection.onCheck(false)
+assertEqual(harness.config.preferMassResurrection, false,
+    "mass resurrection preference is profile-owned")
 
 local macroRow = harness.list.widgets[2]
 macroRow.payload.onEnterPressed("7")
@@ -434,7 +568,10 @@ local newConfig = {
     },
 }
 harness.CC.activeConfig = newConfig
+closeCalls = harness.cascadingMenuCloseCalls
 harness:FireCallback("BFI_UpdateProfile")
+assertEqual(harness.cascadingMenuCloseCalls, closeCalls + 1,
+    "profile changes close the visible panel's stale picker")
 dialog.onConfirm()
 assertEqual(newConfig.bindings[1][3], "/say new profile",
     "stale modal cannot mutate the newly active profile")
@@ -461,5 +598,13 @@ for index, row in ipairs(harness.list.widgets) do
     assertTrue(row.delete.enabled,
         "disabled module keeps deletion editable " .. index)
 end
+
+harness:FireCallback("BFI_ShowOptionsPanel", "profiles")
+closeCalls = harness.cascadingMenuCloseCalls
+harness:FireCallback("BFI_UpdateProfile")
+harness:FireCallback("AF_PLAYER_SPEC_UPDATE")
+harness:FireCallback("AF_COMBAT_ENTER")
+assertEqual(harness.cascadingMenuCloseCalls, closeCalls,
+    "hidden Click Casting panel does not close unrelated cascading menus")
 
 print("click_casting_options_test: ok")

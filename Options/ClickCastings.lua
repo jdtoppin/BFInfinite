@@ -9,6 +9,8 @@ local AF = _G.AbstractFramework
 local panel
 local list
 local enabled
+local smartResurrection
+local preferMassResurrection
 local conflictText
 local rows = {}
 local macroEditor
@@ -121,6 +123,68 @@ local function SetPayloadFromCursor(row)
     list.Load()
     RefreshRuntime()
     UpdateConflictNotice()
+end
+
+local spellCategoryLabels = {
+    class = "Class Spells",
+    spec = "Specialization Spells",
+    pet = "Pet Spells",
+    talent = "Talents",
+    hero = "Hero Talents",
+    pvp = "PvP Talents",
+    resurrection = "Resurrection",
+}
+
+local function SetSuggestedSpell(binding, spellID)
+    local isActive
+    for _, current in ipairs(GetConfig().bindings) do
+        if current == binding then isActive = true break end
+    end
+    if not isActive then return end
+
+    binding[2], binding[3] = "spell", spellID
+    list.Load()
+    RefreshRuntime()
+    UpdateConflictNotice()
+end
+
+local function ShowSpellPicker(row)
+    local binding = GetConfig().bindings[row.index]
+    if not binding or binding[2] ~= "spell" then return end
+
+    local groups = {}
+    local groupOrder = {}
+    for _, spell in ipairs(CC.GetSuggestedSpells()) do
+        local category = spell.category or "talent"
+        if not groups[category] then
+            groups[category] = {}
+            groupOrder[#groupOrder + 1] = category
+        end
+        groups[category][#groups[category] + 1] = {
+            text = spell.name,
+            icon = spell.iconID,
+            value = spell.spellID,
+            callback = function()
+                SetSuggestedSpell(binding, spell.spellID)
+            end,
+        }
+    end
+
+    local items = {}
+    for _, category in ipairs(groupOrder) do
+        items[#items + 1] = {
+            text = L[spellCategoryLabels[category] or "Talents"],
+            notClickable = true,
+            children = groups[category],
+        }
+    end
+    if #items == 0 then
+        items[1] = {
+            text = L["No suggested spells available"],
+            disabled = true,
+        }
+    end
+    AF.ShowCascadingMenu(row.editPayload, items, 15)
 end
 
 local function ShowMacroEditor(row)
@@ -259,7 +323,15 @@ local function CreateRow(index)
     )
     row.editPayload = editPayload
     AF.SetPoint(editPayload, "LEFT", payload, "RIGHT", 7, 0)
-    editPayload:SetOnClick(function() ShowMacroEditor(row) end)
+    editPayload:SetOnClick(function()
+        local binding = GetConfig().bindings[row.index]
+        if not binding then return end
+        if binding[2] == "custom" then
+            ShowMacroEditor(row)
+        elseif binding[2] == "spell" then
+            ShowSpellPicker(row)
+        end
+    end)
 
     local up = AF.CreateButton(row, "↑", "BFI_hover", 22, 22)
     row.up = up
@@ -293,7 +365,12 @@ local function LoadRow(row, index, binding)
     row.action:SetSelectedValue(binding[2])
 
     local hasPayload = payloadActions[binding[2]]
-    row.editPayload:SetEnabled(binding[2] == "custom")
+    row.editPayload:SetEnabled(
+        binding[2] == "custom" or binding[2] == "spell"
+    )
+    row.editPayload:SetText(
+        binding[2] == "spell" and L["Pick"] or L["Edit"]
+    )
     row.payload:SetEnabled(hasPayload)
     row.payload:SetNotUserChangable(binding[2] == "custom")
     if hasPayload then
@@ -359,8 +436,53 @@ local function CreatePanel()
         UpdateConflictNotice()
     end)
 
+    smartResurrection = AF.CreateDropdown(panel, 180)
+    AF.SetPoint(
+        smartResurrection,
+        "TOPLEFT",
+        description,
+        "BOTTOMLEFT",
+        250,
+        -15
+    )
+    smartResurrection:SetLabel(L["Smart Resurrection"], "gray")
+    smartResurrection:SetOnSelect(function(value)
+        GetConfig().smartResurrection = value
+        list.Load()
+        RefreshRuntime()
+    end)
+    smartResurrection:SetTooltip(
+        L["Smart Resurrection"],
+        L["On a dead unit, ordinary Spell bindings cast an available resurrection instead. The original spell still casts on living units."]
+    )
+
+    preferMassResurrection = AF.CreateCheckButton(
+        panel,
+        L["Prefer Mass Resurrection"]
+    )
+    AF.SetPoint(
+        preferMassResurrection,
+        "LEFT",
+        smartResurrection,
+        "RIGHT",
+        15,
+        0
+    )
+    preferMassResurrection:SetOnCheck(function(checked)
+        GetConfig().preferMassResurrection = checked
+        RefreshRuntime()
+    end)
+    AF.SetTooltip(
+        preferMassResurrection,
+        "TOPLEFT",
+        0,
+        2,
+        L["Prefer Mass Resurrection"],
+        L["When the active specialization knows both versions, use its mass resurrection on dead units. Otherwise use the normal single-target spell."]
+    )
+
     local add = AF.CreateButton(panel, L["Add Binding"], "BFI_hover", 110, 22)
-    AF.SetPoint(add, "TOPRIGHT", description, "BOTTOMRIGHT", 0, -12)
+    AF.SetPoint(add, "TOPRIGHT", description, "BOTTOMRIGHT", 0, -45)
     add:SetOnClick(function()
         GetConfig().bindings[#GetConfig().bindings + 1] = {
             "notBound",
@@ -386,7 +508,7 @@ local function CreatePanel()
     end)
 
     local bindingHeader = AF.CreateFontString(panel, L["Binding"], "gray")
-    AF.SetPoint(bindingHeader, "TOPLEFT", enabled, "BOTTOMLEFT", 30, -17)
+    AF.SetPoint(bindingHeader, "TOPLEFT", enabled, "BOTTOMLEFT", 30, -45)
     local actionHeader = AF.CreateFontString(panel, L["Action"], "gray")
     AF.SetPoint(actionHeader, "LEFT", bindingHeader, 152, 0)
     local valueHeader = AF.CreateFontString(panel, L["Value"], "gray")
@@ -394,12 +516,39 @@ local function CreatePanel()
 
     list = AF.CreateScrollList(panel, nil, 3, 3, 13, 26, 4)
     AF.SetPoint(list, "TOPLEFT", bindingHeader, "BOTTOMLEFT", -30, -5)
-    AF.SetPoint(list, "TOPRIGHT", -15, -122)
-    AF.SetPoint(list, "BOTTOM", 0, 55)
+    AF.SetPoint(list, "BOTTOMRIGHT", -15, 55)
 
     function list.Load()
         local config = GetConfig()
+        local capabilities = type(
+            CC.GetSmartResurrectionCapabilities
+        ) == "function"
+            and CC.GetSmartResurrectionCapabilities()
+            or {normal = true, mass = true, combat = true}
         enabled:SetChecked(config.enabled)
+        smartResurrection:SetItems({
+            {text = L["Disabled"], value = "disabled"},
+            {
+                text = L["Normal Resurrection"],
+                value = "normal",
+                disabled = not capabilities.normal,
+            },
+            {
+                text = L["Normal + Combat Resurrection"],
+                value = "normal+combat",
+                disabled = not capabilities.normal
+                    and not capabilities.combat,
+            },
+        })
+        smartResurrection:SetEnabled(
+            capabilities.normal or capabilities.combat
+        )
+        smartResurrection:SetSelectedValue(config.smartResurrection)
+        preferMassResurrection:SetChecked(config.preferMassResurrection)
+        preferMassResurrection:SetEnabled(
+            config.smartResurrection ~= "disabled"
+                and capabilities.mass
+        )
         local widgets = {}
         for index, binding in ipairs(config.bindings) do
             local row = rows[index] or CreateRow(index)
@@ -417,6 +566,7 @@ local function CreatePanel()
             ])
             row.editPayload:SetEnabled(
                 config.bindings[row.index][2] == "custom"
+                or config.bindings[row.index][2] == "spell"
             )
             row.up:SetEnabled(row.index > 1)
             row.down:SetEnabled(
@@ -434,15 +584,17 @@ local function CreatePanel()
 
     panel:SetOnHide(function()
         for _, row in ipairs(rows) do row.capture:CancelCapture() end
+        AF.CloseCascadingMenu()
     end)
 end
 
 local function LoadPanel()
     panel.profile:SetText(
-        L["Profile: %s  •  Class: %s"]:format(
+        L["Profile: %s  •  Class: %s  •  Spec: %s"]:format(
             BFI.vars.profileName == "default"
                 and L["Default"] or BFI.vars.profileName,
-            AF.GetLocalizedClassName(AF.player.class)
+            AF.GetLocalizedClassName(AF.player.class),
+            AF.player.localizedSpec or L["Unknown"]
         )
     )
     list.Load()
@@ -454,8 +606,22 @@ AF.RegisterCallback("BFI_RefreshOptions", function(_, which)
 end)
 
 AF.RegisterCallback("BFI_UpdateProfile", function()
-    if panel and panel:IsShown() then LoadPanel() end
+    if panel and panel:IsShown() then
+        AF.CloseCascadingMenu()
+        LoadPanel()
+    end
 end, "low")
+
+AF.RegisterCallback("AF_PLAYER_SPEC_UPDATE", function()
+    if panel and panel:IsShown() then
+        AF.CloseCascadingMenu()
+        LoadPanel()
+    end
+end, "low")
+
+AF.RegisterCallback("AF_COMBAT_ENTER", function()
+    if panel and panel:IsShown() then AF.CloseCascadingMenu() end
+end)
 
 AF.RegisterCallback("BFI_ShowOptionsPanel", function(_, id)
     if id == "clickCastings" then

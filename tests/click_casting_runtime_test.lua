@@ -29,7 +29,18 @@ local function newFrame(name, parent, template)
 end
 
 local callbacks = {}
-local AF = {}
+local AF = {
+    player = {class = "DRUID", specID = 105},
+}
+function AF.GetSpellInfo(spellID)
+    local names = {
+        [2061] = "Flash Heal",
+        [50769] = "Revive",
+        [212040] = "Revitalize",
+        [20484] = "Rebirth",
+    }
+    return names[spellID] or "Spell " .. tostring(spellID), spellID
+end
 function AF.RegisterCallback(event, callback, priority)
     callbacks[event] = callbacks[event] or {}
     callbacks[event][#callbacks[event] + 1] = {
@@ -58,6 +69,9 @@ local environment = setmetatable({
         overrideClears = overrideClears + 1
         frame.overrideBindingsCleared = true
     end,
+    C_SpellBook = {
+        IsSpellKnownOrInSpellBook = function() return true end,
+    },
     wipe = function(value)
         for key in pairs(value) do value[key] = nil end
     end,
@@ -78,6 +92,8 @@ function CC:UnregisterEvent(event, callback)
 end
 
 local unit = newFrame("BFITestUnit")
+unit:SetAttribute("unit", "party1")
+unit:SetAttribute("toggleForVehicle", true)
 unit:SetAttribute("type1", "target")
 unit:SetAttribute("type2", "togglemenu")
 local BFI = {
@@ -85,6 +101,9 @@ local BFI = {
     vars = {unitButtons = {BFITestUnit = unit}},
 }
 
+local catalog = assert(loadfile("Modules/ClickCastings/SpellCatalog.lua"))
+setfenv(catalog, environment)
+catalog("BFInfinite", BFI)
 local codec = assert(loadfile("Modules/ClickCastings/BindingCodec.lua"))
 setfenv(codec, environment)
 codec("BFInfinite", BFI)
@@ -125,12 +144,131 @@ assert(unit.attributes._onmousedown:find("self:Run", 1, true),
     "secure mouse-down refresh is installed")
 assertEqual(overrideClears, 1, "refresh clears old hover overrides")
 
+CC.activeConfig = {
+    enabled = true,
+    smartResurrection = "normal+combat",
+    preferMassResurrection = true,
+    bindings = {
+        {"alt-type1", "spell", 2061},
+        {"type-shiftR", "spell", 2061},
+    },
+}
+CC.Refresh()
+assertEqual(unit.attributes["alt-type1"], "click",
+    "smart resurrection delegates through the secure unit proxy")
+assertEqual(proxy.attributes["alt-type1"], "spell",
+    "smart proxy retains numeric secure spell execution")
+assertEqual(proxy.attributes["alt-spell1"], 2061,
+    "smart proxy starts with the original numeric spell ID")
+assertEqual(proxy.attributes["alt-bfi-smart-normal1"], 212040,
+    "smart proxy stores the current specialization's mass resurrection")
+assertEqual(proxy.attributes["alt-bfi-smart-combat1"], 20484,
+    "smart proxy stores the combat resurrection")
+assertEqual(
+    proxy.attributes["*bfi-smart-payload-BFI_CC_2"],
+    "*spell-BFI_CC_2",
+    "hover keyboard actions receive wildcard smart metadata"
+)
+
+local modifier = "alt-"
+function proxy:GetEffectiveAttribute(name, button)
+    local suffix = button == "LeftButton" and "1"
+        or button == "RightButton" and "2"
+        or button == "MiddleButton" and "3"
+        or "-" .. tostring(button)
+    local function Lookup(frame)
+        return frame.attributes[modifier .. name .. suffix]
+            or frame.attributes["*" .. name .. suffix]
+            or frame.attributes[modifier .. name .. "*"]
+            or frame.attributes["*" .. name .. "*"]
+            or frame.attributes[name]
+    end
+    local value = Lookup(self)
+    if value == nil
+        and (self.attributes["useparent-" .. name]
+            or self.attributes["useparent*"])
+    then
+        value = Lookup(self.parent)
+    end
+    return value
+end
+
+local dead
+local ghost
+local combat
+local vehicle
+local checkedUnit
+local smartEnvironment = setmetatable({
+    SecureCmdOptionParse = function()
+        return combat and "true" or "false"
+    end,
+    UnitHasVehicleUI = function() return vehicle and true or false end,
+    UnitIsDead = function(unitToken)
+        checkedUnit = unitToken
+        return dead and true or false
+    end,
+    UnitIsGhost = function() return ghost and true or false end,
+}, {__index = _G})
+local smartChunk = assert(loadstring(
+    "return function(self, button, down)\n"
+        .. proxy.wrappedScript[2]
+        .. "\nend"
+))
+setfenv(smartChunk, smartEnvironment)
+local runSmartPreClick = smartChunk()
+
+runSmartPreClick(proxy, "LeftButton", false)
+assertEqual(proxy.attributes["alt-spell1"], 2061,
+    "living unit keeps the original numeric spell")
+ghost = true
+runSmartPreClick(proxy, "LeftButton", false)
+assertEqual(proxy.attributes["alt-spell1"], 212040,
+    "ghost unit out of combat selects normal resurrection")
+ghost = false
+dead = true
+runSmartPreClick(proxy, "LeftButton", false)
+assertEqual(proxy.attributes["alt-spell1"], 212040,
+    "dead unit out of combat selects normal resurrection")
+combat = true
+runSmartPreClick(proxy, "LeftButton", false)
+assertEqual(proxy.attributes["alt-spell1"], 20484,
+    "dead unit in combat selects combat resurrection")
+proxy.attributes["alt-bfi-smart-combat1"] = nil
+runSmartPreClick(proxy, "LeftButton", false)
+assertEqual(proxy.attributes["alt-spell1"], nil,
+    "missing resurrection produces no protected spell action")
+proxy.attributes["alt-bfi-smart-combat1"] = 20484
+
+dead, combat, vehicle = false, false, true
+runSmartPreClick(proxy, "LeftButton", false)
+assertEqual(checkedUnit, "partypet1",
+    "smart state checks use inherited vehicle-adjusted unit routing")
+vehicle = false
+unit:SetAttribute("unit", "raid1")
+unit:SetAttribute("unitsuffix", "pet")
+runSmartPreClick(proxy, "LeftButton", false)
+assertEqual(checkedUnit, "raidpet1",
+    "smart state checks use inherited unit suffix routing")
+unit:SetAttribute("unit", "party1")
+unit:SetAttribute("unitsuffix", nil)
+
+AF.player.specID = 104
+for _, registered in ipairs(callbacks.AF_PLAYER_SPEC_UPDATE) do
+    registered.callback(nil, 104, 105)
+end
+assertEqual(proxy.attributes["alt-bfi-smart-normal1"], 50769,
+    "same-profile specialization updates rebuild derived resurrection")
+assertEqual(proxy.attributes["alt-spell1"], 2061,
+    "profile refresh restores the living-unit spell payload")
+
 CC.activeConfig.bindings = {{"type2", "focus"}}
 CC.Refresh()
 assertEqual(unit.attributes["alt-type1"], nil,
     "old type attribute cleared from ledger")
 assertEqual(unit.attributes["alt-spell1"], nil,
     "old payload attribute cleared from ledger")
+assertEqual(proxy.attributes["alt-bfi-smart-normal1"], nil,
+    "old smart resurrection metadata cleared from proxy ledger")
 assertEqual(proxy.attributes["*type-BFI_CC_3"], nil,
     "old proxy action cleared from ledger")
 assertEqual(unit.attributes.type2, "focus", "replacement action applied")

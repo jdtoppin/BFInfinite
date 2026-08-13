@@ -7,6 +7,8 @@ local AF = _G.AbstractFramework
 
 local classDefaults = {
     enabled = true,
+    smartResurrection = "disabled",
+    preferMassResurrection = true,
     bindings = {
         {"type1", "target"},
         {"type2", "togglemenu"},
@@ -14,7 +16,7 @@ local classDefaults = {
 }
 
 local defaults = {
-    schemaVersion = 1,
+    schemaVersion = 2,
     classes = {},
 }
 
@@ -69,6 +71,15 @@ local function NormalizeClassConfig(config)
     if type(config.enabled) ~= "boolean" then
         config.enabled = classDefaults.enabled
     end
+    if config.smartResurrection ~= "disabled"
+        and config.smartResurrection ~= "normal"
+        and config.smartResurrection ~= "normal+combat"
+    then
+        config.smartResurrection = classDefaults.smartResurrection
+    end
+    if type(config.preferMassResurrection) ~= "boolean" then
+        config.preferMassResurrection = classDefaults.preferMassResurrection
+    end
 
     if config.bindings == nil then
         config.bindings = AF.Copy(classDefaults.bindings)
@@ -92,9 +103,7 @@ end
 
 function CC.NormalizeConfig(config)
     if type(config) ~= "table" then config = AF.Copy(defaults) end
-    if type(config.schemaVersion) ~= "number" then
-        config.schemaVersion = defaults.schemaVersion
-    end
+    config.schemaVersion = defaults.schemaVersion
     if type(config.classes) ~= "table" then config.classes = {} end
 
     for class, classConfig in pairs(config.classes) do

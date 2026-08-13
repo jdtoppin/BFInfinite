@@ -55,6 +55,10 @@ assertContains(profiles,
     "module-copy UI includes Click Casting")
 assertContains(profiles, 'if module == "clickCastings" then',
     "ordered bindings use replacement copy semantics")
+assertContains(profiles, "wipe(BFIProfile[to][module])",
+    "Click Casting module copy clears the destination class map")
+assertContains(profiles, "AF.Copy(BFIProfile[from][module])",
+    "Click Casting module copy clones the full schema-v2 class map")
 assertContains(profiles, "F.ReviseProfile(data.profile, true)",
     "imported profile normalizes immediately")
 

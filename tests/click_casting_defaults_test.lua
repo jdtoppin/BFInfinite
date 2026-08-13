@@ -57,15 +57,22 @@ setfenv(chunk, environment)
 chunk("BFInfinite", BFI)
 
 local normalized = CC.NormalizeConfig(nil)
-assertEqual(normalized.schemaVersion, 1, "schema version")
+assertEqual(normalized.schemaVersion, 2, "schema version")
 assertEqual(#normalized.classes.PRIEST.bindings, 2,
     "current class receives baseline bindings")
+assertEqual(normalized.classes.PRIEST.smartResurrection, "disabled",
+    "smart resurrection defaults disabled")
+assertEqual(normalized.classes.PRIEST.preferMassResurrection, true,
+    "mass resurrection preference defaults on for Cell parity")
 
 normalized = CC.NormalizeConfig({
+    schemaVersion = 1,
     classes = {
         PRIEST = {enabled = true, bindings = {}},
         DRUID = {
             enabled = true,
+            smartResurrection = "invalid",
+            preferMassResurrection = "yes",
             bindings = {
                 {"garbage-type1", "spell", 8936},
                 {"type-META", "spell", 8936},
@@ -76,10 +83,20 @@ normalized = CC.NormalizeConfig({
         },
     },
 })
+assertEqual(normalized.schemaVersion, 2,
+    "schema-v1 profile migrates to schema v2")
 assertEqual(#normalized.classes.PRIEST.bindings, 0,
     "intentional empty binding list is atomic")
+assertEqual(normalized.classes.PRIEST.smartResurrection, "disabled",
+    "schema-v1 class gains the Smart Resurrection default")
+assertEqual(normalized.classes.PRIEST.preferMassResurrection, true,
+    "schema-v1 class gains the mass resurrection preference")
 assertEqual(#normalized.classes.DRUID.bindings, 1,
     "other class bindings reject malformed and duplicate chords")
+assertEqual(normalized.classes.DRUID.smartResurrection, "disabled",
+    "invalid smart resurrection mode is normalized")
+assertEqual(normalized.classes.DRUID.preferMassResurrection, true,
+    "invalid mass preference is normalized")
 
 local profile = {clickCastings = normalized}
 callbacks.BFI_UpdateProfile(nil, profile)
@@ -88,9 +105,15 @@ assertEqual(CC.activeConfig, normalized.classes.PRIEST,
     "current class config selected inside BFI profile")
 
 local druid = normalized.classes.DRUID
+CC.activeConfig.smartResurrection = "normal+combat"
+CC.activeConfig.preferMassResurrection = false
 CC.ResetToDefaults()
 assertEqual(#CC.activeConfig.bindings, 2,
     "reset restores current class baseline")
+assertEqual(CC.activeConfig.smartResurrection, "disabled",
+    "reset restores current class smart resurrection mode")
+assertEqual(CC.activeConfig.preferMassResurrection, true,
+    "reset restores current class mass resurrection preference")
 assertEqual(normalized.classes.DRUID, druid,
     "reset leaves other class data intact")
 
