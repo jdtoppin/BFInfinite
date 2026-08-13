@@ -17,7 +17,7 @@ local REQUIRED_LEGACY_AF_VERSION = 21
 -- AF #27/r36 registers only the selected native aura duration carrier.
 local REQUIRED_CUSTOM_AF_VERSION = 36
 -- AF r42 is the current repository floor and exposes the native square
--- dispel-colour primitive needed by the dormant harmful descriptor.
+-- dispel-colour primitive needed by the explicit harmful-row opt-in.
 local REQUIRED_HARMFUL_DESCRIPTOR_AF_VERSION = 42
 local RETAIL_12_0_INTERFACE_MIN = 120000
 local RETAIL_12_1_INTERFACE_MIN = 120100
@@ -122,8 +122,8 @@ local function HasCustomAuraContainerSchema()
 end
 
 -- AF owns construction and pre-restriction button styling. This predicate
--- verifies every adapter method and schema member needed by the planned
--- upper-right containers without creating a frame as a capability probe.
+-- verifies every adapter method and schema member needed by the native 12.1
+-- aura containers without creating a frame as a capability probe.
 function BD.HasCustomAuraContainerCapability()
     local interfaceVersion = GetRetailInterfaceVersion()
     if not AF.isRetail
@@ -151,8 +151,8 @@ end
 -- eb941aad028d73ddc69e3e8ef4da709f4d3cd744) can render a native HARMFUL
 -- PublicAndPrivate group, while AF r42 can delegate square dispel colours to
 -- Blizzard. This is deliberately only a descriptor-compilation capability:
--- it does not prove that Blizzard's private renderers can be suppressed, and
--- it does not authorize a finite combined cap or select a runtime backend.
+-- explicit opt-in plus the live suppression and registered-controller gates
+-- separately authorize the finite combined row at runtime.
 function BD.HasCustomHarmfulAuraDescriptorCapability()
     local afVersion = AF.versionNum
     if type(afVersion) ~= "number"
@@ -166,6 +166,54 @@ function BD.HasCustomHarmfulAuraDescriptorCapability()
     end
     return BD.HasCustomAuraContainerCapability()
         and AF.HasNativeDispelColorTexture() == true
+end
+
+local function HasCustomHarmfulControllerContract()
+    return type(BD.GetCustomAuraContainerState) == "function"
+        and type(BD.UpdateCustomAuraContainer) == "function"
+        and type(BD.DisableCustomAuraContainer) == "function"
+end
+
+local function CustomHarmfulControllerOwnsPresentation(state)
+    return type(state) == "table"
+        and (
+            state.active == true
+            or state.pending == true
+            or state.operationPending == true
+            or state.editModeSuspended == true
+        )
+end
+
+local function HasCustomHarmfulAuraContainerCapability(state)
+    local adapterAvailable = BD.HasCustomHarmfulAuraDescriptorCapability()
+        and type(BD.CanSuppressNativeHarmfulAuras) == "function"
+        and type(BD.SetNativeHarmfulAurasSuppressed) == "function"
+    if not adapterAvailable then
+        return false
+    end
+
+    local config = BD.config and BD.config.debuffs
+    if type(config) == "table"
+        and config.customHarmfulEnabled == true
+        and HasCustomHarmfulControllerContract()
+        and CustomHarmfulControllerOwnsPresentation(state)
+    then
+        -- Desired/actual ownership must not collapse to #103 merely because
+        -- an otherwise healthy live topology preflight is transiently denied.
+        -- The controller remains responsible for restore-first fallback.
+        return true
+    end
+
+    -- A cold/inactive controller can be promoted only by a fresh complete
+    -- native preflight. In particular, combat never seeds this capability.
+    return BD.CanSuppressNativeHarmfulAuras() == true
+end
+
+function BD.HasCustomHarmfulAuraContainerCapability()
+    local state = type(BD.GetCustomAuraContainerState) == "function"
+        and BD.GetCustomAuraContainerState("debuffs")
+        or nil
+    return HasCustomHarmfulAuraContainerCapability(state)
 end
 
 local function HasRegisteredCustomAuraContainerBackend(which)
@@ -216,9 +264,18 @@ function BD.GetAuraBackend(which)
         if interfaceVersion >= RETAIL_12_2_INTERFACE_MIN then
             return nil
         elseif which == "debuffs" then
-            -- A 12.1 CustomAuraContainer always consumes public and private
-            -- harmful sources together. Keep Blizzard's harmful data path and
-            -- expose only the verified static styling adapter.
+            local config = BD.config and BD.config.debuffs
+            local state = type(BD.GetCustomAuraContainerState) == "function"
+                and BD.GetCustomAuraContainerState(which)
+                or nil
+            if type(config) == "table"
+                and config.customHarmfulEnabled == true
+                and state ~= nil
+                and HasCustomHarmfulControllerContract()
+                and HasCustomHarmfulAuraContainerCapability(state)
+            then
+                return CUSTOM_AURA_CONTAINER_BACKEND
+            end
             if HasBlizzardDebuffStyleBackend() then
                 return BLIZZARD_DEBUFF_STYLE_BACKEND
             end
@@ -600,6 +657,20 @@ local function EnableHeader(which, header, createHeader, config)
     return header
 end
 
+local function DisableCustomPane(which)
+    if type(BD.DisableCustomAuraContainer) ~= "function" then return true end
+    if type(BD.GetCustomAuraContainerState) ~= "function" then
+        return BD.DisableCustomAuraContainer(which) ~= false
+    end
+    if BD.GetCustomAuraContainerState(which) == nil then return true end
+    if BD.DisableCustomAuraContainer(which) ~= true then return false end
+    local state = BD.GetCustomAuraContainerState(which)
+    return state ~= nil
+        and state.active ~= true
+        and state.pending ~= true
+        and state.operationPending ~= true
+end
+
 local function UpdatePane(which, config, header, createHeader)
     local backend = BD.GetAuraBackend(which)
     if backend == CUSTOM_AURA_CONTAINER_BACKEND then
@@ -615,11 +686,9 @@ local function UpdatePane(which, config, header, createHeader)
         if not DisableHeader(which, header) then return header end
         BD.UpdateCustomAuraContainer(which, config)
     elseif backend == BLIZZARD_DEBUFF_STYLE_BACKEND then
-        -- Restore Blizzard's native owner before styling it. A missing Debuffs
-        -- custom controller is expected because #96 registers Buffs only.
-        if type(BD.DisableCustomAuraContainer) == "function" then
-            BD.DisableCustomAuraContainer(which)
-        end
+        -- #103 may touch Blizzard only after the custom owner has completed
+        -- its full private/public restore and reports inactive, not pending.
+        if not DisableCustomPane(which) then return header end
         if not DisableHeader(which, header) then return header end
         if BD.UpdateBlizzardDebuffStyle(config) ~= true then return header end
     elseif backend == SECURE_AURA_HEADER_BACKEND then
@@ -630,9 +699,7 @@ local function UpdatePane(which, config, header, createHeader)
                 return header
             end
         end
-        if type(BD.DisableCustomAuraContainer) == "function" then
-            BD.DisableCustomAuraContainer(which)
-        end
+        if not DisableCustomPane(which) then return header end
         if config.enabled then
             header = EnableHeader(which, header, createHeader, config)
         else
@@ -646,9 +713,7 @@ local function UpdatePane(which, config, header, createHeader)
                 return header
             end
         end
-        if type(BD.DisableCustomAuraContainer) == "function" then
-            BD.DisableCustomAuraContainer(which)
-        end
+        if not DisableCustomPane(which) then return header end
         DisableHeader(which, header)
     end
     return header

@@ -6,15 +6,13 @@ local BD = BFI.modules.BuffsDebuffs
 -- Retail 12.1.0.69273 (wow-ui-source
 -- eb941aad028d73ddc69e3e8ef4da709f4d3cd744) lets a native HARMFUL group
 -- describe ordinary and private presentation without exposing AuraData. The
--- source does not prove that hiding DebuffFrame's six XML anchors suppresses
--- separately pooled private renderers, and the public group contract cannot
--- reserve private entries inside a finite PublicAndPrivate cap. Keep this
--- compiler dormant until a future explicit opt-in accepts the cap semantics
--- and a source-proven suppression primitive exists. AF r42's
--- nativeDispelColor style remains the required presentation contract.
+-- SetUnit(nil) deregisters each of DebuffFrame's exact six private anchors;
+-- Blizzard's watcher releases and hides the pooled renderers. The finite
+-- PublicAndPrivate cap remains behind a separate, explicit saved opt-in.
 if type(BD.HasCustomHarmfulAuraDescriptorCapability) ~= "function"
     or BD.HasCustomHarmfulAuraDescriptorCapability() ~= true
     or type(BD.GetDefaults) ~= "function"
+    or type(BD.RegisterCustomAuraContainerPane) ~= "function"
 then
     return
 end
@@ -32,8 +30,6 @@ local processingPolicy = _G.CustomAuraContainerAuraProcessingPolicy
 
 local defaults = BD.GetDefaults().debuffs
 local CONSTRUCTION_SCHEMA = 1
-local ACTIVATION_BLOCKED =
-    "CUSTOM_HARMFUL_REQUIRES_OPT_IN_AND_PROVEN_SUPPRESSION"
 
 local SORT_METHODS = {
     INDEX = sortMethod.AuraInstanceIDOnly,
@@ -191,7 +187,7 @@ local function NormalizeDurationText(config)
     }
 end
 
-local function CompileDebuffsDraft(config)
+local function CompileDebuffs(config)
     if type(config) ~= "table" then config = {} end
 
     local separateOwn = tonumber(config.separateOwn)
@@ -272,11 +268,8 @@ local function CompileDebuffsDraft(config)
     }
 
     local descriptor = {
-        -- This must not project the existing Debuffs enabled flag. A future
-        -- opt-in needs its own migration and product decision before any
-        -- controller can construct or suppress a harmful replacement.
-        enabled = false,
-        activationBlocked = ACTIVATION_BLOCKED,
+        enabled = config.enabled == true
+            and config.customHarmfulEnabled == true,
         constructionKey = {
             schema = CONSTRUCTION_SCHEMA,
             buttonStyle = buttonStyle,
@@ -286,13 +279,14 @@ local function CompileDebuffsDraft(config)
             height = height,
         },
         holderRolesets = "buffs",
-        proposedHolderAnchor = {
+        holderAnchor = {
             globalName = "DebuffFrame",
             point = "TOPRIGHT",
             relativePoint = "TOPRIGHT",
             x = 0,
             y = 0,
         },
+        nativeSuppression = "harmful",
         containerPoint = {
             point = "TOPRIGHT",
             relativePoint = "TOPRIGHT",
@@ -327,9 +321,7 @@ local function CompileDebuffsDraft(config)
         },
         itemEnchantments = {},
     }
-    return descriptor, ACTIVATION_BLOCKED
+    return descriptor
 end
 
--- Deliberately no RegisterCustomAuraContainerPane call: compiling this draft
--- must create no controller, frame, native group, or suppression transition.
-BD.CompileCustomDebuffsDraftDescriptor = CompileDebuffsDraft
+BD.RegisterCustomAuraContainerPane("debuffs", CompileDebuffs)

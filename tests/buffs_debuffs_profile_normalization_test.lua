@@ -104,6 +104,10 @@ do
     assertEqual(config.buffs.separateOwn, 0, "new Buffs Separate Own default")
     assertEqual(config.debuffs.separateOwn, 0,
         "new Debuffs Separate Own default")
+    assertFalse(config.debuffs.customHarmfulEnabled,
+        "new Debuffs profile defaults replacement opt-in off")
+    assertNil(config.buffs.customHarmfulEnabled,
+        "Buffs does not acquire the harmful replacement option")
     for _, pane in ipairs({config.buffs, config.debuffs}) do
         assertNil(pane.duration.showSecondsUnit,
             "new profiles omit unsupported seconds unit")
@@ -129,6 +133,56 @@ do
             ~= config.debuffs.duration.color.percent.rgb,
         "pane percent colors are not aliased")
     assertEqual(BD.config, config, "module receives new profile config")
+end
+
+do
+    local oldEnabledProfile = {
+        buffsDebuffs = {
+            buffs = {},
+            debuffs = {enabled = true},
+        },
+    }
+    profileCallback(nil, oldEnabledProfile)
+    local debuffs = oldEnabledProfile.buffsDebuffs.debuffs
+    assertTrue(debuffs.enabled,
+        "existing Debuffs appearance enable is preserved")
+    assertFalse(debuffs.customHarmfulEnabled,
+        "existing enabled profile does not migrate into replacement")
+
+    local explicitOptIn = {
+        buffsDebuffs = {
+            buffs = {},
+            debuffs = {
+                enabled = true,
+                customHarmfulEnabled = true,
+            },
+        },
+    }
+    profileCallback(nil, explicitOptIn)
+    assertTrue(
+        explicitOptIn.buffsDebuffs.debuffs.customHarmfulEnabled,
+        "explicit replacement opt-in survives normalization"
+    )
+    profileCallback(nil, explicitOptIn)
+    assertTrue(
+        explicitOptIn.buffsDebuffs.debuffs.customHarmfulEnabled,
+        "explicit replacement opt-in survives repeated normalization"
+    )
+end
+
+for _, malformedOptIn in ipairs({"true", 1, {}, function() end}) do
+    local profile = {
+        buffsDebuffs = {
+            buffs = {},
+            debuffs = {
+                enabled = true,
+                customHarmfulEnabled = malformedOptIn,
+            },
+        },
+    }
+    profileCallback(nil, profile)
+    assertFalse(profile.buffsDebuffs.debuffs.customHarmfulEnabled,
+        "malformed replacement opt-in fails closed")
 end
 
 do
@@ -363,6 +417,8 @@ do
     assertEqual(buffs.stack.color[3], 1, "invalid color uses fallback")
     assertTrue(type(profile.buffsDebuffs.debuffs) == "table",
         "malformed Debuffs pane is rebuilt")
+    assertFalse(profile.buffsDebuffs.debuffs.customHarmfulEnabled,
+        "rebuilt Debuffs pane keeps replacement opt-in off")
 end
 
 do
@@ -517,6 +573,7 @@ do
 
     profile.buffsDebuffs.buffs.duration.showSecondsUnit = true
     profile.buffsDebuffs.debuffs.duration.extra = "remove-on-all-reset"
+    profile.buffsDebuffs.debuffs.customHarmfulEnabled = true
     BD.ResetToDefaults()
     assertNil(profile.buffsDebuffs.buffs.duration.showSecondsUnit,
         "all reset removes imported Buffs seconds-unit key")
@@ -526,6 +583,13 @@ do
         "all reset restores Debuffs Seconds default")
     assertFalse(profile.buffsDebuffs.debuffs.duration.color.percent.enabled,
         "all reset restores Debuffs Percent inactive")
+    assertFalse(profile.buffsDebuffs.debuffs.customHarmfulEnabled,
+        "all reset clears Debuffs replacement opt-in")
+
+    profile.buffsDebuffs.debuffs.customHarmfulEnabled = true
+    BD.ResetToDefaults("debuffs")
+    assertFalse(profile.buffsDebuffs.debuffs.customHarmfulEnabled,
+        "Debuffs pane reset clears replacement opt-in")
 end
 
 print("buffs/debuffs profile normalization tests passed")

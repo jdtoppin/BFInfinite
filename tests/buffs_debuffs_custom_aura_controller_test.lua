@@ -90,6 +90,10 @@ local function NewHarness()
         capability = true,
         canSuppress = true,
         combat = false,
+        harmfulCanSuppress = true,
+        harmfulSuppressSucceeds = true,
+        harmfulRestoreSucceeds = true,
+        harmfulReassertSucceeds = true,
         suppressEnableSucceeds = true,
         suppressRestoreSucceeds = true,
         timers = {},
@@ -473,6 +477,28 @@ local function NewHarness()
         if state.onSuppressRestore then state.onSuppressRestore() end
         return state.suppressRestoreSucceeds
     end
+    function BD.CanSuppressNativeHarmfulAuras()
+        record("BD.CanSuppressNativeHarmfulAuras")
+        return state.harmfulCanSuppress
+    end
+    function BD.SetNativeHarmfulAurasSuppressed(suppressed, unit)
+        record(
+            "BD.SetNativeHarmfulAurasSuppressed",
+            suppressed,
+            unit
+        )
+        if suppressed then
+            if state.onHarmfulSuppress then state.onHarmfulSuppress() end
+            return state.harmfulSuppressSucceeds
+        end
+        if state.onHarmfulRestore then state.onHarmfulRestore(unit) end
+        return state.harmfulRestoreSucceeds
+    end
+    function BD.ReassertNativeHarmfulAuraSuppression()
+        record("BD.ReassertNativeHarmfulAuraSuppression")
+        if state.onHarmfulReassert then state.onHarmfulReassert() end
+        return state.harmfulReassertSucceeds
+    end
     function BD.UpdateBlizzardDebuffStyle()
         error("#127 must not call the #103 style adapter", 2)
     end
@@ -537,6 +563,9 @@ local function NewHarness()
             if state.nativeAccessResult ~= nil then
                 return state.nativeAccessResult
             end
+            local globalResult = state.globalAccessResults
+                and state.globalAccessResults.DebuffFrame
+            if globalResult ~= nil then return globalResult end
             return true
         end
         function frame:GetScale()
@@ -704,6 +733,165 @@ local function CompileFollowingBuffs(config)
         y = 0,
     }
     return descriptor
+end
+
+local function CompileHarmful(config)
+    if config.unsupported then
+        return nil, "UNSUPPORTED_TEST_CONFIG"
+    end
+
+    local descriptor = CompileBuffs(config)
+    descriptor.holderRolesets = "buffs"
+    descriptor.holderAnchor = {
+        globalName = "DebuffFrame",
+        point = "TOPRIGHT",
+        relativePoint = "TOPRIGHT",
+        x = 0,
+        y = 0,
+    }
+    descriptor.nativeSuppression = "harmful"
+    descriptor.position = nil
+    descriptor.positionSave = nil
+    descriptor.moverText = nil
+    descriptor.itemEnchantments = {}
+    descriptor.itemEnchantmentSort = nil
+    descriptor.itemEnchantmentLayout = nil
+    descriptor.groups[1].key = "harmful"
+    descriptor.groups[1].filterString = "HARMFUL"
+    descriptor.groups[1].maxFrameCount = config.maximum or 25
+    return descriptor
+end
+
+for _, callbackOrder in ipairs({
+    {
+        name = "unit refresh before lifecycle invalidation",
+        unitFirst = true,
+    },
+    {
+        name = "lifecycle invalidation before unit refresh",
+        unitFirst = false,
+    },
+}) do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    harness.environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {enabled = true})
+
+    local unitRefresh = BD.RefreshCustomAuraContainerUnits
+    local lifecycleInvalidation
+    local callbackCount = 0
+    for callback in pairs(state.events.PLAYER_ENTERING_WORLD or {}) do
+        callbackCount = callbackCount + 1
+        if callback ~= unitRefresh then
+            lifecycleInvalidation = callback
+        end
+    end
+    assertEqual(callbackCount, 2,
+        callbackOrder.name .. " has exactly two event callbacks")
+    assertTrue(type(lifecycleInvalidation) == "function",
+        callbackOrder.name .. " finds lifecycle invalidation callback")
+
+    state.playerUnit = "vehicle"
+    local eventStart = #state.calls + 1
+    if callbackOrder.unitFirst then
+        unitRefresh("PLAYER_ENTERING_WORLD")
+        lifecycleInvalidation("PLAYER_ENTERING_WORLD")
+    else
+        lifecycleInvalidation("PLAYER_ENTERING_WORLD")
+        unitRefresh("PLAYER_ENTERING_WORLD")
+    end
+
+    local retargeted = BD.GetCustomAuraContainerState("debuffs")
+    assertEqual(retargeted.unit, "vehicle",
+        callbackOrder.name .. " retargets custom row immediately")
+    assertTrue(retargeted.active,
+        callbackOrder.name .. " keeps custom row active")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.SetCustomAuraContainerUnit",
+        eventStart
+    ), 1, callbackOrder.name .. " performs one immediate custom SetUnit")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.UpdateCustomAuraContainer",
+        eventStart
+    ), 1, callbackOrder.name .. " performs one immediate custom update")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        eventStart
+    ), 0, callbackOrder.name .. " defers the native reassert")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        eventStart
+    ), 0, callbackOrder.name .. " starts no duplicate setter transaction")
+
+    state.runTimers(0)
+    state.runTimers(0)
+    local recovered = BD.GetCustomAuraContainerState("debuffs")
+    assertEqual(recovered.unit, "vehicle",
+        callbackOrder.name .. " retains vehicle after recovery")
+    assertFalse(recovered.harmfulReassertPending,
+        callbackOrder.name .. " consumes the coalesced reassert intent")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        eventStart
+    ), 1, callbackOrder.name .. " performs exactly one deferred reassert")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        eventStart
+    ), 0, callbackOrder.name .. " never duplicates native suppression")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    harness.environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 1,
+    })
+
+    state.harmfulSuppressSucceeds = false
+    state.harmfulRestoreSucceeds = false
+    local failureStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 2,
+    })
+    local retained = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(retained.active,
+        "active revalidation failure keeps custom harmful visible")
+    assertTrue(retained.operationPending,
+        "active revalidation failure queues harmful retry ownership")
+    assertFalse(retained.nativeFollowerActive,
+        "active harmful retry never claims native follower ownership")
+    assertTrue(state.frames[1].shown and state.frames[2].shown,
+        "active revalidation failure leaves the replacement visible")
+    assertEqual(findCall(
+        state.calls,
+        "DebuffFrame.ClearAllPointsBase",
+        failureStart
+    ), nil, "active harmful failure performs no follower writes")
+
+    state.harmfulSuppressSucceeds = true
+    state.harmfulRestoreSucceeds = true
+    BD.FlushCustomAuraContainerUpdates()
+    state.runTimers(0)
+    local repaired = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(repaired.active,
+        "later harmful revalidation repair remains visible")
+    assertFalse(repaired.operationPending,
+        "later harmful revalidation repair clears retry ownership")
+    assertEqual(repaired.state, "ACTIVE",
+        "later harmful revalidation repair restores active state")
 end
 
 do
@@ -2800,6 +2988,745 @@ do
 end
 
 do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    environment.DebuffFrame = state.newDebuffFrame()
+    environment.EditModeManagerFrame.editModeActive = false
+
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    assertTrue(BD.IsCustomAuraContainerAvailable("debuffs"),
+        "full harmful controller availability")
+
+    local buildStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("debuffs", {enabled = true})
+    local active = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(active.active, "full harmful controller activates")
+    assertTrue(active.buildCompleted,
+        "full harmful construction completes before activation")
+    assertEqual(active.state, "ACTIVE", "full harmful active state")
+    assertEqual(active.unit, "player", "full harmful initial unit")
+    assertFalse(active.operationPending,
+        "full harmful activation leaves no queued operation")
+    assertEqual(state.frames[1].rolesets, "buffs",
+        "full harmful holder receives the shared roleset")
+
+    local restoreCall, restoreIndex = findCall(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        buildStart
+    )
+    assertEqual(restoreCall.args[1], false,
+        "build starts by restoring complete harmful presentation")
+    assertEqual(restoreCall.args[2], "player",
+        "build restore uses sanitized player unit")
+    local _, createIndex = findCall(
+        state.calls,
+        "AF.CreateCustomAuraContainer",
+        buildStart
+    )
+    local groupCall, groupIndex = findCall(
+        state.calls,
+        "AF.AddCustomAuraGroup",
+        buildStart
+    )
+    local _, updateIndex = findCall(
+        state.calls,
+        "AF.UpdateCustomAuraContainer",
+        buildStart
+    )
+    local suppressCall, suppressIndex = findCall(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        restoreIndex + 1
+    )
+    local _, showIndex = findCall(
+        state.calls,
+        "container1.Show",
+        buildStart
+    )
+    assertTrue(restoreIndex < createIndex,
+        "native restore precedes harmful container allocation")
+    assertTrue(createIndex < groupIndex,
+        "harmful container exists before its native group")
+    assertEqual(groupCall.args[1], "harmful", "harmful group key")
+    assertEqual(groupCall.args[2], "HARMFUL", "harmful native filter")
+    assertEqual(groupCall.args[3].maxFrameCount, 25,
+        "harmful combined finite cap")
+    assertTrue(groupIndex < updateIndex,
+        "native group is complete before first native update")
+    assertEqual(suppressCall.args[1], true,
+        "activation uses full harmful suppression")
+    assertEqual(suppressCall.args[2], nil,
+        "suppression does not pass an observed private unit")
+    assertTrue(updateIndex < suppressIndex,
+        "replacement is updated before Blizzard suppression")
+    assertTrue(suppressIndex < showIndex,
+        "Blizzard suppression completes before custom row show")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.SetNativePublicAurasSuppressed",
+        buildStart
+    ), 0, "harmful activation never uses public-only suppression")
+
+    local holderPoint = findCall(state.calls, "holder1.SetPoint", buildStart)
+    assertEqual(holderPoint.args[1], "TOPRIGHT",
+        "harmful holder point")
+    assertEqual(holderPoint.args[2], environment.DebuffFrame,
+        "harmful holder follows exact DebuffFrame root")
+    assertEqual(holderPoint.args[3], "TOPRIGHT",
+        "harmful holder relative point")
+    assertEqual(holderPoint.args[4], 0, "harmful holder X offset")
+    assertEqual(holderPoint.args[5], 0, "harmful holder Y offset")
+
+    local disableStart = #state.calls + 1
+    assertTrue(BD.DisableCustomAuraContainer("debuffs"),
+        "full harmful disable completes")
+    local disabled = BD.GetCustomAuraContainerState("debuffs")
+    assertFalse(disabled.active, "full harmful disable is inactive")
+    assertFalse(disabled.operationPending,
+        "full harmful disable leaves no pending operation")
+    local disableRestore, disableRestoreIndex = findCall(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        disableStart
+    )
+    local _, disableContainerIndex = findCall(
+        state.calls,
+        "AF.SetCustomAuraContainerEnabled",
+        disableStart
+    )
+    local _, disableHolderIndex = findCall(
+        state.calls,
+        "holder1.Hide",
+        disableStart
+    )
+    assertEqual(disableRestore.args[1], false,
+        "disable restores full native harmful owner")
+    assertEqual(disableRestore.args[2], "player",
+        "disable restores the current sanitized unit")
+    assertTrue(disableRestoreIndex < disableContainerIndex,
+        "native restore precedes custom container disable")
+    assertTrue(disableRestoreIndex < disableHolderIndex,
+        "native restore precedes custom holder hide")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    harness.environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {enabled = true})
+    local allocations = countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    )
+
+    state.harmfulRestoreSucceeds = false
+    local disableStart = #state.calls + 1
+    assertFalse(BD.DisableCustomAuraContainer("debuffs"),
+        "failed native restore rejects custom disable")
+    local retained = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(retained.active,
+        "failed restore retains the custom harmful presentation")
+    assertTrue(retained.operationPending,
+        "failed restore keeps disable queued")
+    assertEqual(findCall(
+        state.calls,
+        "AF.SetCustomAuraContainerEnabled",
+        disableStart
+    ), nil, "failed restore performs no custom disable write")
+    assertEqual(findCall(
+        state.calls,
+        "container1.Hide",
+        disableStart
+    ), nil, "failed restore performs no custom container hide")
+    assertEqual(findCall(
+        state.calls,
+        "holder1.Hide",
+        disableStart
+    ), nil, "failed restore performs no custom holder hide")
+
+    state.harmfulRestoreSucceeds = true
+    BD.FlushCustomAuraContainerUpdates()
+    state.runTimers(0)
+    local repaired = BD.GetCustomAuraContainerState("debuffs")
+    assertFalse(repaired.active,
+        "restore retry hides custom only after native recovery")
+    assertFalse(repaired.operationPending,
+        "restore retry clears pending disable")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    ), allocations, "restore retry allocates no duplicate container")
+end
+
+for _, suppressionFailure in ipairs({
+    {
+        name = "suppression failure with successful restore",
+        restoreSucceeds = true,
+        customVisible = false,
+    },
+    {
+        name = "suppression failure with failed recovery",
+        restoreSucceeds = false,
+        customVisible = false,
+    },
+}) do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    harness.environment.DebuffFrame = state.newDebuffFrame()
+    state.harmfulSuppressSucceeds = false
+    local restoreCalls = 0
+    state.onHarmfulRestore = function()
+        restoreCalls = restoreCalls + 1
+        if restoreCalls >= 2 then
+            state.harmfulRestoreSucceeds =
+                suppressionFailure.restoreSucceeds
+        end
+    end
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {enabled = true})
+
+    local result = BD.GetCustomAuraContainerState("debuffs")
+    assertEqual(result.active, suppressionFailure.customVisible,
+        suppressionFailure.name .. " visibility")
+    assertEqual(state.frames[1].shown, suppressionFailure.customVisible,
+        suppressionFailure.name .. " holder visibility")
+    assertEqual(state.frames[2].shown, suppressionFailure.customVisible,
+        suppressionFailure.name .. " container visibility")
+    assertFalse(result.operationPending,
+        suppressionFailure.name .. " has no retry ownership")
+    assertFalse(result.nativeFollowerActive,
+        suppressionFailure.name .. " has no follower ownership")
+    assertEqual(result.state, "SUPPRESSION_FAILED",
+        suppressionFailure.name .. " publishes fallback state")
+    assertEqual(result.diagnostic, "NATIVE_SUPPRESSION_FAILED",
+        suppressionFailure.name .. " publishes fallback diagnostic")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    ), 1, suppressionFailure.name .. " builds one native shell")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed"
+    ), 3, suppressionFailure.name
+        .. " performs pre-build restore, suppression, and recovery")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    environment.DebuffFrame = state.newDebuffFrame()
+    environment.EditModeManagerFrame.editModeActive = false
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 1,
+    })
+    local allocations = countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    )
+
+    local enterStart = #state.calls + 1
+    state.fireRegistry("EditMode.Enter")
+    local suspended = BD.GetCustomAuraContainerState("debuffs")
+    assertFalse(suspended.active,
+        "Edit Mode entry restores and hides custom harmful row")
+    assertTrue(suspended.editModeSuspended,
+        "Edit Mode entry records explicit suspension")
+    local enterRestore, enterRestoreIndex = findCall(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        enterStart
+    )
+    local _, enterHideIndex = findCall(
+        state.calls,
+        "container1.Hide",
+        enterStart
+    )
+    assertEqual(enterRestore.args[1], false,
+        "Edit Mode entry restores full Blizzard harmful row")
+    assertTrue(enterRestoreIndex < enterHideIndex,
+        "Edit Mode native restore precedes custom hide")
+
+    local updateStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 2,
+    })
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 3,
+    })
+    state.playerUnit = "vehicle"
+    BD.RefreshCustomAuraContainerUnits()
+    local retargetedSuspension =
+        BD.GetCustomAuraContainerState("debuffs")
+    assertEqual(retargetedSuspension.unit, "vehicle",
+        "Edit Mode suspension retargets the hidden row immediately")
+    assertFalse(retargetedSuspension.active,
+        "Edit Mode retarget keeps the custom harmful row hidden")
+    assertTrue(retargetedSuspension.editModeSuspended,
+        "Edit Mode retarget preserves suspension ownership")
+    assertTrue(BD.GetCustomAuraContainerState("debuffs").operationPending,
+        "Edit Mode retarget preserves the latest pending tuning update")
+    local retargetCall = findCall(
+        state.calls,
+        "AF.SetCustomAuraContainerUnit",
+        updateStart
+    )
+    assertEqual(retargetCall.args[1], "vehicle",
+        "hidden combined row receives the immediate vehicle unit")
+    assertEqual(findCall(
+        state.calls,
+        "AF.SetCustomAuraContainerFlowLayout",
+        updateStart
+    ), nil, "Edit Mode performs no harmful tuning writes")
+    assertEqual(findCall(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        updateStart
+    ), nil, "Edit Mode performs no harmful suppression writes")
+    assertEqual(findCall(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        updateStart
+    ), nil, "Edit Mode retarget performs no harmful reassert writes")
+
+    local exitStart = #state.calls + 1
+    state.fireRegistry("EditMode.Exit")
+    assertEqual(findCall(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        exitStart
+    ), nil, "Edit Mode exit defers harmful activation to next tick")
+    state.runTimers(0)
+    local resumed = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(resumed.active,
+        "Edit Mode exit reactivates the custom harmful row")
+    assertFalse(resumed.editModeSuspended,
+        "successful Edit Mode exit clears suspension")
+    assertFalse(resumed.operationPending,
+        "Edit Mode exit drains latest harmful update")
+    assertEqual(resumed.unit, "vehicle",
+        "Edit Mode exit preserves the immediate vehicle retarget")
+    local finalFlow
+    for index = exitStart, #state.calls do
+        if state.calls[index].name
+            == "AF.SetCustomAuraContainerFlowLayout"
+        then
+            finalFlow = state.calls[index]
+        end
+    end
+    assertEqual(finalFlow.args[1].marker, 3,
+        "Edit Mode exit applies latest-only harmful tuning")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        exitStart
+    ), 1, "Edit Mode exit performs one suppression transaction")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        exitStart
+    ), 0, "fresh Edit Mode suppression is not redundantly reasserted")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    ), allocations, "Edit Mode cycle allocates no duplicate container")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    harness.environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {enabled = true})
+    local allocations = countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    )
+
+    state.combat = true
+    state.playerUnit = "vehicle"
+    local retargetStart = #state.calls + 1
+    BD.RefreshCustomAuraContainerUnits()
+    local retargeted = BD.GetCustomAuraContainerState("debuffs")
+    assertEqual(retargeted.unit, "vehicle",
+        "harmful row retargets to vehicle immediately")
+    assertTrue(retargeted.active,
+        "vehicle retarget keeps custom presentation visible")
+    assertTrue(retargeted.operationPending,
+        "vehicle retarget queues OOC harmful reassert")
+    local unitCall = findCall(
+        state.calls,
+        "AF.SetCustomAuraContainerUnit",
+        retargetStart
+    )
+    assertEqual(unitCall.args[1], "vehicle",
+        "native combined row receives sanitized vehicle unit")
+    assertEqual(findCall(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        retargetStart
+    ), nil, "combat retarget performs no private reassert call")
+
+    state.combat = false
+    BD.FlushCustomAuraContainerUpdates()
+    state.runTimers(0)
+    local recovered = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(recovered.active,
+        "regen reassert keeps custom harmful row active")
+    assertFalse(recovered.operationPending,
+        "regen clears harmful reassert queue")
+    assertFalse(recovered.harmfulReassertPending,
+        "regen clears harmful reassert marker")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        retargetStart
+    ), 1, "regen performs one private suppression reassert")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    ), allocations, "vehicle reassert allocates no duplicate container")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    harness.environment.DebuffFrame = state.newDebuffFrame()
+    state.harmfulReassertSucceeds = false
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {enabled = true})
+    local allocations = countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    )
+
+    state.playerUnit = "vehicle"
+    BD.RefreshCustomAuraContainerUnits()
+    local failed = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(failed.active,
+        "failed private reassert retains custom presentation")
+    assertTrue(failed.operationPending,
+        "failed private reassert remains queued")
+    assertTrue(failed.harmfulReassertPending,
+        "failed private reassert exposes truthful state")
+    assertEqual(failed.diagnostic, "NATIVE_HARMFUL_REASSERT_FAILED",
+        "failed private reassert diagnostic")
+
+    state.harmfulReassertSucceeds = true
+    BD.FlushCustomAuraContainerUpdates()
+    state.runTimers(0)
+    local repaired = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(repaired.active,
+        "private reassert retry keeps the custom presentation")
+    assertFalse(repaired.operationPending,
+        "private reassert retry clears the queue")
+    assertEqual(repaired.state, "ACTIVE",
+        "private reassert retry restores active state")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    ), allocations, "private reassert retry allocates no duplicate shell")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    harness.environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {enabled = true})
+
+    state.combat = true
+    state.playerUnit = "vehicle"
+    BD.RefreshCustomAuraContainerUnits()
+    state.combat = false
+    state.harmfulReassertSucceeds = false
+    BD.FlushCustomAuraContainerUpdates()
+    state.runTimers(0)
+    local failed = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(failed.active,
+        "disable-after-reassert setup retains custom row")
+    assertTrue(failed.operationPending,
+        "disable-after-reassert setup exposes pending retry")
+    assertTrue(failed.harmfulReassertPending,
+        "disable-after-reassert setup records reassert failure")
+
+    state.harmfulRestoreSucceeds = true
+    local disableStart = #state.calls + 1
+    assertTrue(BD.DisableCustomAuraContainer("debuffs"),
+        "disable bypasses failed reassert and restores native")
+    local disabled = BD.GetCustomAuraContainerState("debuffs")
+    assertFalse(disabled.active,
+        "disable-after-reassert hides custom row")
+    assertFalse(disabled.operationPending,
+        "disable-after-reassert clears queued retry")
+    assertFalse(disabled.harmfulReassertPending,
+        "disable-after-reassert clears reassert marker")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        disableStart
+    ), 0, "disable does not repeat failed reassert")
+    local restoreCall, restoreIndex = findCall(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        disableStart
+    )
+    local _, hideIndex = findCall(
+        state.calls,
+        "container1.Hide",
+        disableStart
+    )
+    assertEqual(restoreCall.args[1], false,
+        "disable-after-reassert uses full native restore")
+    assertEqual(restoreCall.args[2], "vehicle",
+        "disable-after-reassert restores current vehicle unit")
+    assertTrue(restoreIndex < hideIndex,
+        "disable-after-reassert restores before hiding custom")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    environment.DebuffFrame = state.newDebuffFrame()
+    state.nativeAccessResult = false
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    local firstStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("debuffs", {enabled = true})
+    local denied = BD.GetCustomAuraContainerState("debuffs")
+    assertFalse(denied.active,
+        "denied harmful holder anchor never activates")
+    assertFalse(denied.buildAttempted,
+        "denied harmful holder anchor performs no native build")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer",
+        firstStart
+    ), 0, "denied harmful holder anchor allocates no container")
+    local firstRestore = findCall(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        firstStart
+    )
+    assertEqual(firstRestore.args[1], false,
+        "holder preflight keeps Blizzard restored")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        firstStart
+    ), 1, "denied holder performs no suppression write")
+
+    state.nativeAccessResult = nil
+    BD.UpdateCustomAuraContainer("debuffs", {enabled = true})
+    local recovered = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(recovered.active,
+        "harmful holder access recovery activates")
+    assertEqual(countCalls(state.calls, "CreateFrame.Holder"), 1,
+        "harmful holder retry reuses pending holder")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    ), 1, "harmful holder retry allocates one native container")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    environment.DebuffFrame = state.newDebuffFrame()
+    environment.EventRegistry = nil
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    local startIndex = #state.calls + 1
+    BD.UpdateCustomAuraContainer("debuffs", {enabled = true})
+    local unavailable = BD.GetCustomAuraContainerState("debuffs")
+    assertFalse(unavailable.active,
+        "missing Edit Mode lifecycle never activates harmful replacement")
+    assertFalse(unavailable.buildAttempted,
+        "missing Edit Mode lifecycle performs no harmful build")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer",
+        startIndex
+    ), 0, "missing lifecycle allocates no harmful container")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        startIndex
+    ), 1, "missing lifecycle performs only fail-native restoration")
+    local restoreOnly = findCall(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        startIndex
+    )
+    assertEqual(restoreOnly.args[1], false,
+        "missing lifecycle never suppresses Blizzard harmful presentation")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    environment.DebuffFrame = state.newDebuffFrame()
+    environment.EditModeManagerFrame.editModeActive = false
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {enabled = true})
+
+    state.harmfulRestoreSucceeds = false
+    state.fireRegistry("EditMode.Enter")
+    local failedSuspend = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(failedSuspend.active,
+        "failed Edit Mode suspension keeps custom harmful visible")
+    assertFalse(failedSuspend.editModeSuspended,
+        "failed Edit Mode suspension never claims suspended ownership")
+    assertEqual(failedSuspend.diagnostic, "EDIT_MODE_SUSPEND_FAILED",
+        "failed Edit Mode suspension publishes its own diagnostic")
+
+    state.playerUnit = "vehicle"
+    local retargetStart = #state.calls + 1
+    BD.RefreshCustomAuraContainerUnits()
+    local retargeted = BD.GetCustomAuraContainerState("debuffs")
+    assertEqual(retargeted.unit, "vehicle",
+        "restore-failed active row retargets in Edit Mode immediately")
+    assertTrue(retargeted.active,
+        "restore-failed Edit Mode retarget remains visible")
+    assertTrue(retargeted.harmfulReassertPending,
+        "restore-failed Edit Mode retarget records one reassert intent")
+    assertEqual(findCall(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        retargetStart
+    ), nil, "restore-failed Edit Mode retarget performs no suppression")
+    assertEqual(findCall(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        retargetStart
+    ), nil, "restore-failed Edit Mode retarget performs no reassert")
+
+    state.harmfulRestoreSucceeds = true
+    local exitStart = #state.calls + 1
+    state.fireRegistry("EditMode.Exit")
+    state.runTimers(0)
+    local recovered = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(recovered.active,
+        "failed-suspend exit keeps the replacement active")
+    assertFalse(recovered.harmfulReassertPending,
+        "failed-suspend exit consumes reassert intent")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        exitStart
+    ), 1, "failed-suspend exit performs exactly one reassert")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        exitStart
+    ), 0, "failed-suspend exit does not start a fresh suppression")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    harness.environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {enabled = true})
+
+    local startIndex = #state.calls + 1
+    state.fireEvent("PLAYER_REGEN_ENABLED")
+    state.runTimers(0)
+    assertEqual(countCalls(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        startIndex
+    ), 0, "unrelated regen creates no harmful reassert intent")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    harness.environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {enabled = true})
+
+    state.combat = true
+    local startIndex = #state.calls + 1
+    state.fireEvent("EDIT_MODE_LAYOUTS_UPDATED")
+    state.fireEvent("EDIT_MODE_LAYOUTS_UPDATED")
+    state.fireEvent("PLAYER_SPECIALIZATION_CHANGED", "player")
+    state.fireEvent("ACTIVE_PLAYER_SPECIALIZATION_CHANGED", "player")
+    state.runTimers(0)
+    assertEqual(countCalls(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        startIndex
+    ), 0, "combat lifecycle burst performs no immediate reassert")
+
+    state.combat = false
+    state.fireEvent("PLAYER_REGEN_ENABLED")
+    state.runTimers(0)
+    assertEqual(countCalls(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        startIndex
+    ), 1, "combat layout/spec burst coalesces to one reassert")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    harness.environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {enabled = true})
+
+    state.combat = true
+    state.playerUnit = "vehicle"
+    local startIndex = #state.calls + 1
+    BD.RefreshCustomAuraContainerUnits()
+    state.fireEvent("EDIT_MODE_LAYOUTS_UPDATED")
+    state.fireEvent("PLAYER_SPECIALIZATION_CHANGED", "player")
+    state.fireEvent("ACTIVE_PLAYER_SPECIALIZATION_CHANGED", "player")
+    state.runTimers(0)
+    assertEqual(countCalls(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        startIndex
+    ), 0, "combat retarget/callback burst performs no early reassert")
+
+    state.combat = false
+    state.fireEvent("PLAYER_REGEN_ENABLED")
+    state.runTimers(0)
+    local recovered = BD.GetCustomAuraContainerState("debuffs")
+    assertEqual(recovered.unit, "vehicle",
+        "combined burst preserves immediate vehicle retarget")
+    assertFalse(recovered.harmfulReassertPending,
+        "combined burst consumes its sole reassert intent")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        startIndex
+    ), 1, "combat retarget plus both callbacks reasserts exactly once")
+end
+
+do
     local controllerFile = assert(io.open(
         "Modules/BuffsDebuffs/CustomAuraContainer.lua",
         "r"
@@ -2919,6 +3846,11 @@ do
         1,
         true
     ))
+    local editModeDeferral = assert(applyPendingSource:find(
+        "nativeFollowerEditModeActive",
+        1,
+        true
+    ))
     local noOperation = assert(applyPendingSource:find(
         "if not self.pendingOperation then",
         1,
@@ -2929,6 +3861,8 @@ do
         1,
         true
     ))
+    assertTrue(retarget < editModeDeferral,
+        "live retarget precedes Edit Mode holder deferral")
     assertTrue(retarget < noOperation,
         "live retarget precedes pending-operation cleanup")
     assertTrue(noOperation < combatGate,

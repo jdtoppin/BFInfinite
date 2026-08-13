@@ -80,8 +80,6 @@ local function LoadProductionDefaults()
 end
 
 local defaults = LoadProductionDefaults()
-local ACTIVATION_BLOCKED =
-    "CUSTOM_HARMFUL_REQUIRES_OPT_IN_AND_PROVEN_SUPPRESSION"
 
 local function NewHarness(capability)
     local state = {
@@ -116,7 +114,7 @@ local function NewHarness(capability)
         None = "NONE",
     }
     environment.CreateFrame = function()
-        error("dormant custom Debuffs must not construct frames", 2)
+        error("descriptor registration must not construct frames", 2)
     end
 
     local BD = {}
@@ -127,8 +125,10 @@ local function NewHarness(capability)
         state.defaultsReads = state.defaultsReads + 1
         return deepCopy(defaults)
     end
-    function BD.RegisterCustomAuraContainerPane()
+    function BD.RegisterCustomAuraContainerPane(which, compiler)
         state.registrations = state.registrations + 1
+        state.registeredPane = which
+        state.compiler = compiler
     end
     function BD.SetNativePublicAurasSuppressed()
         state.suppressionCalls = state.suppressionCalls + 1
@@ -149,9 +149,80 @@ local function NewHarness(capability)
 end
 
 do
+    local liveSuppressionAvailable = false
+    local state = {
+        registrations = 0,
+    }
+    local environment = setmetatable({}, {__index = _G})
+    environment._G = environment
+    environment.AnchorUtil = {
+        FlowLayoutAxis = {
+            Horizontal = "HORIZONTAL",
+            Vertical = "VERTICAL",
+        },
+        FlowDirection = {
+            Left = "LEFT",
+            Right = "RIGHT",
+            Up = "UP",
+            Down = "DOWN",
+        },
+    }
+    environment.AuraContainerSortMethod = {
+        AuraInstanceIDOnly = "AURA_INSTANCE",
+        NameOnly = "NAME",
+        ExpirationOnly = "EXPIRATION",
+    }
+    environment.AuraContainerSortDirection = {
+        Normal = "NORMAL",
+        Reverse = "REVERSE",
+    }
+    environment.CustomAuraContainerAuraProcessingPolicy = {None = "NONE"}
+
+    local BD = {}
+    function BD.HasCustomHarmfulAuraDescriptorCapability()
+        return true
+    end
+    function BD.HasCustomHarmfulAuraContainerCapability()
+        return liveSuppressionAvailable
+    end
+    function BD.GetDefaults()
+        return deepCopy(defaults)
+    end
+    function BD.RegisterCustomAuraContainerPane(which, compiler)
+        state.registrations = state.registrations + 1
+        state.which = which
+        state.compiler = compiler
+    end
+
+    local BFI = {
+        modules = {
+            BuffsDebuffs = BD,
+        },
+    }
+    local chunk = assert(loadfile(
+        "Modules/BuffsDebuffs/CustomDebuffs.lua"
+    ))
+    setfenv(chunk, environment)
+    chunk("BFInfinite", BFI)
+
+    assertEqual(state.registrations, 1,
+        "stable descriptor capability registers during transient outage")
+    assertEqual(state.which, "debuffs",
+        "transient suppression outage retains Debuffs registration")
+    assertEqual(type(state.compiler), "function",
+        "transient suppression outage retains descriptor compiler")
+    liveSuppressionAvailable = true
+    local config = deepCopy(defaults.debuffs)
+    config.enabled = true
+    config.customHarmfulEnabled = true
+    assertTrue(state.compiler(config).enabled,
+        "recovered live capability needs no descriptor reload")
+end
+
+do
     local unavailable = NewHarness(false)
     assertNil(
-        unavailable.BD.CompileCustomDebuffsDraftDescriptor,
+        unavailable.compiler,
         "unavailable capability exposes no compiler"
     )
     assertEqual(unavailable.defaultsReads, 0,
@@ -163,35 +234,41 @@ do
 end
 
 local state = NewHarness(true)
-local compile = state.BD.CompileCustomDebuffsDraftDescriptor
-assertEqual(type(compile), "function", "draft compiler exported")
+local compile = state.compiler
+assertEqual(type(compile), "function", "active compiler registered")
 assertEqual(state.defaultsReads, 1, "available compiler reads defaults once")
-assertEqual(state.registrations, 0, "draft registers no controller")
-assertEqual(state.suppressionCalls, 0, "draft performs no suppression")
+assertEqual(state.registrations, 1, "Debuffs registers one controller")
+assertEqual(state.registeredPane, "debuffs", "Debuffs registration pane")
+assertEqual(state.suppressionCalls, 0, "registration performs no suppression")
 
 do
     local config = deepCopy(defaults.debuffs)
     config.enabled = true
+    config.customHarmfulEnabled = true
     config.duration.showSecondsUnit = false
     config.duration.color.percent.enabled = true
     config.duration.color.seconds.value = 99
     config.duration.color.seconds.rgb = {0.9, 0.2, 0.1, 0.8}
     local savedConfig = deepCopy(config)
-    local descriptor, diagnostic = assert(compile(config))
+    local descriptor = assert(compile(config))
 
     assertTablesEqual(config, savedConfig,
         "compiler does not mutate saved Debuffs configuration")
-    assertEqual(descriptor.enabled, false,
-        "existing enabled flag cannot opt into custom harmful presentation")
-    assertEqual(diagnostic, ACTIVATION_BLOCKED,
-        "activation reports both unresolved requirements")
-    assertEqual(descriptor.activationBlocked, ACTIVATION_BLOCKED,
-        "descriptor records its dormant state")
+    assertEqual(descriptor.enabled, true,
+        "both explicit toggles activate custom harmful presentation")
     assertEqual(descriptor.holder.width, 746, "default row width")
     assertEqual(descriptor.holder.height, 26, "default row height")
     assertEqual(descriptor.holderRolesets, "buffs", "holder roleset")
-    assertEqual(descriptor.proposedHolderAnchor.globalName, "DebuffFrame",
-        "draft placement keeps the Blizzard root as its proposed seam")
+    assertEqual(descriptor.holderAnchor.globalName, "DebuffFrame",
+        "active placement follows the Blizzard Debuff root")
+    assertEqual(descriptor.holderAnchor.point, "TOPRIGHT",
+        "holder anchor point")
+    assertEqual(descriptor.holderAnchor.relativePoint, "TOPRIGHT",
+        "holder relative anchor point")
+    assertEqual(descriptor.holderAnchor.x, 0, "holder X offset")
+    assertEqual(descriptor.holderAnchor.y, 0, "holder Y offset")
+    assertEqual(descriptor.nativeSuppression, "harmful",
+        "descriptor requests full harmful suppression")
     assertNil(descriptor.position, "draft creates no independent mover")
     assertNil(descriptor.positionSave, "draft saves no position")
     assertNil(descriptor.nativeFollower,
@@ -205,11 +282,11 @@ do
     assertEqual(descriptor.flowLayout.verticalGrowthDirection, "DOWN",
         "Debuff rows grow downward")
 
-    assertEqual(#descriptor.groups, 1, "one dormant harmful group")
+    assertEqual(#descriptor.groups, 1, "one native harmful group")
     local group = descriptor.groups[1]
     assertEqual(group.key, "harmful", "harmful group key")
     assertEqual(group.filterString, "HARMFUL", "native harmful filter")
-    assertEqual(group.maxFrameCount, 25, "proposed finite cap")
+    assertEqual(group.maxFrameCount, 25, "finite combined cap")
     assertEqual(countKeys(group.candidateFilters), 0,
         "no Lua-side candidate classification")
     assertEqual(group.layout.elementSpacing, 4, "default X spacing")
@@ -269,8 +346,8 @@ do
     assertEqual(config.duration.color.seconds.rgb[2], 0.2,
         "descriptor threshold edits do not alias saved configuration")
 
-    assertEqual(state.registrations, 0,
-        "compilation still registers no controller")
+    assertEqual(state.registrations, 1,
+        "compilation does not re-register the controller")
     assertEqual(state.suppressionCalls, 0,
         "compilation still performs no suppression")
 end
@@ -278,6 +355,7 @@ end
 do
     local config = deepCopy(defaults.debuffs)
     config.enabled = false
+    config.customHarmfulEnabled = true
     config.width = 20
     config.height = 30
     config.spacingX = 2
@@ -286,17 +364,33 @@ do
     config.maxWraps = 2
     config.sortMethod = "INDEX"
     config.sortDirection = "+"
-    local descriptor, diagnostic = assert(compile(config))
+    local descriptor = assert(compile(config))
     local group = descriptor.groups[1]
 
-    assertEqual(descriptor.enabled, false, "disabled remains dormant")
-    assertEqual(diagnostic, ACTIVATION_BLOCKED,
-        "disabled config does not waive blockers")
+    assertEqual(descriptor.enabled, false, "appearance toggle disables row")
     assertEqual(descriptor.holder.width, 86, "custom row width")
     assertEqual(descriptor.holder.height, 30, "custom row height")
-    assertEqual(group.maxFrameCount, 8, "proposed custom cap")
+    assertEqual(group.maxFrameCount, 8, "custom combined cap")
     assertEqual(group.sortMethod, "AURA_INSTANCE", "native sort method")
     assertEqual(group.sortDirection, "NORMAL", "native sort direction")
+end
+
+do
+    local config = deepCopy(defaults.debuffs)
+    config.enabled = true
+    config.customHarmfulEnabled = false
+    assertEqual(assert(compile(config)).enabled, false,
+        "appearance enable alone does not opt into replacement")
+
+    config.enabled = false
+    config.customHarmfulEnabled = true
+    assertEqual(assert(compile(config)).enabled, false,
+        "replacement opt-in does not override pane disable")
+
+    config.enabled = true
+    config.customHarmfulEnabled = "true"
+    assertEqual(assert(compile(config)).enabled, false,
+        "malformed replacement opt-in fails closed")
 end
 
 do
@@ -363,7 +457,7 @@ do
 
     for _, descriptor in ipairs({secondsDescriptor, percentDescriptor}) do
         assertEqual(descriptor.enabled, false,
-            "duration colour changes never affect activation")
+            "default-off replacement ignores duration colour changes")
         assertEqual(descriptor.groups[1].filterString, "HARMFUL",
             "duration colour changes never affect selection")
         assertEqual(countKeys(descriptor.groups[1].candidateFilters), 0,
@@ -396,10 +490,10 @@ do
         color = {2, -1, "bad", math.huge},
     }
 
-    local ok, descriptor, diagnostic = pcall(compile, config)
+    local ok, descriptor = pcall(compile, config)
     assertTrue(ok, "malformed config normalizes without assertion")
-    assertEqual(diagnostic, ACTIVATION_BLOCKED,
-        "malformed config remains dormant")
+    assertEqual(descriptor.enabled, false,
+        "malformed config remains default-off")
     local group = descriptor.groups[1]
     assertEqual(group.buttonStyle.width, 26, "invalid width fallback")
     assertEqual(group.buttonStyle.height, 10, "height clamp")
@@ -407,7 +501,7 @@ do
         "infinite spacing fallback")
     assertEqual(group.layout.lineSpacing, -1,
         "negative spacing clamp")
-    assertEqual(group.maxFrameCount, 50, "normalized proposed cap")
+    assertEqual(group.maxFrameCount, 50, "normalized combined cap")
     assertEqual(group.sortMethod, "EXPIRATION", "sort fallback")
     assertEqual(group.sortDirection, "REVERSE", "direction fallback")
 end
@@ -431,7 +525,6 @@ do
         "spellId",
         ":SetParent",
         "SecureAuraHeaderTemplate",
-        "BD.RegisterCustomAuraContainerPane(\"debuffs\"",
         "BD.SetNativePublicAurasSuppressed(",
         "PrivateAuraAnchors",
         "privateAuraAnchor",
@@ -439,6 +532,22 @@ do
         assertNil(source:find(pattern, 1, true),
             "forbidden direct dependency: " .. pattern)
     end
+    assertTrue(
+        source:find(
+            "BD.RegisterCustomAuraContainerPane(\"debuffs\"",
+            1,
+            true
+        ) ~= nil,
+        "active Debuffs descriptor is registered"
+    )
+    for _, dormantPattern in ipairs({
+        "CompileCustomDebuffsDraftDescriptor",
+        "activationBlocked",
+        "proposedHolderAnchor",
+    }) do
+        assertNil(source:find(dormantPattern, 1, true),
+            "dormant scaffold removed: " .. dormantPattern)
+    end
 end
 
-print("buffs/debuffs dormant custom Debuffs descriptor tests passed")
+print("buffs/debuffs custom Debuffs descriptor tests passed")

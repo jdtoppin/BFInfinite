@@ -89,6 +89,8 @@ local function NewHarness(options)
     local createFrameCalls = 0
     local customDisableCalls = {}
     local customUpdateCalls = {}
+    local harmfulSuppressionCalls = {}
+    local harmfulCapabilityCalls = 0
     local callLog = {}
     local blizzardStyleDisableCalls = 0
     local blizzardStyleUpdateCalls = {}
@@ -213,9 +215,26 @@ local function NewHarness(options)
             },
             debuffs = {
                 enabled = true,
+                customHarmfulEnabled =
+                    options.customHarmfulEnabled == true,
             },
         },
     }
+    if options.fullHarmfulMethods ~= false then
+        BD.CanSuppressNativeHarmfulAuras = function()
+            harmfulCapabilityCalls = harmfulCapabilityCalls + 1
+            return options.harmfulSuppressionCapability ~= false
+        end
+        BD.SetNativeHarmfulAurasSuppressed = function(suppressed, unit)
+            harmfulSuppressionCalls[#harmfulSuppressionCalls + 1] = {
+                suppressed = suppressed,
+                unit = unit,
+            }
+            callLog[#callLog + 1] = "harmful:"
+                .. tostring(suppressed) .. ":" .. tostring(unit)
+            return options.harmfulSuppressionResult ~= false
+        end
+    end
     local BFI = {
         L = {},
         modules = {
@@ -231,6 +250,12 @@ local function NewHarness(options)
             buffs = true,
             debuffs = true,
         }
+        local customState = {
+            active = options.customStateActive == true,
+            pending = options.customStatePending == true,
+            operationPending = options.customOperationPending == true,
+            editModeSuspended = options.customEditModeSuspended == true,
+        }
         BD.IsCustomAuraContainerAvailable = function(which)
             return customPanes[which] == true
         end
@@ -244,7 +269,33 @@ local function NewHarness(options)
         BD.DisableCustomAuraContainer = function(which)
             callLog[#callLog + 1] = "customDisable:" .. which
             customDisableCalls[#customDisableCalls + 1] = which
-            return options.customDisableResult ~= false
+            if options.customDisableResult == false then return false end
+            if which == "debuffs"
+                and options.customDisableRestoresHarmful
+                and (
+                    customState.active
+                    or customState.pending
+                    or customState.operationPending
+                    or customState.editModeSuspended
+                )
+            then
+                if BD.SetNativeHarmfulAurasSuppressed(
+                    false,
+                    "player"
+                ) ~= true then
+                    return false
+                end
+            end
+            if not options.customDisableLeavesState then
+                customState.active = false
+                customState.pending = false
+                customState.operationPending = false
+                customState.editModeSuspended = false
+            end
+            return true
+        end
+        BD.GetCustomAuraContainerState = function(which)
+            if customPanes[which] == true then return customState end
         end
     end
 
@@ -276,6 +327,10 @@ local function NewHarness(options)
         end,
         customDisableCalls = customDisableCalls,
         customUpdateCalls = customUpdateCalls,
+        harmfulSuppressionCalls = harmfulSuppressionCalls,
+        getHarmfulCapabilityCalls = function()
+            return harmfulCapabilityCalls
+        end,
         blizzardStyleUpdateCalls = blizzardStyleUpdateCalls,
         callLog = callLog,
         clearCallLog = function()
@@ -399,9 +454,35 @@ do
     harness.update("debuffs")
     assertLog(harness.callLog, {
         "customDisable:debuffs",
-        "native:debuffs:false",
-        "styleUpdate",
-    }, "style ignores optional custom-disable false")
+    }, "style aborts when custom harmful restore fails")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 0,
+        "failed custom restore prevents style activation")
+end
+
+for _, staleStateCase in ipairs({
+    {name = "active", customStateActive = true},
+    {name = "pending", customStatePending = true},
+    {name = "operation pending", customOperationPending = true},
+}) do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 42,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customDisableLeavesState = true,
+        customStateActive = staleStateCase.customStateActive,
+        customStatePending = staleStateCase.customStatePending,
+        customOperationPending = staleStateCase.customOperationPending,
+    })
+    harness.setBackendOverride(
+        harness.BD.BLIZZARD_DEBUFF_STYLE_BACKEND
+    )
+    harness.clearCallLog()
+    harness.update("debuffs")
+    assertLog(harness.callLog, {"customDisable:debuffs"},
+        staleStateCase.name .. " custom state aborts style transition")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 0,
+        staleStateCase.name .. " prevents mixed native presentation")
 end
 
 do
@@ -420,6 +501,31 @@ do
         "style aborts when native restore fails")
     assertEqual(#harness.blizzardStyleUpdateCalls, 0,
         "native restore failure prevents style update")
+end
+
+do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 42,
+        customHarmfulEnabled = true,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {buffs = true},
+    })
+    assertEqual(
+        harness.BD.GetAuraBackend("debuffs"),
+        harness.BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
+        "opt-in without registered Debuffs controller falls back"
+    )
+    harness.clearCallLog()
+    harness.update("debuffs")
+    assertLog(harness.callLog, {
+        "styleCapability",
+        "native:debuffs:false",
+        "styleUpdate",
+    }, "missing Debuffs controller fallback transition")
+    assertEqual(#harness.customUpdateCalls, 0,
+        "missing Debuffs controller never enters custom update")
 end
 
 do
@@ -472,6 +578,8 @@ do
     assertEqual(BD.HasCustomAuraContainerCapability(), true, "12.1 custom capability")
     assertEqual(BD.HasCustomHarmfulAuraDescriptorCapability(), true,
         "AF r42 native dispel-colour descriptor capability")
+    assertEqual(BD.HasCustomHarmfulAuraContainerCapability(), true,
+        "exact harmful suppression completes Debuffs capability")
     assertEqual(
         BD.GetAuraBackend("buffs"),
         BD.CUSTOM_AURA_CONTAINER_BACKEND,
@@ -548,6 +656,7 @@ for _, capabilityCase in ipairs({
         nativeDispelColorMethodValue =
             capabilityCase.nativeDispelColorMethodValue,
         nativeDispelColor = capabilityCase.nativeDispelColor,
+        customHarmfulEnabled = true,
         registerCustomBackend = true,
         customPanes = {debuffs = true},
     })
@@ -578,16 +687,202 @@ do
     local BD = harness.BD
 
     assertEqual(BD.HasCustomHarmfulAuraDescriptorCapability(), true,
-        "complete dormant descriptor capability")
+        "complete descriptor capability")
+    assertEqual(BD.HasCustomHarmfulAuraContainerCapability(), true,
+        "complete harmful runtime capability")
     assertEqual(BD.GetAuraBackend("debuffs"), nil,
-        "complete descriptor cannot select a harmful runtime backend")
+        "default-off opt-in cannot select harmful runtime backend")
     harness.update("debuffs")
     assertEqual(#harness.customUpdateCalls, 0,
-        "complete descriptor performs no custom Debuffs update")
+        "default-off descriptor performs no custom Debuffs update")
     for _, call in ipairs(harness.callLog) do
         assertEqual(call == "native:debuffs:true", false,
             "complete descriptor performs no native suppression")
     end
+end
+
+do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 42,
+        customHarmfulEnabled = true,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {debuffs = true},
+    })
+    local BD = harness.BD
+
+    assertEqual(BD.GetAuraBackend("debuffs"),
+        BD.CUSTOM_AURA_CONTAINER_BACKEND,
+        "explicit opt-in selects complete harmful backend")
+    assertEqual(harness.getHarmfulCapabilityCalls(), 1,
+        "one backend lookup performs one harmful topology preflight")
+    assertEqual(BD.HasAuraBackend("debuffs"), true,
+        "opted-in harmful backend is available")
+    assertEqual(harness.getHarmfulCapabilityCalls(), 2,
+        "availability lookup adds one harmful topology preflight")
+    harness.clearCallLog()
+    harness.update("debuffs")
+    assertLog(harness.callLog, {
+        "styleDisable",
+        "native:debuffs:false",
+        "customUpdate:debuffs",
+    }, "custom activation restores style before controller update")
+    assertEqual(#harness.customUpdateCalls, 1,
+        "opted-in Debuffs custom update count")
+    assertEqual(harness.customUpdateCalls[1].config, BD.config.debuffs,
+        "opted-in Debuffs forwards its saved configuration")
+    assertEqual(harness.getHarmfulCapabilityCalls(), 3,
+        "dispatcher lookup adds one harmful topology preflight")
+end
+
+do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 42,
+        customHarmfulEnabled = true,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {debuffs = true},
+        customStateActive = true,
+    })
+    local BD = harness.BD
+    assertEqual(BD.GetAuraBackend("debuffs"),
+        BD.CUSTOM_AURA_CONTAINER_BACKEND,
+        "OOC preflight seeds harmful backend")
+    harness.setCombat(true)
+    harness.BD.CanSuppressNativeHarmfulAuras = function()
+        return false
+    end
+    assertEqual(BD.GetAuraBackend("debuffs"),
+        BD.CUSTOM_AURA_CONTAINER_BACKEND,
+        "verified active harmful backend remains selected in combat")
+    harness.setCombat(false)
+    assertEqual(BD.GetAuraBackend("debuffs"),
+        BD.CUSTOM_AURA_CONTAINER_BACKEND,
+        "active harmful ownership survives transient OOC preflight failure")
+end
+
+for _, ownershipCase in ipairs({
+    {
+        name = "active",
+        customStateActive = true,
+    },
+    {
+        name = "pending",
+        customStatePending = true,
+    },
+    {
+        name = "operation pending",
+        customOperationPending = true,
+    },
+    {
+        name = "Edit Mode suspended",
+        customEditModeSuspended = true,
+    },
+}) do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 42,
+        customHarmfulEnabled = true,
+        harmfulSuppressionCapability = false,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {debuffs = true},
+        customStateActive = ownershipCase.customStateActive,
+        customStatePending = ownershipCase.customStatePending,
+        customOperationPending = ownershipCase.customOperationPending,
+        customEditModeSuspended = ownershipCase.customEditModeSuspended,
+    })
+    assertEqual(harness.BD.GetAuraBackend("debuffs"),
+        harness.BD.CUSTOM_AURA_CONTAINER_BACKEND,
+        ownershipCase.name
+            .. " ownership survives transient harmful preflight failure")
+end
+
+do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 42,
+        customHarmfulEnabled = true,
+        harmfulSuppressionCapability = false,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {debuffs = true},
+    })
+    assertEqual(harness.BD.GetAuraBackend("debuffs"),
+        harness.BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
+        "cold inactive preflight failure selects Blizzard style")
+end
+
+do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 42,
+        customHarmfulEnabled = false,
+        harmfulSuppressionCapability = false,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {debuffs = true},
+        customStateActive = true,
+        customDisableRestoresHarmful = true,
+    })
+    local BD = harness.BD
+    assertEqual(BD.GetAuraBackend("debuffs"),
+        BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
+        "explicit opt-out selects Blizzard style despite custom ownership")
+    harness.clearCallLog()
+    harness.update("debuffs")
+    assertLog(harness.callLog, {
+        "styleCapability",
+        "customDisable:debuffs",
+        "harmful:false:player",
+        "native:debuffs:false",
+        "styleUpdate",
+    }, "opt-out restores full harmful owner before style update")
+end
+
+for _, suppressionCase in ipairs({
+    {
+        name = "missing full harmful methods",
+        fullHarmfulMethods = false,
+    },
+    {
+        name = "failed full harmful preflight",
+        harmfulSuppressionCapability = false,
+    },
+}) do
+    local harness = NewHarness({
+        interfaceVersion = 120100,
+        afVersion = 42,
+        customHarmfulEnabled = true,
+        fullHarmfulMethods = suppressionCase.fullHarmfulMethods,
+        harmfulSuppressionCapability =
+            suppressionCase.harmfulSuppressionCapability,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {debuffs = true},
+    })
+    assertEqual(
+        harness.BD.HasCustomHarmfulAuraContainerCapability(),
+        false,
+        suppressionCase.name .. " capability"
+    )
+    assertEqual(
+        harness.BD.GetAuraBackend("debuffs"),
+        harness.BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
+        suppressionCase.name .. " falls back to Blizzard style"
+    )
+    harness.clearCallLog()
+    harness.update("debuffs")
+    assertLog(harness.callLog, {
+        "styleCapability",
+        "customDisable:debuffs",
+        "native:debuffs:false",
+        "styleUpdate",
+    }, suppressionCase.name .. " fallback transition")
+    assertEqual(#harness.customUpdateCalls, 0,
+        suppressionCase.name .. " performs no custom update")
 end
 
 do
@@ -749,6 +1044,7 @@ do
     local harness = NewHarness({
         interfaceVersion = 120200,
         afVersion = 36,
+        customHarmfulEnabled = true,
         registerCustomBackend = true,
     })
     local BD = harness.BD
