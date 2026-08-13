@@ -47,6 +47,17 @@ local function countCalls(calls, name)
     return count
 end
 
+local function countPlain(source, needle)
+    local count = 0
+    local offset = 1
+    while true do
+        local position = source:find(needle, offset, true)
+        if not position then return count end
+        count = count + 1
+        offset = position + #needle
+    end
+end
+
 local function NewHarness()
     local state = {
         afTotals = {
@@ -72,7 +83,34 @@ local function NewHarness()
         events = {},
         frames = {},
         playerUnit = "player",
+        secretUnits = {},
+        secretUnitBoundaryCalls = 0,
+        secretUnitTypeCalls = 0,
+        secretUnitEqualityCalls = 0,
     }
+
+    local nativeType = type
+
+    local function IsSecretUnit(value)
+        for _, secret in ipairs(state.secretUnits) do
+            if rawequal(value, secret) then
+                return true
+            end
+        end
+        return false
+    end
+
+    function state.newSecretUnit()
+        local secret = setmetatable({}, {
+            __eq = function()
+                state.secretUnitEqualityCalls =
+                    state.secretUnitEqualityCalls + 1
+                error("secret unit reached equality", 2)
+            end,
+        })
+        state.secretUnits[#state.secretUnits + 1] = secret
+        return secret
+    end
 
     local function record(name, ...)
         local call = {
@@ -117,6 +155,13 @@ local function NewHarness()
 
     local environment = setmetatable({}, {__index = _G})
     environment._G = environment
+    environment.type = function(value)
+        if IsSecretUnit(value) then
+            state.secretUnitTypeCalls = state.secretUnitTypeCalls + 1
+            error("secret unit reached type", 2)
+        end
+        return nativeType(value)
+    end
     environment.PlayerFrame = setmetatable({}, {
         __index = function(_, key)
             if key == "unit" then return state.playerUnit end
@@ -287,6 +332,11 @@ local function NewHarness()
     local BFI = {
         L = L,
         funcs = {
+            isValueNonSecret = function(value)
+                state.secretUnitBoundaryCalls =
+                    state.secretUnitBoundaryCalls + 1
+                return not IsSecretUnit(value)
+            end,
             LoadPosition = function(frame, position)
                 record("BFI.LoadPosition", frame.label, position)
             end,
@@ -390,6 +440,82 @@ local function CompileBuffs(config)
         positionSave = config.positionSave,
         moverText = "Buffs",
     }
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local initialSecret = state.newSecretUnit()
+    state.playerUnit = initialSecret
+
+    BD.RegisterCustomAuraContainerPane("buffs", CompileBuffs)
+    BD.UpdateCustomAuraContainer("buffs", {
+        enabled = true,
+    })
+    assertEqual(
+        BD.GetCustomAuraContainerState("buffs").unit,
+        "player",
+        "secret initial unit falls back before native construction"
+    )
+
+    state.combat = true
+    local invalidUnits = {
+        {label = "empty", value = ""},
+        {label = "arbitrary", value = "party1"},
+        {label = "table", value = {}},
+        {label = "false", value = false},
+        {label = "number", value = 1},
+        {label = "nil"},
+    }
+    for _, invalid in ipairs(invalidUnits) do
+        state.playerUnit = "vehicle"
+        BD.RefreshCustomAuraContainerUnits()
+        assertEqual(
+            BD.GetCustomAuraContainerState("buffs").unit,
+            "vehicle",
+            invalid.label .. " setup accepts vehicle"
+        )
+
+        state.playerUnit = invalid.value
+        BD.RefreshCustomAuraContainerUnits()
+        local controllerState = BD.GetCustomAuraContainerState("buffs")
+        assertEqual(controllerState.unit, "player",
+            invalid.label .. " unit falls back to player")
+        assertFalse(controllerState.pending,
+            invalid.label .. " combat retarget needs no regen queue")
+    end
+
+    state.playerUnit = "vehicle"
+    BD.RefreshCustomAuraContainerUnits()
+    local refreshSecret = state.newSecretUnit()
+    state.playerUnit = refreshSecret
+    BD.RefreshCustomAuraContainerUnits()
+    assertEqual(
+        BD.GetCustomAuraContainerState("buffs").unit,
+        "player",
+        "secret combat unit falls back immediately"
+    )
+    assertFalse(
+        BD.GetCustomAuraContainerState("buffs").pending,
+        "secret combat fallback needs no regen queue"
+    )
+    assertEqual(state.secretUnitTypeCalls, 0,
+        "secret unit is gated before type")
+    assertEqual(state.secretUnitEqualityCalls, 0,
+        "secret unit is gated before equality")
+    assertTrue(state.secretUnitBoundaryCalls > 0,
+        "unit values pass through the canonical boundary")
+
+    for _, call in ipairs(state.calls) do
+        for _, argument in ipairs(call.args) do
+            assertFalse(
+                rawequal(argument, initialSecret)
+                    or rawequal(argument, refreshSecret),
+                "raw secret unit never escapes to AF or event calls"
+            )
+        end
+    end
 end
 
 do
@@ -728,6 +854,13 @@ do
     state.combat = true
     local flowCallsBeforeCombat =
         countCalls(state.calls, "AF.SetCustomAuraContainerFlowLayout")
+    local createsBeforeCombat =
+        countCalls(state.calls, "AF.CreateCustomAuraContainer")
+    local unitWritesBeforeCombat =
+        countCalls(state.calls, "AF.SetCustomAuraContainerUnit")
+    local updatesBeforeCombat =
+        countCalls(state.calls, "AF.UpdateCustomAuraContainer")
+    local timersBeforeCombat = countCalls(state.calls, "Timer.After")
     BD.UpdateCustomAuraContainer("buffs", {
         enabled = true,
         tuning = 6,
@@ -749,6 +882,37 @@ do
         "unit events plus one regen registration"
     )
 
+    state.playerUnit = "vehicle"
+    BD.RefreshCustomAuraContainerUnits()
+    local retargetedPendingState =
+        BD.GetCustomAuraContainerState("buffs")
+    assertEqual(retargetedPendingState.unit, "vehicle",
+        "queued tuning does not defer combat-live retarget")
+    assertTrue(retargetedPendingState.pending,
+        "combat-live retarget preserves queued tuning")
+    assertEqual(
+        countCalls(state.calls, "AF.SetCustomAuraContainerUnit"),
+        unitWritesBeforeCombat + 1,
+        "queued tuning retarget writes unit immediately"
+    )
+    assertEqual(
+        countCalls(state.calls, "AF.UpdateCustomAuraContainer"),
+        updatesBeforeCombat + 1,
+        "queued tuning retarget refreshes native container immediately"
+    )
+    assertEqual(
+        countCalls(state.calls, "AF.SetCustomAuraContainerFlowLayout"),
+        flowCallsBeforeCombat,
+        "combat-live retarget does not apply queued tuning"
+    )
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        createsBeforeCombat,
+        "combat-live retarget does not rebuild"
+    )
+    assertEqual(countCalls(state.calls, "Timer.After"), timersBeforeCombat,
+        "combat-live retarget does not add a retry timer")
+
     state.combat = false
     BD.FlushCustomAuraContainerUpdates()
     state.runTimers(0)
@@ -760,8 +924,20 @@ do
             lastFlowCall = call
         end
     end
+    assertEqual(
+        countCalls(state.calls, "AF.SetCustomAuraContainerFlowLayout"),
+        flowCallsBeforeCombat + 1,
+        "regen applies exactly one queued tuning pass"
+    )
     assertEqual(lastFlowCall.args[1].marker, 7,
         "combat queue keeps latest tuning")
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        createsBeforeCombat,
+        "regen tuning reuses the existing container"
+    )
+    assertEqual(countCalls(state.calls, "Timer.After"), timersBeforeCombat + 1,
+        "regen schedules one deferred tuning callback")
 
     local pointerFlowCount =
         countCalls(state.calls, "AF.SetCustomAuraContainerFlowLayout")
@@ -886,6 +1062,87 @@ do
     ))
     local nativeSource = nativeFile:read("*a")
     nativeFile:close()
+
+    local resolverStart = assert(controllerSource:find(
+        "local function ResolvePlayerUnit()",
+        1,
+        true
+    ))
+    local resolverEnd = assert(controllerSource:find(
+        "\nend\n\nlocal function HasPendingControllers",
+        resolverStart,
+        true
+    ))
+    local resolverSource = controllerSource:sub(resolverStart, resolverEnd)
+    local unitRead = assert(resolverSource:find(
+        "unit = playerFrame.unit",
+        1,
+        true
+    ))
+    local boundaryGate = assert(resolverSource:find(
+        "if IsValueNonSecret(unit)",
+        1,
+        true
+    ))
+    local typeCheck = assert(resolverSource:find(
+        "and type(unit) == \"string\"",
+        1,
+        true
+    ))
+    local whitelist = assert(resolverSource:find(
+        "and (unit == \"player\" or unit == \"vehicle\")",
+        1,
+        true
+    ))
+    assertTrue(unitRead < boundaryGate,
+        "player unit is read once before the boundary")
+    assertTrue(boundaryGate < typeCheck,
+        "secret gate precedes unit type observation")
+    assertTrue(typeCheck < whitelist,
+        "unit type check precedes whitelist equality")
+    assertEqual(countPlain(resolverSource, "playerFrame.unit"), 1,
+        "resolver reads PlayerFrame.unit exactly once")
+    assertEqual(resolverSource:find("type(playerFrame.unit)", 1, true), nil,
+        "resolver never observes raw PlayerFrame.unit type")
+    local cachedGate = assert(controllerSource:find(
+        "local IsValueNonSecret = BFI.funcs.isValueNonSecret",
+        1,
+        true
+    ))
+    assertTrue(cachedGate < resolverStart,
+        "resolver uses the cached canonical secret gate")
+
+    local applyPendingStart = assert(controllerSource:find(
+        "function ControllerMixin:_ApplyPending()",
+        1,
+        true
+    ))
+    local applyPendingEnd = assert(controllerSource:find(
+        "\nfunction ControllerMixin:Update(config)",
+        applyPendingStart,
+        true
+    ))
+    local applyPendingSource =
+        controllerSource:sub(applyPendingStart, applyPendingEnd)
+    local retarget = assert(applyPendingSource:find(
+        "self:_ApplyRetarget()",
+        1,
+        true
+    ))
+    local noOperation = assert(applyPendingSource:find(
+        "if not self.pendingOperation then",
+        1,
+        true
+    ))
+    local combatGate = assert(applyPendingSource:find(
+        "if InCombatLockdown() then",
+        1,
+        true
+    ))
+    assertTrue(retarget < noOperation,
+        "live retarget precedes pending-operation cleanup")
+    assertTrue(noOperation < combatGate,
+        "live retarget precedes protected tuning deferral")
 
     for _, symbol in ipairs({
         ":IsMouseOver(",

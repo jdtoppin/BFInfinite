@@ -1,11 +1,39 @@
 ---@type BFI
 local BFI = select(2, ...)
 local NP = BFI.modules.Nameplates
-local F = BFI.funcs
+local UF = BFI.modules.UnitFrames
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local Auras_UpdateSize, Auras_UpdateSiblings
+local HOSTILE_PLATE_TYPES = {
+    hostile_npc = true,
+    hostile_player = true,
+}
+
+local function ConfigsEqual(left, right, seen)
+    if left == right then return true end
+    if type(left) ~= type(right) or type(left) ~= "table" then
+        return false
+    end
+
+    seen = seen or {}
+    if seen[left] then
+        return seen[left] == right
+    end
+    seen[left] = right
+
+    for key, value in pairs(left) do
+        if not ConfigsEqual(value, right[key], seen) then
+            return false
+        end
+    end
+    for key in pairs(right) do
+        if left[key] == nil then
+            return false
+        end
+    end
+    return true
+end
 
 local function GetEffectivePosition(config, plateConfig)
     local position = config.position
@@ -36,9 +64,6 @@ local function GetEffectivePosition(config, plateConfig)
             + (tonumber(font[2]) or 12)
     )
 
-    -- Keep the saved aura offset intact. Inside-name layouts only remove the
-    -- configured footprint of an outside name anchored above this same bar;
-    -- switching back therefore restores the exact configured position.
     return {
         position[1],
         position[2],
@@ -47,319 +72,183 @@ local function GetEffectivePosition(config, plateConfig)
     }
 end
 
-local function Auras_Update(self)
-    self:SetUnit(self.root.unit)
+local function NormalizeDebuffConfig(config, plateConfig, enabled)
+    -- This leaf restores the supported enemy row only. Friendly dispellable
+    -- debuffs require a different native policy and remain fail-closed until
+    -- that reaction direction is migrated independently.
+    local nativeConfig = {
+        enabled = config.enabled == true and enabled == true,
+        position = AF.Copy(GetEffectivePosition(config, plateConfig)),
+        anchorTo = config.anchorTo,
+        orientation = config.orientation,
+        cooldownStyle = config.cooldownStyle,
+        width = config.width,
+        height = config.height,
+        spacingX = config.spacingX,
+        spacingY = config.spacingY,
+        numPerLine = config.numPerLine,
+        numTotal = config.numTotal,
+        frameLevel = config.frameLevel,
+        durationText = AF.Copy(config.durationText),
+        stackText = AF.Copy(config.stackText),
+        auraTypeColor = AF.Copy(config.auraTypeColor),
+        mode = "blacklist",
+        blacklist = {},
+        filters = {
+            all = false,
+            player = true,
+            notPlayer = false,
+            raidInCombat = false,
+            raidPlayerDispellable = false,
+            bigDefensive = false,
+            externalDefensive = false,
+            important = false,
+            anyDispellable = false,
+        },
+        tooltip = {enabled = false},
+    }
+    -- The saved crowd-control blocker was never consumed by the legacy live
+    -- Debuffs constructor. Preserve that row here; a dedicated CC type remains
+    -- a separate migration instead of silently changing the existing set.
+    return nativeConfig
 end
 
-local function Auras_Enable(self)
-    self:SetUnit(self.root.unit)
-    self:Show()
+local function ApplyNameplatePlacement(holder, placement, root)
+    AF.SetFrameLevel(holder, placement.frameLevel, root)
+    NP.LoadIndicatorPosition(
+        holder,
+        placement.position,
+        placement.anchorTo
+    )
 end
 
-local function Auras_Disable(self)
-    self:ClearUnit()
-    self:Hide()
-end
-
-local function Auras_OnAurasUpdated(self, count)
-    Auras_UpdateSize(self, count)
-    Auras_UpdateSiblings(self)
-end
-
----------------------------------------------------------------------
--- BFI_UpdateConfig
----------------------------------------------------------------------
-AF.RegisterCallback("BFI_UpdateConfig", function(_, module, which)
-    if module ~= "auras" then return end
-
-    if not which or which == "blacklist" or which == "priorities" then
-        for _, frame in next, NP.created do
-            if frame:IsVisible() then
-                local buffs = NP.GetIndicator(frame, "buffs")
-                if buffs and buffs.enabled then
-                    Auras_Update(buffs)
-                end
-                local debuffs = NP.GetIndicator(frame, "debuffs")
-                if debuffs and debuffs.enabled then
-                    Auras_Update(debuffs)
-                end
-            end
+local function GetAppliedHostileConfig(config, plateConfig)
+    if type(NP.GetAppliedHostileNameplateConfig) == "function" then
+        local applied = NP.GetAppliedHostileNameplateConfig()
+        if applied and applied.debuffs then
+            return applied.debuffs, applied
         end
     end
-end, "low")
-
----------------------------------------------------------------------
--- siblings
----------------------------------------------------------------------
-local function Auras_AddSibling(self, sibling)
-    if not self.siblings then
-        self.siblings = {}
-    end
-    self.siblings[sibling] = true
+    return config, plateConfig
 end
 
-local function Auras_RemoveSibling(self, sibling)
-    if not self.siblings then
-        return
-    end
-    self.siblings[sibling] = nil
-end
+local function WrapNameplateConfig(frame)
+    local LoadNativeConfig = frame.LoadConfig
+    local NativeRequiresReload = frame.RequiresReloadForConfig
 
-function Auras_UpdateSiblings(self)
-    if not self.siblings then
-        return
-    end
-    for sibling in next, self.siblings do
-        AF.ClearPoints(sibling)
-        if self.numAuras == 0 then
-            AF.SetPoint(sibling, sibling.position[1], self, sibling.position[2])
-        else
-            AF.SetPoint(sibling, sibling.position[1], self, sibling.position[2], sibling.position[3], sibling.position[4])
+    local function ApplyHostileConfig(self, config, plateConfig)
+        local nativeConfig =
+            NormalizeDebuffConfig(config, plateConfig, true)
+        self._nameplatePlateConfig = plateConfig
+        if ConfigsEqual(self._nameplateAppliedConfig, nativeConfig) then
+            return false
         end
-    end
-end
-
----------------------------------------------------------------------
--- config
----------------------------------------------------------------------
-function Auras_UpdateSize(self, numAuras)
-    if not self.numSlots then return end
-
-    -- hide unused
-    for i = numAuras + 1, self.numSlots do
-        self.slots[i]:Hide()
+        self._nameplateAppliedConfig = AF.Copy(nativeConfig)
+        LoadNativeConfig(self, nativeConfig)
+        return true
     end
 
-    -- set size
-    local lines = ceil(numAuras / self.numPerLine)
-    numAuras = min(numAuras, self.numPerLine)
-
-    if self.isHorizontal then
-        AF.SetGridSize(self, self.width, self.height, self.spacingX, self.spacingY, numAuras, lines)
-    else
-        AF.SetGridSize(self, self.width, self.height, self.spacingX, self.spacingY, lines, numAuras)
-    end
-
-    Auras_UpdateSiblings(self)
-end
-
-local function Auras_SetSize(self, width, height)
-    self.width = width
-    self.height = height
-
-    for i = 1, self.numSlots do
-        AF.SetSize(self.slots[i], width, height)
-    end
-end
-
-local function Auras_SetOrientation(self, orientation)
-    self.orientation = orientation
-
-    assert(self.anchor, "[indicator] position must be set before SetOrientation")
-
-    self.isHorizontal = not strfind(orientation, "top")
-
-    local point1, point2, x, y
-    local newLinePoint2, newLineX, newLineY
-
-    if orientation == "left_to_right" then
-        if strfind(self.anchor, "^BOTTOM") then
-            point1 = "BOTTOMLEFT"
-            point2 = "BOTTOMRIGHT"
-            newLinePoint2 = "TOPLEFT"
-            y = 0
-            newLineY = self.spacingY
-        else
-            point1 = "TOPLEFT"
-            point2 = "TOPRIGHT"
-            newLinePoint2 = "BOTTOMLEFT"
-            y = 0
-            newLineY = -self.spacingY
-        end
-        x = self.spacingX
-        newLineX = 0
-
-    elseif orientation == "right_to_left" then
-        if strfind(self.anchor, "^BOTTOM") then
-            point1 = "BOTTOMRIGHT"
-            point2 = "BOTTOMLEFT"
-            newLinePoint2 = "TOPRIGHT"
-            y = 0
-            newLineY = self.spacingY
-        else
-            point1 = "TOPRIGHT"
-            point2 = "TOPLEFT"
-            newLinePoint2 = "BOTTOMRIGHT"
-            y = 0
-            newLineY = -self.spacingY
-        end
-        x = -self.spacingX
-        newLineX = 0
-
-    elseif orientation == "top_to_bottom" then
-        if strfind(self.anchor, "RIGHT$") then
-            point1 = "TOPRIGHT"
-            point2 = "BOTTOMRIGHT"
-            newLinePoint2 = "TOPLEFT"
-            x = 0
-            newLineX = -self.spacingX
-        else
-            point1 = "TOPLEFT"
-            point2 = "BOTTOMLEFT"
-            newLinePoint2 = "TOPRIGHT"
-            x = 0
-            newLineX = self.spacingX
-        end
-        y = -self.spacingY
-        newLineY = 0
-
-    elseif orientation == "bottom_to_top" then
-        if strfind(self.anchor, "RIGHT$") then
-            point1 = "BOTTOMRIGHT"
-            point2 = "TOPRIGHT"
-            newLinePoint2 = "BOTTOMLEFT"
-            x = 0
-            newLineX = -self.spacingX
-        else
-            point1 = "BOTTOMLEFT"
-            point2 = "TOPLEFT"
-            newLinePoint2 = "BOTTOMRIGHT"
-            x = 0
-            newLineX = self.spacingX
-        end
-        y = self.spacingY
-        newLineY = 0
-    end
-
-    for i = 1, self.numSlots do
-        AF.ClearPoints(self.slots[i])
-        if i == 1 then
-            AF.SetPoint(self.slots[i], point1)
-        elseif i % self.numPerLine == 1 then
-            AF.SetPoint(self.slots[i], point1, self.slots[i-self.numPerLine], newLinePoint2, newLineX, newLineY)
-        else
-            AF.SetPoint(self.slots[i], point1, self.slots[i-1], point2, x, y)
-        end
-    end
-end
-
-local function Auras_SetNumPerLine(self, numPerLine)
-    self.numPerLine = min(numPerLine, self.numSlots)
-end
-
-local function Auras_SetNumSlots(self, numSlots)
-    self.numSlots = numSlots
-    self:SetMaxCount(numSlots)
-
-    for i = 1, numSlots do
-        if not self.slots[i] then
-            self.slots[i] = AF.CreateAura(self, true)
-        end
-    end
-
-    -- hide if reduced
-    for i = numSlots + 1, #self.slots do
-        self.slots[i]:Hide()
-    end
-end
-
-local function Auras_SetupAuras(self, config)
-    for i = 1, self.numSlots do
-        local aura = self.slots[i]
-        aura.root = self.root
-        -- Nameplate hit testing remains owned by Blizzard's native plate.
-        aura:EnableMouse(false)
-        aura:EnableDispelColor(
-            self.auraFilter == "HARMFUL"
-            and config.auraTypeColor
-            and config.auraTypeColor.debuffType
+    frame.ApplyNameplateHostileConfig = ApplyHostileConfig
+    frame.RequiresNameplateHostileReload = function(
+        self,
+        config,
+        plateConfig
+    )
+        return NativeRequiresReload(
+            self,
+            NormalizeDebuffConfig(config, plateConfig, true)
         )
-        -- aura:SetDesaturated(config.desaturated)
-        aura:SetCooldownStyle(config.cooldownStyle)
-        aura:SetupDurationText(config.durationText)
-        aura:SetupStackText(config.stackText)
-    end
-end
-
-local function Auras_OnHide(self)
-    if not self.numSlots then return end
-    for i = 1, self.numSlots do
-        self.slots[i]:Hide()
-    end
-end
-
-local function Auras_LoadConfig(self, config, plateConfig)
-    local position = GetEffectivePosition(config, plateConfig)
-
-    AF.SetFrameLevel(self, config.frameLevel, self.root)
-    NP.LoadIndicatorPosition(self, position, config.anchorTo)
-
-    self.position = position -- for sibling update
-    self.anchor = position[1]
-    self.spacingX = config.spacingX
-    self.spacingY = config.spacingY
-    Auras_SetNumSlots(self, config.numTotal)
-    Auras_SetSize(self, config.width, config.height)
-    Auras_SetNumPerLine(self, config.numPerLine)
-    Auras_SetOrientation(self, config.orientation)
-    Auras_SetupAuras(self, config)
-    Auras_UpdateSize(self, 0)
-
-    if self.auraFilter == "HARMFUL|CROWD_CONTROL" then
-        self:SetMatchFilters(nil)
-    else
-        self:SetMatchFilters(F.GetSecretSafeAuraMatchFilters(self.auraFilter, config.filters))
     end
 
-    -- Arbitrary spell blacklists and priorities remain unavailable for
-    -- restricted auras. Supported categories use Blizzard's C-side filters.
-end
+    frame.LoadConfig = function(self, config, plateConfig)
+        if HOSTILE_PLATE_TYPES[self.root.configKey] ~= true then
+            -- A pooled native row can pass through an unsupported friendly
+            -- assignment and return to an enemy during the same combat. Do
+            -- not dirty or replace its last complete enemy snapshot here;
+            -- Common will disable and curtain the indicator after this call.
+            self.enabled = false
+            return
+        end
 
-local function Auras_UpdatePixels(self)
-    AF.ReSize(self)
-    AF.RePoint(self)
-    for _, slot in next, self.slots do
-        slot:UpdatePixels()
+        config, plateConfig =
+            GetAppliedHostileConfig(config, plateConfig)
+        ApplyHostileConfig(self, config, plateConfig)
     end
-end
 
----------------------------------------------------------------------
--- create
----------------------------------------------------------------------
-local function CreateAuras(parent, name, auraFilter)
-    local frame = AF.CreateSecretAuraList(parent, name, auraFilter)
-
-    frame.root = parent
-    frame.auraFilter = auraFilter
-    frame.canHaveSibling = true
-
-    -- scripts
-    frame:SetScript("OnHide", Auras_OnHide)
-
-    -- functions
-    frame.Enable = Auras_Enable
-    frame.Disable = Auras_Disable
-    frame.Update = Auras_Update
-    frame.LoadConfig = Auras_LoadConfig
-    frame.AddSibling = Auras_AddSibling
-    frame.RemoveSibling = Auras_RemoveSibling
-    frame.UpdateSiblings = Auras_UpdateSiblings
-    frame.OnAurasUpdated = Auras_OnAurasUpdated
-
-    -- pixel perfect
-    AF.AddToPixelUpdater_Auto(frame, Auras_UpdatePixels)
-
-    return frame
+    frame.RequiresReloadForConfig = function(
+        self,
+        config,
+        plateConfig
+    )
+        if HOSTILE_PLATE_TYPES[self.root.configKey] ~= true then
+            return false
+        end
+        config, plateConfig =
+            GetAppliedHostileConfig(config, plateConfig)
+        plateConfig = plateConfig or self._nameplatePlateConfig
+        return self:RequiresNameplateHostileReload(
+            config,
+            plateConfig
+        )
+    end
 end
 
 function NP.CreateDebuffs(parent, name)
-    return CreateAuras(parent, name, "HARMFUL")
+    local frame, errorCode = UF.CreateNativeAuraIndicator(
+        parent,
+        name,
+        "HARMFUL",
+        false,
+        {
+            includeSpellColors = false,
+            allowCombatInitialBuild = true,
+            keepNativeEnabledWhenHidden = true,
+            immediateConfigCommit = true,
+            applyPlacement = ApplyNameplatePlacement,
+            controller = {
+                liveUnitChanges = true,
+                allowCombatInitialBuild = true,
+                alphaOnlyVisibility = true,
+            },
+        }
+    )
+    assert(frame, errorCode or "native nameplate aura backend unavailable")
+
+    frame._nameplateAuraType = "enemyDebuffs"
+    WrapNameplateConfig(frame)
+    return frame
 end
 
-function NP.CreateBuffs(parent, name)
-    return CreateAuras(parent, name, "HELPFUL")
-end
+function NP.PrepareNameplateAuraConfigUpdate()
+    local plateConfig = NP.config and NP.config.hostile_npc
+    local config = plateConfig and plateConfig.debuffs
+    if not config then return false end
 
-function NP.CreateCrowdControls(parent, name)
-    return CreateAuras(parent, name, "HARMFUL|CROWD_CONTROL")
+    local prepared = {}
+    local reloadRequired = false
+    for _, frame in next, NP.created do
+        local debuffs = frame.indicators
+            and frame.indicators.debuffs
+        local state = debuffs
+            and debuffs.GetNativeAuraState
+            and debuffs:GetNativeAuraState()
+        if debuffs
+            and debuffs._nameplateAppliedConfig
+            and state
+            and state.built == true
+        then
+            prepared[#prepared + 1] = debuffs
+            reloadRequired =
+                debuffs:RequiresNameplateHostileReload(
+                    config,
+                    plateConfig
+                ) == true
+                or reloadRequired
+        end
+    end
+
+    for _, debuffs in ipairs(prepared) do
+        debuffs:ApplyNameplateHostileConfig(config, plateConfig)
+    end
+    return reloadRequired
 end

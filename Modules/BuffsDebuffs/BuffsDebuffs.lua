@@ -14,7 +14,8 @@ local mainHandSlot = GetInventorySlotInfo("MainHandSlot")
 local secondaryHandSlot = GetInventorySlotInfo("SecondaryHandSlot")
 
 local REQUIRED_LEGACY_AF_VERSION = 21
-local REQUIRED_CUSTOM_AF_VERSION = 33
+-- AF #27/r36 registers only the selected native aura duration carrier.
+local REQUIRED_CUSTOM_AF_VERSION = 36
 local RETAIL_12_0_INTERFACE_MIN = 120000
 local RETAIL_12_1_INTERFACE_MIN = 120100
 local RETAIL_12_2_INTERFACE_MIN = 120200
@@ -55,10 +56,10 @@ local function GetRetailInterfaceVersion()
 end
 
 -- Retail 12.0.7 loads the implementation and template together from
--- Blizzard_RestrictedAddOnEnvironment/SecureGroupHeaders. Retail 12.1.0.68914
--- (wow-ui-source d3915c78) marks SecureAuraHeader.lua/xml Classic-only. Keep an
--- explicit interface boundary because Lua function globals cannot prove that
--- SecureAuraHeaderTemplate is constructible.
+-- Blizzard_RestrictedAddOnEnvironment/SecureGroupHeaders. Retail 12.1.0.69273
+-- (wow-ui-source eb941aad028d73ddc69e3e8ef4da709f4d3cd744) marks
+-- SecureAuraHeader.lua/xml Classic-only. Keep an explicit interface boundary
+-- because Lua function globals cannot prove that the template is constructible.
 function BD.HasSecureAuraHeaderBackend()
     local interfaceVersion = GetRetailInterfaceVersion()
     return AF.isRetail
