@@ -206,6 +206,16 @@ assertEqual(hookCalls[1], "SharedTooltip_SetBackdropStyle", "backdrop hook")
 assertEqual(hookCalls[2], "GameTooltip_ShowStatusBar", "status-bar hook")
 assertEqual(hookCalls[3], "GameTooltip_ShowProgressBar", "progress-bar hook")
 
+environment.AuraContainerInbound = {}
+addonLoadedCallback()
+assertEqual(backdropCalls, 0, "missing setter call count")
+
+environment.AuraContainerInbound = {
+    SetTooltipBackdrop = {},
+}
+addonLoadedCallback()
+assertEqual(backdropCalls, 0, "non-function setter call count")
+
 environment.AuraContainerInbound = {
     SetTooltipBackdrop = function(options)
         backdropCalls = backdropCalls + 1

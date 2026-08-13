@@ -13,6 +13,7 @@ ignore:
   - .unused
   - AGENTS.md
   - CONTRIBUTING.md
+  - docs
   - Modules/Blizzard/Style/WorldMapFrame_Test.lua
   - RELEASE_NOTES.md
   - scripts

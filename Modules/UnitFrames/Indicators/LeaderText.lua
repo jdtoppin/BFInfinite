@@ -7,9 +7,6 @@ local UF = BFI.modules.UnitFrames
 ---------------------------------------------------------------------
 -- local functions
 ---------------------------------------------------------------------
-local IsInRaid = IsInRaid
-local UnitIsGroupLeader = UnitIsGroupLeader
-local UnitIsGroupAssistant = UnitIsGroupAssistant
 local UnitClassBase = AF.UnitClassBase
 
 ---------------------------------------------------------------------
@@ -38,10 +35,12 @@ end
 local function UpdateLeaderText(self)
     local unit = self.root.unit
 
-    local isLeader = UnitIsGroupLeader(unit)
-    local isAssistant = IsInRaid() and UnitIsGroupAssistant(unit)
+    local isLeader, isAssistant, identityPublic =
+        UF.GetPublicUnitLeadership(unit)
 
-    if isLeader then
+    if not identityPublic then
+        self:SetText("")
+    elseif isLeader then
         self:SetText("L")
     elseif isAssistant then
         self:SetText("A")

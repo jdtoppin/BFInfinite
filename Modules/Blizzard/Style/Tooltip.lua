@@ -15,7 +15,7 @@ local function StyleAuraButtonTooltip()
     local inbound = _G.AuraContainerInbound
     if type(inbound) ~= "table" or type(inbound.SetTooltipBackdrop) ~= "function" then return end
 
-    -- Retail 12.1.0.69189 / wow-ui-source a520b6c27bb897e6:
+    -- Retail 12.1.0.69273 / wow-ui-source eb941aad028d73dd:
     -- AuraButtonTooltip is hidden and forbidden. Use Blizzard's global inbound
     -- styling surface instead of reading or mutating the object.
     local pixel = AF.GetOnePixelForRegion(_G.UIParent)
@@ -51,6 +51,18 @@ end
 ---------------------------------------------------------------------
 -- style
 ---------------------------------------------------------------------
+-- Retail 12.1.0.68914 (wow-ui-source d3915c78aba7) defines CompareHeader's
+-- rounded background in GameTooltip.xml. TooltipComparisonManager.lua owns
+-- its label, dynamic width, and visibility, so only replace the artwork.
+local function StyleCompareHeader(header)
+    if not header or header._BFIStyled then return end
+    header._BFIStyled = true
+
+    S.RemoveTextures(header, true)
+    AF.ApplyDefaultBackdropWithColors(header, "widget")
+    AF.AddToPixelUpdater_CustomGroup("BFIStyled", header)
+end
+
 local function Style(tooltip, _, embedded)
     if not tooltip or tooltip:IsForbidden() or not tooltip.NineSlice then return end
     if embedded or tooltip.IsEmbedded then return end -- Interface/AddOns/Blizzard_SharedXML/SharedTooltipTemplates.lua#L44
@@ -60,6 +72,8 @@ local function Style(tooltip, _, embedded)
 
     AF.ApplyDefaultBackdropWithColors(tooltip.NineSlice)
     AF.SetOnePixelInside(tooltip.NineSlice, tooltip)
+
+    StyleCompareHeader(tooltip.CompareHeader)
 end
 
 ---------------------------------------------------------------------
@@ -141,4 +155,9 @@ local function StyleBlizzard()
     hooksecurefunc("GameTooltip_ShowProgressBar", GameTooltip_ShowProgressBar)
 end
 AF.RegisterCallback("BFI_StyleBlizzard", StyleBlizzard)
-AF.RegisterAddonLoaded("Blizzard_AuraContainer", StyleAuraButtonTooltip)
+if type(AF.RegisterAddonLoaded) == "function" then
+    AF.RegisterAddonLoaded(
+        "Blizzard_AuraContainer",
+        StyleAuraButtonTooltip
+    )
+end

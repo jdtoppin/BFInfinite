@@ -64,11 +64,11 @@ AF.RegisterCallback("BFI_UpdateConfig", function(_, module)
         if frame:IsVisible() then
             local buffs = UF.GetIndicator(frame, "buffs")
             if buffs and buffs.enabled then
-                Auras_Update(buffs)
+                buffs:Update(true)
             end
             local debuffs = UF.GetIndicator(frame, "debuffs")
             if debuffs and debuffs.enabled then
-                Auras_Update(debuffs)
+                debuffs:Update(true)
             end
         end
     end
@@ -309,7 +309,6 @@ local function Auras_LoadConfig(self, config)
     self.anchor = config.position[1]
     self.spacingX = config.spacingX
     self.spacingY = config.spacingY
-    self.isBlock = strfind(config.cooldownStyle, "^block")
     self.tooltipEnabled = config.tooltip.enabled
 
     Auras_SetNumSlots(self, config.numTotal)
@@ -319,7 +318,12 @@ local function Auras_LoadConfig(self, config)
     Auras_SetupAuras(self, config, false)
     Auras_UpdateSize(self, 0)
 
-    self:SetMatchFilters(F.GetSecretSafeAuraMatchFilters(self.auraFilter, config.filters))
+    self:SetMatchFilters(
+        F.GetSecretSafeUnitFrameAuraMatchFilters(
+            self.auraFilter,
+            config.filters
+        )
+    )
 
     self.subFrameEnabled = false
     if self.subFrame and config.subFrame then
@@ -372,16 +376,9 @@ end
 ---------------------------------------------------------------------
 local function ConfigMode_RefreshAuras(self)
     local icon = self.auraFilter == "HELPFUL" and 135953 or 136071
-    if self.isBlock then
-        for i = 1, self.numSlots do
-            self.slots[i]:SetCooldown(GetTime(), 15, i, icon, nil, nil, nil, AF.GetColorRGB("BFI"))
-            self.slots[i]:EnableMouse(false)
-        end
-    else
-        for i = 1, self.numSlots do
-            self.slots[i]:SetCooldown(GetTime(), 15, i, icon)
-            self.slots[i]:EnableMouse(false)
-        end
+    for i = 1, self.numSlots do
+        self.slots[i]:SetCooldown(GetTime(), 15, i, icon)
+        self.slots[i]:EnableMouse(false)
     end
     Auras_UpdateSize(self, self.numSlots)
 end
