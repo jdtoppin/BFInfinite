@@ -403,6 +403,17 @@ local function UsesNativeAuraContainer(t)
     return nativeAuraOwners[t.owner] == true
 end
 
+local nativeGroupAuraOwners = {
+    party = true,
+    raid = true,
+}
+
+local function IsGroupManagedHarmfulNative(t)
+    return t.id == "debuffs"
+        and nativeGroupAuraOwners[t.owner] == true
+        and UsesNativeAuraContainer(t)
+end
+
 local function RequiresNativeAuraReload(t, count)
     if not IsAuraIndicator(t) then return false end
 
@@ -4387,7 +4398,12 @@ builder["auraBlackListWhitelist"] = function(parent)
         if AF.isRetail then
             HideEditBox()
             usesNative = UsesNativeAuraContainer(t)
-            if usesNative then
+            if IsGroupManagedHarmfulNative(t) then
+                mode:SetItems(retailModeItems)
+                tip:SetText(
+                    L["Group-frame Debuff spell lists are preserved but not applied on WoW 12.1. WoW cannot safely identity-filter harmful auras on assistable group units, so the unfiltered native Debuffs row remains visible"]
+                )
+            elseif usesNative then
                 canEdit = true
                 mode:SetItems(retailModeItems)
                 tip:SetText(
@@ -4790,10 +4806,17 @@ builder["auraArrangement"] = function(parent)
         pane.t = t
         if UsesNativeAuraContainer(t) then
             numTotal:SetLabel(L["Max Per Aura Group"])
-            numTotal:SetTooltip(
-                L["Max Per Aura Group"],
-                L["WoW 12.1 may split a row by enabled category and saved spell colors. This limit applies to each group, so the row can show more auras overall and groups may sort separately"]
-            )
+            if IsGroupManagedHarmfulNative(t) then
+                numTotal:SetTooltip(
+                    L["Max Per Aura Group"],
+                    L["WoW 12.1 may split this row by enabled category. This limit applies to each group, so the row can show more auras overall and groups may sort separately"]
+                )
+            else
+                numTotal:SetTooltip(
+                    L["Max Per Aura Group"],
+                    L["WoW 12.1 may split a row by enabled category and saved spell colors. This limit applies to each group, so the row can show more auras overall and groups may sort separately"]
+                )
+            end
         else
             numTotal:SetLabel(L["Max Displayed"])
             AF.ClearTooltip(numTotal)
@@ -4842,7 +4865,12 @@ builder["cooldownStyle"] = function(parent)
         pane.t = t
         styleDropdown:SetSelectedValue(t.cfg.cooldownStyle)
         if AF.isRetail then
-            if UsesNativeAuraContainer(t) then
+            if IsGroupManagedHarmfulNative(t) then
+                styleDropdown:SetTooltip(
+                    L["Cooldown Style"],
+                    L["Retail cooldown styles change presentation only; Blizzard's opaque aura duration continues to drive the swipe. Global spell colors are preserved but not applied to group Debuffs because harmful identity matching is unsafe on assistable group units"]
+                )
+            elseif UsesNativeAuraContainer(t) then
                 styleDropdown:SetTooltip(
                     L["Cooldown Style"],
                     L["Retail cooldown styles change presentation only; Blizzard's opaque aura duration continues to drive the swipe. Block styles can use the spell colors configured in Auras when WoW can match them safely; unlisted spells use gray"]
