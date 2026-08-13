@@ -67,9 +67,10 @@ function BD.GetBuffsDebuffsOptionsPolicy(which)
         available = backend ~= nil,
         backend = backend,
         custom = custom,
-        label = which == "debuffs" and customBuffsAvailable
-            and L["Debuffs (Blizzard controlled)"]
-            or L[which == "buffs" and "Buffs" or "Debuffs"],
+        label = custom and L["Buffs (Public + Private)"]
+            or (which == "debuffs" and customBuffsAvailable
+                and L["Debuffs (Blizzard controlled)"]
+                or L[which == "buffs" and "Buffs" or "Debuffs"]),
         separateOwnItems = {
             {text = L["Disabled"], value = 0},
             {text = L["Before"], value = 1, disabled = custom},
@@ -146,6 +147,9 @@ local function CreateBuffsDebuffsPanel()
             disabled = not debuffsPolicy.available,
         },
     })
+    if buffsPolicy.sourceDisclosure then
+        switch.buttons[1]:SetTooltip(buffsPolicy.sourceDisclosure)
+    end
     switch:SetOnSelect(LoadOptions)
 
     local enabled = AF.CreateCheckButton(switch)
@@ -294,17 +298,6 @@ local function CreateNormalPane()
     ]
     maxWraps:SetTooltip(enchantmentCapHelp)
     wrapAfter:SetTooltip(enchantmentCapHelp)
-
-    local sourceDisclosure = AF.CreateFontString(
-        iconsPane,
-        SOURCE_DISCLOSURE,
-        "gray"
-    )
-    normalPane.sourceDisclosure = sourceDisclosure
-    AF.SetPoint(sourceDisclosure, "BOTTOMLEFT", 10, 28)
-    AF.SetWidth(sourceDisclosure, 530)
-    sourceDisclosure:SetWordWrap(true)
-    sourceDisclosure:Hide()
 
     local statusText = AF.CreateFontString(
         iconsPane,
@@ -632,7 +625,6 @@ local function CreateNormalPane()
         AF.SetEnabled(currentConfig.enabled, arrangement, sortMethod, sortDirection, width, height, spacingX, spacingY, maxWraps, wrapAfter)
         AF.SetEnabled(policy.custom or currentConfig.enabled, separateOwn)
         separateOwn:SetItems(policy.separateOwnItems)
-        sourceDisclosure:SetShown(policy.sourceDisclosure ~= nil)
         arrangement:SetSelectedValue(currentConfig.orientation)
         sortMethod:SetSelectedValue(currentConfig.sortMethod)
         sortDirection:SetSelectedValue(currentConfig.sortDirection)

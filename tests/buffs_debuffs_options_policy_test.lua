@@ -604,9 +604,6 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     records.textSwitch = records.switches[2]
     records.separateOwn =
         records.dropdownsByLabel["Separate Own"]
-    records.sourceDisclosure = records.fontStringsByText[
-        "WoW 12.1's PublicAndPrivate source list combines public and private authorized Buffs in this native row; the sources cannot be separated."
-    ]
     records.durationMode = records.dropdownsByLabel[
         "Low-Time Text Color"
     ]
@@ -623,6 +620,12 @@ do
     assertEqual(#custom.events, 0,
         "custom programmatic option load fires no update")
     assertEqual(#custom.topSwitch.labels, 2, "custom has two tabs")
+    assertEqual(custom.topSwitch.labels[1].text,
+        "Buffs (Public + Private)",
+        "custom Buffs tab visibly discloses combined source classes")
+    assertEqual(custom.topSwitch.buttons[1].tooltip,
+        "WoW 12.1's PublicAndPrivate source list combines public and private authorized Buffs in this native row; the sources cannot be separated.",
+        "custom Buffs tab tooltip names the exact native source list")
     assertEqual(custom.topSwitch.labels[2].text,
         "Debuffs (Blizzard controlled)", "custom Debuffs label")
     assertFalse(custom.topSwitch.buttons[2].enabled,
@@ -642,8 +645,6 @@ do
             <= 500,
         "stacked panes fit the available normal pane height"
     )
-    assertTrue(custom.sourceDisclosure.shown,
-        "custom Buffs visibly disclose combined aura sources")
     assertEqual(custom.statusButton.width, 165,
         "status action has bounded width")
     assertEqual(custom.statusText.width, 350,
@@ -871,8 +872,10 @@ do
     assertEqual(legacy.durationMode.tooltip,
         "Durations abbreviate automatically to seconds, minutes, hours, and days.",
         "legacy backend receives the same non-flow duration guidance")
-    assertFalse(legacy.sourceDisclosure.shown,
-        "legacy pane does not claim the combined custom source")
+    assertEqual(legacy.topSwitch.labels[1].text, "Buffs",
+        "legacy Buffs tab does not claim combined custom sources")
+    assertNil(rawget(legacy.topSwitch.buttons[1], "tooltip"),
+        "legacy Buffs tab has no custom-source tooltip")
 
     legacy.events = {}
     legacy.durationMode.onSelect("percent")
@@ -905,6 +908,8 @@ do
         "seconds threshold controls are retained")
     assertTrue(source:find("PublicAndPrivate", 1, true) ~= nil,
         "visible source disclosure names the native source list")
+    assertNil(source:find("local sourceDisclosure", 1, true),
+        "source disclosure does not consume icon-pane vertical flow")
     assertTrue(source:find("SetAfterValueChanged", 1, true) ~= nil,
         "custom construction sliders commit after interaction")
     assertTrue(source:find("SetOnConfirm", 1, true) ~= nil,

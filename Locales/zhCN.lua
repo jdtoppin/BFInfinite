@@ -648,6 +648,7 @@ L["Bar Width Scale"] = "条形宽度缩放"
 -- buffs debuffs
 ---------------------------------------------------------------------
 L["Buffs & Debuffs"] = "增益与减益"
+L["Buffs (Public + Private)"] = "增益效果（公开 + 私有）"
 L["Show Seconds Unit"] = "显示秒数单位"
 L["Separate Own"] = "分离自己的"
 L["Aura Order"] = "光环顺序"

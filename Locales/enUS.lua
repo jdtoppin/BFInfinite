@@ -1,6 +1,7 @@
 select(2, ...).L = setmetatable({
     ["ABOUT"] = "BFInfinite is a World of Warcraft addon suite inspired by ElvUI, featuring unit frames, action bars, nameplates, UI enhancements, and more.\nWith a highly customizable and minimalist design, it aims to provide players with an unprecedented experience.\nMore features will continue to be added in the future to meet the personalized needs of different players.",
     ["buffs"] = "Buffs",
+    ["Buffs (Public + Private)"] = "Buffs (Public + Private)",
     ["Aura Lines"] = "Aura Lines",
     ["Aura Order"] = "Aura Order",
     ["Bags"] = "Bags",
