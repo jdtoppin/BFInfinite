@@ -22,6 +22,7 @@ end
 
 local backendByPane = {}
 local stateByPane = {}
+local transitionByPane = {}
 local dispatchPendingByPane = {}
 local callbacks = {}
 local harmfulDescriptorCapability = false
@@ -43,6 +44,7 @@ local L = setmetatable({}, {
 
 local BD = {
     BLIZZARD_DEBUFF_STYLE_BACKEND = "blizzardDebuffStyle",
+    BLIZZARD_DEFAULT_BACKEND = "blizzardDefault",
     SECURE_AURA_HEADER_BACKEND = "secureAuraHeader",
     CUSTOM_AURA_CONTAINER_BACKEND = "customAuraContainer",
     config = {
@@ -64,6 +66,10 @@ end
 
 function BD.GetCustomAuraContainerState(which)
     return stateByPane[which]
+end
+
+function BD.GetBuffsDebuffsBackendTransitionState(which)
+    return transitionByPane[which]
 end
 
 function BD.HasCustomHarmfulAuraDescriptorCapability()
@@ -100,6 +106,8 @@ local function SetLegacyBackend()
     backendByPane.debuffs = BD.SECURE_AURA_HEADER_BACKEND
     stateByPane.buffs = nil
     stateByPane.debuffs = nil
+    transitionByPane.buffs = nil
+    transitionByPane.debuffs = nil
     dispatchPendingByPane.buffs = nil
     dispatchPendingByPane.debuffs = nil
     BD.config.buffs.separateOwn = 0
@@ -115,6 +123,8 @@ local function SetCustomBuffsBackend()
     backendByPane.debuffs = BD.BLIZZARD_DEBUFF_STYLE_BACKEND
     stateByPane.buffs = {}
     stateByPane.debuffs = nil
+    transitionByPane.buffs = nil
+    transitionByPane.debuffs = nil
     dispatchPendingByPane.buffs = nil
     dispatchPendingByPane.debuffs = nil
     BD.config.buffs.separateOwn = 0
@@ -130,6 +140,8 @@ local function SetCustomDebuffsBackend(backend)
     stateByPane.buffs = {}
     stateByPane.debuffs = {active = backend
         == BD.CUSTOM_AURA_CONTAINER_BACKEND}
+    transitionByPane.buffs = nil
+    transitionByPane.debuffs = nil
     dispatchPendingByPane.buffs = nil
     dispatchPendingByPane.debuffs = nil
     BD.config.debuffs.enabled = true
@@ -146,6 +158,8 @@ local function SetCustomHarmfulBackend()
         nativeFollowerActive = true,
     }
     stateByPane.debuffs = {active = true}
+    transitionByPane.buffs = nil
+    transitionByPane.debuffs = nil
     dispatchPendingByPane.buffs = nil
     dispatchPendingByPane.debuffs = nil
     BD.config.buffs.enabled = true
@@ -315,6 +329,202 @@ do
     dispatchPendingByPane.debuffs = nil
 end
 
+do
+    BD.config.debuffs.customHarmfulEnabled = false
+    backendByPane.debuffs = BD.BLIZZARD_DEBUFF_STYLE_BACKEND
+    stateByPane.debuffs = {
+        active = true,
+        pending = false,
+        operationPending = false,
+    }
+    local status = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(status.code, "HARMFUL_ACTIVE_RECOVERY_FAILED",
+        "pre-dispatch opt-out reports the still-active custom owner")
+    assertNil(status.action,
+        "pre-dispatch active custom ownership exposes no style action")
+
+    stateByPane.debuffs = {
+        active = true,
+        pending = true,
+        operationPending = true,
+        diagnostic = "NATIVE_RESTORE_FAILED",
+    }
+    status = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(status.code, "HARMFUL_ACTIVE_RECOVERY_FAILED",
+        "opt-out restore failure preserves active harmful ownership")
+    assertNil(status.action,
+        "opt-out active recovery exposes no unsafe style action")
+
+    stateByPane.debuffs = {
+        active = false,
+        pending = true,
+        operationPending = true,
+    }
+    status = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(status.code, "PENDING_SAFE_UPDATE",
+        "inactive pending opt-out remains in safe transition")
+
+    stateByPane.debuffs = {
+        active = false,
+        pending = false,
+        operationPending = false,
+    }
+    status = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(status.code, "BFI_SHARED_AURA_MOVER",
+        "completed opt-out leaves active-recovery status for shared mover")
+end
+
+for _, transientBackend in ipairs({
+    {
+        name = "style",
+        backend = BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
+    },
+    {
+        name = "nil",
+        backend = false,
+    },
+}) do
+    BD.config.debuffs.customHarmfulEnabled = true
+    backendByPane.debuffs = transientBackend.backend or nil
+    stateByPane.debuffs = {
+        active = true,
+        pending = true,
+        operationPending = true,
+        diagnostic = "NATIVE_RESTORE_FAILED",
+    }
+    local status = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(status.code, "HARMFUL_ACTIVE_RECOVERY_FAILED",
+        transientBackend.name
+            .. " transient policy preserves active custom ownership")
+    assertNil(status.action,
+        transientBackend.name
+            .. " active custom recovery exposes no fallback action")
+
+    stateByPane.debuffs = {
+        active = false,
+        pending = false,
+        operationPending = false,
+    }
+    status = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(status.code, "HARMFUL_NATIVE_FALLBACK",
+        transientBackend.name
+            .. " requested fallback applies only after custom inactivity")
+end
+
+SetCustomHarmfulBackend()
+do
+    transitionByPane.debuffs = {
+        pending = true,
+        actualBackend = BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
+        desiredBackend = BD.CUSTOM_AURA_CONTAINER_BACKEND,
+        diagnostic = "STYLE_RELEASE_FAILED",
+    }
+    stateByPane.debuffs = {
+        active = false,
+        pending = false,
+        operationPending = false,
+    }
+    local policy = BD.GetBuffsDebuffsOptionsPolicy("debuffs")
+    assertFalse(policy.custom,
+        "reverse handoff does not expose custom-only controls early")
+    assertTrue(policy.blizzardDebuffStyle,
+        "reverse handoff exposes actual #103 controls")
+    assertTrue(policy.harmfulOptInRequested,
+        "reverse handoff retains the saved custom request")
+    assertEqual(policy.label, "Debuffs (appearance only)",
+        "reverse handoff labels its actual #103 owner")
+    assertEqual(BD.GetBuffsDebuffsOptionsStatus("debuffs").code,
+        "HARMFUL_STYLE_HANDOFF_PENDING",
+        "reverse handoff reports actual style ownership")
+
+    transitionByPane.debuffs = {
+        pending = true,
+        actualBackend = BD.BLIZZARD_DEFAULT_BACKEND,
+        desiredBackend = BD.CUSTOM_AURA_CONTAINER_BACKEND,
+        diagnostic = "CUSTOM_ACTIVATE_FAILED",
+    }
+    policy = BD.GetBuffsDebuffsOptionsPolicy("debuffs")
+    assertFalse(policy.custom,
+        "cold activation failure exposes no custom-only controls")
+    assertFalse(policy.blizzardDebuffStyle,
+        "cold activation failure does not claim #103 ownership")
+    assertEqual(BD.GetBuffsDebuffsOptionsStatus("debuffs").code,
+        "HARMFUL_NATIVE_FALLBACK",
+        "cold activation failure reports Blizzard default fallback")
+end
+
+SetCustomBuffsBackend()
+do
+    BD.config.debuffs.customHarmfulEnabled = false
+    transitionByPane.debuffs = {
+        pending = true,
+        actualBackend = BD.BLIZZARD_DEFAULT_BACKEND,
+        desiredBackend = BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
+        diagnostic = "STYLE_APPLY_FAILED",
+    }
+    local policy = BD.GetBuffsDebuffsOptionsPolicy("debuffs")
+    assertFalse(policy.custom,
+        "failed style apply exposes no custom controls")
+    assertFalse(policy.blizzardDebuffStyle,
+        "failed style apply truthfully reports Blizzard default")
+    assertEqual(BD.GetBuffsDebuffsOptionsStatus("debuffs").code,
+        "BLIZZARD_DEBUFF_STYLE_PENDING",
+        "failed style apply never labels #103 or shared mover active")
+end
+
+SetCustomHarmfulBackend()
+do
+    BD.config.debuffs.enabled = false
+    stateByPane.debuffs = {
+        active = true,
+        pending = true,
+        operationPending = true,
+        diagnostic = "NATIVE_RESTORE_FAILED",
+    }
+    local status = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(status.code, "HARMFUL_ACTIVE_RECOVERY_FAILED",
+        "disabled harmful row reports its still-active restore failure")
+    assertNil(status.action,
+        "disabled active recovery exposes no premature fallback action")
+
+    stateByPane.debuffs = {
+        active = false,
+        pending = false,
+        operationPending = false,
+    }
+    status = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(status.code, "BFI_SHARED_AURA_MOVER",
+        "disabled row leaves active recovery status after native restore")
+end
+
+SetCustomHarmfulBackend()
+do
+    BD.config.debuffs.separateOwn = 1
+    stateByPane.debuffs = {
+        active = true,
+        pending = true,
+        operationPending = true,
+        diagnostic = "NATIVE_RESTORE_FAILED",
+    }
+    local status = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(status.code, "HARMFUL_ACTIVE_RECOVERY_FAILED",
+        "Separate Own restore failure reports actual custom ownership")
+    assertNil(status.action,
+        "Separate Own active recovery exposes no premature repair action")
+
+    stateByPane.debuffs = {
+        active = false,
+        pending = false,
+        operationPending = false,
+        diagnostic = "UNSUPPORTED_SEPARATE_OWN",
+    }
+    status = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(status.code, "UNSUPPORTED_SEPARATE_OWN",
+        "Separate Own status appears after native ownership recovers")
+    assertEqual(status.action, "RECOVER_SEPARATE_OWN",
+        "recovered Separate Own status exposes its narrow repair action")
+end
+
 SetCustomBuffsBackend()
 
 do
@@ -438,7 +648,8 @@ do
     BD.config.buffs.enabled = true
 end
 
-local function NewOptionsUIHarness(customBackend, afVersion, harmfulBackendActive)
+local function NewOptionsUIHarness(customBackend, afVersion, harmfulBackendActive,
+        initialBackendTransition, initialHarmfulActive)
     local records = {
         callbacks = {},
         checkButtonsByLabel = {},
@@ -793,6 +1004,7 @@ local function NewOptionsUIHarness(customBackend, afVersion, harmfulBackendActiv
 
     local uiBD = {
         BLIZZARD_DEBUFF_STYLE_BACKEND = "blizzardDebuffStyle",
+        BLIZZARD_DEFAULT_BACKEND = "blizzardDefault",
         SECURE_AURA_HEADER_BACKEND = "secureAuraHeader",
         CUSTOM_AURA_CONTAINER_BACKEND = "customAuraContainer",
         config = {
@@ -801,12 +1013,19 @@ local function NewOptionsUIHarness(customBackend, afVersion, harmfulBackendActiv
         },
     }
     records.BD = uiBD
+    records.backendTransition = initialBackendTransition
     records.harmfulDescriptorCapability = customBackend == true
     records.harmfulBackendActive = harmfulBackendActive == true
-    records.controllerState = customBackend and {
+    records.buffsControllerState = customBackend and {
         active = true,
         nativeFollowerActive = true,
     } or {}
+    records.debuffsControllerState = records.harmfulBackendActive and {
+        active = initialHarmfulActive ~= false,
+    } or {}
+    records.controllerState = records.harmfulBackendActive
+        and records.debuffsControllerState
+        or records.buffsControllerState
 
     function uiBD.GetAuraBackend(which)
         records.backendCalls = (records.backendCalls or 0) + 1
@@ -826,8 +1045,13 @@ local function NewOptionsUIHarness(customBackend, afVersion, harmfulBackendActiv
     function uiBD.HasAuraBackend(which)
         return uiBD.GetAuraBackend(which) ~= nil
     end
-    function uiBD.GetCustomAuraContainerState()
-        return records.controllerState
+    function uiBD.GetCustomAuraContainerState(which)
+        return which == "debuffs"
+            and records.debuffsControllerState
+            or records.buffsControllerState
+    end
+    function uiBD.GetBuffsDebuffsBackendTransitionState(which)
+        if which == "debuffs" then return records.backendTransition end
     end
     function uiBD.HasCustomHarmfulAuraDescriptorCapability()
         return records.harmfulDescriptorCapability
@@ -905,6 +1129,12 @@ do
     assertEqual(custom.harmfulOptIn.tooltip,
         "This opt-in replaces Blizzard's ordinary and private Debuffs with one PublicAndPrivate native row. Its finite icon cap is shared; at the cap, either source can displace auras from the other. Deadly Debuffs remain Blizzard controlled.",
         "harmful opt-in tooltip discloses cap and ownership")
+    assertEqual(custom.slidersByLabel["Aura Lines"].tooltip,
+        "Temporary Main-Hand and Off-Hand enchants share this layout and may add up to two icons beyond the aura cap.",
+        "combined Buffs line tooltip discloses temporary enchant icons")
+    assertEqual(custom.slidersByLabel["Icons Per Line"].tooltip,
+        "Temporary Main-Hand and Off-Hand enchants share this layout and may add up to two icons beyond the aura cap.",
+        "combined Buffs wrap tooltip discloses temporary enchant icons")
     assertTrue(custom.separateOwn.items[3].disabled,
         "custom After item disabled")
     assertEqual(custom.titledPanesByTitle.Icons.height, 260,
@@ -1339,6 +1569,16 @@ do
         "successful harmful sort method is editable")
     assertTrue(harmful.slidersByLabel["X Spacing"].enabled,
         "successful harmful spacing is editable")
+    local harmfulCapHelp =
+        "Public and private Debuffs share this finite icon cap; at the cap, either source can displace auras from the other."
+    assertEqual(harmful.slidersByLabel["Aura Lines"].tooltip,
+        harmfulCapHelp,
+        "combined Debuffs line tooltip explains its shared finite cap")
+    assertEqual(harmful.slidersByLabel["Icons Per Line"].tooltip,
+        harmfulCapHelp,
+        "combined Debuffs wrap tooltip explains its shared finite cap")
+    assertNil(harmfulCapHelp:lower():find("enchant", 1, true),
+        "combined Debuffs layout help never claims weapon enchants")
 
     harmful.controllerState.active = true
     harmful.controllerState.pending = true
@@ -1360,11 +1600,42 @@ do
     assertFalse(harmful.statusButton.shown,
         "active harmful recovery exposes no unsafe action")
 
+    harmful.controllerState.diagnostic = "HOLDER_ANCHOR_UNAVAILABLE"
+    harmful.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+    assertEqual(
+        harmful.BD.GetBuffsDebuffsOptionsStatus("debuffs").code,
+        "HARMFUL_ACTIVE_RECOVERY_FAILED",
+        "active harmful holder failure retains degraded ownership status"
+    )
+    assertEqual(harmful.statusText.textValue,
+        "The combined Debuffs row remains active while native suppression recovery is pending.",
+        "active holder recovery status never claims Blizzard fallback")
+    assertFalse(harmful.statusButton.shown,
+        "active holder recovery exposes no unsafe action")
+
+    debuffsConfig.enabled = false
+    harmful.controllerState.diagnostic = "NATIVE_RESTORE_FAILED"
+    harmful.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+    assertEqual(harmful.statusText.textValue,
+        "The combined Debuffs row remains active while native suppression recovery is pending.",
+        "disabled Debuffs UI follows its still-active custom owner")
+    assertFalse(harmful.statusButton.shown,
+        "disabled active recovery exposes no premature action")
+
+    debuffsConfig.enabled = true
+    debuffsConfig.separateOwn = 1
+    harmful.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+    assertEqual(harmful.statusText.textValue,
+        "The combined Debuffs row remains active while native suppression recovery is pending.",
+        "unsupported Separate Own waits for active custom restore")
+    assertFalse(harmful.statusButton.shown,
+        "unsupported active recovery hides the premature repair action")
+
     harmful.controllerState.pending = nil
     harmful.controllerState.operationPending = nil
     harmful.controllerState.harmfulReassertPending = nil
     harmful.controllerState.diagnostic = nil
-    debuffsConfig.separateOwn = 1
+    harmful.controllerState.active = false
     harmful.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
     assertEqual(
         harmful.BD.GetBuffsDebuffsOptionsStatus("debuffs").code,
@@ -1410,6 +1681,155 @@ do
         "Debuffs reload status exposes the reload action")
     assertEqual(harmful.statusButton.textValue, "Reload UI",
         "Debuffs reload status uses the reload action label")
+end
+
+do
+    local handoff = NewOptionsUIHarness(true, 42, true, {
+        pending = true,
+        actualBackend = "blizzardDebuffStyle",
+        desiredBackend = "customAuraContainer",
+        diagnostic = "STYLE_RELEASE_FAILED",
+    }, false)
+    handoff.BD.config.debuffs.customHarmfulEnabled = true
+    handoff.debuffsControllerState.active = false
+    handoff.topSwitch:SetSelectedValue("debuffs")
+    handoff.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+
+    assertTrue(handoff.harmfulOptIn.checked,
+        "reverse handoff keeps the saved harmful opt-in checked")
+    assertEqual(handoff.topSwitch.labels[2].text,
+        "Debuffs (appearance only)",
+        "reverse handoff tab follows actual #103 ownership")
+    assertFalse(handoff.dropdownsByLabel["Sort Method"].enabled,
+        "reverse handoff hides custom-only sort ownership")
+    assertEqual(handoff.statusText.textValue,
+        "The combined Debuffs row remains opted in, but Blizzard Debuffs styling remains active until the backend handoff can complete.",
+        "reverse handoff status names requested and actual owners")
+    assertFalse(handoff.statusButton.shown,
+        "reverse handoff exposes no unsafe action")
+end
+
+do
+    local handoff = NewOptionsUIHarness(true, 42, false, {
+        pending = true,
+        actualBackend = "blizzardDefault",
+        desiredBackend = "blizzardDebuffStyle",
+        diagnostic = "STYLE_APPLY_FAILED",
+    })
+    handoff.BD.config.debuffs.customHarmfulEnabled = false
+    handoff.topSwitch:SetSelectedValue("debuffs")
+    handoff.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+
+    assertEqual(handoff.topSwitch.labels[2].text,
+        "Debuffs (Blizzard controlled)",
+        "failed style apply does not label #103 as actual")
+    assertEqual(handoff.statusText.textValue,
+        "Blizzard Debuffs are active while BFInfinite waits to apply Debuffs styling.",
+        "failed style apply reports Blizzard default during handoff")
+    assertNil(handoff.statusText.textValue:find(
+        "combined Buffs row",
+        1,
+        true
+    ), "failed style apply never claims the shared mover")
+    assertFalse(handoff.statusButton.shown,
+        "failed style apply exposes no unsafe action")
+end
+
+do
+    local optOut = NewOptionsUIHarness(true, 42, false)
+    optOut.BD.config.debuffs.customHarmfulEnabled = false
+    optOut.debuffsControllerState.active = true
+    optOut.debuffsControllerState.pending = false
+    optOut.debuffsControllerState.operationPending = false
+    optOut.debuffsControllerState.diagnostic = nil
+    optOut.topSwitch:SetSelectedValue("debuffs")
+    optOut.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+
+    assertEqual(
+        optOut.BD.GetBuffsDebuffsOptionsStatus("debuffs").code,
+        "HARMFUL_ACTIVE_RECOVERY_FAILED",
+        "pre-dispatch opt-out UI follows actual active custom ownership"
+    )
+    assertEqual(optOut.statusText.textValue,
+        "The combined Debuffs row remains active while native suppression recovery is pending.",
+        "pre-dispatch opt-out UI never labels #103 as actual")
+
+    optOut.debuffsControllerState.pending = true
+    optOut.debuffsControllerState.operationPending = true
+    optOut.debuffsControllerState.diagnostic = "NATIVE_RESTORE_FAILED"
+    optOut.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+
+    assertEqual(
+        optOut.BD.GetBuffsDebuffsOptionsStatus("debuffs").code,
+        "HARMFUL_ACTIVE_RECOVERY_FAILED",
+        "opt-out UI preserves active harmful recovery status"
+    )
+    assertEqual(optOut.statusText.textValue,
+        "The combined Debuffs row remains active while native suppression recovery is pending.",
+        "opt-out restore failure says combined row remains active")
+    assertNil(optOut.statusText.textValue:find(
+        "BFInfinite styles ordinary Debuffs only",
+        1,
+        true
+    ), "opt-out restore failure never claims Blizzard style ownership")
+    assertNil(optOut.statusText.textValue:find(
+        "The BFI Buff Frame mover",
+        1,
+        true
+    ), "opt-out restore failure never reports shared mover ownership")
+
+    optOut.debuffsControllerState.active = false
+    optOut.debuffsControllerState.pending = false
+    optOut.debuffsControllerState.operationPending = false
+    optOut.debuffsControllerState.diagnostic = nil
+    optOut.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+    assertEqual(
+        optOut.BD.GetBuffsDebuffsOptionsStatus("debuffs").code,
+        "BFI_SHARED_AURA_MOVER",
+        "completed opt-out UI leaves active recovery for shared mover"
+    )
+    assertEqual(optOut.statusText.textValue,
+        "The BFI Buff Frame mover positions the combined Buffs row and Blizzard's DebuffFrame root together. Movement is unavailable in combat.",
+        "completed opt-out UI reports truthful shared mover ownership")
+end
+
+do
+    local transient = NewOptionsUIHarness(true, 42, false)
+    transient.BD.config.debuffs.customHarmfulEnabled = true
+    transient.debuffsControllerState.active = true
+    transient.debuffsControllerState.pending = true
+    transient.debuffsControllerState.operationPending = true
+    transient.debuffsControllerState.diagnostic = "NATIVE_RESTORE_FAILED"
+    transient.topSwitch:SetSelectedValue("debuffs")
+    transient.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+
+    assertEqual(
+        transient.BD.GetBuffsDebuffsOptionsStatus("debuffs").code,
+        "HARMFUL_ACTIVE_RECOVERY_FAILED",
+        "requested transient style policy preserves active custom status"
+    )
+    assertEqual(transient.statusText.textValue,
+        "The combined Debuffs row remains active while native suppression recovery is pending.",
+        "requested transient style UI reports active combined row")
+    assertNil(transient.statusText.textValue:find(
+        "Blizzard Debuffs remain active",
+        1,
+        true
+    ), "requested transient style UI never claims Blizzard fallback")
+
+    transient.debuffsControllerState.active = false
+    transient.debuffsControllerState.pending = false
+    transient.debuffsControllerState.operationPending = false
+    transient.debuffsControllerState.diagnostic = nil
+    transient.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+    assertEqual(
+        transient.BD.GetBuffsDebuffsOptionsStatus("debuffs").code,
+        "HARMFUL_NATIVE_FALLBACK",
+        "requested fallback UI waits for custom inactivity"
+    )
+    assertEqual(transient.statusText.textValue,
+        "The combined Debuffs row is opted in, but its native private-aura boundary is not currently available. Blizzard Debuffs remain active.",
+        "inactive requested fallback UI reports Blizzard ownership")
 end
 
 do

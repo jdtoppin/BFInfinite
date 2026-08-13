@@ -10,6 +10,7 @@ local GetUnitAuraInstanceIDs = C_UnitAuras.GetUnitAuraInstanceIDs
 local GetBuildInfo = GetBuildInfo
 local GetWeaponEnchantInfo = GetWeaponEnchantInfo
 local InCombatLockdown = InCombatLockdown
+local C_Timer = C_Timer
 local mainHandSlot = GetInventorySlotInfo("MainHandSlot")
 local secondaryHandSlot = GetInventorySlotInfo("SecondaryHandSlot")
 
@@ -25,6 +26,7 @@ local RETAIL_12_2_INTERFACE_MIN = 120200
 local SECURE_AURA_HEADER_BACKEND = "secureAuraHeader"
 local CUSTOM_AURA_CONTAINER_BACKEND = "customAuraContainer"
 local BLIZZARD_DEBUFF_STYLE_BACKEND = "blizzardDebuffStyle"
+local BLIZZARD_DEFAULT_BACKEND = "blizzardDefault"
 
 local REQUIRED_CUSTOM_AF_METHODS = {
     "AddCustomAuraGroup",
@@ -51,6 +53,7 @@ local REQUIRED_CUSTOM_AF_METHODS = {
 BD.SECURE_AURA_HEADER_BACKEND = SECURE_AURA_HEADER_BACKEND
 BD.CUSTOM_AURA_CONTAINER_BACKEND = CUSTOM_AURA_CONTAINER_BACKEND
 BD.BLIZZARD_DEBUFF_STYLE_BACKEND = BLIZZARD_DEBUFF_STYLE_BACKEND
+BD.BLIZZARD_DEFAULT_BACKEND = BLIZZARD_DEFAULT_BACKEND
 
 local function GetRetailInterfaceVersion()
     -- GetBuildInfo returns values after interfaceVersion as well. Assign the
@@ -592,6 +595,149 @@ local updatePending
 local pendingWhich
 local UpdateBuffsDebuffs
 local pendingOptionsSignature
+local backendTransitionGeneration = 0
+local backendRequestGenerations = {}
+local backendTransitions = {}
+local backendTransitionOptionsSignatures = {}
+
+local function NormalizeBackend(backend)
+    return backend or BLIZZARD_DEFAULT_BACKEND
+end
+
+local function GetActualDebuffBackend()
+    if type(BD.GetCustomAuraContainerState) == "function" then
+        local state = BD.GetCustomAuraContainerState("debuffs")
+        if type(state) == "table" and state.active == true then
+            return CUSTOM_AURA_CONTAINER_BACKEND
+        end
+    end
+    if type(BD.GetBlizzardDebuffStyleState) == "function" then
+        local state = BD.GetBlizzardDebuffStyleState()
+        if type(state) == "table" and state.active == true then
+            return BLIZZARD_DEBUFF_STYLE_BACKEND
+        end
+    end
+    return BLIZZARD_DEFAULT_BACKEND
+end
+
+local function NotifyBackendTransitionOptions(which)
+    local transition = backendTransitions[which]
+    local signature = transition and table.concat({
+        transition.generation,
+        transition.actualBackend,
+        transition.desiredBackend,
+        transition.stage,
+        transition.diagnostic,
+        transition.retryAttempted and 1 or 0,
+    }, ":") or ""
+    if signature == backendTransitionOptionsSignatures[which] then return end
+    backendTransitionOptionsSignatures[which] = signature
+    AF.Fire("BFI_RefreshOptions", "buffsDebuffs")
+end
+
+local function BeginBackendRequest(which)
+    backendTransitionGeneration = backendTransitionGeneration + 1
+    backendRequestGenerations[which] = backendTransitionGeneration
+    return {
+        which = which,
+        generation = backendTransitionGeneration,
+    }
+end
+
+local function IsCurrentBackendRequest(request)
+    return type(request) == "table"
+        and backendRequestGenerations[request.which] == request.generation
+end
+
+local function ClearBackendTransition(request)
+    if not IsCurrentBackendRequest(request) then return end
+    if backendTransitions[request.which] == nil then return end
+    backendTransitions[request.which] = nil
+    NotifyBackendTransitionOptions(request.which)
+end
+
+local function QueueBackendTransitionRetry(request)
+    if not IsCurrentBackendRequest(request)
+        or request.retryQueued
+        or request.retryAttempted
+        or type(C_Timer) ~= "table"
+        or type(C_Timer.After) ~= "function"
+    then
+        return
+    end
+
+    request.retryQueued = true
+    C_Timer.After(0, function()
+        if not IsCurrentBackendRequest(request)
+            or backendTransitions[request.which] ~= request
+        then
+            return
+        end
+        request.retryQueued = nil
+        request.retryAttempted = true
+        UpdateBuffsDebuffs(
+            nil,
+            "buffsDebuffs",
+            request.which,
+            request.generation
+        )
+    end)
+end
+
+local function RecordBackendTransition(
+    request,
+    desiredBackend,
+    stage,
+    diagnostic
+)
+    if not IsCurrentBackendRequest(request) then return end
+    request.pending = true
+    request.actualBackend = GetActualDebuffBackend()
+    request.desiredBackend = NormalizeBackend(desiredBackend)
+    request.stage = stage
+    request.diagnostic = diagnostic
+    backendTransitions[request.which] = request
+    NotifyBackendTransitionOptions(request.which)
+    QueueBackendTransitionRetry(request)
+end
+
+function BD.GetBuffsDebuffsBackendTransitionState(which)
+    local transition = backendTransitions[which]
+    if not transition then return nil end
+    if which == "debuffs" then
+        local actualBackend = GetActualDebuffBackend()
+        if actualBackend ~= transition.actualBackend then
+            transition.actualBackend = actualBackend
+            -- The caller is already performing the options/state refresh that
+            -- observed this newer owner. Invalidate the emission signature so
+            -- the next stage mutation cannot be suppressed by the old snapshot.
+            backendTransitionOptionsSignatures[which] = nil
+        end
+    end
+    return {
+        pending = true,
+        generation = transition.generation,
+        actualBackend = transition.actualBackend,
+        desiredBackend = transition.desiredBackend,
+        stage = transition.stage,
+        diagnostic = transition.diagnostic,
+        retryAttempted = transition.retryAttempted == true,
+    }
+end
+
+function BD.ContinueBuffsDebuffsBackendTransition(which)
+    local transition = backendTransitions[which]
+    if not transition or not IsCurrentBackendRequest(transition) then
+        return false
+    end
+    UpdateBuffsDebuffs(
+        nil,
+        "buffsDebuffs",
+        which,
+        transition.generation
+    )
+    return true
+end
 
 function BD.IsBuffsDebuffsUpdatePending(which)
     if not updatePending then return false end
@@ -660,10 +806,18 @@ end
 local function DisableCustomPane(which)
     if type(BD.DisableCustomAuraContainer) ~= "function" then return true end
     if type(BD.GetCustomAuraContainerState) ~= "function" then
-        return BD.DisableCustomAuraContainer(which) ~= false
+        return BD.DisableCustomAuraContainer(
+            which,
+            which == "debuffs"
+        ) ~= false
     end
     if BD.GetCustomAuraContainerState(which) == nil then return true end
-    if BD.DisableCustomAuraContainer(which) ~= true then return false end
+    if BD.DisableCustomAuraContainer(
+        which,
+        which == "debuffs"
+    ) ~= true then
+        return false
+    end
     local state = BD.GetCustomAuraContainerState(which)
     return state ~= nil
         and state.active ~= true
@@ -671,55 +825,161 @@ local function DisableCustomPane(which)
         and state.operationPending ~= true
 end
 
-local function UpdatePane(which, config, header, createHeader)
+local function UpdatePane(which, config, header, createHeader, request)
     local backend = BD.GetAuraBackend(which)
     if backend == CUSTOM_AURA_CONTAINER_BACKEND then
         if which == "debuffs" then
             if type(BD.DisableBlizzardDebuffStyle) ~= "function"
                 or BD.DisableBlizzardDebuffStyle() ~= true
             then
+                RecordBackendTransition(
+                    request,
+                    backend,
+                    "STYLE_RELEASE",
+                    "STYLE_RELEASE_FAILED"
+                )
                 return header
             end
         end
         -- Restore Blizzard first. The custom backend may suppress it again
         -- only after its replacement has completed construction.
-        if not DisableHeader(which, header) then return header end
-        BD.UpdateCustomAuraContainer(which, config)
+        if not DisableHeader(which, header) then
+            RecordBackendTransition(
+                request,
+                backend,
+                "NATIVE_RESTORE",
+                "NATIVE_RESTORE_FAILED"
+            )
+            return header
+        end
+        local accepted = BD.UpdateCustomAuraContainer(
+            which,
+            config,
+            which == "debuffs"
+        )
+        if which == "debuffs" then
+            local state = type(BD.GetCustomAuraContainerState) == "function"
+                and BD.GetCustomAuraContainerState(which)
+                or nil
+            local completed = accepted == true
+                and type(state) == "table"
+                and (
+                    state.active == true
+                    or (
+                        config.enabled ~= true
+                        and state.pending ~= true
+                        and state.operationPending ~= true
+                    )
+                )
+            if not completed then
+                RecordBackendTransition(
+                    request,
+                    backend,
+                    "CUSTOM_ACTIVATE",
+                    "CUSTOM_ACTIVATE_FAILED"
+                )
+                return header
+            end
+        end
+        ClearBackendTransition(request)
     elseif backend == BLIZZARD_DEBUFF_STYLE_BACKEND then
         -- #103 may touch Blizzard only after the custom owner has completed
         -- its full private/public restore and reports inactive, not pending.
-        if not DisableCustomPane(which) then return header end
-        if not DisableHeader(which, header) then return header end
-        if BD.UpdateBlizzardDebuffStyle(config) ~= true then return header end
+        if not DisableCustomPane(which) then
+            RecordBackendTransition(
+                request,
+                backend,
+                "CUSTOM_RELEASE",
+                "CUSTOM_RELEASE_FAILED"
+            )
+            return header
+        end
+        if not DisableHeader(which, header) then
+            RecordBackendTransition(
+                request,
+                backend,
+                "NATIVE_RESTORE",
+                "NATIVE_RESTORE_FAILED"
+            )
+            return header
+        end
+        if BD.UpdateBlizzardDebuffStyle(config) ~= true then
+            RecordBackendTransition(
+                request,
+                backend,
+                "STYLE_APPLY",
+                "STYLE_APPLY_FAILED"
+            )
+            return header
+        end
+        ClearBackendTransition(request)
     elseif backend == SECURE_AURA_HEADER_BACKEND then
         if which == "debuffs" then
             if type(BD.DisableBlizzardDebuffStyle) ~= "function"
                 or BD.DisableBlizzardDebuffStyle() ~= true
             then
+                RecordBackendTransition(
+                    request,
+                    backend,
+                    "STYLE_RELEASE",
+                    "STYLE_RELEASE_FAILED"
+                )
                 return header
             end
         end
-        if not DisableCustomPane(which) then return header end
+        if not DisableCustomPane(which) then
+            RecordBackendTransition(
+                request,
+                backend,
+                "CUSTOM_RELEASE",
+                "CUSTOM_RELEASE_FAILED"
+            )
+            return header
+        end
         if config.enabled then
             header = EnableHeader(which, header, createHeader, config)
         else
             DisableHeader(which, header)
         end
+        ClearBackendTransition(request)
     else
         if which == "debuffs" then
             if type(BD.DisableBlizzardDebuffStyle) ~= "function"
                 or BD.DisableBlizzardDebuffStyle() ~= true
             then
+                RecordBackendTransition(
+                    request,
+                    backend,
+                    "STYLE_RELEASE",
+                    "STYLE_RELEASE_FAILED"
+                )
                 return header
             end
         end
-        if not DisableCustomPane(which) then return header end
-        DisableHeader(which, header)
+        if not DisableCustomPane(which) then
+            RecordBackendTransition(
+                request,
+                backend,
+                "CUSTOM_RELEASE",
+                "CUSTOM_RELEASE_FAILED"
+            )
+            return header
+        end
+        if not DisableHeader(which, header) then
+            RecordBackendTransition(
+                request,
+                backend,
+                "NATIVE_RESTORE",
+                "NATIVE_RESTORE_FAILED"
+            )
+            return header
+        end
+        ClearBackendTransition(request)
     end
     return header
 end
 
-UpdateBuffsDebuffs = function(_, module, which)
+UpdateBuffsDebuffs = function(_, module, which, continuationGeneration)
     if module and module ~= "buffsDebuffs" then return end
     if which and which ~= "buffs" and which ~= "debuffs" then return end
 
@@ -735,6 +995,22 @@ UpdateBuffsDebuffs = function(_, module, which)
         return
     end
 
+    local debuffRequest
+    if not which or which == "debuffs" then
+        if continuationGeneration ~= nil then
+            local transition = backendTransitions.debuffs
+            if not transition
+                or transition.generation ~= continuationGeneration
+                or not IsCurrentBackendRequest(transition)
+            then
+                return
+            end
+            debuffRequest = transition
+        else
+            debuffRequest = BeginBackendRequest("debuffs")
+        end
+    end
+
     -- buffs
     local config = BD.config.buffs
     if not which or which == "buffs" then
@@ -744,7 +1020,13 @@ UpdateBuffsDebuffs = function(_, module, which)
     -- debuffs
     config = BD.config.debuffs
     if not which or which == "debuffs" then
-        debuffFrame = UpdatePane("debuffs", config, debuffFrame, CreateDebuffHeader)
+        debuffFrame = UpdatePane(
+            "debuffs",
+            config,
+            debuffFrame,
+            CreateDebuffHeader,
+            debuffRequest
+        )
     end
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateBuffsDebuffs)

@@ -194,6 +194,27 @@ local function DeferControllerForEditMode(controller)
     end
 end
 
+local function QueueCompletedDispatcherHandoff(controller)
+    if controller.dispatcherHandoffQueued then return end
+    controller.dispatcherHandoffQueued = true
+    C_Timer.After(0, function()
+        controller.dispatcherHandoffQueued = nil
+        if controller.dispatcherHandoffPending
+            and controller.pendingOperation == nil
+            and pendingControllers[controller] ~= true
+        then
+            -- The dispatcher stopped at a custom-controller ownership boundary.
+            -- Resume only after the controller has drained its exact pending
+            -- operation; the dispatcher re-reads desired and actual ownership
+            -- against its current generation before any downstream write.
+            controller.dispatcherHandoffPending = nil
+            if type(BD.ContinueBuffsDebuffsBackendTransition) == "function" then
+                BD.ContinueBuffsDebuffsBackendTransition(controller.which)
+            end
+        end
+    end)
+end
+
 local function AssertDescriptor(descriptor)
     assert(type(descriptor) == "table",
         "custom aura pane compiler must return a descriptor")
@@ -1189,6 +1210,10 @@ local function Deactivate(controller, state)
         return false
     end
     if not RestoreNative(controller) then
+        if controller.active and UsesHarmfulSuppression(controller) then
+            controller.state = "ACTIVE_REFRESH_FAILED"
+            controller.diagnostic = "NATIVE_RESTORE_FAILED"
+        end
         return false
     end
 
@@ -1515,6 +1540,7 @@ function ControllerMixin:_ApplyPending()
     self.pendingDiagnostic = nil
     pendingControllers[self] = nil
 
+    local completedDisable
     if operation == "disable" then
         if not Deactivate(self) then
             self.pendingOperation = operation
@@ -1523,6 +1549,7 @@ function ControllerMixin:_ApplyPending()
         end
         self.reloadRequired = nil
         self.diagnostic = nil
+        completedDisable = true
     elseif operation == "unsupported" then
         if not Deactivate(self, "UNSUPPORTED") then
             self.pendingOperation = operation
@@ -1569,14 +1596,49 @@ function ControllerMixin:_ApplyPending()
     else
         self.reloadRequired = nil
         self.descriptor = descriptor
+        local reassertAfterTuning = self.active == true
+            and self.harmfulReassertPending == true
+            and UsesHarmfulSuppression(self, descriptor)
         if not ApplyNativeTuning(self, descriptor) then
-            if RestoreNative(self) then
+            local wasActive = self.active == true
+            local nativeRestored = RestoreNative(self)
+            if nativeRestored then
                 HideCustom(self)
+                self.harmfulReassertPending = nil
+            elseif wasActive and UsesHarmfulSuppression(self, descriptor) then
+                -- Keep the last safe replacement visible and retain this
+                -- latest-only tuning payload. A transient holder boundary and
+                -- a failed native restore must not silently discard the user
+                -- update or claim that Blizzard has taken presentation back.
+                self.pendingOperation = operation
+                self.pendingDescriptor = descriptor
+                self.state = "ACTIVE_REFRESH_FAILED"
+                self.diagnostic = descriptor.holderAnchor
+                    and "HOLDER_ANCHOR_UNAVAILABLE"
+                    or "NATIVE_FOLLOWER_UNAVAILABLE"
+                QueueController(self)
+                UnregisterRegenIfIdle()
+                NotifyControllerState(self)
+                return
             end
             self.state = "NATIVE_UNAVAILABLE"
             self.diagnostic = descriptor.holderAnchor
                 and "HOLDER_ANCHOR_UNAVAILABLE"
                 or "NATIVE_FOLLOWER_UNAVAILABLE"
+        elseif reassertAfterTuning then
+            -- A completed harmful suppression ledger makes Activate's normal
+            -- SetNative(true) path intentionally idempotent. Do not let that
+            -- erase a lifecycle invalidation that arrived alongside this
+            -- latest tuning update: consume it with one explicit reassert.
+            if ReassertNative(self) then
+                self.harmfulReassertPending = nil
+                self.state = "ACTIVE"
+                self.diagnostic = nil
+            else
+                self.state = "ACTIVE_REFRESH_FAILED"
+                self.diagnostic = "NATIVE_HARMFUL_REASSERT_FAILED"
+                QueueController(self)
+            end
         elseif not Activate(self) then
             if descriptor.nativeFollower
                 and not self.nativeFollowerRefreshPending
@@ -1588,9 +1650,17 @@ function ControllerMixin:_ApplyPending()
 
     UnregisterRegenIfIdle()
     NotifyControllerState(self)
+    if (completedDisable or self.pendingOperation == nil)
+        and self.which == "debuffs"
+        and self.dispatcherHandoffPending
+    then
+        QueueCompletedDispatcherHandoff(self)
+    end
 end
 
 function ControllerMixin:Update(config)
+    -- A fresh custom update supersedes any earlier deferred dispatcher handoff.
+    self.dispatcherHandoffPending = nil
     local descriptor, diagnostic = self.compiler(config)
     if descriptor == nil then
         self.pendingOperation = "unsupported"
@@ -1875,21 +1945,31 @@ function BD.IsCustomAuraContainerAvailable(which)
         )
 end
 
-function BD.UpdateCustomAuraContainer(which, config)
+function BD.UpdateCustomAuraContainer(which, config, resumeDispatcher)
     local controller = registrations[which]
     if not controller or not BD.HasCustomAuraContainerCapability() then
         return false
     end
 
     controller:Update(config)
+    if resumeDispatcher == true and which == "debuffs" then
+        local state = controller:GetState()
+        controller.dispatcherHandoffPending =
+            (state.pending == true or state.operationPending == true) and true
+            or nil
+    end
     return true
 end
 
-function BD.DisableCustomAuraContainer(which)
+function BD.DisableCustomAuraContainer(which, resumeDispatcher)
     local controller = registrations[which]
     if not controller then return false end
 
-    return controller:Disable() == true
+    local completed = controller:Disable() == true
+    if resumeDispatcher == true and which == "debuffs" then
+        controller.dispatcherHandoffPending = not completed and true or nil
+    end
+    return completed
 end
 
 function BD.GetCustomAuraContainerState(which)

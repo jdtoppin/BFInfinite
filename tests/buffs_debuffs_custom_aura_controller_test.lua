@@ -505,6 +505,10 @@ local function NewHarness()
     function BD.DisableBlizzardDebuffStyle()
         error("#127 must not call the #103 style adapter", 2)
     end
+    function BD.ContinueBuffsDebuffsBackendTransition(which)
+        record("BD.ContinueBuffsDebuffsBackendTransition", which)
+        return true
+    end
 
     local L = setmetatable({}, {
         __index = function(_, key)
@@ -738,6 +742,8 @@ end
 local function CompileHarmful(config)
     if config.unsupported then
         return nil, "UNSUPPORTED_TEST_CONFIG"
+    elseif config.separateOwn and config.separateOwn ~= 0 then
+        return nil, "UNSUPPORTED_SEPARATE_OWN"
     end
 
     local descriptor = CompileBuffs(config)
@@ -760,6 +766,105 @@ local function CompileHarmful(config)
     descriptor.groups[1].filterString = "HARMFUL"
     descriptor.groups[1].maxFrameCount = config.maximum or 25
     return descriptor
+end
+
+for _, deactivateCase in ipairs({
+    {
+        name = "disabled harmful row",
+        config = {enabled = false},
+        recoveredState = "INACTIVE",
+    },
+    {
+        name = "unsupported Separate Own harmful row",
+        config = {enabled = true, separateOwn = 1},
+        recoveredState = "UNSUPPORTED",
+        recoveredDiagnostic = "UNSUPPORTED_SEPARATE_OWN",
+    },
+}) do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    harness.environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {enabled = true})
+
+    state.harmfulRestoreSucceeds = false
+    local failureStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("debuffs", deactivateCase.config)
+    local retained = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(retained.active,
+        deactivateCase.name .. " restore failure keeps custom visible")
+    assertTrue(retained.operationPending,
+        deactivateCase.name .. " restore failure retains latest operation")
+    assertEqual(retained.state, "ACTIVE_REFRESH_FAILED",
+        deactivateCase.name .. " publishes degraded active ownership")
+    assertEqual(retained.diagnostic, "NATIVE_RESTORE_FAILED",
+        deactivateCase.name .. " publishes the failed restore boundary")
+    assertEqual(findCall(
+        state.calls,
+        "AF.SetCustomAuraContainerEnabled",
+        failureStart
+    ), nil, deactivateCase.name .. " performs no premature custom hide")
+
+    state.harmfulRestoreSucceeds = true
+    BD.FlushCustomAuraContainerUpdates()
+    state.runTimers(0)
+    local recovered = BD.GetCustomAuraContainerState("debuffs")
+    assertFalse(recovered.active,
+        deactivateCase.name .. " hides custom after native recovery")
+    assertFalse(recovered.operationPending,
+        deactivateCase.name .. " clears recovery ownership")
+    assertEqual(recovered.state, deactivateCase.recoveredState,
+        deactivateCase.name .. " publishes the requested recovered state")
+    assertEqual(recovered.diagnostic, deactivateCase.recoveredDiagnostic,
+        deactivateCase.name .. " publishes only the recovered diagnostic")
+end
+
+for _, pendingCase in ipairs({
+    {
+        name = "pending Buffs update",
+        begin = function(BD)
+            BD.UpdateCustomAuraContainer("buffs", {
+                enabled = true,
+                tuning = 2,
+            }, true)
+        end,
+    },
+    {
+        name = "pending Buffs disable",
+        begin = function(BD)
+            BD.DisableCustomAuraContainer("buffs", true)
+        end,
+    },
+}) do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    BD.RegisterCustomAuraContainerPane("buffs", CompileBuffs)
+    BD.UpdateCustomAuraContainer("buffs", {
+        enabled = true,
+        tuning = 1,
+    })
+
+    state.combat = true
+    local timerStart = countCalls(state.calls, "Timer.After")
+    pendingCase.begin(BD)
+    assertTrue(BD.GetCustomAuraContainerState("buffs").pending,
+        pendingCase.name .. " enters the shared controller queue")
+    assertEqual(countCalls(state.calls, "Timer.After"), timerStart,
+        pendingCase.name .. " creates no dispatcher timer in combat")
+
+    state.combat = false
+    BD.FlushCustomAuraContainerUpdates()
+    state.runTimers(0)
+    assertEqual(countCalls(state.calls, "Timer.After"), timerStart + 1,
+        pendingCase.name .. " has only the controller drain timer")
+    assertEqual(#state.timers, 0,
+        pendingCase.name .. " leaves no dispatcher continuation timer")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.ContinueBuffsDebuffsBackendTransition"
+    ), 0, pendingCase.name .. " never enters the Debuffs handoff ledger")
 end
 
 for _, callbackOrder in ipairs({
@@ -858,6 +963,101 @@ do
         enabled = true,
         tuning = 1,
     })
+    local allocations = countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    )
+
+    state.combat = true
+    local burstStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 2,
+    })
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 3,
+    })
+    state.fireEvent("EDIT_MODE_LAYOUTS_UPDATED")
+    state.fireEvent("PLAYER_SPECIALIZATION_CHANGED", "player")
+    state.runTimers(0)
+    local queued = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(queued.active,
+        "combat tuning/lifecycle burst keeps custom harmful active")
+    assertTrue(queued.operationPending,
+        "combat tuning/lifecycle burst retains tuning operation")
+    assertTrue(queued.harmfulReassertPending,
+        "combat tuning/lifecycle burst records native reassert intent")
+    assertEqual(findCall(
+        state.calls,
+        "AF.SetCustomAuraContainerFlowLayout",
+        burstStart
+    ), nil, "combat tuning/lifecycle burst performs no tuning writes")
+    assertEqual(findCall(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        burstStart
+    ), nil, "combat tuning/lifecycle burst performs no early reassert")
+    assertEqual(findCall(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        burstStart
+    ), nil, "combat tuning/lifecycle burst performs no suppression writes")
+
+    state.combat = false
+    state.fireEvent("PLAYER_REGEN_ENABLED")
+    state.runTimers(0)
+    state.runTimers(0)
+    local recovered = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(recovered.active,
+        "OOC tuning/lifecycle recovery keeps custom harmful active")
+    assertFalse(recovered.operationPending,
+        "OOC tuning/lifecycle recovery clears tuning operation")
+    assertFalse(recovered.harmfulReassertPending,
+        "OOC tuning/lifecycle recovery consumes reassert intent")
+    assertEqual(recovered.state, "ACTIVE",
+        "OOC tuning/lifecycle recovery restores active state")
+    local latestFlow
+    for index = burstStart, #state.calls do
+        if state.calls[index].name
+            == "AF.SetCustomAuraContainerFlowLayout"
+        then
+            latestFlow = state.calls[index]
+        end
+    end
+    assertEqual(latestFlow.args[1].marker, 3,
+        "OOC tuning/lifecycle recovery applies latest descriptor")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.SetCustomAuraContainerFlowLayout",
+        burstStart
+    ), 1, "OOC tuning/lifecycle recovery applies tuning once")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        burstStart
+    ), 1, "OOC tuning/lifecycle recovery reasserts exactly once")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        burstStart
+    ), 0, "OOC tuning/lifecycle recovery starts no fresh suppression")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    ), allocations, "OOC tuning/lifecycle recovery rebuilds nothing")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    harness.environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 1,
+    })
 
     state.harmfulSuppressSucceeds = false
     state.harmfulRestoreSucceeds = false
@@ -892,6 +1092,158 @@ do
         "later harmful revalidation repair clears retry ownership")
     assertEqual(repaired.state, "ACTIVE",
         "later harmful revalidation repair restores active state")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    harness.environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 1,
+    })
+    local allocations = countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    )
+
+    state.nativeAccessResult = false
+    state.harmfulRestoreSucceeds = false
+    local failureStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 2,
+    })
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 3,
+    })
+    local retained = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(retained.active,
+        "active tuning and restore failure keeps custom harmful visible")
+    assertTrue(retained.operationPending,
+        "active tuning and restore failure retains retry ownership")
+    assertEqual(retained.state, "ACTIVE_REFRESH_FAILED",
+        "active tuning failure publishes degraded active state")
+    assertEqual(retained.diagnostic, "HOLDER_ANCHOR_UNAVAILABLE",
+        "active tuning failure publishes the failed holder boundary")
+    assertFalse(retained.nativeFollowerActive,
+        "active holder failure never claims follower ownership")
+    assertTrue(state.frames[1].shown and state.frames[2].shown,
+        "active tuning failure keeps holder and container visible")
+    assertEqual(findCall(
+        state.calls,
+        "AF.SetCustomAuraContainerFlowLayout",
+        failureStart
+    ), nil, "failed holder boundary performs no partial tuning writes")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    ), allocations, "failed tuning retries allocate no replacement shell")
+
+    state.nativeAccessResult = nil
+    state.harmfulRestoreSucceeds = true
+    BD.FlushCustomAuraContainerUpdates()
+    state.runTimers(0)
+    local repaired = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(repaired.active,
+        "repaired holder boundary keeps custom harmful visible")
+    assertFalse(repaired.operationPending,
+        "repaired holder boundary clears tuning retry ownership")
+    assertEqual(repaired.state, "ACTIVE",
+        "repaired holder boundary restores active state")
+    assertEqual(repaired.diagnostic, nil,
+        "repaired holder boundary clears recovery diagnostic")
+    local latestFlow
+    for index = failureStart, #state.calls do
+        if state.calls[index].name
+            == "AF.SetCustomAuraContainerFlowLayout"
+        then
+            latestFlow = state.calls[index]
+        end
+    end
+    assertEqual(latestFlow.args[1].marker, 3,
+        "holder recovery applies only the latest tuning descriptor")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.SetCustomAuraContainerFlowLayout",
+        failureStart
+    ), 1, "holder recovery applies one coalesced tuning payload")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    ), allocations, "holder recovery reuses the completed container")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    harness.environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("debuffs", CompileHarmful)
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 1,
+    })
+
+    state.combat = true
+    BD.UpdateCustomAuraContainer("debuffs", {
+        enabled = true,
+        tuning = 2,
+    })
+    state.fireEvent("EDIT_MODE_LAYOUTS_UPDATED")
+    state.runTimers(0)
+    local queued = BD.GetCustomAuraContainerState("debuffs")
+    assertTrue(queued.operationPending,
+        "restore-success setup queues pending tuning")
+    assertTrue(queued.harmfulReassertPending,
+        "restore-success setup records lifecycle reassert intent")
+
+    state.combat = false
+    state.nativeAccessResult = false
+    state.harmfulRestoreSucceeds = true
+    local recoveryStart = #state.calls + 1
+    BD.FlushCustomAuraContainerUpdates()
+    state.runTimers(0)
+    local restored = BD.GetCustomAuraContainerState("debuffs")
+    assertFalse(restored.active,
+        "holder failure with successful native restore hides custom row")
+    assertFalse(restored.operationPending,
+        "successful native fallback clears tuning operation")
+    assertFalse(restored.harmfulReassertPending,
+        "successful native fallback clears stale reassert intent")
+    assertEqual(restored.state, "NATIVE_UNAVAILABLE",
+        "successful native fallback reports inactive native-unavailable state")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.SetNativeHarmfulAurasSuppressed",
+        recoveryStart
+    ), 1, "holder failure restores full native presentation once")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        recoveryStart
+    ), 0, "successful restore bypasses stale reassert intent")
+
+    state.playerUnit = "vehicle"
+    local retargetStart = #state.calls + 1
+    BD.RefreshCustomAuraContainerUnits()
+    local retargeted = BD.GetCustomAuraContainerState("debuffs")
+    assertEqual(retargeted.unit, "vehicle",
+        "inactive fallback row still retargets its hidden container")
+    assertFalse(retargeted.active,
+        "inactive fallback retarget stays hidden")
+    assertFalse(retargeted.operationPending,
+        "inactive fallback retarget creates no recovery queue")
+    assertFalse(retargeted.harmfulReassertPending,
+        "inactive fallback retarget creates no reassert intent")
+    assertEqual(countCalls(
+        state.calls,
+        "BD.ReassertNativeHarmfulAuraSuppression",
+        retargetStart
+    ), 0, "inactive fallback retarget never reasserts suppression")
 end
 
 do

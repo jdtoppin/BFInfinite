@@ -8,11 +8,35 @@ local function assertEqual(actual, expected, message)
     end
 end
 
+local function assertTrue(value, message)
+    assertEqual(value == true, true, message)
+end
+
 local function assertLog(actual, expected, message)
     assertEqual(#actual, #expected, message .. " length")
     for index, value in ipairs(expected) do
         assertEqual(actual[index], value, message .. " " .. index)
     end
+end
+
+local function assertTransition(BD, actualBackend, desiredBackend, pending,
+        message)
+    assertEqual(type(BD.GetBuffsDebuffsBackendTransitionState), "function",
+        message .. " transition API")
+    local state = BD.GetBuffsDebuffsBackendTransitionState("debuffs")
+    assertEqual(type(state), "table", message .. " transition state")
+    assertEqual(state.actualBackend, actualBackend,
+        message .. " actual backend")
+    assertEqual(state.desiredBackend, desiredBackend,
+        message .. " desired backend")
+    assertEqual(state.pending == true, pending == true,
+        message .. " pending")
+    return state
+end
+
+local function assertNoTransition(BD, message)
+    assertEqual(BD.GetBuffsDebuffsBackendTransitionState("debuffs"), nil,
+        message)
 end
 
 local REQUIRED_CUSTOM_AF_METHODS = {
@@ -94,8 +118,11 @@ local function NewHarness(options)
     local callLog = {}
     local blizzardStyleDisableCalls = 0
     local blizzardStyleUpdateCalls = {}
+    local blizzardStyleActive = options.blizzardStyleActive == true
     local eventCallbacks = {}
     local refreshEvents = {}
+    local nextRefreshEvent = 1
+    local timerCallbacks = {}
     local inCombat = options.inCombat == true
     local updateCallback
 
@@ -136,6 +163,12 @@ local function NewHarness(options)
     end
     _G.RegisterAttributeDriver = function()
     end
+    _G.C_Timer = {
+        After = function(delay, callback)
+            assertEqual(delay, 0, "backend handoff retry delay")
+            timerCallbacks[#timerCallbacks + 1] = callback
+        end,
+    }
     if options.legacyGlobals == false then
         _G.SecureAuraHeader_Update = nil
         _G.SecureAuraHeader_UpdateEventRegistrations = nil
@@ -184,10 +217,11 @@ local function NewHarness(options)
             updateCallback = callback
         end
     end
-    AF.Fire = function(event, which)
+    AF.Fire = function(event, module, which)
         refreshEvents[#refreshEvents + 1] = {
             event = event,
-            which = which,
+            module = module,
+            which = which or module,
         }
     end
     _G.AbstractFramework = AF
@@ -260,13 +294,24 @@ local function NewHarness(options)
             return customPanes[which] == true
         end
         BD.UpdateCustomAuraContainer = function(which, config)
+            if options.requireStyleInactiveBeforeCustom
+                and blizzardStyleActive
+            then
+                error("custom backend activated before #103 released ownership")
+            end
             callLog[#callLog + 1] = "customUpdate:" .. which
             customUpdateCalls[#customUpdateCalls + 1] = {
                 which = which,
                 config = config,
             }
+            if not options.customUpdateLeavesInactive then
+                customState.active = true
+                customState.pending = false
+                customState.operationPending = false
+            end
+            return options.customUpdateResult ~= false
         end
-        BD.DisableCustomAuraContainer = function(which)
+        BD.DisableCustomAuraContainer = function(which, resumeDispatcher)
             callLog[#callLog + 1] = "customDisable:" .. which
             customDisableCalls[#customDisableCalls + 1] = which
             if options.customDisableResult == false then return false end
@@ -283,6 +328,12 @@ local function NewHarness(options)
                     false,
                     "player"
                 ) ~= true then
+                    if options.customDisableQueuesOnRestoreFailure then
+                        customState.pending = true
+                        customState.operationPending = true
+                        customState.resumeDispatcher =
+                            resumeDispatcher == true
+                    end
                     return false
                 end
             end
@@ -292,11 +343,16 @@ local function NewHarness(options)
                 customState.operationPending = false
                 customState.editModeSuspended = false
             end
+            if customState.resumeDispatcher then
+                customState.resumeDispatcher = false
+                AF.Fire("BFI_UpdateModule", "buffsDebuffs", which)
+            end
             return true
         end
         BD.GetCustomAuraContainerState = function(which)
             if customPanes[which] == true then return customState end
         end
+        options.customState = customState
     end
 
     if options.registerBlizzardDebuffStyle then
@@ -311,12 +367,19 @@ local function NewHarness(options)
             callLog[#callLog + 1] = "styleUpdate"
             blizzardStyleUpdateCalls[#blizzardStyleUpdateCalls + 1] =
                 config
-            return options.styleUpdateResult ~= false
+            if options.styleUpdateResult == false then return false end
+            blizzardStyleActive = true
+            return true
         end
         BD.DisableBlizzardDebuffStyle = function()
             callLog[#callLog + 1] = "styleDisable"
             blizzardStyleDisableCalls = blizzardStyleDisableCalls + 1
-            return options.styleDisableResult ~= false
+            if options.styleDisableResult == false then return false end
+            blizzardStyleActive = false
+            return true
+        end
+        BD.GetBlizzardDebuffStyleState = function()
+            return {active = blizzardStyleActive}
         end
     end
 
@@ -341,7 +404,13 @@ local function NewHarness(options)
         getBlizzardStyleDisableCalls = function()
             return blizzardStyleDisableCalls
         end,
+        isBlizzardStyleActive = function()
+            return blizzardStyleActive
+        end,
         refreshEvents = refreshEvents,
+        getCustomState = function()
+            return options.customState
+        end,
         setCombat = function(value)
             inCombat = value == true
         end,
@@ -360,6 +429,26 @@ local function NewHarness(options)
         end,
         update = function(which)
             updateCallback(nil, "buffsDebuffs", which)
+        end,
+        continueFiredUpdates = function()
+            while nextRefreshEvent <= #refreshEvents do
+                local event = refreshEvents[nextRefreshEvent]
+                nextRefreshEvent = nextRefreshEvent + 1
+                if event.event == "BFI_UpdateModule" then
+                    updateCallback(nil, "buffsDebuffs", event.which)
+                end
+            end
+        end,
+        getTimerCount = function()
+            return #timerCallbacks
+        end,
+        runTimers = function()
+            local callbacks = timerCallbacks
+            timerCallbacks = {}
+            for _, callback in ipairs(callbacks) do
+                callback()
+            end
+            return #callbacks
         end,
     }
 end
@@ -457,6 +546,311 @@ do
     }, "style aborts when custom harmful restore fails")
     assertEqual(#harness.blizzardStyleUpdateCalls, 0,
         "failed custom restore prevents style activation")
+end
+
+do
+    local options = {
+        interfaceVersion = 120100,
+        afVersion = 42,
+        customHarmfulEnabled = false,
+        harmfulSuppressionResult = false,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {debuffs = true},
+        customStateActive = true,
+        customDisableRestoresHarmful = true,
+        customDisableQueuesOnRestoreFailure = true,
+    }
+    local harness = NewHarness(options)
+    local BD = harness.BD
+
+    assertEqual(BD.GetAuraBackend("debuffs"),
+        BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
+        "opt-out handoff selects Blizzard Debuff style")
+    harness.clearCallLog()
+    harness.update("debuffs")
+    assertLog(harness.callLog, {
+        "styleCapability",
+        "customDisable:debuffs",
+        "harmful:false:player",
+    }, "first handoff stops at failed full harmful restore")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 0,
+        "failed controller restore cannot style Blizzard early")
+    local queued = harness.getCustomState()
+    assertEqual(queued.active, true,
+        "failed handoff keeps the custom harmful row active")
+    assertEqual(queued.pending, true,
+        "failed handoff queues controller recovery")
+    assertEqual(queued.operationPending, true,
+        "failed handoff retains disable operation ownership")
+    assertTransition(BD, BD.CUSTOM_AURA_CONTAINER_BACKEND,
+        BD.BLIZZARD_DEBUFF_STYLE_BACKEND, true,
+        "failed custom-to-style restore")
+
+    options.harmfulSuppressionResult = true
+    harness.clearCallLog()
+    assertEqual(BD.DisableCustomAuraContainer("debuffs"), true,
+        "controller retry completes its restore-first disable")
+    assertLog(harness.callLog, {
+        "customDisable:debuffs",
+        "harmful:false:player",
+    }, "controller retry restores and hides before continuation")
+    local recovered = harness.getCustomState()
+    assertEqual(recovered.active, false,
+        "controller retry hides the custom harmful row")
+    assertEqual(recovered.pending, false,
+        "controller retry clears pending recovery")
+    assertEqual(recovered.operationPending, false,
+        "controller retry clears disable ownership")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 0,
+        "controller completion alone never races style activation")
+    assertTransition(BD, BD.BLIZZARD_DEFAULT_BACKEND,
+        BD.BLIZZARD_DEBUFF_STYLE_BACKEND, true,
+        "controller completion refreshes actual owner before continuation")
+
+    harness.clearCallLog()
+    harness.continueFiredUpdates()
+    assertLog(harness.callLog, {
+        "styleCapability",
+        "customDisable:debuffs",
+        "native:debuffs:false",
+        "styleUpdate",
+    }, "dispatcher continuation applies style after controller completion")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 1,
+        "cross-backend handoff applies Blizzard style exactly once")
+    assertEqual(#harness.harmfulSuppressionCalls, 2,
+        "cross-backend handoff performs only failed and retry restores")
+    assertNoTransition(BD,
+        "completed custom-to-style handoff clears transition ownership")
+end
+
+do
+    local options = {
+        interfaceVersion = 120100,
+        afVersion = 42,
+        customHarmfulEnabled = true,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {debuffs = true},
+        blizzardStyleActive = true,
+        styleDisableResult = false,
+        requireStyleInactiveBeforeCustom = true,
+    }
+    local harness = NewHarness(options)
+    local BD = harness.BD
+
+    assertEqual(BD.GetAuraBackend("debuffs"),
+        BD.CUSTOM_AURA_CONTAINER_BACKEND,
+        "opt-in reverse handoff selects desired custom backend")
+    harness.clearCallLog()
+    harness.update("debuffs")
+    assertLog(harness.callLog, {
+        "styleDisable",
+    }, "reverse handoff stops when #103 cannot release ownership")
+    assertEqual(#harness.customUpdateCalls, 0,
+        "failed #103 release prevents premature custom activation")
+    assertEqual(harness.isBlizzardStyleActive(), true,
+        "failed reverse handoff keeps #103 as actual owner")
+    assertTransition(BD, BD.BLIZZARD_DEBUFF_STYLE_BACKEND,
+        BD.CUSTOM_AURA_CONTAINER_BACKEND, true,
+        "failed style-to-custom release")
+    assertEqual(harness.getTimerCount(), 1,
+        "failed reverse handoff queues one bounded continuation")
+
+    harness.clearCallLog()
+    assertEqual(harness.runTimers(), 1,
+        "reverse handoff consumes its one automatic continuation")
+    assertLog(harness.callLog, {
+        "styleDisable",
+    }, "bounded reverse continuation stops at persistent owner")
+    assertEqual(harness.getTimerCount(), 0,
+        "failed automatic continuation does not poll")
+    assertEqual(#harness.customUpdateCalls, 0,
+        "bounded failure never activates custom early")
+
+    options.styleDisableResult = true
+    harness.clearCallLog()
+    harness.update("debuffs")
+    assertLog(harness.callLog, {
+        "styleDisable",
+        "native:debuffs:false",
+        "customUpdate:debuffs",
+    }, "reverse dispatcher continuation releases style before custom")
+    assertEqual(harness.isBlizzardStyleActive(), false,
+        "successful reverse continuation clears #103 ownership")
+    assertEqual(#harness.customUpdateCalls, 1,
+        "reverse handoff activates custom backend exactly once")
+    assertEqual(#harness.harmfulSuppressionCalls, 0,
+        "dispatcher delegates custom suppression to its controller")
+    assertNoTransition(BD,
+        "completed style-to-custom handoff clears transition ownership")
+end
+
+do
+    local options = {
+        interfaceVersion = 120100,
+        afVersion = 42,
+        customHarmfulEnabled = false,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {debuffs = true},
+        customStateActive = true,
+        customDisableRestoresHarmful = true,
+        nativeRestoreResult = false,
+    }
+    local harness = NewHarness(options)
+    local BD = harness.BD
+
+    harness.update("debuffs")
+    assertEqual(harness.getCustomState().active, false,
+        "header-restore abort releases the custom owner first")
+    assertEqual(harness.isBlizzardStyleActive(), false,
+        "header-restore abort never activates #103 early")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 0,
+        "header-restore abort performs zero style writes")
+    assertTransition(BD, BD.BLIZZARD_DEFAULT_BACKEND,
+        BD.BLIZZARD_DEBUFF_STYLE_BACKEND, true,
+        "custom-to-style public restore abort")
+    assertEqual(harness.getTimerCount(), 1,
+        "public restore abort queues one bounded continuation")
+
+    options.nativeRestoreResult = true
+    harness.clearCallLog()
+    assertEqual(harness.runTimers(), 1,
+        "public restore continuation runs once after repair")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 1,
+        "public restore continuation applies #103 exactly once")
+    assertEqual(harness.isBlizzardStyleActive(), true,
+        "public restore continuation establishes #103 ownership")
+    assertEqual(#harness.customUpdateCalls, 0,
+        "custom-to-style repair never rebuilds the old owner")
+    assertEqual(harness.getTimerCount(), 0,
+        "successful public restore continuation leaves no polling timer")
+    assertNoTransition(BD,
+        "repaired custom-to-style public restore clears transition")
+end
+
+do
+    local options = {
+        interfaceVersion = 120100,
+        afVersion = 42,
+        customHarmfulEnabled = true,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {debuffs = true},
+        blizzardStyleActive = true,
+        nativeRestoreResult = false,
+    }
+    local harness = NewHarness(options)
+    local BD = harness.BD
+
+    harness.update("debuffs")
+    assertEqual(harness.isBlizzardStyleActive(), false,
+        "reverse public restore abort releases #103 first")
+    assertEqual(#harness.customUpdateCalls, 0,
+        "reverse public restore abort never activates custom early")
+    assertTransition(BD, BD.BLIZZARD_DEFAULT_BACKEND,
+        BD.CUSTOM_AURA_CONTAINER_BACKEND, true,
+        "style-to-custom public restore abort")
+    assertEqual(harness.getTimerCount(), 1,
+        "reverse public restore abort queues one bounded continuation")
+
+    options.nativeRestoreResult = true
+    assertEqual(harness.runTimers(), 1,
+        "reverse public restore continuation runs once after repair")
+    assertEqual(#harness.customUpdateCalls, 1,
+        "reverse public restore continuation activates custom exactly once")
+    assertTrue(harness.getCustomState().active,
+        "reverse public restore continuation establishes custom ownership")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 0,
+        "reverse repair never restarts the old style owner")
+    assertEqual(harness.getTimerCount(), 0,
+        "successful reverse public restore leaves no polling timer")
+    assertNoTransition(BD,
+        "repaired style-to-custom public restore clears transition")
+end
+
+do
+    local options = {
+        interfaceVersion = 120100,
+        afVersion = 42,
+        customHarmfulEnabled = false,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {debuffs = true},
+        customStateActive = true,
+        customDisableRestoresHarmful = true,
+        styleUpdateResult = false,
+    }
+    local harness = NewHarness(options)
+    local BD = harness.BD
+
+    harness.update("debuffs")
+    assertEqual(harness.getCustomState().active, false,
+        "style-update abort releases custom ownership")
+    assertEqual(harness.isBlizzardStyleActive(), false,
+        "failed style update leaves Blizzard default presentation")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 1,
+        "style-update abort makes one failed style attempt")
+    assertTransition(BD, BD.BLIZZARD_DEFAULT_BACKEND,
+        BD.BLIZZARD_DEBUFF_STYLE_BACKEND, true,
+        "style update abort")
+    assertEqual(harness.getTimerCount(), 1,
+        "style update abort queues one bounded continuation")
+
+    options.styleUpdateResult = true
+    assertEqual(harness.runTimers(), 1,
+        "style update continuation runs once after repair")
+    assertEqual(#harness.blizzardStyleUpdateCalls, 2,
+        "style update repair has one failure and one successful write")
+    assertEqual(harness.isBlizzardStyleActive(), true,
+        "style update repair establishes #103 ownership")
+    assertEqual(#harness.customUpdateCalls, 0,
+        "style update repair never rebuilds custom")
+    assertEqual(harness.getTimerCount(), 0,
+        "successful style update continuation leaves no polling timer")
+    assertNoTransition(BD,
+        "repaired style update clears transition ownership")
+end
+
+do
+    local options = {
+        interfaceVersion = 120100,
+        afVersion = 42,
+        customHarmfulEnabled = true,
+        registerCustomBackend = true,
+        registerBlizzardDebuffStyle = true,
+        customPanes = {debuffs = true},
+        blizzardStyleActive = true,
+        customUpdateLeavesInactive = true,
+    }
+    local harness = NewHarness(options)
+    local BD = harness.BD
+
+    harness.update("debuffs")
+    assertEqual(#harness.customUpdateCalls, 1,
+        "cold handoff reaches the custom controller once")
+    assertEqual(harness.getCustomState().active, false,
+        "accepted cold update can still end without custom ownership")
+    assertEqual(harness.getCustomState().pending, false,
+        "cold failed controller exposes no internal retry")
+    assertEqual(harness.isBlizzardStyleActive(), false,
+        "cold failure truthfully leaves Blizzard default active")
+    assertTransition(BD, BD.BLIZZARD_DEFAULT_BACKEND,
+        BD.CUSTOM_AURA_CONTAINER_BACKEND, true,
+        "cold inactive custom failure")
+    assertEqual(harness.getTimerCount(), 1,
+        "cold inactive custom failure queues one bounded continuation")
+
+    assertEqual(harness.runTimers(), 1,
+        "cold inactive custom failure consumes one retry")
+    assertEqual(#harness.customUpdateCalls, 2,
+        "cold inactive custom failure retries exactly once")
+    assertEqual(harness.getTimerCount(), 0,
+        "persistent cold failure does not poll")
+    assertTransition(BD, BD.BLIZZARD_DEFAULT_BACKEND,
+        BD.CUSTOM_AURA_CONTAINER_BACKEND, true,
+        "bounded cold inactive custom failure")
 end
 
 for _, staleStateCase in ipairs({
