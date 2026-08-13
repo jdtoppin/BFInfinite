@@ -604,9 +604,6 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     records.textSwitch = records.switches[2]
     records.separateOwn =
         records.dropdownsByLabel["Separate Own"]
-    records.durationHint = records.fontStringsByText[
-        "Durations abbreviate automatically to seconds, minutes, hours, and days."
-    ]
     records.sourceDisclosure = records.fontStringsByText[
         "WoW 12.1's PublicAndPrivate source list combines public and private authorized Buffs in this native row; the sources cannot be separated."
     ]
@@ -634,10 +631,17 @@ do
         "custom Before item disabled")
     assertTrue(custom.separateOwn.items[3].disabled,
         "custom After item disabled")
-    assertEqual(custom.titledPanesByTitle.Icons.height, 285,
-        "status and source disclosure reserve pane height")
-    assertEqual(custom.titledPanesByTitle.Texts.height, 315,
-        "duration mode controls reserve pane height")
+    assertEqual(custom.titledPanesByTitle.Icons.height, 260,
+        "icons retain the known fitting pane height")
+    assertEqual(custom.titledPanesByTitle.Texts.height, 235,
+        "texts retain the known fitting pane height")
+    assertTrue(
+        custom.titledPanesByTitle.Icons.height
+            + 5
+            + custom.titledPanesByTitle.Texts.height
+            <= 500,
+        "stacked panes fit the available normal pane height"
+    )
     assertTrue(custom.sourceDisclosure.shown,
         "custom Buffs visibly disclose combined aura sources")
     assertEqual(custom.statusButton.width, 165,
@@ -667,6 +671,8 @@ do
     color.onConfirm(0.2, 0.3, 0.4)
     assertEqual(config.stack.color[1], 0.2,
         "custom color commits on confirmation")
+    assertEqual(config.stack.color[4], 1,
+        "custom normal RGB confirmation preserves alpha")
     assertEqual(#custom.events, 1,
         "custom color confirmation fires one update")
 
@@ -688,12 +694,15 @@ do
         "recovery fires one module update")
 
     custom.textSwitch:SetSelectedValue("duration")
-    assertTrue(custom.durationHint.shown,
-        "current AF shows abbreviation hint")
-    assertEqual(custom.durationHint.width, 160,
-        "duration hint is bounded to its column")
-    assertTrue(custom.durationHint.wordWrap,
-        "duration hint wraps inside the pane")
+    assertEqual(custom.durationMode.tooltip,
+        "Durations abbreviate automatically to seconds, minutes, hours, and days.",
+        "duration abbreviation guidance moves to a non-flow tooltip")
+    assertEqual(custom.durationMode.items[1].value, "seconds",
+        "mode selector lists Seconds first")
+    assertEqual(custom.durationMode.items[2].value, "percent",
+        "mode selector lists Percent second")
+    assertEqual(custom.durationMode.items[3].value, "off",
+        "mode selector lists Off third")
     assertEqual(custom.durationMode.selected, "seconds",
         "saved seconds mode loads into the single selector")
     assertTrue(custom.secondsValue.shown,
@@ -798,6 +807,8 @@ do
         "custom low-time color commits on confirmation")
     assertEqual(#custom.events, 1,
         "custom low-time color confirmation commits once")
+    assertEqual(config.duration.color.percent.rgb[4], percentColor[4],
+        "low-time RGB confirmation preserves saved alpha")
 
     custom.events = {}
     custom.durationMode.onSelect("off")
@@ -857,8 +868,9 @@ do
         "legacy confirm path fires no second update")
 
     legacy.textSwitch:SetSelectedValue("duration")
-    assertTrue(legacy.durationHint.shown,
-        "current AF shows the duration abbreviation hint")
+    assertEqual(legacy.durationMode.tooltip,
+        "Durations abbreviate automatically to seconds, minutes, hours, and days.",
+        "legacy backend receives the same non-flow duration guidance")
     assertFalse(legacy.sourceDisclosure.shown,
         "legacy pane does not claim the combined custom source")
 

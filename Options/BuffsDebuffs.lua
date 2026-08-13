@@ -190,7 +190,7 @@ local function CreateNormalPane()
     --------------------------------------------------
     -- iconsPane
     --------------------------------------------------
-    local iconsPane = AF.CreateTitledPane(normalPane, L["Icons"], nil, 285)
+    local iconsPane = AF.CreateTitledPane(normalPane, L["Icons"], nil, 260)
     AF.SetPoint(iconsPane, "TOPLEFT", 0, -5)
     AF.SetPoint(iconsPane, "TOPRIGHT", 0, -5)
 
@@ -332,7 +332,7 @@ local function CreateNormalPane()
     --------------------------------------------------
     -- textsPane
     --------------------------------------------------
-    local textsPane = AF.CreateTitledPane(normalPane, L["Texts"], nil, 315)
+    local textsPane = AF.CreateTitledPane(normalPane, L["Texts"], nil, 235)
     AF.SetPoint(textsPane, "TOPLEFT", iconsPane, "BOTTOMLEFT", 0, -5)
     AF.SetPoint(textsPane, "TOPRIGHT", iconsPane, "BOTTOMRIGHT", 0, -5)
 
@@ -544,17 +544,9 @@ local function CreateNormalPane()
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
 
-    local durationHint = AF.CreateFontString(
-        textsPane,
-        L[
-            "Durations abbreviate automatically to seconds, minutes, hours, and days."
-        ],
-        "gray"
-    )
-    AF.SetPoint(durationHint, "TOPLEFT", lowTimeColor, "BOTTOMLEFT", 0, -15)
-    AF.SetWidth(durationHint, 160)
-    durationHint:SetWordWrap(true)
-    durationHint:Hide()
+    durationMode:SetTooltip(L[
+        "Durations abbreviate automatically to seconds, minutes, hours, and days."
+    ])
 
     --------------------------------------------------
     -- load
@@ -630,7 +622,6 @@ local function CreateNormalPane()
             end
         end
         textsPane.UpdateDurationWidgets()
-        durationHint:SetShown(which == "duration")
     end
 
     function normalPane.Load()
