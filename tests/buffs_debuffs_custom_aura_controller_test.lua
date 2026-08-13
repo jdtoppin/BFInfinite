@@ -37,25 +37,6 @@ local function findCall(calls, name, startIndex)
     end
 end
 
-local function findCallWhere(calls, name, predicate, startIndex)
-    for index = startIndex or 1, #calls do
-        local call = calls[index]
-        if call.name == name and predicate(call) then
-            return call, index
-        end
-    end
-end
-
-local function countEventCalls(calls, name, event)
-    local count = 0
-    for _, call in ipairs(calls) do
-        if call.name == name and call.args[1] == event then
-            count = count + 1
-        end
-    end
-    return count
-end
-
 local function countEventCallbackCalls(calls, name, event, callback)
     local count = 0
     for _, call in ipairs(calls) do
@@ -69,14 +50,25 @@ local function countEventCallbackCalls(calls, name, event, callback)
     return count
 end
 
-local function countCalls(calls, name)
+local function countCalls(calls, name, startIndex)
     local count = 0
-    for _, call in ipairs(calls) do
-        if call.name == name then
+    for index = startIndex or 1, #calls do
+        if calls[index].name == name then
             count = count + 1
         end
     end
     return count
+end
+
+local function countPlain(source, needle)
+    local count = 0
+    local offset = 1
+    while true do
+        local position = source:find(needle, offset, true)
+        if not position then return count end
+        count = count + 1
+        offset = position + #needle
+    end
 end
 
 local function NewHarness()
@@ -105,8 +97,58 @@ local function NewHarness()
         registryCallbacks = {},
         frames = {},
         playerUnit = "player",
-        nativeAccessResult = true,
+        secretValues = {},
+        secretUnits = {},
+        secretUnitBoundaryCalls = 0,
+        secretUnitTypeCalls = 0,
+        secretUnitEqualityCalls = 0,
+        mutationReadCounts = {},
     }
+
+    local nativeType = type
+
+    local function IsSecretUnit(value)
+        for _, secret in ipairs(state.secretUnits) do
+            if rawequal(value, secret) then
+                return true
+            end
+        end
+        return false
+    end
+
+    local function IsSecretValue(value)
+        for _, secret in ipairs(state.secretValues) do
+            if rawequal(value, secret) then
+                return true
+            end
+        end
+        return IsSecretUnit(value)
+    end
+
+    function state.newSecretValue(label)
+        local secret = setmetatable({label = label}, {
+            __index = function()
+                error("secret value was observed", 2)
+            end,
+            __eq = function()
+                error("secret value reached equality", 2)
+            end,
+        })
+        state.secretValues[#state.secretValues + 1] = secret
+        return secret
+    end
+
+    function state.newSecretUnit()
+        local secret = setmetatable({}, {
+            __eq = function()
+                state.secretUnitEqualityCalls =
+                    state.secretUnitEqualityCalls + 1
+                error("secret unit reached equality", 2)
+            end,
+        })
+        state.secretUnits[#state.secretUnits + 1] = secret
+        return secret
+    end
 
     local function record(name, ...)
         local call = {
@@ -138,6 +180,24 @@ local function NewHarness()
             error("forbidden hover accessor was called", 2)
         end
 
+        function frame:CanBeAccessedInContext()
+            record(label .. ".CanBeAccessedInContext")
+            state.holderAccessCalls = (state.holderAccessCalls or 0) + 1
+            if state.onHolderAccess then
+                state.onHolderAccess(frame, state.holderAccessCalls)
+            end
+            return state.holderAccessResult == nil
+                or state.holderAccessResult
+        end
+
+        function frame:SetRolesets(rolesets)
+            if state.onHolderSetRolesets then
+                state.onHolderSetRolesets(frame, rolesets)
+            end
+            self.rolesets = rolesets
+            record(label .. ".SetRolesets", rolesets)
+        end
+
         function frame:ClearAllPoints()
             record(label .. ".ClearAllPoints")
         end
@@ -146,22 +206,57 @@ local function NewHarness()
             record(label .. ".SetPoint", ...)
         end
 
-        function frame:SetRolesets(rolesets)
-            self.rolesets = rolesets
-            record(label .. ".SetRolesets", rolesets)
-        end
-
         return frame
     end
 
-    local environment = setmetatable({}, {__index = _G})
+    local environmentStorage = {}
+    local environment = setmetatable({}, {
+        __index = function(_, key)
+            local value = environmentStorage[key]
+            if value ~= nil then return value end
+            return _G[key]
+        end,
+        __newindex = function(_, key, value)
+            environmentStorage[key] = value
+        end,
+    })
     environment._G = environment
+    environment.rawget = function(target, key)
+        if rawequal(target, environment) then
+            local value = environmentStorage[key]
+            local mutation = state.globalReadMutations
+                and state.globalReadMutations[key]
+            if mutation then
+                state.mutationReadCounts[key] =
+                    (state.mutationReadCounts[key] or 0) + 1
+                mutation(
+                    environmentStorage,
+                    state.mutationReadCounts[key],
+                    value
+                )
+                value = environmentStorage[key]
+            end
+            return value
+        end
+        return rawget(target, key)
+    end
+    environment.type = function(value)
+        if IsSecretValue(value) then
+            state.secretUnitTypeCalls = state.secretUnitTypeCalls + 1
+            error("secret unit reached type", 2)
+        end
+        return nativeType(value)
+    end
     environment.PlayerFrame = setmetatable({}, {
         __index = function(_, key)
             if key == "unit" then return state.playerUnit end
         end,
     })
     environment.InCombatLockdown = function()
+        state.combatCalls = (state.combatCalls or 0) + 1
+        if state.onCombatCheck then
+            state.onCombatCheck(state.combatCalls)
+        end
         return state.combat
     end
     environment.C_Timer = {
@@ -186,32 +281,71 @@ local function NewHarness()
         end
         return target
     end
+
+
+    local function NewAccessibleGlobal(label)
+        local object = {label = label}
+        function object:CanBeAccessedInContext()
+            record(label .. ".CanBeAccessedInContext")
+            state.globalAccessCalls = state.globalAccessCalls or {}
+            state.globalAccessCalls[label] =
+                (state.globalAccessCalls[label] or 0) + 1
+            if state.onGlobalAccess then
+                state.onGlobalAccess(
+                    label,
+                    object,
+                    state.globalAccessCalls[label]
+                )
+            end
+            local result = state.globalAccessResults
+                and state.globalAccessResults[label]
+            if result ~= nil then return result end
+            return true
+        end
+        return object
+    end
+
+    environment.UIParent = NewAccessibleGlobal("UIParent")
+    environment.BuffFrame = NewAccessibleGlobal("BuffFrame")
+    environment.EditModeManagerFrame =
+        NewAccessibleGlobal("EditModeManagerFrame")
+    environment.DeadlyDebuffFrame = setmetatable({}, {
+        __index = function()
+            error("private DeadlyDebuffFrame was observed", 2)
+        end,
+    })
+    environment.PrivateAuraFrame = setmetatable({}, {
+        __index = function()
+            error("private aura frame alias was observed", 2)
+        end,
+    })
+    environment.auraFrames = setmetatable({}, {
+        __index = function()
+            error("auraFrames alias was observed", 2)
+        end,
+    })
     environment.EventRegistry = {}
     function environment.EventRegistry:RegisterCallback(event, callback, owner)
-        state.registryCallbacks[event] = state.registryCallbacks[event] or {}
-        state.registryCallbacks[event][#state.registryCallbacks[event] + 1] = {
+        state.registryCallbacks[event] =
+            state.registryCallbacks[event] or {}
+        state.registryCallbacks[event][
+            #state.registryCallbacks[event] + 1
+        ] = {
             callback = callback,
             owner = owner,
         }
         record("EventRegistry.RegisterCallback", event, callback, owner)
     end
-    function environment.EventRegistry:UnregisterCallback(event, owner)
-        local callbacks = state.registryCallbacks[event]
-        if callbacks then
-            for index = #callbacks, 1, -1 do
-                if callbacks[index].owner == owner then
-                    table.remove(callbacks, index)
-                end
-            end
-        end
-        record("EventRegistry.UnregisterCallback", event, owner)
-    end
 
     local AF = {
-        UIParent = {},
+        UIParent = environment.UIParent,
     }
     function AF.Copy(value)
-        return deepCopy(value)
+        local copy = deepCopy(value)
+        if type(copy) == "table" and copy.nativeFollower ~= nil then
+            state.lastDescriptorCopy = copy
+        end
+        return copy
     end
     function AF.Fire(...)
         record("AF.Fire", ...)
@@ -333,9 +467,17 @@ local function NewHarness()
     function BD.SetNativePublicAurasSuppressed(which, suppressed)
         record("BD.SetNativePublicAurasSuppressed", which, suppressed)
         if suppressed then
+            if state.onSuppressEnable then state.onSuppressEnable() end
             return state.suppressEnableSucceeds
         end
+        if state.onSuppressRestore then state.onSuppressRestore() end
         return state.suppressRestoreSucceeds
+    end
+    function BD.UpdateBlizzardDebuffStyle()
+        error("#127 must not call the #103 style adapter", 2)
+    end
+    function BD.DisableBlizzardDebuffStyle()
+        error("#127 must not call the #103 style adapter", 2)
     end
 
     local L = setmetatable({}, {
@@ -347,7 +489,9 @@ local function NewHarness()
         L = L,
         funcs = {
             isValueNonSecret = function(value)
-                return value ~= state.secretValue
+                state.secretUnitBoundaryCalls =
+                    state.secretUnitBoundaryCalls + 1
+                return not IsSecretValue(value)
             end,
             LoadPosition = function(frame, position)
                 record("BFI.LoadPosition", frame.label, position)
@@ -362,21 +506,21 @@ local function NewHarness()
     setfenv(chunk, environment)
     chunk("BFInfinite", BFI)
 
-    function state.newDebuffFrame()
-        local nativeTarget = "UIParent"
-        local nativeTarget2 = "BuffFrame"
+    function state.newDebuffFrame(options)
+        options = options or {}
         local frame = {
-            systemInfo = {
+            scale = options.scale == nil and 2 or options.scale,
+            systemInfo = options.systemInfo or {
                 anchorInfo = {
                     point = "TOPRIGHT",
-                    relativeTo = nativeTarget,
+                    relativeTo = "UIParent",
                     relativePoint = "TOPRIGHT",
                     offsetX = -31,
                     offsetY = -42,
                 },
                 anchorInfo2 = {
                     point = "BOTTOMRIGHT",
-                    relativeTo = nativeTarget2,
+                    relativeTo = "BuffFrame",
                     relativePoint = "BOTTOMRIGHT",
                     offsetX = -7,
                     offsetY = 9,
@@ -386,11 +530,22 @@ local function NewHarness()
 
         function frame:CanBeAccessedInContext()
             record("DebuffFrame.CanBeAccessedInContext")
-            return state.nativeAccessResult
+            state.nativeAccessCalls = (state.nativeAccessCalls or 0) + 1
+            if state.onNativeAccess then
+                state.onNativeAccess(frame, state.nativeAccessCalls)
+            end
+            if state.nativeAccessResult ~= nil then
+                return state.nativeAccessResult
+            end
+            return true
         end
         function frame:GetScale()
             record("DebuffFrame.GetScale")
-            return 2
+            state.nativeScaleCalls = (state.nativeScaleCalls or 0) + 1
+            if state.onNativeScale then
+                state.onNativeScale(frame, state.nativeScaleCalls)
+            end
+            return frame.scale
         end
         function frame:ClearAllPointsBase()
             record("DebuffFrame.ClearAllPointsBase")
@@ -413,9 +568,6 @@ local function NewHarness()
         function frame:IsShown()
             error("follower must not read DebuffFrame visibility", 2)
         end
-
-        frame.nativeTarget = nativeTarget
-        frame.nativeTarget2 = nativeTarget2
         return frame
     end
 
@@ -446,8 +598,9 @@ local function NewHarness()
     end
 
     function state.fireRegistry(event, ...)
-        local callbacks = state.registryCallbacks[event] or {}
-        for _, registration in ipairs(callbacks) do
+        for _, registration in ipairs(
+            state.registryCallbacks[event] or {}
+        ) do
             if registration.owner ~= nil then
                 registration.callback(registration.owner, ...)
             else
@@ -533,10 +686,9 @@ local function CompileBuffs(config)
     }
 end
 
-local function CompileSharedMoverBuffs(config)
+local function CompileFollowingBuffs(config)
     local descriptor, diagnostic = CompileBuffs(config)
     if not descriptor then return nil, diagnostic end
-
     descriptor.holderRolesets = "buffs"
     descriptor.nativeFollower = {
         globalName = "DebuffFrame",
@@ -554,12 +706,79 @@ local function CompileSharedMoverBuffs(config)
     return descriptor
 end
 
-local function NewPositionSave(position)
-    return function(point, x, y)
-        position[1] = point
-        position[2] = x
-        position[3] = y
-        position[4] = nil
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local initialSecret = state.newSecretUnit()
+    state.playerUnit = initialSecret
+
+    BD.RegisterCustomAuraContainerPane("buffs", CompileBuffs)
+    BD.UpdateCustomAuraContainer("buffs", {
+        enabled = true,
+    })
+    assertEqual(
+        BD.GetCustomAuraContainerState("buffs").unit,
+        "player",
+        "secret initial unit falls back before native construction"
+    )
+
+    state.combat = true
+    local invalidUnits = {
+        {label = "empty", value = ""},
+        {label = "arbitrary", value = "party1"},
+        {label = "table", value = {}},
+        {label = "false", value = false},
+        {label = "number", value = 1},
+        {label = "nil"},
+    }
+    for _, invalid in ipairs(invalidUnits) do
+        state.playerUnit = "vehicle"
+        BD.RefreshCustomAuraContainerUnits()
+        assertEqual(
+            BD.GetCustomAuraContainerState("buffs").unit,
+            "vehicle",
+            invalid.label .. " setup accepts vehicle"
+        )
+
+        state.playerUnit = invalid.value
+        BD.RefreshCustomAuraContainerUnits()
+        local controllerState = BD.GetCustomAuraContainerState("buffs")
+        assertEqual(controllerState.unit, "player",
+            invalid.label .. " unit falls back to player")
+        assertFalse(controllerState.pending,
+            invalid.label .. " combat retarget needs no regen queue")
+    end
+
+    state.playerUnit = "vehicle"
+    BD.RefreshCustomAuraContainerUnits()
+    local refreshSecret = state.newSecretUnit()
+    state.playerUnit = refreshSecret
+    BD.RefreshCustomAuraContainerUnits()
+    assertEqual(
+        BD.GetCustomAuraContainerState("buffs").unit,
+        "player",
+        "secret combat unit falls back immediately"
+    )
+    assertFalse(
+        BD.GetCustomAuraContainerState("buffs").pending,
+        "secret combat fallback needs no regen queue"
+    )
+    assertEqual(state.secretUnitTypeCalls, 0,
+        "secret unit is gated before type")
+    assertEqual(state.secretUnitEqualityCalls, 0,
+        "secret unit is gated before equality")
+    assertTrue(state.secretUnitBoundaryCalls > 0,
+        "unit values pass through the canonical boundary")
+
+    for _, call in ipairs(state.calls) do
+        for _, argument in ipairs(call.args) do
+            assertFalse(
+                rawequal(argument, initialSecret)
+                    or rawequal(argument, refreshSecret),
+                "raw secret unit never escapes to AF or event calls"
+            )
+        end
     end
 end
 
@@ -639,333 +858,6 @@ end
 do
     local harness = NewHarness()
     local BD = harness.BD
-    local environment = harness.environment
-    local state = harness.state
-    environment.DebuffFrame = state.newDebuffFrame()
-    state.nativeAccessResult = state.secretValue
-    BD.RegisterCustomAuraContainerPane("buffs", CompileSharedMoverBuffs)
-
-    BD.UpdateCustomAuraContainer("buffs", {
-        enabled = true,
-        positionSave = NewPositionSave({"TOPRIGHT", -4, -4}),
-    })
-    local unavailable = BD.GetCustomAuraContainerState("buffs")
-    assertEqual(unavailable.state, "NATIVE_UNAVAILABLE",
-        "ambiguous native access fails closed")
-    assertFalse(unavailable.active,
-        "ambiguous native access keeps custom Buffs inactive")
-    assertFalse(unavailable.nativeFollowerActive,
-        "ambiguous native access never claims DebuffFrame")
-    for _, call in ipairs(state.calls) do
-        if call.name == "BD.SetNativePublicAurasSuppressed" then
-            assertFalse(call.args[2] == true,
-                "ambiguous native access never suppresses Blizzard Buffs")
-        end
-    end
-
-    local allocations = countCalls(
-        state.calls,
-        "AF.CreateCustomAuraContainer"
-    )
-    state.nativeAccessResult = true
-    state.fireEvent("PLAYER_ENTERING_WORLD")
-    state.runTimers(0)
-    local retried = BD.GetCustomAuraContainerState("buffs")
-    assertTrue(retried.active,
-        "later lifecycle event retries an available native follower")
-    assertTrue(retried.nativeFollowerActive,
-        "retry links Debuffs after access becomes ordinary")
-    assertEqual(
-        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
-        allocations,
-        "follower retry reuses the completed native container"
-    )
-end
-
-do
-    local harness = NewHarness()
-    local BD = harness.BD
-    local environment = harness.environment
-    local state = harness.state
-    local debuffFrame = state.newDebuffFrame()
-    environment.DebuffFrame = debuffFrame
-    BD.RegisterCustomAuraContainerPane("buffs", CompileSharedMoverBuffs)
-
-    local profilePosition = {"TOPRIGHT", "TOPRIGHT", -4, -4}
-    local savePosition = NewPositionSave(profilePosition)
-    local buildStart = #state.calls + 1
-    BD.UpdateCustomAuraContainer("buffs", {
-        enabled = true,
-        positionSave = savePosition,
-    })
-
-    local active = BD.GetCustomAuraContainerState("buffs")
-    assertEqual(active.state, "ACTIVE", "shared mover active state")
-    assertTrue(active.active, "shared mover activates Buffs")
-    assertTrue(active.nativeFollowerActive,
-        "Blizzard Debuffs follow the active BFI holder")
-
-    local rolesetCall, rolesetIndex = findCall(
-        state.calls,
-        "holder1.SetRolesets",
-        buildStart
-    )
-    assertEqual(rolesetCall.args[1], "buffs", "shared holder roleset")
-    local moverCall, moverIndex = findCall(
-        state.calls,
-        "AF.CreateMover",
-        buildStart
-    )
-    assertTrue(rolesetIndex < moverIndex,
-        "holder roleset is applied before mover publication")
-    assertEqual(moverCall.args[4], savePosition,
-        "BFI mover receives the profile save callback")
-    assertTrue(findCall(state.calls, "BFI.LoadPosition", buildStart) ~= nil,
-        "BFI holder restores its saved position")
-
-    moverCall.args[4]("BOTTOMLEFT", 14, 18)
-    assertEqual(profilePosition[1], "BOTTOMLEFT",
-        "mover callback saves the point")
-    assertEqual(profilePosition[2], 14, "mover callback saves X")
-    assertEqual(profilePosition[3], 18, "mover callback saves Y")
-    assertEqual(profilePosition[4], nil,
-        "mover callback clears the legacy relative-point field")
-
-    local attachCall, attachIndex = findCallWhere(
-        state.calls,
-        "DebuffFrame.SetPointBase",
-        function(call)
-            return call.args[2] == state.frames[1]
-        end,
-        buildStart
-    )
-    assertEqual(attachCall.args[1], "TOPRIGHT", "Debuff follower point")
-    assertEqual(attachCall.args[3], "BOTTOMRIGHT",
-        "Debuff follower relative point")
-    assertEqual(attachCall.args[4], 0, "Debuff follower X")
-    assertEqual(attachCall.args[5], -5, "Debuff follower Y")
-    local _, suppressIndex = findCallWhere(
-        state.calls,
-        "BD.SetNativePublicAurasSuppressed",
-        function(call)
-            return call.args[1] == "buffs" and call.args[2] == true
-        end,
-        buildStart
-    )
-    assertTrue(attachIndex < suppressIndex,
-        "Debuffs attach before Blizzard Buffs are suppressed")
-
-    local disableStart = #state.calls + 1
-    BD.DisableCustomAuraContainer("buffs")
-    local disabled = BD.GetCustomAuraContainerState("buffs")
-    assertFalse(disabled.active, "disable hides custom Buffs")
-    assertFalse(disabled.nativeFollowerActive,
-        "disable releases Blizzard Debuffs")
-    local restoreCall, restoreIndex = findCallWhere(
-        state.calls,
-        "DebuffFrame.SetPointBase",
-        function(call)
-            return call.args[2] == debuffFrame.nativeTarget
-        end,
-        disableStart
-    )
-    assertEqual(restoreCall.args[1], "TOPRIGHT", "native restore point")
-    assertEqual(restoreCall.args[3], "TOPRIGHT",
-        "native restore relative point")
-    assertEqual(restoreCall.args[4], -15.5, "scaled native restore X")
-    assertEqual(restoreCall.args[5], -21, "scaled native restore Y")
-    local restoreCall2 = findCallWhere(
-        state.calls,
-        "DebuffFrame.SetPointBase",
-        function(call)
-            return call.args[2] == debuffFrame.nativeTarget2
-        end,
-        restoreIndex + 1
-    )
-    assertTrue(restoreCall2 ~= nil,
-        "optional second native Edit Mode anchor is restored")
-end
-
-do
-    local harness = NewHarness()
-    local BD = harness.BD
-    local environment = harness.environment
-    local state = harness.state
-    local debuffFrame = state.newDebuffFrame()
-    environment.DebuffFrame = debuffFrame
-    BD.RegisterCustomAuraContainerPane("buffs", CompileSharedMoverBuffs)
-    BD.UpdateCustomAuraContainer("buffs", {
-        enabled = true,
-        positionSave = NewPositionSave({"TOPRIGHT", -4, -4}),
-    })
-
-    assertEqual(
-        countCalls(state.calls, "EventRegistry.RegisterCallback"),
-        2,
-        "Edit Mode enter and exit callbacks are registered"
-    )
-    for _, registration in ipairs({
-        {"EDIT_MODE_LAYOUTS_UPDATED", 1},
-        {"PLAYER_ENTERING_WORLD", 2},
-        {"PLAYER_REGEN_ENABLED", 1},
-        {"PLAYER_SPECIALIZATION_CHANGED", 1},
-        {"ACTIVE_PLAYER_SPECIALIZATION_CHANGED", 1},
-    }) do
-        assertEqual(
-            countEventCalls(
-                state.calls,
-                "BD.RegisterEvent",
-                registration[1]
-            ),
-            registration[2],
-            registration[1] .. " follower lifecycle registration"
-        )
-    end
-    local enterStart = #state.calls + 1
-    state.fireRegistry("EditMode.Enter")
-    assertFalse(BD.GetCustomAuraContainerState("buffs").nativeFollowerActive,
-        "Edit Mode temporarily receives native Debuff ownership")
-    assertTrue(findCallWhere(
-        state.calls,
-        "DebuffFrame.SetPointBase",
-        function(call)
-            return call.args[2] == debuffFrame.nativeTarget
-        end,
-        enterStart
-    ) ~= nil, "Edit Mode entry restores the native anchor")
-
-    local editModeUpdateStart = #state.calls + 1
-    BD.UpdateCustomAuraContainer("buffs", {
-        enabled = true,
-        positionSave = NewPositionSave({"TOPRIGHT", -4, -4}),
-    })
-    local editModeUpdate = BD.GetCustomAuraContainerState("buffs")
-    assertFalse(editModeUpdate.active,
-        "settings update cannot reactivate the follower in Edit Mode")
-    assertEqual(editModeUpdate.state, "NATIVE_UNAVAILABLE",
-        "Edit Mode settings update waits on native ownership")
-    assertTrue(findCallWhere(
-        state.calls,
-        "BD.SetNativePublicAurasSuppressed",
-        function(call)
-            return call.args[1] == "buffs" and call.args[2] == false
-        end,
-        editModeUpdateStart
-    ) ~= nil, "Edit Mode settings update restores Blizzard Buffs")
-
-    local replacementTarget = "ReplacementNativeTarget"
-    debuffFrame.systemInfo.anchorInfo = {
-        point = "TOPLEFT",
-        relativeTo = replacementTarget,
-        relativePoint = "TOPLEFT",
-        offsetX = 27,
-        offsetY = -19,
-    }
-    debuffFrame.systemInfo.anchorInfo2 = nil
-
-    local exitStart = #state.calls + 1
-    state.fireRegistry("EditMode.Exit")
-    assertEqual(findCallWhere(
-        state.calls,
-        "DebuffFrame.SetPointBase",
-        function(call)
-            return call.args[2] == state.frames[1]
-        end,
-        exitStart
-    ), nil, "Edit Mode exit does not reattach synchronously")
-    state.runTimers(0)
-    assertTrue(findCallWhere(
-        state.calls,
-        "DebuffFrame.SetPointBase",
-        function(call)
-            return call.args[2] == state.frames[1]
-        end,
-        exitStart
-    ) ~= nil, "Edit Mode exit reattaches on the next tick")
-    assertTrue(BD.GetCustomAuraContainerState("buffs").nativeFollowerActive,
-        "next-tick Edit Mode reattach is reflected in state")
-
-    local layoutStart = #state.calls + 1
-    state.fireEvent("EDIT_MODE_LAYOUTS_UPDATED")
-    state.runTimers(0)
-    assertTrue(findCallWhere(
-        state.calls,
-        "DebuffFrame.SetPointBase",
-        function(call)
-            return call.args[2] == state.frames[1]
-        end,
-        layoutStart
-    ) ~= nil, "layout changes reapply the shared follower")
-
-    local specStart = #state.calls + 1
-    state.fireEvent("PLAYER_SPECIALIZATION_CHANGED", "player")
-    state.runTimers(0)
-    assertTrue(findCallWhere(
-        state.calls,
-        "DebuffFrame.SetPointBase",
-        function(call)
-            return call.args[2] == state.frames[1]
-        end,
-        specStart
-    ) ~= nil, "specialization layout changes reapply the follower")
-
-    state.combat = true
-    local combatStart = #state.calls + 1
-    state.fireEvent("EDIT_MODE_LAYOUTS_UPDATED")
-    state.runTimers(0)
-    assertEqual(findCall(
-        state.calls,
-        "DebuffFrame.ClearAllPointsBase",
-        combatStart
-    ), nil, "combat performs no native Debuff anchor mutation")
-    assertTrue(findCall(state.calls, "Timer.After", combatStart) ~= nil,
-        "combat follower refresh is coalesced without mutating anchors")
-    state.combat = false
-    state.fireEvent("PLAYER_REGEN_ENABLED")
-    state.runTimers(0)
-    assertTrue(findCallWhere(
-        state.calls,
-        "DebuffFrame.SetPointBase",
-        function(call)
-            return call.args[2] == state.frames[1]
-        end,
-        combatStart
-    ) ~= nil, "regen applies the deferred follower anchor")
-end
-
-do
-    local harness = NewHarness()
-    local BD = harness.BD
-    local environment = harness.environment
-    local state = harness.state
-    local debuffFrame = state.newDebuffFrame()
-    environment.DebuffFrame = debuffFrame
-    state.suppressEnableSucceeds = false
-    BD.RegisterCustomAuraContainerPane("buffs", CompileSharedMoverBuffs)
-
-    local updateStart = #state.calls + 1
-    BD.UpdateCustomAuraContainer("buffs", {
-        enabled = true,
-        positionSave = NewPositionSave({"TOPRIGHT", -4, -4}),
-    })
-    local failed = BD.GetCustomAuraContainerState("buffs")
-    assertEqual(failed.state, "SUPPRESSION_FAILED",
-        "shared mover suppression failure state")
-    assertFalse(failed.nativeFollowerActive,
-        "suppression failure restores native Debuff ownership")
-    assertTrue(findCallWhere(
-        state.calls,
-        "DebuffFrame.SetPointBase",
-        function(call)
-            return call.args[2] == debuffFrame.nativeTarget
-        end,
-        updateStart
-    ) ~= nil, "suppression failure restores the native Debuff anchor")
-end
-
-do
-    local harness = NewHarness()
-    local BD = harness.BD
     local state = harness.state
 
     assertFalse(BD.IsCustomAuraContainerAvailable("buffs"),
@@ -998,12 +890,11 @@ do
     )
 
     local buildStart = #state.calls + 1
-    local profilePosition = {"TOPRIGHT", "TOPRIGHT", -4, -4}
-    local profilePositionSave = NewPositionSave(profilePosition)
+    local profilePosition = {"TOPRIGHT", -4, -4}
     BD.UpdateCustomAuraContainer("buffs", {
         enabled = true,
         tuning = 1,
-        positionSave = profilePositionSave,
+        positionSave = profilePosition,
     })
     local buildCalls = state.calls
     local _, restoreIndex = findCall(
@@ -1084,17 +975,8 @@ do
     assertTrue(suppressIndex < showContainerIndex, "suppression precedes container show")
     assertTrue(showContainerIndex < showHolderIndex, "container shows before holder")
     local moverCall = findCall(buildCalls, "AF.CreateMover", buildStart)
-    assertEqual(moverCall.args[4], profilePositionSave,
-        "mover retains profile position save callback identity")
-    moverCall.args[4]("BOTTOMRIGHT", -12, 17)
-    assertEqual(profilePosition[1], "BOTTOMRIGHT",
-        "mover callback updates the profile point")
-    assertEqual(profilePosition[2], -12,
-        "mover callback updates the profile X")
-    assertEqual(profilePosition[3], 17,
-        "mover callback updates the profile Y")
-    assertEqual(profilePosition[4], nil,
-        "mover callback removes the stale relative point")
+    assertEqual(moverCall.args[4], profilePosition,
+        "mover retains profile position table identity")
     assertEqual(
         countCalls(buildCalls, "AF.AddCustomItemEnchantment"),
         2,
@@ -1142,12 +1024,11 @@ do
         countCalls(state.calls, "AF.AddCustomItemEnchantment")
     local tuningStart = #state.calls + 1
     local replacementPosition = {"TOPRIGHT", -8, -8}
-    local replacementPositionSave = NewPositionSave(replacementPosition)
     BD.UpdateCustomAuraContainer("buffs", {
         enabled = true,
         tuning = 2,
         maximum = 15,
-        positionSave = replacementPositionSave,
+        positionSave = replacementPosition,
     })
     assertEqual(
         countCalls(state.calls, "AF.CreateCustomAuraContainer"),
@@ -1171,8 +1052,8 @@ do
         "AF.UpdateMoverSave",
         tuningStart
     )
-    assertEqual(updateMoverCall.args[2], replacementPositionSave,
-        "live tuning refreshes mover save callback identity")
+    assertEqual(updateMoverCall.args[2], replacementPosition,
+        "live tuning refreshes mover profile table identity")
 
     local disableStart = #state.calls + 1
     BD.DisableCustomAuraContainer("buffs")
@@ -1242,6 +1123,13 @@ do
     state.combat = true
     local flowCallsBeforeCombat =
         countCalls(state.calls, "AF.SetCustomAuraContainerFlowLayout")
+    local createsBeforeCombat =
+        countCalls(state.calls, "AF.CreateCustomAuraContainer")
+    local unitWritesBeforeCombat =
+        countCalls(state.calls, "AF.SetCustomAuraContainerUnit")
+    local updatesBeforeCombat =
+        countCalls(state.calls, "AF.UpdateCustomAuraContainer")
+    local timersBeforeCombat = countCalls(state.calls, "Timer.After")
     BD.UpdateCustomAuraContainer("buffs", {
         enabled = true,
         tuning = 6,
@@ -1265,8 +1153,39 @@ do
             BD.FlushCustomAuraContainerUpdates
         ),
         1,
-        "combat queue has one regen registration"
+        "combat queue has one controller regen registration"
     )
+
+    state.playerUnit = "vehicle"
+    BD.RefreshCustomAuraContainerUnits()
+    local retargetedPendingState =
+        BD.GetCustomAuraContainerState("buffs")
+    assertEqual(retargetedPendingState.unit, "vehicle",
+        "queued tuning does not defer combat-live retarget")
+    assertTrue(retargetedPendingState.pending,
+        "combat-live retarget preserves queued tuning")
+    assertEqual(
+        countCalls(state.calls, "AF.SetCustomAuraContainerUnit"),
+        unitWritesBeforeCombat + 1,
+        "queued tuning retarget writes unit immediately"
+    )
+    assertEqual(
+        countCalls(state.calls, "AF.UpdateCustomAuraContainer"),
+        updatesBeforeCombat + 1,
+        "queued tuning retarget refreshes native container immediately"
+    )
+    assertEqual(
+        countCalls(state.calls, "AF.SetCustomAuraContainerFlowLayout"),
+        flowCallsBeforeCombat,
+        "combat-live retarget does not apply queued tuning"
+    )
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        createsBeforeCombat,
+        "combat-live retarget does not rebuild"
+    )
+    assertEqual(countCalls(state.calls, "Timer.After"), timersBeforeCombat,
+        "combat-live retarget does not add a retry timer")
 
     state.combat = false
     BD.FlushCustomAuraContainerUpdates()
@@ -1279,8 +1198,20 @@ do
             lastFlowCall = call
         end
     end
+    assertEqual(
+        countCalls(state.calls, "AF.SetCustomAuraContainerFlowLayout"),
+        flowCallsBeforeCombat + 1,
+        "regen applies exactly one queued tuning pass"
+    )
     assertEqual(lastFlowCall.args[1].marker, 7,
         "combat queue keeps latest tuning")
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        createsBeforeCombat,
+        "regen tuning reuses the existing container"
+    )
+    assertEqual(countCalls(state.calls, "Timer.After"), timersBeforeCombat + 1,
+        "regen schedules one deferred tuning callback")
 
     local pointerFlowCount =
         countCalls(state.calls, "AF.SetCustomAuraContainerFlowLayout")
@@ -1329,6 +1260,1482 @@ do
     assertEqual(unsupported.diagnostic, "UNSUPPORTED_TEST_CONFIG",
         "unsupported diagnostic")
     assertFalse(unsupported.active, "unsupported leaves custom inactive")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    local debuffFrame = state.newDebuffFrame()
+    environment.DebuffFrame = debuffFrame
+    environment.EditModeManagerFrame.editModeActive = nil
+
+    BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+    local buildStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+    local active = BD.GetCustomAuraContainerState("buffs")
+    assertTrue(active.active, "fresh-login nil Edit Mode state activates")
+    assertTrue(active.nativeFollowerActive,
+        "fresh-login nil Edit Mode state attaches the follower")
+    assertEqual(state.frames[1].rolesets, "buffs",
+        "holder receives the shared buffs roleset")
+    local _, rolesetIndex = findCall(
+        state.calls,
+        "holder1.SetRolesets",
+        buildStart
+    )
+    local _, moverIndex = findCall(
+        state.calls,
+        "AF.CreateMover",
+        buildStart
+    )
+    assertTrue(rolesetIndex < moverIndex,
+        "roleset is assigned before mover publication")
+    local attachCall = findCall(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        buildStart
+    )
+    assertEqual(attachCall.args[1], "TOPRIGHT", "follower point")
+    assertEqual(attachCall.args[2], state.frames[1],
+        "follower uses the BFI holder identity")
+    assertEqual(attachCall.args[3], "BOTTOMRIGHT",
+        "follower relative point")
+    assertEqual(attachCall.args[4], 0, "follower native-unit X")
+    assertEqual(attachCall.args[5], -5, "follower native-unit Y")
+
+    local disableStart = #state.calls + 1
+    BD.DisableCustomAuraContainer("buffs")
+    local disabled = BD.GetCustomAuraContainerState("buffs")
+    assertFalse(disabled.active, "disable hides custom Buffs")
+    assertFalse(disabled.nativeFollowerActive,
+        "disable releases Blizzard Debuffs")
+    local restoreFirst, restoreFirstIndex = findCall(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        disableStart
+    )
+    assertEqual(restoreFirst.args[1], "TOPRIGHT", "first restore point")
+    assertEqual(restoreFirst.args[2], environment.UIParent,
+        "UIParent alias resolves to the exact object")
+    assertEqual(restoreFirst.args[3], "TOPRIGHT",
+        "first restore relative point")
+    assertEqual(restoreFirst.args[4], -15.5,
+        "first restore X converts physical offset by scale")
+    assertEqual(restoreFirst.args[5], -21,
+        "first restore Y converts physical offset by scale")
+    local restoreSecond = findCall(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        restoreFirstIndex + 1
+    )
+    assertTrue(restoreSecond ~= nil,
+        "optional second native anchor is restored atomically")
+    assertEqual(restoreSecond.args[2], environment.BuffFrame,
+        "BuffFrame alias resolves to the exact object")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    local frame = state.newDebuffFrame()
+    environment.DebuffFrame = frame
+    environment.EditModeManagerFrame.editModeActive = false
+
+    BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+    local active = BD.GetCustomAuraContainerState("buffs")
+    assertTrue(active.active,
+        "explicit false Edit Mode state activates")
+    assertTrue(active.nativeFollowerActive,
+        "explicit false Edit Mode state attaches the follower")
+end
+
+do
+    for _, point in ipairs({
+        "BOTTOM",
+        "BOTTOMLEFT",
+        "BOTTOMRIGHT",
+        "CENTER",
+        "LEFT",
+        "RIGHT",
+        "TOP",
+        "TOPLEFT",
+        "TOPRIGHT",
+    }) do
+        local harness = NewHarness()
+        local BD = harness.BD
+        local state = harness.state
+        local environment = harness.environment
+        local frame = state.newDebuffFrame()
+        frame.systemInfo.anchorInfo.point = point
+        frame.systemInfo.anchorInfo.relativePoint = point
+        frame.systemInfo.anchorInfo2 = nil
+        environment.DebuffFrame = frame
+
+        BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+        BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+        local disableStart = #state.calls + 1
+        BD.DisableCustomAuraContainer("buffs")
+        local restore = findCall(
+            state.calls,
+            "DebuffFrame.SetPointBase",
+            disableStart
+        )
+        assertEqual(restore.args[1], point,
+            point .. " is accepted as a native restore point")
+        assertEqual(restore.args[3], point,
+            point .. " is accepted as a native relative point")
+    end
+end
+
+do
+    local function RunRolesetFailure(label, configure)
+        local harness = NewHarness()
+        local BD = harness.BD
+        local state = harness.state
+        configure(state)
+
+        BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+        local buildStart = #state.calls + 1
+        local ok = pcall(BD.UpdateCustomAuraContainer, "buffs", {
+            enabled = true,
+        })
+        assertTrue(ok, label .. " fails closed without Lua error")
+        assertEqual(findCall(
+            state.calls,
+            "holder1.SetRolesets",
+            buildStart
+        ), nil, label .. " performs zero SetRolesets calls")
+        assertEqual(findCall(
+            state.calls,
+            "AF.CreateMover",
+            buildStart
+        ), nil, label .. " publishes no mover")
+        assertEqual(findCall(
+            state.calls,
+            "AF.CreateCustomAuraContainer",
+            buildStart
+        ), nil, label .. " allocates no container")
+        local result = BD.GetCustomAuraContainerState("buffs")
+        assertFalse(result.buildAttempted,
+            label .. " publishes no completed holder construction")
+    end
+
+    for _, case in ipairs({
+        {
+            label = "false holder access",
+            configure = function(state)
+                state.holderAccessResult = false
+            end,
+        },
+        {
+            label = "nonboolean holder access",
+            configure = function(state)
+                state.holderAccessResult = {}
+            end,
+        },
+        {
+            label = "secret holder access",
+            configure = function(state)
+                state.holderAccessResult =
+                    state.newSecretValue("roleset holder access")
+            end,
+        },
+        {
+            label = "missing SetRolesets",
+            configure = function(state)
+                state.onHolderAccess = function(holder, count)
+                    if count == 1 then holder.SetRolesets = nil end
+                end
+            end,
+        },
+        {
+            label = "secret SetRolesets",
+            configure = function(state)
+                state.onHolderAccess = function(holder, count)
+                    if count == 1 then
+                        holder.SetRolesets =
+                            state.newSecretValue("SetRolesets")
+                    end
+                end
+            end,
+        },
+        {
+            label = "drifted SetRolesets",
+            configure = function(state)
+                state.onHolderAccess = function(holder, count)
+                    if count == 2 then
+                        holder.SetRolesets = function()
+                            error("drifted SetRolesets executed", 2)
+                        end
+                    end
+                end
+            end,
+        },
+        {
+            label = "roleset final combat flip",
+            configure = function(state)
+                state.onCombatCheck = function(count)
+                    if count == 2 then state.combat = true end
+                end
+            end,
+        },
+    }) do
+        RunRolesetFailure(case.label, case.configure)
+    end
+end
+
+do
+    local function RunRolesetRetry(label, configure, recover)
+        local harness = NewHarness()
+        local BD = harness.BD
+        local state = harness.state
+        local environment = harness.environment
+        environment.DebuffFrame = state.newDebuffFrame()
+        configure(state)
+
+        BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+        BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+        assertEqual(countCalls(state.calls, "CreateFrame.Holder"), 1,
+            label .. " allocates one retained pending holder")
+        assertEqual(countCalls(state.calls, "holder1.SetRolesets"), 0,
+            label .. " performs no failed roleset write")
+        assertEqual(countCalls(state.calls, "AF.CreateMover"), 0,
+            label .. " publishes no mover while roleset is pending")
+        assertEqual(countCalls(
+            state.calls,
+            "AF.CreateCustomAuraContainer"
+        ), 0, label .. " allocates no native container while pending")
+
+        recover(state, state.frames[1])
+        BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+        assertEqual(countCalls(state.calls, "CreateFrame.Holder"), 1,
+            label .. " reuses the retained pending holder")
+        assertEqual(countCalls(state.calls, "holder1.SetRolesets"), 1,
+            label .. " applies rolesets once after recovery")
+        assertEqual(countCalls(state.calls, "AF.CreateMover"), 1,
+            label .. " publishes one mover after roleset success")
+        assertEqual(countCalls(
+            state.calls,
+            "AF.CreateCustomAuraContainer"
+        ), 1, label .. " allocates one container after roleset success")
+        local result = BD.GetCustomAuraContainerState("buffs")
+        assertTrue(result.buildCompleted,
+            label .. " completes construction after recovery")
+        assertTrue(result.active,
+            label .. " activates the recovered single holder")
+    end
+
+    RunRolesetRetry(
+        "holder access retry",
+        function(state)
+            state.holderAccessResult = false
+        end,
+        function(state)
+            state.holderAccessResult = nil
+        end
+    )
+
+    RunRolesetRetry(
+        "holder method retry",
+        function(state)
+            state.onHolderAccess = function(holder, count)
+                if count == 1 then
+                    state.savedSetRolesets = holder.SetRolesets
+                    holder.SetRolesets = nil
+                end
+            end
+        end,
+        function(state, holder)
+            holder.SetRolesets = state.savedSetRolesets
+            state.onHolderAccess = nil
+        end
+    )
+
+    RunRolesetRetry(
+        "holder final combat retry",
+        function(state)
+            state.onCombatCheck = function(count)
+                if count == 2 then state.combat = true end
+            end
+        end,
+        function(state)
+            state.combat = false
+            state.onCombatCheck = nil
+        end
+    )
+
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    harness.environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+
+    state.holderAccessResult = false
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+    assertEqual(countCalls(state.calls, "CreateFrame.Holder"), 1,
+        "repeated roleset failures allocate the pending holder once")
+
+    state.holderAccessResult = nil
+    state.onHolderAccess = function(holder, count)
+        if count == 2 then
+            state.savedSetRolesets = holder.SetRolesets
+            holder.SetRolesets = nil
+        end
+    end
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+    assertEqual(countCalls(state.calls, "CreateFrame.Holder"), 1,
+        "method failure reuses the same pending holder")
+
+    state.frames[1].SetRolesets = state.savedSetRolesets
+    state.onHolderAccess = nil
+    state.onCombatCheck = function(count)
+        if count == 4 then state.combat = true end
+    end
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+    assertEqual(countCalls(state.calls, "CreateFrame.Holder"), 1,
+        "final-combat failure reuses the same pending holder")
+    assertEqual(countCalls(state.calls, "holder1.SetRolesets"), 0,
+        "all repeated failures perform zero roleset writes")
+    assertEqual(countCalls(state.calls, "AF.CreateMover"), 0,
+        "all repeated failures publish zero movers")
+    assertEqual(countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    ), 0, "all repeated failures allocate zero native containers")
+
+    state.combat = false
+    state.onCombatCheck = nil
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+    assertEqual(countCalls(state.calls, "CreateFrame.Holder"), 1,
+        "recovery still uses the one retained pending holder")
+    assertEqual(countCalls(state.calls, "holder1.SetRolesets"), 1,
+        "recovery applies rolesets once")
+    local moverCall = findCall(state.calls, "AF.CreateMover")
+    local containerCall = findCall(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    )
+    assertEqual(moverCall.args[1], "holder1",
+        "mover publishes the retained holder")
+    assertEqual(containerCall.args[1], "holder1",
+        "native container uses the retained holder")
+    assertTrue(BD.GetCustomAuraContainerState("buffs").active,
+        "repeated-failure holder activates after recovery")
+end
+
+do
+    local function RunFollowerFailure(label, configure)
+        local harness = NewHarness()
+        local BD = harness.BD
+        local state = harness.state
+        local environment = harness.environment
+        local debuffFrame = state.newDebuffFrame()
+        environment.DebuffFrame = debuffFrame
+        configure(state, environment, debuffFrame)
+
+        BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+        local writeStart = #state.calls + 1
+        local ok = pcall(BD.UpdateCustomAuraContainer, "buffs", {
+            enabled = true,
+        })
+        assertTrue(ok, label .. " fails closed without Lua error")
+        local result = BD.GetCustomAuraContainerState("buffs")
+        assertFalse(result.nativeFollowerActive,
+            label .. " never claims native follower ownership")
+        assertEqual(findCall(
+            state.calls,
+            "DebuffFrame.ClearAllPointsBase",
+            writeStart
+        ), nil, label .. " performs zero native anchor writes")
+        assertEqual(findCall(
+            state.calls,
+            "DebuffFrame.SetPointBase",
+            writeStart
+        ), nil, label .. " performs zero native point writes")
+    end
+
+    for _, case in ipairs({
+        {
+            label = "unknown restore alias",
+            configure = function(_, _, frame)
+                frame.systemInfo.anchorInfo.relativeTo = "WorldFrame"
+            end,
+        },
+        {
+            label = "secret restore alias",
+            configure = function(state, environment, frame)
+                environment.UIParent = state.newSecretValue("UIParent")
+                frame.systemInfo.anchorInfo.relativeTo = "UIParent"
+            end,
+        },
+        {
+            label = "invalid restore point token",
+            configure = function(_, _, frame)
+                frame.systemInfo.anchorInfo.point = "ALL"
+            end,
+        },
+        {
+            label = "invalid restore relative point token",
+            configure = function(_, _, frame)
+                frame.systemInfo.anchorInfo.relativePoint = "ALL"
+            end,
+        },
+        {
+            label = "zero scale",
+            configure = function(_, _, frame) frame.scale = 0 end,
+        },
+        {
+            label = "NaN scale",
+            configure = function(_, _, frame) frame.scale = 0 / 0 end,
+        },
+        {
+            label = "infinite scale",
+            configure = function(_, _, frame) frame.scale = math.huge end,
+        },
+        {
+            label = "division overflow",
+            configure = function(_, _, frame)
+                frame.scale = 1e-320
+                frame.systemInfo.anchorInfo.offsetX = 1e308
+            end,
+        },
+        {
+            label = "malformed optional second point",
+            configure = function(_, _, frame)
+                frame.systemInfo.anchorInfo2.relativeTo = "WorldFrame"
+            end,
+        },
+        {
+            label = "active Edit Mode",
+            configure = function(_, environment)
+                environment.EditModeManagerFrame.editModeActive = true
+            end,
+        },
+        {
+            label = "hostile Edit Mode state",
+            configure = function(_, environment)
+                environment.EditModeManagerFrame.editModeActive = {}
+            end,
+        },
+        {
+            label = "secret Edit Mode state",
+            configure = function(state, environment)
+                environment.EditModeManagerFrame.editModeActive =
+                    state.newSecretValue("editModeActive")
+            end,
+        },
+        {
+            label = "false relative access result",
+            configure = function(state)
+                state.globalAccessResults = {UIParent = false}
+            end,
+        },
+        {
+            label = "nonboolean relative access result",
+            configure = function(state)
+                state.globalAccessResults = {UIParent = {}}
+            end,
+        },
+        {
+            label = "secret relative access result",
+            configure = function(state)
+                state.globalAccessResults = {
+                    UIParent = state.newSecretValue("UIParent access"),
+                }
+            end,
+        },
+        {
+            label = "false holder access result",
+            configure = function(state)
+                state.holderAccessResult = false
+            end,
+        },
+        {
+            label = "nonboolean holder access result",
+            configure = function(state)
+                state.holderAccessResult = {}
+            end,
+        },
+        {
+            label = "secret holder access result",
+            configure = function(state)
+                state.holderAccessResult =
+                    state.newSecretValue("holder access")
+            end,
+        },
+        {
+            label = "false Edit Mode access result",
+            configure = function(state)
+                state.globalAccessResults = {
+                    EditModeManagerFrame = false,
+                }
+            end,
+        },
+        {
+            label = "nonboolean Edit Mode access result",
+            configure = function(state)
+                state.globalAccessResults = {
+                    EditModeManagerFrame = {},
+                }
+            end,
+        },
+        {
+            label = "secret Edit Mode access result",
+            configure = function(state)
+                state.globalAccessResults = {
+                    EditModeManagerFrame = state.newSecretValue(
+                        "Edit Mode access"
+                    ),
+                }
+            end,
+        },
+    }) do
+        RunFollowerFailure(case.label, case.configure)
+    end
+end
+
+do
+    local function RunLateSecretApply(label, install)
+        local harness = NewHarness()
+        local BD = harness.BD
+        local state = harness.state
+        local environment = harness.environment
+        local frame = state.newDebuffFrame()
+        environment.DebuffFrame = frame
+
+        BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+        local writeStart = #state.calls + 1
+        install(state, environment, frame)
+        local ok = pcall(BD.UpdateCustomAuraContainer, "buffs", {
+            enabled = true,
+        })
+        assertTrue(ok, label .. " fails closed without Lua error")
+        assertEqual(findCall(
+            state.calls,
+            "DebuffFrame.ClearAllPointsBase",
+            writeStart
+        ), nil, label .. " performs zero native clears")
+        assertEqual(findCall(
+            state.calls,
+            "DebuffFrame.SetPointBase",
+            writeStart
+        ), nil, label .. " performs zero native point writes")
+        assertFalse(BD.GetCustomAuraContainerState("buffs").nativeFollowerActive,
+            label .. " publishes no follower ownership")
+    end
+
+    local targetFields = {
+        "CanBeAccessedInContext",
+        "GetScale",
+        "ClearAllPointsBase",
+        "SetPointBase",
+        "systemInfo",
+    }
+    for _, field in ipairs(targetFields) do
+        RunLateSecretApply("late-secret target " .. field,
+            function(state, _, frame)
+                state.onHolderAccess = function(_, count)
+                    if count == 2 then
+                        frame[field] = state.newSecretValue(field)
+                    end
+                end
+            end)
+    end
+
+    local anchorFields = {
+        "point",
+        "relativeTo",
+        "relativePoint",
+        "offsetX",
+        "offsetY",
+    }
+    for _, field in ipairs(anchorFields) do
+        RunLateSecretApply("late-secret anchor " .. field,
+            function(state, _, frame)
+                state.onHolderAccess = function(_, count)
+                    if count == 2 then
+                        frame.systemInfo.anchorInfo[field] =
+                            state.newSecretValue(field)
+                    end
+                end
+            end)
+    end
+
+    for _, field in ipairs(anchorFields) do
+        RunLateSecretApply("late-secret second anchor " .. field,
+            function(state, _, frame)
+                state.onHolderAccess = function(_, count)
+                    if count == 2 then
+                        frame.systemInfo.anchorInfo2[field] =
+                            state.newSecretValue("anchorInfo2 " .. field)
+                    end
+                end
+            end)
+    end
+
+    RunLateSecretApply("late-secret anchorInfo2",
+        function(state, _, frame)
+            state.onHolderAccess = function(_, count)
+                if count == 2 then
+                    frame.systemInfo.anchorInfo2 =
+                        state.newSecretValue("anchorInfo2")
+                end
+            end
+        end)
+
+    RunLateSecretApply("late-secret DebuffFrame global",
+        function(state)
+            state.globalReadMutations = {
+                DebuffFrame = function(storage, count)
+                    if count == 3 then
+                        storage.DebuffFrame =
+                            state.newSecretValue("DebuffFrame")
+                    end
+                end,
+            }
+        end)
+
+    RunLateSecretApply("late-secret relative global",
+        function(state)
+            state.globalReadMutations = {
+                UIParent = function(storage, count)
+                    if count == 3 then
+                        storage.UIParent =
+                            state.newSecretValue("UIParent global")
+                    end
+                end,
+            }
+        end)
+
+    RunLateSecretApply("late-secret relative access method",
+        function(state, environment)
+            state.onHolderAccess = function(_, count)
+                if count == 2 then
+                    environment.UIParent.CanBeAccessedInContext =
+                        state.newSecretValue("UIParent access method")
+                end
+            end
+        end)
+
+    RunLateSecretApply("late-secret holder access method",
+        function(state)
+            state.onHolderAccess = function(holder, count)
+                if count == 2 then
+                    holder.CanBeAccessedInContext =
+                        state.newSecretValue("holder access method")
+                end
+            end
+        end)
+
+    RunLateSecretApply("late-secret Edit Mode manager global",
+        function(state)
+            state.globalReadMutations = {
+                EditModeManagerFrame = function(storage, count)
+                    if count == 3 then
+                        storage.EditModeManagerFrame = state.newSecretValue(
+                            "EditModeManagerFrame"
+                        )
+                    end
+                end,
+            }
+        end)
+
+    RunLateSecretApply("late-secret Edit Mode access method",
+        function(state, environment)
+            state.onHolderAccess = function(_, count)
+                if count == 2 then
+                    environment.EditModeManagerFrame
+                        .CanBeAccessedInContext = state.newSecretValue(
+                            "Edit Mode access method"
+                        )
+                end
+            end
+        end)
+
+    RunLateSecretApply("late-secret Edit Mode state",
+        function(state, environment)
+            state.onHolderAccess = function(_, count)
+                if count == 2 then
+                    environment.EditModeManagerFrame.editModeActive =
+                        state.newSecretValue("editModeActive")
+                end
+            end
+        end)
+
+    for _, field in ipairs({
+        "globalName",
+        "point",
+        "relativePoint",
+        "x",
+        "y",
+    }) do
+        RunLateSecretApply("late-secret follower " .. field,
+            function(state)
+                state.onHolderAccess = function(_, count)
+                    if count == 2 then
+                        state.lastDescriptorCopy.nativeFollower[field] =
+                            state.newSecretValue("follower " .. field)
+                    end
+                end
+            end)
+    end
+end
+
+do
+    local function RunLateSecretRestore(label, mutate)
+        local harness = NewHarness()
+        local BD = harness.BD
+        local state = harness.state
+        local environment = harness.environment
+        local frame = state.newDebuffFrame()
+        environment.DebuffFrame = frame
+
+        BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+        BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+        state.globalAccessCalls = {}
+        local secret = state.newSecretValue(label)
+        local repair
+        local allocations = countCalls(
+            state.calls,
+            "AF.CreateCustomAuraContainer"
+        )
+        state.onGlobalAccess = function(globalName, _, count)
+            if globalName == "BuffFrame" and count == 3 then
+                repair = mutate(state, environment, frame, secret)
+            end
+        end
+
+        local writeStart = #state.calls + 1
+        local ok = pcall(BD.DisableCustomAuraContainer, "buffs")
+        assertTrue(ok, label .. " restore fails closed without Lua error")
+        assertEqual(findCall(
+            state.calls,
+            "DebuffFrame.ClearAllPointsBase",
+            writeStart
+        ), nil, label .. " restore performs zero native clears")
+        assertEqual(findCall(
+            state.calls,
+            "DebuffFrame.SetPointBase",
+            writeStart
+        ), nil, label .. " restore performs zero native point writes")
+        local retained = BD.GetCustomAuraContainerState("buffs")
+        assertTrue(retained.active,
+            label .. " restore retains the active presentation")
+        assertTrue(retained.nativeFollowerActive,
+            label .. " restore retains follower ownership")
+        assertTrue(retained.operationPending,
+            label .. " restore keeps disable queued")
+
+        state.onGlobalAccess = nil
+        assertTrue(type(repair) == "function",
+            label .. " reached the terminal restore fence")
+        repair()
+        state.fireEvent("PLAYER_REGEN_ENABLED")
+        state.runTimers(0)
+        local repaired = BD.GetCustomAuraContainerState("buffs")
+        assertFalse(repaired.active,
+            label .. " repairs to an inactive custom presentation")
+        assertFalse(repaired.nativeFollowerActive,
+            label .. " repairs exact native follower ownership")
+        assertFalse(repaired.operationPending,
+            label .. " drains the queued disable after repair")
+        assertEqual(countCalls(
+            state.calls,
+            "DebuffFrame.ClearAllPointsBase",
+            writeStart
+        ), 1, label .. " repairs with one exact native clear")
+        assertEqual(countCalls(
+            state.calls,
+            "DebuffFrame.SetPointBase",
+            writeStart
+        ), 2, label .. " repairs the exact saved two-point anchor")
+        assertEqual(countCalls(
+            state.calls,
+            "AF.CreateCustomAuraContainer"
+        ), allocations, label .. " repair allocates no replacement container")
+    end
+
+    for _, field in ipairs({
+        "CanBeAccessedInContext",
+        "GetScale",
+        "ClearAllPointsBase",
+        "SetPointBase",
+        "systemInfo",
+    }) do
+        RunLateSecretRestore("late-secret restore target " .. field,
+            function(_, _, frame, secret)
+                local original = frame[field]
+                frame[field] = secret
+                return function() frame[field] = original end
+            end)
+    end
+
+    RunLateSecretRestore("late-secret restore DebuffFrame global",
+        function(_, environment, _, secret)
+            local original = environment.DebuffFrame
+            environment.DebuffFrame = secret
+            return function() environment.DebuffFrame = original end
+        end)
+    RunLateSecretRestore("late-secret restore anchorInfo2",
+        function(_, _, frame, secret)
+            local original = frame.systemInfo.anchorInfo2
+            frame.systemInfo.anchorInfo2 = secret
+            return function()
+                frame.systemInfo.anchorInfo2 = original
+            end
+        end)
+
+    for _, anchorName in ipairs({"anchorInfo", "anchorInfo2"}) do
+        for _, field in ipairs({
+            "point",
+            "relativeTo",
+            "relativePoint",
+            "offsetX",
+            "offsetY",
+        }) do
+            RunLateSecretRestore(
+                "late-secret restore " .. anchorName .. " " .. field,
+                function(_, _, frame, secret)
+                    local original = frame.systemInfo[anchorName][field]
+                    frame.systemInfo[anchorName][field] = secret
+                    return function()
+                        frame.systemInfo[anchorName][field] = original
+                    end
+                end
+            )
+        end
+    end
+
+    RunLateSecretRestore("late-secret restore relative global",
+        function(_, environment, _, secret)
+            local original = environment.UIParent
+            environment.UIParent = secret
+            return function() environment.UIParent = original end
+        end)
+    RunLateSecretRestore("late-secret restore relative access method",
+        function(_, environment, _, secret)
+            local original = environment.UIParent.CanBeAccessedInContext
+            environment.UIParent.CanBeAccessedInContext = secret
+            return function()
+                environment.UIParent.CanBeAccessedInContext = original
+            end
+        end)
+end
+
+do
+    local driftCases = {
+        {
+            label = "target identity drift",
+            configure = function(state, environment)
+                state.onNativeScale = function(_, count)
+                    if count == 1 then
+                        environment.DebuffFrame = state.newDebuffFrame()
+                    end
+                end
+            end,
+        },
+        {
+            label = "systemInfo identity drift",
+            configure = function(state, _, frame)
+                state.onNativeScale = function(_, count)
+                    if count == 1 then
+                        frame.systemInfo = deepCopy(frame.systemInfo)
+                    end
+                end
+            end,
+        },
+        {
+            label = "anchor identity drift",
+            configure = function(state, _, frame)
+                state.onGlobalAccess = function(label, _, count)
+                    if label == "UIParent" and count == 1 then
+                        frame.systemInfo.anchorInfo =
+                            deepCopy(frame.systemInfo.anchorInfo)
+                    end
+                end
+            end,
+        },
+        {
+            label = "captured writer drift",
+            configure = function(state, _, frame)
+                state.onNativeScale = function(_, count)
+                    if count == 1 then
+                        frame.SetPointBase = function()
+                            error("drifted writer must never execute", 2)
+                        end
+                    end
+                end
+            end,
+        },
+        {
+            label = "relative global drift",
+            configure = function(state, environment)
+                state.onGlobalAccess = function(label, _, count)
+                    if label == "UIParent" and count == 1 then
+                        environment.UIParent = {
+                            CanBeAccessedInContext = function() return true end,
+                        }
+                    end
+                end
+            end,
+        },
+        {
+            label = "holder access-method drift",
+            configure = function(state)
+                state.onHolderAccess = function(holder, count)
+                    if count == 1 then
+                        holder.CanBeAccessedInContext = function()
+                            return true
+                        end
+                    end
+                end
+            end,
+        },
+        {
+            label = "Edit Mode manager drift",
+            configure = function(state, environment)
+                state.onGlobalAccess = function(label, _, count)
+                    if label == "EditModeManagerFrame" and count == 1 then
+                        environment.EditModeManagerFrame = {
+                            editModeActive = false,
+                            CanBeAccessedInContext = function() return true end,
+                        }
+                    end
+                end
+            end,
+        },
+        {
+            label = "follower payload drift",
+            configure = function(state)
+                state.onHolderAccess = function(_, count)
+                    if count == 1 then
+                        state.lastDescriptorCopy.nativeFollower.y = -6
+                    end
+                end
+            end,
+        },
+    }
+
+    for _, case in ipairs(driftCases) do
+        local harness = NewHarness()
+        local BD = harness.BD
+        local state = harness.state
+        local environment = harness.environment
+        local frame = state.newDebuffFrame()
+        environment.DebuffFrame = frame
+
+        BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+        state.globalAccessCalls = {}
+        case.configure(state, environment, frame)
+        local writeStart = #state.calls + 1
+        local ok = pcall(BD.UpdateCustomAuraContainer, "buffs", {
+            enabled = true,
+        })
+        assertTrue(ok, case.label .. " fails closed without Lua error")
+        assertEqual(findCall(
+            state.calls,
+            "DebuffFrame.ClearAllPointsBase",
+            writeStart
+        ), nil, case.label .. " performs zero native anchor writes")
+        local result = BD.GetCustomAuraContainerState("buffs")
+        assertFalse(result.nativeFollowerActive,
+            case.label .. " never publishes follower ownership")
+    end
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    environment.DebuffFrame = state.newDebuffFrame()
+    state.onCombatCheck = function(count)
+        if count == 3 then state.combat = true end
+    end
+
+    BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+    local writeStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+    assertEqual(findCall(
+        state.calls,
+        "DebuffFrame.ClearAllPointsBase",
+        writeStart
+    ), nil, "final combat flip performs zero native anchor writes")
+    assertFalse(BD.GetCustomAuraContainerState("buffs").nativeFollowerActive,
+        "final combat flip never publishes follower ownership")
+end
+
+do
+    local accessCases = {
+        {label = "false target access", value = false},
+        {label = "nonboolean target access", value = {}},
+        {label = "string target access", value = "yes"},
+    }
+    for _, case in ipairs(accessCases) do
+        local harness = NewHarness()
+        local BD = harness.BD
+        local state = harness.state
+        local environment = harness.environment
+        environment.DebuffFrame = state.newDebuffFrame()
+        state.nativeAccessResult = case.value
+        BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+        local writeStart = #state.calls + 1
+        BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+        assertEqual(findCall(
+            state.calls,
+            "DebuffFrame.ClearAllPointsBase",
+            writeStart
+        ), nil, case.label .. " performs zero writes")
+    end
+
+    local secretHarness = NewHarness()
+    local secretBD = secretHarness.BD
+    local secretState = secretHarness.state
+    secretHarness.environment.DebuffFrame = secretState.newDebuffFrame()
+    secretState.nativeAccessResult =
+        secretState.newSecretValue("native access result")
+    secretBD.RegisterCustomAuraContainerPane(
+        "buffs",
+        CompileFollowingBuffs
+    )
+    local writeStart = #secretState.calls + 1
+    secretBD.UpdateCustomAuraContainer("buffs", {enabled = true})
+    assertEqual(findCall(
+        secretState.calls,
+        "DebuffFrame.ClearAllPointsBase",
+        writeStart
+    ), nil, "secret target access result performs zero writes")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    local frame = state.newDebuffFrame()
+    environment.DebuffFrame = frame
+    BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+    local allocations = countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    )
+
+    state.globalAccessResults = {UIParent = false}
+    local deniedStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("buffs", {
+        enabled = true,
+        style = "changed",
+    })
+    local denied = BD.GetCustomAuraContainerState("buffs")
+    assertTrue(denied.active,
+        "failed update restore retains the active custom presentation")
+    assertTrue(denied.nativeFollowerActive,
+        "failed update restore retains the last safe follower anchor")
+    assertTrue(denied.operationPending,
+        "failed update restore keeps the requested update queued")
+    assertEqual(findCall(
+        state.calls,
+        "DebuffFrame.ClearAllPointsBase",
+        deniedStart
+    ), nil, "denied stored restore performs zero native writes")
+    assertTrue(state.frames[1].shown and state.frames[2].shown,
+        "denied update never creates a zero-display transition")
+
+    state.globalAccessResults = nil
+    BD.FlushCustomAuraContainerUpdates()
+    state.runTimers(0)
+    local repaired = BD.GetCustomAuraContainerState("buffs")
+    assertEqual(repaired.state, "RELOAD_REQUIRED",
+        "repaired update completes its queued reload fallback")
+    assertFalse(repaired.active,
+        "repaired update restores Blizzard before hiding custom Buffs")
+    assertFalse(repaired.nativeFollowerActive,
+        "repaired update restores native Debuff ownership")
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        allocations,
+        "repaired update allocates no duplicate native container"
+    )
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    local originalUIParent = environment.UIParent
+    environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+
+    environment.UIParent = {
+        CanBeAccessedInContext = function() return true end,
+    }
+    local deniedStart = #state.calls + 1
+    BD.DisableCustomAuraContainer("buffs")
+    local denied = BD.GetCustomAuraContainerState("buffs")
+    assertTrue(denied.active,
+        "failed disable restore retains the active custom presentation")
+    assertTrue(denied.nativeFollowerActive,
+        "failed disable restore retains the last safe follower anchor")
+    assertTrue(denied.operationPending,
+        "failed disable restore keeps disable queued")
+    assertEqual(findCall(
+        state.calls,
+        "DebuffFrame.ClearAllPointsBase",
+        deniedStart
+    ), nil, "changed restore global performs zero native writes")
+
+    environment.UIParent = originalUIParent
+    BD.FlushCustomAuraContainerUpdates()
+    state.runTimers(0)
+    local repaired = BD.GetCustomAuraContainerState("buffs")
+    assertEqual(repaired.state, "INACTIVE",
+        "repaired disable completes")
+    assertFalse(repaired.active,
+        "repaired disable hides custom Buffs after native restore")
+    assertFalse(repaired.nativeFollowerActive,
+        "repaired disable releases native Debuff ownership")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    local frame = state.newDebuffFrame()
+    environment.DebuffFrame = frame
+    BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+
+    local enterStart = #state.calls + 1
+    state.fireRegistry("EditMode.Enter")
+    local entered = BD.GetCustomAuraContainerState("buffs")
+    assertTrue(entered.active,
+        "Edit Mode entry retains custom Buff presentation ownership")
+    assertFalse(entered.nativeFollowerActive,
+        "Edit Mode entry restores native Debuff anchoring")
+    assertTrue(findCall(
+        state.calls,
+        "DebuffFrame.ClearAllPointsBase",
+        enterStart
+    ) ~= nil, "Edit Mode entry restores the native root")
+    assertTrue(state.frames[1].shown and state.frames[2].shown,
+        "Edit Mode entry keeps the custom presentation visible")
+
+    frame.systemInfo.anchorInfo.offsetX = -60
+    frame.systemInfo.anchorInfo.offsetY = -80
+    local exitStart = #state.calls + 1
+    state.fireRegistry("EditMode.Exit")
+    assertEqual(findCall(
+        state.calls,
+        "DebuffFrame.ClearAllPointsBase",
+        exitStart
+    ), nil, "Edit Mode exit does not reattach synchronously")
+    assertTrue(findCall(state.calls, "Timer.After", exitStart) ~= nil,
+        "Edit Mode exit queues one next-tick reattach")
+    state.runTimers(0)
+    local exited = BD.GetCustomAuraContainerState("buffs")
+    assertTrue(exited.active and exited.nativeFollowerActive,
+        "next-tick Edit Mode exit restores shared follower ownership")
+    local reattach = findCall(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        exitStart
+    )
+    assertEqual(reattach.args[2], state.frames[1],
+        "Edit Mode exit reattaches Debuffs to the same holder")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true, tuning = 1})
+    local allocations = countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    )
+
+    state.combat = true
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true, tuning = 2})
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true, tuning = 3})
+    state.playerUnit = "vehicle"
+    BD.RefreshCustomAuraContainerUnits()
+    local queued = BD.GetCustomAuraContainerState("buffs")
+    assertEqual(queued.unit, "vehicle",
+        "follower controller retargets player to vehicle immediately")
+    assertTrue(queued.operationPending,
+        "combat-live retarget preserves the latest tuning operation")
+
+    local eventStart = #state.calls + 1
+    local timersBefore = countCalls(state.calls, "Timer.After")
+    state.fireEvent("EDIT_MODE_LAYOUTS_UPDATED")
+    state.fireEvent("EDIT_MODE_LAYOUTS_UPDATED")
+    state.fireEvent("PLAYER_ENTERING_WORLD")
+    state.fireEvent("PLAYER_SPECIALIZATION_CHANGED", "player")
+    state.fireEvent("ACTIVE_PLAYER_SPECIALIZATION_CHANGED", "player")
+    assertEqual(
+        countCalls(state.calls, "Timer.After"),
+        timersBefore + 1,
+        "combat lifecycle bursts coalesce to one follower timer"
+    )
+    state.runTimers(0)
+    assertEqual(findCall(
+        state.calls,
+        "DebuffFrame.ClearAllPointsBase",
+        eventStart
+    ), nil, "combat lifecycle timer performs zero protected writes")
+
+    state.combat = false
+    state.fireEvent("PLAYER_REGEN_ENABLED")
+    state.runTimers(0)
+    local recovered = BD.GetCustomAuraContainerState("buffs")
+    assertFalse(recovered.operationPending,
+        "regen drains the latest tuning operation")
+    assertEqual(recovered.unit, "vehicle",
+        "regen preserves the immediate vehicle retarget")
+    assertTrue(recovered.nativeFollowerActive,
+        "regen reapplies the shared follower")
+    local lastFlow
+    for _, call in ipairs(state.calls) do
+        if call.name == "AF.SetCustomAuraContainerFlowLayout" then
+            lastFlow = call
+        end
+    end
+    assertEqual(lastFlow.args[1].marker, 3,
+        "regen applies only the latest queued tuning payload")
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        allocations,
+        "combat lifecycle recovery allocates no duplicate container"
+    )
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    environment.DebuffFrame = state.newDebuffFrame()
+    BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+    local allocations = countCalls(
+        state.calls,
+        "AF.CreateCustomAuraContainer"
+    )
+
+    state.globalAccessResults = {UIParent = false}
+    local refreshStart = #state.calls + 1
+    state.fireEvent("EDIT_MODE_LAYOUTS_UPDATED")
+    state.runTimers(0)
+    local failed = BD.GetCustomAuraContainerState("buffs")
+    assertEqual(failed.state, "ACTIVE_REFRESH_FAILED",
+        "active refresh failure has a distinct state")
+    assertEqual(failed.diagnostic, "NATIVE_FOLLOWER_REFRESH_FAILED",
+        "active refresh failure has a truthful distinct diagnostic")
+    assertTrue(failed.active and failed.nativeFollowerActive,
+        "active refresh failure retains the last safe presentation")
+    assertTrue(state.frames[1].shown and state.frames[2].shown,
+        "active refresh failure keeps holder and container visible")
+    assertEqual(findCall(
+        state.calls,
+        "DebuffFrame.ClearAllPointsBase",
+        refreshStart
+    ), nil, "failed active refresh performs zero native writes")
+
+    state.globalAccessResults = nil
+    state.fireEvent("PLAYER_ENTERING_WORLD")
+    state.runTimers(0)
+    local repaired = BD.GetCustomAuraContainerState("buffs")
+    assertEqual(repaired.state, "ACTIVE",
+        "later lifecycle recovery repairs the active follower")
+    assertEqual(repaired.diagnostic, nil,
+        "successful refresh clears the distinct diagnostic")
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        allocations,
+        "active refresh recovery allocates no duplicate container"
+    )
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    local frame = state.newDebuffFrame()
+    environment.DebuffFrame = frame
+    BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+
+    state.globalAccessResults = {UIParent = false}
+    state.fireEvent("EDIT_MODE_LAYOUTS_UPDATED")
+    state.runTimers(0)
+    local failed = BD.GetCustomAuraContainerState("buffs")
+    assertTrue(failed.pending,
+        "failed lifecycle attachment marks shared follower pending")
+    assertFalse(failed.operationPending,
+        "failed lifecycle attachment is not a config operation")
+    assertEqual(failed.diagnostic, "NATIVE_FOLLOWER_REFRESH_FAILED",
+        "failed lifecycle attachment publishes truthful diagnostic")
+
+    frame.systemInfo.anchorInfo.point = "LEFT"
+    frame.systemInfo.anchorInfo.relativePoint = "RIGHT"
+    frame.systemInfo.anchorInfo.offsetX = 24
+    frame.systemInfo.anchorInfo.offsetY = -18
+    frame.systemInfo.anchorInfo2.point = "TOP"
+    frame.systemInfo.anchorInfo2.relativePoint = "CENTER"
+    frame.systemInfo.anchorInfo2.offsetX = -14
+    frame.systemInfo.anchorInfo2.offsetY = 22
+    state.globalAccessResults = nil
+    local recoveryStart = #state.calls + 1
+    BD.UpdateCustomAuraContainer("buffs", {
+        enabled = true,
+        tuning = 4,
+    })
+    assertEqual(countCalls(
+        state.calls,
+        "DebuffFrame.ClearAllPointsBase",
+        recoveryStart
+    ), 1, "direct config recovery performs one real follower clear")
+    assertEqual(countCalls(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        recoveryStart
+    ), 1, "direct config recovery performs one real follower attach")
+    local reattach = findCall(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        recoveryStart
+    )
+    assertEqual(reattach.args[1], "TOPRIGHT",
+        "direct config recovery reapplies the follower point")
+    assertEqual(reattach.args[2], state.frames[1],
+        "direct config recovery reattaches to the existing holder")
+    assertEqual(reattach.args[3], "BOTTOMRIGHT",
+        "direct config recovery reapplies follower relative point")
+    assertEqual(reattach.args[4], 0,
+        "direct config recovery reapplies follower X")
+    assertEqual(reattach.args[5], -5,
+        "direct config recovery reapplies follower Y")
+    local repaired = BD.GetCustomAuraContainerState("buffs")
+    assertEqual(repaired.state, "ACTIVE",
+        "direct config update repairs failed lifecycle attachment")
+    assertFalse(repaired.pending,
+        "successful direct update clears global follower pending")
+    assertFalse(repaired.operationPending,
+        "successful direct update leaves no config operation pending")
+    assertEqual(repaired.diagnostic, nil,
+        "successful direct update clears refresh diagnostic")
+    assertTrue(repaired.nativeFollowerActive,
+        "successful direct update retains follower ownership")
+
+    local disableStart = #state.calls + 1
+    BD.DisableCustomAuraContainer("buffs")
+    assertEqual(countCalls(
+        state.calls,
+        "DebuffFrame.ClearAllPointsBase",
+        disableStart
+    ), 1, "disable clears the repaired follower once")
+    assertEqual(countCalls(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        disableStart
+    ), 2, "disable restores the updated two-point system anchor")
+    local firstRestore, firstRestoreIndex = findCall(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        disableStart
+    )
+    assertEqual(firstRestore.args[1], "LEFT",
+        "disable restores updated first point")
+    assertEqual(firstRestore.args[2], environment.UIParent,
+        "disable restores updated first relative object")
+    assertEqual(firstRestore.args[3], "RIGHT",
+        "disable restores updated first relative point")
+    assertEqual(firstRestore.args[4], 12,
+        "disable restores updated first scaled X")
+    assertEqual(firstRestore.args[5], -9,
+        "disable restores updated first scaled Y")
+    local secondRestore = findCall(
+        state.calls,
+        "DebuffFrame.SetPointBase",
+        firstRestoreIndex + 1
+    )
+    assertEqual(secondRestore.args[1], "TOP",
+        "disable restores updated second point")
+    assertEqual(secondRestore.args[2], environment.BuffFrame,
+        "disable restores updated second relative object")
+    assertEqual(secondRestore.args[3], "CENTER",
+        "disable restores updated second relative point")
+    assertEqual(secondRestore.args[4], -7,
+        "disable restores updated second scaled X")
+    assertEqual(secondRestore.args[5], 11,
+        "disable restores updated second scaled Y")
+    local disabled = BD.GetCustomAuraContainerState("buffs")
+    assertFalse(disabled.active,
+        "disable completes after restoring the updated system anchor")
+    assertFalse(disabled.nativeFollowerActive,
+        "disable releases follower ownership after updated restore")
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    environment.DebuffFrame = state.newDebuffFrame()
+    state.suppressEnableSucceeds = false
+    BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+    local rolledBack = BD.GetCustomAuraContainerState("buffs")
+    assertEqual(rolledBack.state, "SUPPRESSION_FAILED",
+        "successful rollback reports suppression failure")
+    assertFalse(rolledBack.active,
+        "successful rollback hides custom Buffs after native restore")
+    assertFalse(rolledBack.nativeFollowerActive,
+        "successful rollback restores native Debuff anchoring")
+    assertFalse(state.frames[1].shown or state.frames[2].shown,
+        "successful rollback leaves no duplicate custom presentation")
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        1,
+        "successful rollback retains one completed container"
+    )
+end
+
+do
+    local harness = NewHarness()
+    local BD = harness.BD
+    local state = harness.state
+    local environment = harness.environment
+    environment.DebuffFrame = state.newDebuffFrame()
+    state.suppressEnableSucceeds = false
+    state.onSuppressEnable = function()
+        state.suppressRestoreSucceeds = false
+    end
+    BD.RegisterCustomAuraContainerPane("buffs", CompileFollowingBuffs)
+    BD.UpdateCustomAuraContainer("buffs", {enabled = true})
+    local retained = BD.GetCustomAuraContainerState("buffs")
+    assertTrue(retained.active,
+        "failed native rollback retains a visible custom presentation")
+    assertTrue(state.frames[1].shown and state.frames[2].shown,
+        "failed native rollback never leaves zero Buff presentation")
+    assertEqual(
+        countCalls(state.calls, "AF.CreateCustomAuraContainer"),
+        1,
+        "failed rollback allocates no duplicate container"
+    )
 end
 
 do
@@ -1405,6 +2812,208 @@ do
     ))
     local nativeSource = nativeFile:read("*a")
     nativeFile:close()
+
+    local resolverStart = assert(controllerSource:find(
+        "local function ResolvePlayerUnit()",
+        1,
+        true
+    ))
+    local resolverEnd = assert(controllerSource:find(
+        "\nend\n\nlocal function HasPendingControllers",
+        resolverStart,
+        true
+    ))
+    local resolverSource = controllerSource:sub(resolverStart, resolverEnd)
+    local unitRead = assert(resolverSource:find(
+        "unit = playerFrame.unit",
+        1,
+        true
+    ))
+    local boundaryGate = assert(resolverSource:find(
+        "if IsValueNonSecret(unit)",
+        1,
+        true
+    ))
+    local typeCheck = assert(resolverSource:find(
+        "and type(unit) == \"string\"",
+        1,
+        true
+    ))
+    local whitelist = assert(resolverSource:find(
+        "and (unit == \"player\" or unit == \"vehicle\")",
+        1,
+        true
+    ))
+    assertTrue(unitRead < boundaryGate,
+        "player unit is read once before the boundary")
+    assertTrue(boundaryGate < typeCheck,
+        "secret gate precedes unit type observation")
+    assertTrue(typeCheck < whitelist,
+        "unit type check precedes whitelist equality")
+    assertEqual(countPlain(resolverSource, "playerFrame.unit"), 1,
+        "resolver reads PlayerFrame.unit exactly once")
+    assertEqual(resolverSource:find("type(playerFrame.unit)", 1, true), nil,
+        "resolver never observes raw PlayerFrame.unit type")
+    local cachedGate = assert(controllerSource:find(
+        "local IsValueNonSecret = BFI.funcs.isValueNonSecret",
+        1,
+        true
+    ))
+    assertTrue(cachedGate < resolverStart,
+        "resolver uses the cached canonical secret gate")
+
+    for _, order in ipairs({
+        {
+            startText = "local function HasExactSystemAnchorIdentity(",
+            endText = "\nlocal function HasExactNativeFollowerIdentity(",
+            gateText = "if not IsOrdinaryValue(relativeObject) then",
+            observeText = "local relativeType = type(relativeObject)",
+            label = "relative global",
+        },
+        {
+            startText = "local function HasExactNativeFollowerIdentity(",
+            endText = "\nlocal function RevalidateNativeFollowerSnapshot(",
+            gateText = "if not IsOrdinaryValue(target) then",
+            observeText = "local targetType = type(target)",
+            label = "DebuffFrame global",
+        },
+        {
+            startText = "local function HasExactApplyTransactionIdentity(",
+            endText = "\nlocal function RestoreNativeFollower(",
+            gateText = "if not IsOrdinaryValue(manager) then",
+            observeText = "local managerType = type(manager)",
+            label = "Edit Mode manager",
+        },
+    }) do
+        local sectionStart = assert(controllerSource:find(
+            order.startText,
+            1,
+            true
+        ))
+        local sectionEnd = assert(controllerSource:find(
+            order.endText,
+            sectionStart,
+            true
+        ))
+        local section = controllerSource:sub(sectionStart, sectionEnd)
+        local gate = assert(section:find(order.gateText, 1, true))
+        local observation = assert(section:find(order.observeText, 1, true))
+        assertTrue(gate < observation,
+            order.label .. " secret gate precedes type observation")
+    end
+
+    local applyPendingStart = assert(controllerSource:find(
+        "function ControllerMixin:_ApplyPending()",
+        1,
+        true
+    ))
+    local applyPendingEnd = assert(controllerSource:find(
+        "\nfunction ControllerMixin:Update(config)",
+        applyPendingStart,
+        true
+    ))
+    local applyPendingSource =
+        controllerSource:sub(applyPendingStart, applyPendingEnd)
+    local retarget = assert(applyPendingSource:find(
+        "self:_ApplyRetarget()",
+        1,
+        true
+    ))
+    local noOperation = assert(applyPendingSource:find(
+        "if not self.pendingOperation then",
+        1,
+        true
+    ))
+    local combatGate = assert(applyPendingSource:find(
+        "if InCombatLockdown() then",
+        1,
+        true
+    ))
+    assertTrue(retarget < noOperation,
+        "live retarget precedes pending-operation cleanup")
+    assertTrue(noOperation < combatGate,
+        "live retarget precedes protected tuning deferral")
+
+    local systemIdentityStart = assert(controllerSource:find(
+        "local function HasExactSystemAnchorIdentity(",
+        1,
+        true
+    ))
+    local systemIdentityEnd = assert(controllerSource:find(
+        "\nend\n\nlocal function HasExactNativeFollowerIdentity",
+        systemIdentityStart,
+        true
+    ))
+    local systemIdentitySource = controllerSource:sub(
+        systemIdentityStart,
+        systemIdentityEnd
+    )
+    local relativeGate = assert(systemIdentitySource:find(
+        "IsOrdinaryValue(relativeObject)",
+        1,
+        true
+    ))
+    local relativeType = assert(systemIdentitySource:find(
+        "type(relativeObject)",
+        1,
+        true
+    ))
+    assertTrue(relativeGate < relativeType,
+        "relative-object terminal secret gate precedes type")
+
+    local nativeIdentityStart = assert(controllerSource:find(
+        "local function HasExactNativeFollowerIdentity(",
+        1,
+        true
+    ))
+    local nativeIdentityEnd = assert(controllerSource:find(
+        "\nend\n\nlocal function RevalidateNativeFollowerSnapshot",
+        nativeIdentityStart,
+        true
+    ))
+    local nativeIdentitySource = controllerSource:sub(
+        nativeIdentityStart,
+        nativeIdentityEnd
+    )
+    local targetGate = assert(nativeIdentitySource:find(
+        "IsOrdinaryValue(target)",
+        1,
+        true
+    ))
+    local targetType = assert(nativeIdentitySource:find(
+        "type(target)",
+        1,
+        true
+    ))
+    assertTrue(targetGate < targetType,
+        "native-target terminal secret gate precedes type")
+
+    local applyIdentityStart = assert(controllerSource:find(
+        "local function HasExactApplyTransactionIdentity(",
+        1,
+        true
+    ))
+    local applyIdentityEnd = assert(controllerSource:find(
+        "\nend\n\nlocal function RestoreNativeFollower",
+        applyIdentityStart,
+        true
+    ))
+    local applyIdentitySource = controllerSource:sub(
+        applyIdentityStart,
+        applyIdentityEnd
+    )
+    local managerGate = assert(applyIdentitySource:find(
+        "IsOrdinaryValue(manager)",
+        1,
+        true
+    ))
+    local managerType = assert(applyIdentitySource:find(
+        "type(manager)",
+        1,
+        true
+    ))
+    assertTrue(managerGate < managerType,
+        "Edit Mode manager terminal secret gate precedes type")
 
     for _, symbol in ipairs({
         ":IsMouseOver(",

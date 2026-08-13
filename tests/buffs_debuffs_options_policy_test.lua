@@ -41,16 +41,16 @@ local L = setmetatable({}, {
 })
 
 local BD = {
+    BLIZZARD_DEBUFF_STYLE_BACKEND = "blizzardDebuffStyle",
     SECURE_AURA_HEADER_BACKEND = "secureAuraHeader",
     CUSTOM_AURA_CONTAINER_BACKEND = "customAuraContainer",
-    BLIZZARD_DEBUFF_STYLE_BACKEND = "blizzardDebuffStyle",
     config = {
         buffs = {
-            enabled = true,
+            enabled = false,
             separateOwn = 0,
         },
         debuffs = {
-            enabled = true,
+            enabled = false,
             separateOwn = 0,
         },
     },
@@ -70,11 +70,6 @@ end
 
 local BFI = {
     L = L,
-    funcs = {
-        isValueNonSecret = function(value)
-            return type(value) == "boolean"
-        end,
-    },
     modules = {
         BuffsDebuffs = BD,
     },
@@ -97,7 +92,9 @@ local function SetLegacyBackend()
     dispatchPendingByPane.buffs = nil
     dispatchPendingByPane.debuffs = nil
     BD.config.buffs.separateOwn = 0
+    BD.config.buffs.enabled = false
     BD.config.debuffs.separateOwn = 0
+    BD.config.debuffs.enabled = false
 end
 
 local function SetCustomBuffsBackend()
@@ -108,7 +105,9 @@ local function SetCustomBuffsBackend()
     dispatchPendingByPane.buffs = nil
     dispatchPendingByPane.debuffs = nil
     BD.config.buffs.separateOwn = 0
+    BD.config.buffs.enabled = true
     BD.config.debuffs.separateOwn = 0
+    BD.config.debuffs.enabled = false
 end
 
 SetLegacyBackend()
@@ -140,19 +139,21 @@ do
     assertTrue(buffsPolicy.available, "custom Buffs available")
     assertTrue(buffsPolicy.custom, "custom Buffs policy")
     assertTrue(debuffsPolicy.available,
-        "ordinary Debuffs styling is available")
+        "ordinary Debuffs style is available")
     assertTrue(debuffsPolicy.blizzardDebuffStyle,
-        "Debuffs use the Blizzard styling adapter")
+        "Debuffs use the static Blizzard style adapter")
     assertEqual(debuffsPolicy.label, "Debuffs (appearance only)",
-        "Debuffs styling label")
+        "Debuffs appearance-only label")
     assertFalse(debuffsPolicy.layoutControls,
-        "Blizzard retains Debuffs layout")
-    assertTrue(debuffsPolicy.iconSizeControls,
-        "ordinary Debuff icon sizing remains available")
+        "Blizzard owns Debuffs layout")
     assertEqual(debuffsPolicy.maximumIconSize, 30,
-        "ordinary icon size is capped to the native cell")
+        "Debuffs size is capped to the fixed native cell")
     assertFalse(debuffsPolicy.durationAppearanceControls,
-        "Blizzard retains Debuff duration presentation")
+        "Blizzard owns Debuffs duration appearance")
+    assertTrue(debuffsPolicy.durationEnabledControl,
+        "Debuffs duration visibility remains editable")
+    assertTrue(debuffsPolicy.stackAppearanceControls,
+        "ordinary Debuffs stack text remains editable")
     assertNil(buffsPolicy.separateOwnItems[1].disabled,
         "custom Disabled choice remains selectable")
     assertTrue(buffsPolicy.separateOwnItems[2].disabled,
@@ -161,16 +162,17 @@ do
         "custom After choice disabled")
     assertTrue(buffsPolicy.constructionOwnedStyle,
         "custom button styling is construction-owned")
-    assertTrue(buffsPolicy.positionOwnedByBFI,
-        "BFI owns the shared Buff and Debuff location")
+    assertTrue(buffsPolicy.durationColorModes,
+        "one duration color mode control is declared")
     assertFalse(buffsPolicy.arrangementControls,
-        "follower arrangement is fixed")
+        "custom Buffs arrangement control is display-only")
     assertEqual(buffsPolicy.fixedArrangement,
-        "right_to_left_then_up", "follower arrangement value")
-    assertTrue(buffsPolicy.layoutControls,
-        "remaining custom layout controls stay available")
-    assertTrue(buffsPolicy.retiredDurationControls,
-        "retired duration controls are declared")
+        "right_to_left_then_up", "custom Buffs fixed arrangement")
+    assertFalse(debuffsPolicy.arrangementControls,
+        "Blizzard-owned Debuffs arrangement is disabled")
+    assertTrue(buffsPolicy.sourceDisclosure:find("PublicAndPrivate", 1, true)
+            ~= nil,
+        "custom policy discloses the native combined source list")
 end
 
 do
@@ -241,20 +243,57 @@ do
     }
     status = BD.GetBuffsDebuffsOptionsStatus("buffs")
     assertEqual(status.code, "BFI_SHARED_AURA_MOVER",
-        "ready custom backend explains its shared BFI mover")
-    stateByPane.buffs.nativeFollowerActive = false
-    local debuffsStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
-    assertEqual(debuffsStatus.code, "BLIZZARD_DEBUFF_STYLE",
-        "inactive custom Buffs do not claim linked movement")
-    stateByPane.buffs.nativeFollowerActive = true
-    debuffsStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
-    assertEqual(debuffsStatus.code, "BFI_SHARED_AURA_MOVER",
-        "active native follower exposes the shared BFI mover")
+        "ready custom backend exposes its shared BFI mover")
+    local debuffStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(debuffStatus.code, "BFI_SHARED_AURA_MOVER",
+        "linked Debuffs expose the same shared BFI mover")
     dispatchPendingByPane.debuffs = true
-    debuffsStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
-    assertEqual(debuffsStatus.code, "PENDING_SAFE_UPDATE",
-        "Debuffs combat deferral is visible")
+    debuffStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(debuffStatus.code, "PENDING_SAFE_UPDATE",
+        "Debuffs combat queue outranks ownership status")
     dispatchPendingByPane.debuffs = nil
+
+    stateByPane.buffs = {
+        active = true,
+        nativeFollowerActive = true,
+        pending = true,
+    }
+    status = BD.GetBuffsDebuffsOptionsStatus("buffs")
+    assertEqual(status.code, "PENDING_SAFE_UPDATE",
+        "pending safe update outranks ready mover guidance")
+
+    stateByPane.buffs = {
+        active = true,
+        nativeFollowerActive = true,
+        diagnostic = "NATIVE_FOLLOWER_REFRESH_FAILED",
+        pending = true,
+    }
+    status = BD.GetBuffsDebuffsOptionsStatus("buffs")
+    assertEqual(status.code, "NATIVE_FOLLOWER_REFRESH_FAILED",
+        "follower retry pending retains its truthful distinct status")
+    debuffStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(debuffStatus.code, "NATIVE_FOLLOWER_REFRESH_FAILED",
+        "linked Debuffs expose the active follower refresh failure")
+
+    stateByPane.buffs.operationPending = true
+    status = BD.GetBuffsDebuffsOptionsStatus("buffs")
+    assertEqual(status.code, "PENDING_SAFE_UPDATE",
+        "queued config operation outranks follower refresh guidance")
+    debuffStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(debuffStatus.code, "PENDING_SAFE_UPDATE",
+        "linked Debuffs expose the queued config operation first")
+
+    BD.config.buffs.enabled = false
+    stateByPane.buffs = {
+        active = true,
+        nativeFollowerActive = true,
+    }
+    assertNil(BD.GetBuffsDebuffsOptionsStatus("buffs"),
+        "disabled Buffs do not claim a shared mover")
+    debuffStatus = BD.GetBuffsDebuffsOptionsStatus("debuffs")
+    assertEqual(debuffStatus.code, "BLIZZARD_DEBUFF_STYLE",
+        "disabled Buffs leave Debuffs ownership with Blizzard")
+    BD.config.buffs.enabled = true
 end
 
 local function NewOptionsUIHarness(customBackend, afVersion)
@@ -263,6 +302,7 @@ local function NewOptionsUIHarness(customBackend, afVersion)
         checkButtonsByLabel = {},
         colorPickersByLabel = {},
         dropdownsByLabel = {},
+        editBoxesByLabel = {},
         events = {},
         fontStringsByText = {},
         slidersByLabel = {},
@@ -327,7 +367,16 @@ local function NewOptionsUIHarness(customBackend, afVersion)
             self.maximum = maximum
         end
         function widget:SetColor(...)
-            self.color = {...}
+            local color = {...}
+            if #color == 1 and type(color[1]) == "table" then
+                color = {
+                    color[1][1],
+                    color[1][2],
+                    color[1][3],
+                    color[1][4],
+                }
+            end
+            self.color = color
         end
         function widget:SetItems(items)
             self.items = items
@@ -370,6 +419,12 @@ local function NewOptionsUIHarness(customBackend, afVersion)
         end
         function widget:SetOnConfirm(callback)
             self.onConfirm = callback
+        end
+        function widget:SetConfirmButton(callback)
+            self.confirmValue = callback
+        end
+        function widget:SetOnEditFocusLost(callback)
+            self.onEditFocusLost = callback
         end
 
         setmetatable(widget, {
@@ -449,6 +504,16 @@ local function NewOptionsUIHarness(customBackend, afVersion)
                 position = {"BOTTOM", "BOTTOM", 1, -3},
                 color = {
                     normal = {1, 1, 1, 1},
+                    seconds = {
+                        enabled = true,
+                        value = 0.5,
+                        rgb = {1, 0, 0, 1},
+                    },
+                    percent = {
+                        enabled = false,
+                        value = 0.955,
+                        rgb = {1, 1, 0, 1},
+                    },
                 },
             },
         }
@@ -456,21 +521,12 @@ local function NewOptionsUIHarness(customBackend, afVersion)
 
     local uiEnvironment = setmetatable({}, {__index = _G})
     uiEnvironment._G = uiEnvironment
-    uiEnvironment.InCombatLockdown = function()
-        return false
-    end
-    uiEnvironment.ShowUIPanel = function(frame)
-        records.shownUIPanel = frame
-    end
     uiEnvironment.ReloadUI = function()
         records.reloadCalls = (records.reloadCalls or 0) + 1
     end
-    uiEnvironment.EditModeManagerFrame = {
-        CanEnterEditMode = function()
-            return true
-        end,
-    }
-    records.editModeManagerFrame = uiEnvironment.EditModeManagerFrame
+    uiEnvironment.InCombatLockdown = function()
+        return records.combat == true
+    end
 
     local uiAF = {
         versionNum = afVersion,
@@ -488,9 +544,7 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     end
     function uiAF.CreateCheckButton(_, label)
         local checkButton = NewWidget("checkButton", label)
-        if label then
-            records.checkButtonsByLabel[label] = checkButton
-        end
+        if label then records.checkButtonsByLabel[label] = checkButton end
         return checkButton
     end
     function uiAF.CreateIconButton()
@@ -503,6 +557,12 @@ local function NewOptionsUIHarness(customBackend, afVersion)
         local slider = NewWidget("slider", label)
         records.slidersByLabel[label] = slider
         return slider
+    end
+    function uiAF.CreateEditBox(_, label, _, _, mode)
+        local editBox = NewWidget("editBox", label)
+        editBox.mode = mode
+        records.editBoxesByLabel[label] = editBox
+        return editBox
     end
     function uiAF.CreateTitledPane(_, title, _, height)
         local pane = NewWidget("titledPane", title)
@@ -574,19 +634,25 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     end
     function uiAF.SetFrameLevel() end
     function uiAF.ApplyCombatProtectionToFrame() end
-    function uiAF.ApplyCombatProtectionToWidget() end
     function uiAF.ClearPoints() end
     function uiAF.ShowMovers()
-        records.showMoversCalls = (records.showMoversCalls or 0) + 1
+        records.moverActionCalls = records.moverActionCalls or {}
+        records.moverActionCalls[#records.moverActionCalls + 1] = "ShowMovers"
     end
 
     uiEnvironment.BFIOptionsFrame_ContentPane = NewWidget("content")
     uiEnvironment.BFIOptionsFrame = NewWidget("optionsFrame")
+    records.optionsFrame = uiEnvironment.BFIOptionsFrame
+    function uiEnvironment.BFIOptionsFrame:Hide()
+        self.shown = false
+        records.moverActionCalls = records.moverActionCalls or {}
+        records.moverActionCalls[#records.moverActionCalls + 1] = "Hide"
+    end
 
     local uiBD = {
+        BLIZZARD_DEBUFF_STYLE_BACKEND = "blizzardDebuffStyle",
         SECURE_AURA_HEADER_BACKEND = "secureAuraHeader",
         CUSTOM_AURA_CONTAINER_BACKEND = "customAuraContainer",
-        BLIZZARD_DEBUFF_STYLE_BACKEND = "blizzardDebuffStyle",
         config = {
             buffs = NewPaneConfig(),
             debuffs = NewPaneConfig(),
@@ -599,6 +665,7 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     } or {}
 
     function uiBD.GetAuraBackend(which)
+        records.backendCalls = (records.backendCalls or 0) + 1
         if customBackend then
             if which == "buffs" then
                 return uiBD.CUSTOM_AURA_CONTAINER_BACKEND
@@ -629,12 +696,11 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     local uiBFI = {
         L = uiL,
         funcs = {
-            isValueNonSecret = function(value)
-                return type(value) == "boolean"
-            end,
             PrepareEditModePositions = function()
-                records.prepareEditModeCalls =
-                    (records.prepareEditModeCalls or 0) + 1
+                records.moverActionCalls = records.moverActionCalls or {}
+                records.moverActionCalls[
+                    #records.moverActionCalls + 1
+                ] = "PrepareEditModePositions"
             end,
         },
         modules = {
@@ -651,53 +717,92 @@ local function NewOptionsUIHarness(customBackend, afVersion)
     records.textSwitch = records.switches[2]
     records.separateOwn =
         records.dropdownsByLabel["Separate Own"]
-    records.durationHint = records.fontStringsByText[
-        "Durations abbreviate automatically to seconds, minutes, hours, and days."
+    records.durationMode = records.dropdownsByLabel[
+        "Low-Time Text Color"
     ]
+    records.secondsValue = records.editBoxesByLabel.Seconds
+    records.percentValue = records.editBoxesByLabel.Percent
+    records.lowTimeColor = records.colorPickersByLabel["Low-Time Color"]
+    records.textEnabled = records.checkButtonsByLabel.Enabled
     return records
 end
 
 do
-    local custom = NewOptionsUIHarness(true, 33)
+    local custom = NewOptionsUIHarness(true, 42)
     local config = custom.BD.config.buffs
 
     assertEqual(#custom.events, 0,
         "custom programmatic option load fires no update")
+    assertEqual(custom.backendCalls, 3,
+        "initial panel load performs one backend probe per policy load")
     assertEqual(#custom.topSwitch.labels, 2, "custom has two tabs")
+    assertEqual(custom.topSwitch.labels[1].text,
+        "Buffs (Public + Private)",
+        "custom Buffs tab visibly discloses combined source classes")
+    assertEqual(custom.topSwitch.buttons[1].tooltip,
+        "WoW 12.1's PublicAndPrivate source list combines public and private authorized Buffs in this native row; the sources cannot be separated.",
+        "custom Buffs tab tooltip names the exact native source list")
     assertEqual(custom.topSwitch.labels[2].text,
-        "Debuffs (appearance only)", "custom Debuffs label")
+        "Debuffs (appearance only)", "Debuffs appearance-only label")
     assertTrue(custom.topSwitch.buttons[2].enabled,
-        "ordinary Debuffs styling tab enabled")
+        "Debuffs appearance tab enabled")
     assertTrue(custom.separateOwn.items[2].disabled,
         "custom Before item disabled")
     assertTrue(custom.separateOwn.items[3].disabled,
         "custom After item disabled")
     assertEqual(custom.titledPanesByTitle.Icons.height, 260,
-        "status row reserves pane height")
+        "icons retain the known fitting pane height")
+    assertEqual(custom.titledPanesByTitle.Texts.height, 235,
+        "texts retain the known fitting pane height")
+    assertTrue(
+        custom.titledPanesByTitle.Icons.height
+            + 5
+            + custom.titledPanesByTitle.Texts.height
+            <= 500,
+        "stacked panes fit the available normal pane height"
+    )
     assertEqual(custom.statusButton.width, 165,
         "status action has bounded width")
     assertEqual(custom.statusText.width, 350,
         "status action text does not run under button")
-    assertTrue(custom.statusText.wordWrap,
-        "status explanations wrap inside their row")
     assertFalse(custom.dropdownsByLabel.Arrangement.enabled,
-        "custom Buff arrangement is fixed for the shared mover")
+        "custom Buffs arrangement is fixed and display-only")
     assertEqual(custom.dropdownsByLabel.Arrangement.selected,
-        "right_to_left_then_up", "fixed shared arrangement is visible")
+        "right_to_left_then_up", "fixed custom arrangement is visible")
+    assertEqual(config.orientation, "right_to_left_then_down",
+        "fixed arrangement display preserves saved orientation")
+    custom.events = {}
+    custom.dropdownsByLabel.Arrangement.onSelect("left_to_right_then_down")
+    assertEqual(config.orientation, "right_to_left_then_down",
+        "fixed arrangement callback preserves dormant saved data")
+    assertEqual(#custom.events, 0,
+        "fixed arrangement callback emits no update")
     assertTrue(custom.dropdownsByLabel["Sort Method"].enabled,
         "custom Buff sorting remains editable")
     assertEqual(custom.statusText.textValue,
-        "Both rows move together with the BFI Buff Frame mover. Movement is unavailable in combat.",
-        "custom shared-mover guidance")
-    assertEqual(custom.statusButton.textValue,
-        "Open BFI Edit Mode", "custom Buff mover action")
+        "The BFI Buff Frame mover positions the combined Buffs row and Blizzard's DebuffFrame root together. Movement is unavailable in combat.",
+        "custom Buffs expose shared-mover guidance")
+    assertEqual(custom.statusButton.textValue, "Open BFI Edit Mode",
+        "custom Buffs expose the BFI Edit Mode action")
+    assertTrue(custom.statusButton.shown,
+        "shared-mover guidance action is visible")
+
+    custom.combat = true
     custom.statusButton.onClick()
-    assertEqual(custom.prepareEditModeCalls, 1,
-        "BFI positions are prepared before showing movers")
-    assertEqual(custom.showMoversCalls, 1,
-        "BFI Edit Mode action shows BFI movers")
-    assertFalse(custom.shownUIPanel == custom.editModeManagerFrame,
-        "shared mover action does not open Blizzard Edit Mode")
+    assertNil(custom.moverActionCalls,
+        "combat-blocked mover action performs zero calls")
+    assertTrue(custom.optionsFrame.shown,
+        "combat-blocked mover action leaves options visible")
+    custom.combat = false
+    custom.statusButton.onClick()
+    assertEqual(custom.moverActionCalls[1], "Hide",
+        "mover action hides options first")
+    assertEqual(custom.moverActionCalls[2], "PrepareEditModePositions",
+        "mover action prepares saved positions second")
+    assertEqual(custom.moverActionCalls[3], "ShowMovers",
+        "mover action publishes movers last")
+    assertFalse(custom.optionsFrame.shown,
+        "successful mover action closes the options frame")
 
     local width = custom.slidersByLabel.Width
     width.onValueChanged(40)
@@ -721,6 +826,8 @@ do
     color.onConfirm(0.2, 0.3, 0.4)
     assertEqual(config.stack.color[1], 0.2,
         "custom color commits on confirmation")
+    assertEqual(config.stack.color[4], 1,
+        "custom normal RGB confirmation preserves alpha")
     assertEqual(#custom.events, 1,
         "custom color confirmation fires one update")
 
@@ -743,63 +850,269 @@ do
     assertEqual(#custom.events, 1,
         "recovery fires one module update")
 
+    local backendCallsBeforeTextSelection = custom.backendCalls
     custom.textSwitch:SetSelectedValue("duration")
-    assertTrue(custom.durationHint.shown,
-        "AF r33 shows abbreviation hint")
-    assertEqual(custom.durationHint.width, 160,
-        "duration hint is bounded to its column")
-    assertTrue(custom.durationHint.wordWrap,
-        "duration hint wraps inside the pane")
+    assertEqual(custom.backendCalls, backendCallsBeforeTextSelection,
+        "text selection reuses the loaded backend policy")
+    assertEqual(custom.durationMode.tooltip,
+        "Durations abbreviate automatically to seconds, minutes, hours, and days.",
+        "duration abbreviation guidance moves to a non-flow tooltip")
+    assertEqual(custom.durationMode.items[1].value, "seconds",
+        "mode selector lists Seconds first")
+    assertEqual(custom.durationMode.items[2].value, "percent",
+        "mode selector lists Percent second")
+    assertEqual(custom.durationMode.items[3].value, "off",
+        "mode selector lists Off third")
+    assertEqual(custom.durationMode.selected, "seconds",
+        "saved seconds mode loads into the single selector")
+    assertTrue(custom.secondsValue.shown,
+        "seconds value control is shown in seconds mode")
+    assertFalse(custom.percentValue.shown,
+        "percent value control is hidden in seconds mode")
+    assertEqual(custom.secondsValue.textValue, 0.5,
+        "non-grid seconds value loads exactly without an update")
+    assertEqual(custom.percentValue.textValue, 95.5,
+        "arbitrary imported percent displays exactly as a percentage")
+    assertEqual(custom.secondsValue.mode, "decimal",
+        "fractional seconds input uses decimal mode")
+    assertEqual(custom.percentValue.mode, "decimal",
+        "fractional percent input uses decimal mode")
 
-    custom.controllerState.active = true
-    custom.controllerState.nativeFollowerActive = true
+    local secondsValue = config.duration.color.seconds.value
+    local secondsColor = config.duration.color.seconds.rgb
+    local percentValue = config.duration.color.percent.value
+    local percentColor = config.duration.color.percent.rgb
+    custom.events = {}
+    local backendCallsBeforeDurationCallback = custom.backendCalls
+    custom.durationMode.onSelect("percent")
+    assertEqual(custom.backendCalls, backendCallsBeforeDurationCallback,
+        "duration callbacks do not re-run native capability preflight")
+    assertFalse(config.duration.color.seconds.enabled,
+        "percent mode disables seconds")
+    assertTrue(config.duration.color.percent.enabled,
+        "percent mode enables percent")
+    assertEqual(config.duration.color.seconds.value, secondsValue,
+        "mode change preserves inactive seconds payload")
+    assertEqual(config.duration.color.seconds.rgb, secondsColor,
+        "mode change preserves inactive seconds color identity")
+    assertEqual(config.duration.color.percent.value, percentValue,
+        "mode change preserves percent payload")
+    assertEqual(config.duration.color.percent.rgb, percentColor,
+        "mode change preserves percent color identity")
+    assertEqual(#custom.events, 1,
+        "mode change commits exactly one construction update")
+    assertTrue(custom.percentValue.shown,
+        "percent value control is shown in percent mode")
+    assertFalse(custom.secondsValue.shown,
+        "seconds value control hides in percent mode")
+    assertEqual(custom.lowTimeColor.color[1], percentColor[1],
+        "switching to Percent displays the saved percent color")
+    assertEqual(custom.lowTimeColor.color[2], percentColor[2],
+        "Percent display retains the saved percent RGB")
+
+    custom.durationMode.onSelect("seconds")
+    assertEqual(custom.lowTimeColor.color[1], secondsColor[1],
+        "switching back to Seconds restores saved seconds color")
+    assertEqual(custom.lowTimeColor.color[2], secondsColor[2],
+        "Seconds display retains the saved seconds RGB")
+    assertEqual(config.duration.color.seconds.value, secondsValue,
+        "mode round-trip preserves seconds value")
+    assertEqual(config.duration.color.percent.value, percentValue,
+        "mode round-trip preserves percent value")
+    assertEqual(config.duration.color.seconds.rgb, secondsColor,
+        "mode round-trip preserves seconds color identity")
+    assertEqual(config.duration.color.percent.rgb, percentColor,
+        "mode round-trip preserves percent color identity")
+    custom.durationMode.onSelect("percent")
+    assertEqual(custom.lowTimeColor.color[1], percentColor[1],
+        "returning to Percent restores its saved color")
+    assertEqual(#custom.events, 3,
+        "each mode selection commits exactly one update")
+
+    custom.events = {}
+    custom.percentValue.confirmValue(42.5)
+    custom.percentValue.textValue = 42.5
+    custom.percentValue.onEditFocusLost(custom.percentValue)
+    assertEqual(config.duration.color.percent.value, 0.425,
+        "custom percent value commits its exact confirmed value")
+    assertEqual(#custom.events, 1,
+        "custom percent confirmation commits once")
+    custom.events = {}
+    custom.percentValue.confirmValue(100)
+    custom.percentValue.textValue = 100
+    custom.percentValue.onEditFocusLost(custom.percentValue)
+    assertEqual(config.duration.color.percent.value, 0.425,
+        "invalid percent confirmation preserves saved value")
+    assertEqual(custom.percentValue.textValue, 42.5,
+        "invalid percent confirmation restores exact display")
+    assertEqual(#custom.events, 0,
+        "invalid percent confirmation emits no update")
+
+    custom.events = {}
+    custom.secondsValue.confirmValue(0)
+    custom.secondsValue.textValue = 0
+    custom.secondsValue.onEditFocusLost(custom.secondsValue)
+    assertEqual(config.duration.color.seconds.value, 0.5,
+        "invalid seconds confirmation preserves saved value")
+    assertEqual(custom.secondsValue.textValue, 0.5,
+        "invalid seconds confirmation restores exact display")
+    assertEqual(#custom.events, 0,
+        "invalid seconds confirmation emits no update")
+
+    custom.events = {}
+    custom.lowTimeColor.onChange(0.2, 0.4, 0.6)
+    assertEqual(config.duration.color.percent.rgb[1], 1,
+        "custom low-time color preview is configuration-neutral")
+    assertEqual(#custom.events, 0,
+        "custom low-time color preview emits no update")
+    custom.lowTimeColor.onConfirm(0.2, 0.4, 0.6)
+    assertEqual(config.duration.color.percent.rgb[1], 0.2,
+        "custom low-time color commits on confirmation")
+    assertEqual(#custom.events, 1,
+        "custom low-time color confirmation commits once")
+    assertEqual(config.duration.color.percent.rgb[4], percentColor[4],
+        "low-time RGB confirmation preserves saved alpha")
+
+    custom.events = {}
+    custom.durationMode.onSelect("off")
+    assertFalse(config.duration.color.seconds.enabled,
+        "Off keeps seconds disabled")
+    assertFalse(config.duration.color.percent.enabled,
+        "Off disables percent")
+    assertEqual(config.duration.color.seconds.value, secondsValue,
+        "Off preserves seconds payload")
+    assertEqual(config.duration.color.percent.value, 0.425,
+        "Off preserves percent payload")
+    assertFalse(custom.secondsValue.shown,
+        "Off hides seconds value")
+    assertFalse(custom.percentValue.shown,
+        "Off hides percent value")
+    assertFalse(custom.lowTimeColor.shown,
+        "Off hides low-time color")
+    assertEqual(#custom.events, 1,
+        "Off mode commits exactly once")
+
     custom.topSwitch:SetSelectedValue("debuffs")
     local debuffsConfig = custom.BD.config.debuffs
+    debuffsConfig.width = 45
+    debuffsConfig.height = 37
+    local savedSecondsEnabled =
+        debuffsConfig.duration.color.seconds.enabled
+    local savedPercentEnabled =
+        debuffsConfig.duration.color.percent.enabled
+    local savedSecondsValue = debuffsConfig.duration.color.seconds.value
+    local savedPercentValue = debuffsConfig.duration.color.percent.value
+    custom.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+    assertEqual(debuffsConfig.width, 45,
+        "imported Debuffs width remains saved")
+    assertEqual(debuffsConfig.height, 37,
+        "imported Debuffs height remains saved")
+    assertEqual(custom.slidersByLabel.Width.value, 30,
+        "imported Debuffs width is display-clamped")
+    assertEqual(custom.slidersByLabel.Height.value, 30,
+        "imported Debuffs height is display-clamped")
+    assertEqual(custom.slidersByLabel.Width.minimum, 10,
+        "Debuffs width minimum")
+    assertEqual(custom.slidersByLabel.Width.maximum, 30,
+        "Debuffs width maximum")
     assertFalse(custom.dropdownsByLabel.Arrangement.enabled,
         "Debuffs arrangement remains Blizzard-owned")
     assertFalse(custom.dropdownsByLabel["Sort Method"].enabled,
         "Debuffs sorting remains Blizzard-owned")
+    assertFalse(custom.dropdownsByLabel["Sort Direction"].enabled,
+        "Debuffs sort direction remains Blizzard-owned")
     assertFalse(custom.separateOwn.enabled,
         "Debuffs Separate Own remains Blizzard-owned")
-    assertTrue(custom.slidersByLabel.Width.enabled,
-        "ordinary Debuff icon width is editable")
-    assertTrue(custom.slidersByLabel.Height.enabled,
-        "ordinary Debuff icon height is editable")
-    assertEqual(custom.slidersByLabel.Width.maximum, 30,
-        "Debuff icon width uses the native-cell ceiling")
-    assertEqual(custom.slidersByLabel.Height.maximum, 30,
-        "Debuff icon height uses the native-cell ceiling")
+    assertFalse(custom.slidersByLabel["X Spacing"].enabled,
+        "Debuffs horizontal spacing remains Blizzard-owned")
+    assertFalse(custom.slidersByLabel["Aura Lines"].enabled,
+        "Debuffs line count remains Blizzard-owned")
     assertEqual(custom.statusText.textValue,
-        "Both rows move together with the BFI Buff Frame mover. Movement is unavailable in combat.",
-        "Debuffs shared-mover explanation")
-    assertEqual(custom.statusButton.textValue,
-        "Open BFI Edit Mode", "Debuffs shared-mover action")
+        "The BFI Buff Frame mover positions the combined Buffs row and Blizzard's DebuffFrame root together. Movement is unavailable in combat.",
+        "Debuffs shared-mover status")
     assertTrue(custom.statusText.shown,
-        "Debuffs ownership explanation is visible")
-    assertEqual(custom.durationHint.textValue,
-        "Blizzard supplies and abbreviates Debuff durations. BFInfinite can only show or hide this text.",
-        "native duration explanation")
-    assertFalse(custom.dropdownsByLabel.Font.enabled,
-        "native duration font remains Blizzard-owned")
-    assertTrue(custom.checkButtonsByLabel.Enabled.enabled,
-        "native duration visibility remains editable")
+        "Debuffs ownership status visible")
+    assertTrue(custom.statusText.wordWrap,
+        "Debuffs ownership status wraps within the fitting status row")
 
     custom.textSwitch:SetSelectedValue("stack")
     assertTrue(custom.dropdownsByLabel.Font.enabled,
-        "ordinary stack font remains editable")
+        "Debuffs stack font remains editable")
+    assertTrue(custom.dropdownsByLabel.Outline.enabled,
+        "Debuffs stack outline remains editable")
     assertTrue(custom.colorPickersByLabel.Normal.enabled,
-        "ordinary stack colour remains editable")
+        "Debuffs stack colour remains editable")
+
+    custom.textSwitch:SetSelectedValue("duration")
+    assertTrue(custom.textEnabled.enabled,
+        "Debuffs duration Enabled remains editable")
+    assertFalse(custom.dropdownsByLabel.Font.enabled,
+        "Debuffs duration font remains Blizzard-owned")
+    assertFalse(custom.dropdownsByLabel.Outline.enabled,
+        "Debuffs duration outline remains Blizzard-owned")
+    assertFalse(custom.colorPickersByLabel.Normal.enabled,
+        "Debuffs duration normal colour remains Blizzard-owned")
+    assertFalse(custom.durationMode.enabled,
+        "Debuffs duration mode remains visible but disabled")
+    assertFalse(custom.secondsValue.enabled,
+        "Debuffs seconds value remains visible but disabled")
+    assertFalse(custom.lowTimeColor.enabled,
+        "Debuffs low-time colour remains visible but disabled")
+    assertEqual(custom.durationMode.tooltip,
+        "Blizzard supplies and abbreviates Debuff durations. BFInfinite can only show or hide this text.",
+        "Debuffs duration ownership tooltip")
 
     custom.events = {}
-    custom.slidersByLabel.Width.onValueChanged(28)
-    assertEqual(debuffsConfig.width, 28,
-        "Debuffs icon width updates live")
-    assertEqual(#custom.events, 1,
-        "Debuffs icon width queues one safe update")
+    custom.durationMode.onSelect("percent")
+    custom.secondsValue.confirmValue(9.5)
+    custom.lowTimeColor.onConfirm(0.3, 0.4, 0.5)
+    assertEqual(debuffsConfig.duration.color.seconds.enabled,
+        savedSecondsEnabled,
+        "disabled mode control preserves seconds flag")
+    assertEqual(debuffsConfig.duration.color.percent.enabled,
+        savedPercentEnabled,
+        "disabled mode control preserves percent flag")
+    assertEqual(debuffsConfig.duration.color.seconds.value,
+        savedSecondsValue,
+        "disabled seconds editor preserves payload")
+    assertEqual(debuffsConfig.duration.color.percent.value,
+        savedPercentValue,
+        "disabled percent payload remains exact")
+    assertEqual(#custom.events, 0,
+        "disabled duration appearance callbacks are neutral")
+
+    custom.dispatchPending = true
+    custom.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+    assertEqual(custom.statusText.textValue,
+        "Debuffs styling is waiting for combat to end.",
+        "selected Debuffs tab shows pending status")
+    custom.dispatchPending = false
+    custom.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+    assertEqual(custom.statusText.textValue,
+        "The BFI Buff Frame mover positions the combined Buffs row and Blizzard's DebuffFrame root together. Movement is unavailable in combat.",
+        "Debuffs shared-mover status returns after pending clears")
+
+    custom.controllerState.pending = true
+    custom.controllerState.operationPending = false
+    custom.controllerState.diagnostic = nil
+    custom.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+    assertEqual(custom.statusText.textValue,
+        "Debuffs styling is waiting for combat to end.",
+        "lifecycle-only pending state outranks mover information")
+
+    custom.controllerState.diagnostic =
+        "NATIVE_FOLLOWER_REFRESH_FAILED"
+    custom.controllerState.pending = true
+    custom.callbacks.BFI_RefreshOptions(nil, "buffsDebuffs")
+    assertEqual(custom.statusText.textValue,
+        "The shared DebuffFrame attachment could not be refreshed. The current safe layout remains in place while native frame access recovers.",
+        "active refresh failure does not claim Blizzard Buffs are active")
+    assertFalse(custom.statusButton.shown,
+        "active refresh failure has no unsafe action")
 end
 
 do
-    local legacy = NewOptionsUIHarness(false, 32)
+    local legacy = NewOptionsUIHarness(false, 42)
     local config = legacy.BD.config.buffs
 
     assertEqual(#legacy.events, 0,
@@ -836,8 +1149,26 @@ do
         "legacy confirm path fires no second update")
 
     legacy.textSwitch:SetSelectedValue("duration")
-    assertFalse(legacy.durationHint.shown,
-        "AF r32 does not promise abbreviation support")
+    assertEqual(legacy.durationMode.tooltip,
+        "Durations abbreviate automatically to seconds, minutes, hours, and days.",
+        "legacy backend receives the same non-flow duration guidance")
+    assertEqual(legacy.topSwitch.labels[1].text, "Buffs",
+        "legacy Buffs tab does not claim combined custom sources")
+    assertNil(rawget(legacy.topSwitch.buttons[1], "tooltip"),
+        "legacy Buffs tab has no custom-source tooltip")
+
+    legacy.events = {}
+    legacy.durationMode.onSelect("percent")
+    assertEqual(#legacy.events, 1,
+        "legacy duration mode remains a live one-event change")
+    legacy.events = {}
+    legacy.percentValue.confirmValue(44.4)
+    legacy.percentValue.textValue = 44.4
+    legacy.percentValue.onEditFocusLost(legacy.percentValue)
+    assertEqual(config.duration.color.percent.value, 0.444,
+        "legacy percent value remains an exact confirmed update")
+    assertEqual(#legacy.events, 1,
+        "legacy percent confirmation fires one update")
 end
 
 do
@@ -849,10 +1180,16 @@ do
         "Private Auras pane construction retired")
     assertNil(source:find("Show Seconds Unit", 1, true),
         "seconds-unit control retired")
-    assertNil(source:find("color.percent", 1, true),
-        "percent threshold controls retired")
-    assertNil(source:find("color.seconds", 1, true),
-        "seconds threshold controls retired")
+    assertTrue(source:find("Low-Time Text Color", 1, true) ~= nil,
+        "one Seconds/Percent/Off mode selector is present")
+    assertTrue(source:find("color.percent", 1, true) ~= nil,
+        "percent threshold controls are retained")
+    assertTrue(source:find("color.seconds", 1, true) ~= nil,
+        "seconds threshold controls are retained")
+    assertTrue(source:find("PublicAndPrivate", 1, true) ~= nil,
+        "visible source disclosure names the native source list")
+    assertNil(source:find("local sourceDisclosure", 1, true),
+        "source disclosure does not consume icon-pane vertical flow")
     assertTrue(source:find("SetAfterValueChanged", 1, true) ~= nil,
         "custom construction sliders commit after interaction")
     assertTrue(source:find("SetOnConfirm", 1, true) ~= nil,

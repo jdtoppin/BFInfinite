@@ -8,6 +8,22 @@ local function assertEqual(actual, expected, message)
     end
 end
 
+local function readFile(path)
+    local file, openError = io.open(path, "r")
+    if not file then
+        error(openError or ("unable to open " .. path), 2)
+    end
+    local contents = file:read("*a")
+    file:close()
+    return contents
+end
+
+local function assertContains(contents, text, message)
+    if not contents:find(text, 1, true) then
+        error((message or "missing source contract") .. ": " .. text, 2)
+    end
+end
+
 local function loadInit(sharedFunction)
     local AF = {
         funcs = sharedFunction and {
@@ -45,8 +61,10 @@ local function loadInit(sharedFunction)
 end
 
 local unsupported = loadInit()
-assertEqual(unsupported.requiredAFVersion, 29,
+assertEqual(unsupported.requiredAFVersion, 42,
     "global AbstractFramework requirement")
+assertContains(readFile("Core.lua"), "local REQUIRED_AF_VERSION = 42",
+    "runtime AbstractFramework requirement matches the bootstrap guard")
 assertEqual(type(unsupported.funcs.isValueNonSecret), "function",
     "unsupported AF receives a conservative guard")
 assertEqual(unsupported.funcs.isValueNonSecret("ordinary"), false,

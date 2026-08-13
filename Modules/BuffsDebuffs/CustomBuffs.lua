@@ -3,13 +3,32 @@ local BFI = select(2, ...)
 local L = BFI.L
 ---@class BuffsDebuffs
 local BD = BFI.modules.BuffsDebuffs
+---@type AbstractFramework
+local AF = _G.AbstractFramework
+local type = type
+local afVersion = type(AF) == "table" and AF.versionNum or nil
 
--- On Retail 12.1, register only the public Buffs replacement:
--- CustomAuraContainer
--- always receives public and private sources, so a harmful group would
--- duplicate DebuffFrame's private-aura anchors.
+-- AF r40 added the native duration-color binding used by this pane. Keep the
+-- local registration gate ahead of capability, defaults, and schema reads so
+-- r36-r39 cannot activate a container that silently drops legacy thresholds.
+if type(afVersion) ~= "number"
+    or afVersion ~= afVersion
+    or afVersion == math.huge
+    or afVersion == -math.huge
+    or afVersion < 40
+then
+    return
+end
+
+-- Retail 12.1.0.69273 (wow-ui-source
+-- eb941aad028d73ddc69e3e8ef4da709f4d3cd744) ManagedAuraContainer supplies
+-- every CustomAuraContainer the native PublicAndPrivate source list. This
+-- pane's HELPFUL group therefore consumes that combined native source without
+-- reading or classifying either partition; HARMFUL remains Blizzard-owned to
+-- avoid duplicating DebuffFrame's private anchors.
 if type(BD.RegisterCustomAuraContainerPane) ~= "function"
-    or not BD.HasCustomAuraContainerCapability()
+    or type(BD.HasCustomAuraContainerCapability) ~= "function"
+    or BD.HasCustomAuraContainerCapability() ~= true
 then
     return
 end
@@ -17,7 +36,6 @@ end
 local floor = math.floor
 local max = math.max
 local tonumber = tonumber
-local type = type
 
 local flowAxis = _G.AnchorUtil.FlowLayoutAxis
 local flowDirection = _G.AnchorUtil.FlowDirection
@@ -242,6 +260,33 @@ end
 local function NormalizeDurationText(config)
     if type(config) ~= "table" then config = {} end
     local color = type(config.color) == "table" and config.color or {}
+    local defaultColor = defaults.duration.color
+    local seconds = type(color.seconds) == "table" and color.seconds or {}
+    local percent = type(color.percent) == "table" and color.percent or {}
+
+    local threshold
+    if NormalizeBoolean(seconds.enabled, defaultColor.seconds.enabled) then
+        local value = tonumber(seconds.value)
+        if not IsFiniteNumber(value) or value <= 0 then
+            value = defaultColor.seconds.value
+        end
+        threshold = {
+            mode = "seconds",
+            value = value,
+            rgb = NormalizeColor(seconds.rgb, defaultColor.seconds.rgb),
+        }
+    elseif NormalizeBoolean(percent.enabled, defaultColor.percent.enabled) then
+        local value = tonumber(percent.value)
+        if not IsFiniteNumber(value) or value <= 0 or value >= 1 then
+            value = defaultColor.percent.value
+        end
+        threshold = {
+            mode = "percent",
+            value = value,
+            rgb = NormalizeColor(percent.rgb, defaultColor.percent.rgb),
+        }
+    end
+
     return {
         enabled = NormalizeBoolean(config.enabled, defaults.duration.enabled),
         font = NormalizeFont(config.font, defaults.duration.font),
@@ -252,8 +297,9 @@ local function NormalizeDurationText(config)
         color = {
             normal = NormalizeColor(
                 color.normal,
-                defaults.duration.color.normal
+                defaultColor.normal
             ),
+            threshold = threshold,
         },
     }
 end
@@ -327,8 +373,9 @@ local function CompileBuffs(config)
     )
 
     -- The BFI mover owns one fixed bottom-right seam. Buffs grow left/up from
-    -- it and Blizzard's ordinary DebuffFrame is linked directly below it, so
-    -- alignment never depends on live aura count or restricted geometry.
+    -- it and Blizzard's DebuffFrame root follows directly below, so
+    -- alignment never observes live aura count, private anchors, or restricted
+    -- button geometry.
     local orientation = ORIENTATIONS.right_to_left_then_up
     local nativeSortMethod = SORT_METHODS[config.sortMethod]
         or SORT_METHODS[defaults.sortMethod]
@@ -345,8 +392,8 @@ local function CompileBuffs(config)
         wrapAfter * primarySize + (wrapAfter - 1) * primarySpacing
     )
 
-    -- The holder represents only the seam row. Additional native rows grow
-    -- upward without reserving empty space between Buffs and Debuffs.
+    -- The holder is the shared seam row. Additional native Buff rows grow
+    -- upward; DebuffFrame remains fixed five native units below the seam.
     local holderWidth = maximumLineSize
     local holderHeight = height
 

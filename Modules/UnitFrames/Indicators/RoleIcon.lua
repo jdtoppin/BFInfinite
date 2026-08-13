@@ -6,22 +6,28 @@ local G = AF.Glyphs
 local UF = BFI.modules.UnitFrames
 
 ---------------------------------------------------------------------
--- functions
----------------------------------------------------------------------
-local UnitGroupRolesAssigned = UnitGroupRolesAssigned
-
----------------------------------------------------------------------
 -- update
 ---------------------------------------------------------------------
 local function RoleIcon_Update(self)
     local unit = self.root.unit
-    local role = UnitGroupRolesAssigned(unit)
+    local role, rolePublic = UF.GetPublicUnitGroupRole(unit)
 
-    if role == "NONE" or (self.hideDamager and role == "DAMAGER") then
+    if not rolePublic then
+        G.SetGlyph(self.text, nil)
+        self:Hide()
+        return
+    end
+
+    local glyph = G.Role[role]
+    if not glyph
+        or role == "NONE"
+        or (self.hideDamager and role == "DAMAGER")
+    then
+        G.SetGlyph(self.text, nil)
         self:Hide()
     else
         -- self.icon:SetTexture(AF.GetTexture(role))
-        G.SetGlyph(self.text, G.Role[role])
+        G.SetGlyph(self.text, glyph)
         self:Show()
     end
 end

@@ -21,6 +21,33 @@ local function ForbiddenObserver(label)
     end
 end
 
+local secretParents = {}
+local secretEqualityCalls = 0
+
+local function IsValueNonSecret(value)
+    for _, secret in ipairs(secretParents) do
+        if rawequal(value, secret) then
+            return false
+        end
+    end
+    return true
+end
+
+local function SetSecretParent(object, expected)
+    local equalityTrap = {
+        __eq = function()
+            secretEqualityCalls = secretEqualityCalls + 1
+            error("secret parent must be gated before equality", 2)
+        end,
+    }
+    setmetatable(expected, equalityTrap)
+    local secret = setmetatable({}, equalityTrap)
+    secretParents[#secretParents + 1] = secret
+    function object:GetParent()
+        return secret
+    end
+end
+
 local function NewContainer(parent, label)
     local container = {
         shown = true,
@@ -209,6 +236,9 @@ local function LoadAdapter(hasRestrictedAuraButtons)
     _G.C_AuraContainerUtil = hasRestrictedAuraButtons and {} or nil
     local adapter = {}
     local BFI = {
+        funcs = {
+            isValueNonSecret = IsValueNonSecret,
+        },
         modules = {
             BuffsDebuffs = adapter,
         },
@@ -383,6 +413,76 @@ assertWrites(
 )
 assertEqual(restrictedButtonCalls, 0, "restricted restoration button calls")
 
+local secretBD = LoadAdapter(false)
+
+local secretContainerFrame = NewBuffFrame()
+SetSecretParent(secretContainerFrame.AuraContainer, secretContainerFrame)
+_G.BuffFrame = secretContainerFrame
+assertEqual(
+    secretBD.CanSuppressNativePublicAuras("buffs"),
+    false,
+    "secret container parent"
+)
+
+local secretControlFrame = NewBuffFrame()
+SetSecretParent(secretControlFrame.CollapseAndExpandButton, secretControlFrame)
+_G.BuffFrame = secretControlFrame
+assertEqual(
+    secretBD.CanSuppressNativePublicAuras("buffs"),
+    false,
+    "secret control parent"
+)
+
+local secretTooltipFrame = NewBuffFrame()
+local secretTooltip = secretTooltipFrame.ConsolidatedBuffs.Tooltip
+SetSecretParent(secretTooltip, secretTooltipFrame.ConsolidatedBuffs)
+_G.BuffFrame = secretTooltipFrame
+assertEqual(
+    secretBD.CanSuppressNativePublicAuras("buffs"),
+    false,
+    "secret consolidated tooltip parent"
+)
+
+local secretAurasFrame = NewBuffFrame()
+local secretAurasTooltip = secretAurasFrame.ConsolidatedBuffs.Tooltip
+SetSecretParent(secretAurasTooltip.Auras, secretAurasTooltip)
+_G.BuffFrame = secretAurasFrame
+assertEqual(
+    secretBD.CanSuppressNativePublicAuras("buffs"),
+    false,
+    "secret consolidated auras parent"
+)
+
+local secretNestedContainerFrame = NewBuffFrame()
+local secretNestedAuras =
+    secretNestedContainerFrame.ConsolidatedBuffs.Tooltip.Auras
+SetSecretParent(secretNestedAuras.AuraContainer, secretNestedAuras)
+_G.BuffFrame = secretNestedContainerFrame
+assertEqual(
+    secretBD.CanSuppressNativePublicAuras("buffs"),
+    false,
+    "secret consolidated container parent"
+)
+
+local secretPrivateFrame = NewDebuffFrame()
+SetSecretParent(secretPrivateFrame.privateAnchor, secretPrivateFrame)
+_G.DebuffFrame = secretPrivateFrame
+assertEqual(
+    secretBD.CanSuppressNativePublicAuras("debuffs"),
+    false,
+    "secret private-anchor parent"
+)
+
+local secretButtonFrame = NewDebuffFrame()
+SetSecretParent(secretButtonFrame.publicButton, secretButtonFrame.AuraContainer)
+_G.DebuffFrame = secretButtonFrame
+assertEqual(
+    secretBD.SetNativePublicAurasSuppressed("debuffs", true),
+    true,
+    "secret legacy button parent suppression"
+)
+assertEqual(secretEqualityCalls, 0, "secret parents never compared")
+
 local sourceFile = assert(io.open("Modules/BuffsDebuffs/NativeAuraFrames.lua", "r"))
 local source = sourceFile:read("*a")
 sourceFile:close()
@@ -399,5 +499,18 @@ assertEqual(
     nil,
     "hover helper source guard"
 )
+local getParentPosition = assert(source:find(
+    "local parent = object:GetParent()", 1, true
+))
+local gatePosition = assert(source:find(
+    "IsValueNonSecret(parent)", getParentPosition, true
+))
+local comparisonPosition = assert(source:find(
+    "parent == expected", gatePosition, true
+))
+assertEqual(getParentPosition < gatePosition, true, "GetParent before secret gate")
+assertEqual(gatePosition < comparisonPosition, true, "secret gate before equality")
+local _, getParentCalls = source:gsub(":GetParent%(%)", "")
+assertEqual(getParentCalls, 1, "GetParent calls centralized behind gate")
 
 print("buffs_debuffs_native_aura_frames_test: ok")

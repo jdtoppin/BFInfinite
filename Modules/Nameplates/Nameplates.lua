@@ -4,6 +4,7 @@ local BFI = select(2, ...)
 local AF = _G.AbstractFramework
 ---@class Nameplates
 local NP = BFI.modules.Nameplates
+local UF = BFI.modules.UnitFrames
 
 local hasNameplateGeometryAPI =
     type(C_NamePlate) == "table"
@@ -21,9 +22,12 @@ local hasNameplateFoundation =
     and type(AF.SetNativeNamePlateVisualSuppressed) == "function"
     and type(AF.CreateSecretHealthBar) == "function"
     and type(AF.CreateSecretNameText) == "function"
-    and type(AF.CreateSecretAuraList) == "function"
     and type(AF.CreateSecretCastBar) == "function"
     and type(AF.CreateSecretNamePlateThreatIndicator) == "function"
+    and type(UF) == "table"
+    and type(UF.HasNativeAuraContainerBackend) == "function"
+    and UF.HasNativeAuraContainerBackend() == true
+    and type(UF.CreateNativeAuraIndicator) == "function"
     and hasNameplateGeometryAPI
 
 NP.created = {}
@@ -63,6 +67,10 @@ local ownsProgressiveThreatDisplay
 local ApplyCustomHitTest
 local RestoreNativeHitTest
 local ApplyPendingUpdate
+
+function NP.GetAppliedHostileNameplateConfig()
+    return appliedConfig and appliedConfig.hostile_npc
+end
 
 local ZERO_HIT_TEST_INSETS = {
     left = 0,
@@ -902,6 +910,14 @@ local function NamePlateFactionChanged(_, _, unit)
         -- window, keep the current visual and hit target paired until combat
         -- ends instead of leaving a stale invisible click region.
         if InCombatLockdown() then
+            local debuffs = NP.GetIndicator(np, "debuffs")
+            if debuffs then
+                -- Reaction changes can invalidate the enemy-only native
+                -- policy before the protected nameplate rebuild is legal.
+                -- Curtain this row immediately and keep its native container
+                -- opaque until the complete plate is reattached after combat.
+                debuffs:Disable()
+            end
             NP:RegisterEvent(
                 "PLAYER_REGEN_ENABLED",
                 ApplyPendingUpdate

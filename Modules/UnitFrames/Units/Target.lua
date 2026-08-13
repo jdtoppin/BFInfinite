@@ -6,6 +6,7 @@ local UF = BFI.modules.UnitFrames
 local AF = _G.AbstractFramework
 
 local target
+local UnitWatchRegistered = UnitWatchRegistered
 local indicators = {
     "healthBar",
     "powerBar",
@@ -28,8 +29,8 @@ local indicators = {
     "targetHighlight",
     "mouseoverHighlight",
     "threatGlow",
-    {"auras", "buffs", "HELPFUL"},
-    {"auras", "debuffs", "HARMFUL", true},
+    {"nativeAuras", "buffs", "HELPFUL"},
+    {"nativePartitionedAuras", "debuffs", "HARMFUL", true},
     -- {"auras", "debuffsByMe", "HARMFUL", "castByMe"},
     -- {"auras", "debuffsByOthers", "HARMFUL", "castByOthers"},
 }
@@ -57,6 +58,14 @@ local function CreateTarget()
     UF.CreateIndicators(target, indicators)
 end
 
+local function RestoreTargetConfigModeIndicators()
+    for _, indicator in pairs(target.indicators) do
+        if indicator.EnableConfigMode then
+            indicator:EnableConfigMode()
+        end
+    end
+end
+
 ---------------------------------------------------------------------
 -- update
 ---------------------------------------------------------------------
@@ -69,21 +78,35 @@ local function UpdateTarget(_, module, which, skipIndicatorUpdates)
     if not (UF.config.general.enabled and config.general.enabled) then
         if target then
             UF.DisableIndicators(target)
-            UnregisterUnitWatch(target)
-            UF.RemoveFromConfigMode("target")
+            if UnitWatchRegistered(target) then
+                UnregisterUnitWatch(target)
+            end
             target:Hide()
         end
         return
     end
 
+    local wasEnabled = target ~= nil and target.enabled == true
     if not target then
         CreateTarget()
     end
 
     -- setup
-    UF.SetupUnitFrame(target, config, indicators, skipIndicatorUpdates)
+    UF.SetupUnitFrame(
+        target,
+        config,
+        indicators,
+        skipIndicatorUpdates == true and wasEnabled
+    )
 
-    -- visibility NOTE: show must invoke after settings applied
-    RegisterUnitWatch(target)
+    if target.inConfigMode then
+        if not wasEnabled then
+            RestoreTargetConfigModeIndicators()
+        end
+        target:Show()
+    elseif not UnitWatchRegistered(target) then
+        -- visibility NOTE: show must invoke after settings applied
+        RegisterUnitWatch(target)
+    end
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateTarget)
