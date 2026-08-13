@@ -83,6 +83,27 @@ local function makeHarness()
         }
     end
 
+    function UF.GetPublicUnitIdentityValue(value)
+        if getmetatable(value) ~= secretGuidMetatable then
+            return value, true
+        end
+        if BFI.funcs.isValueNonSecret(value) then
+            return value, true
+        end
+        return nil, false
+    end
+
+    function UF.GetPublicUnitIdentitySnapshot(unit)
+        return {
+            name = unit,
+            class = "HUNTER",
+            guid = nil,
+            isPlayer = false,
+            inVehicle =
+                unit == "player" and harness.playerInVehicle or false,
+        }
+    end
+
     local environment = {
         _G = false,
         AbstractFramework = AF,

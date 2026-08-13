@@ -611,6 +611,20 @@ local function makeEventRuntimeHarness(
         return indicator
     end
 
+    function UF.GetPublicUnitIdentityValue(value)
+        return value, true
+    end
+
+    function UF.GetPublicUnitIdentitySnapshot(unit)
+        return {
+            name = unit,
+            class = nil,
+            guid = "guid:" .. tostring(unit),
+            isPlayer = false,
+            inVehicle = false,
+        }
+    end
+
     function UF.LoadIndicatorPosition(frame, position, anchorTo)
         frame.position = copy(position)
         frame.anchorTo = anchorTo

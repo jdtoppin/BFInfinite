@@ -6,22 +6,18 @@ local G = AF.Glyphs
 local UF = BFI.modules.UnitFrames
 
 ---------------------------------------------------------------------
--- local functions
----------------------------------------------------------------------
-local IsInRaid = IsInRaid
-local UnitIsGroupLeader = UnitIsGroupLeader
-local UnitIsGroupAssistant = UnitIsGroupAssistant
-
----------------------------------------------------------------------
 -- show/hide
 ---------------------------------------------------------------------
 local function UpdateLeaderIcon(self)
     local unit = self.root.unit
 
-    local isLeader = UnitIsGroupLeader(unit)
-    local isAssistant = IsInRaid() and UnitIsGroupAssistant(unit)
+    local isLeader, isAssistant, identityPublic =
+        UF.GetPublicUnitLeadership(unit)
 
-    if isLeader then
+    if not identityPublic then
+        G.SetGlyph(self.text, nil)
+        self:Hide()
+    elseif isLeader then
         -- self.icon:SetTexture("Interface\\GroupFrame\\UI-Group-LeaderIcon")
         G.SetGlyph(self.text, G.Group.leader)
         self:Show()
@@ -30,6 +26,7 @@ local function UpdateLeaderIcon(self)
         G.SetGlyph(self.text, G.Group.assistant)
         self:Show()
     else
+        G.SetGlyph(self.text, nil)
         self:Hide()
     end
 end

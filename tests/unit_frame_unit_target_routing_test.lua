@@ -60,6 +60,22 @@ local function makeHarness()
         }
     end
 
+    function UF.GetPublicUnitIdentityValue(value)
+        return value, true
+    end
+
+    function UF.GetPublicUnitIdentitySnapshot(unit)
+        return {
+            name = unit,
+            class = "MAGE",
+            guid = harness.unitExists[unit]
+                and "guid-" .. unit
+                or nil,
+            isPlayer = false,
+            inVehicle = false,
+        }
+    end
+
     local environment = {
         _G = false,
         AbstractFramework = AF,
