@@ -42,8 +42,14 @@ local nameplatesPanel
 local RefreshNameplatePreviews = AF.noop
 
 local function UpdateNameplates()
+    local reloadRequired =
+        type(NP.PrepareNameplateAuraConfigUpdate) == "function"
+        and NP.PrepareNameplateAuraConfigUpdate() == true
     AF.Fire("BFI_UpdateModule", "nameplates")
     RefreshNameplatePreviews()
+    if reloadRequired then
+        AF.Fire("BFI_NativeAuraReloadRequired")
+    end
 end
 
 local function SetSharedHealthBarValue(key, value)
@@ -350,8 +356,8 @@ local function IsHealthBarEnabledForScope(scope)
     return IsIndicatorEnabledForScope(scope, "healthBar")
 end
 
-local function IsDebuffDurationEnabledForAnyPlateType()
-    for _, plateType in ipairs(PLATE_TYPES) do
+local function IsHostileDebuffDurationEnabled()
+    for _, plateType in ipairs(PLATE_TYPE_GROUPS.hostile) do
         if NP.config[plateType].debuffs.durationText.enabled then
             return true
         end
@@ -617,7 +623,7 @@ local function CreateNameplatesPanel()
     local debuffs = AF.CreateCheckButton(sharedPane, L["debuffs"])
     AF.SetPoint(debuffs, "TOPLEFT", sharedPane, 15, -200)
     debuffs:SetOnCheck(function(checked)
-        SetSharedIndicatorEnabled("debuffs", checked)
+        SetScopeIndicatorEnabled("hostile", "debuffs", checked)
     end)
 
     local namePlacement = AF.CreateDropdown(sharedPane, 165)
@@ -2724,7 +2730,11 @@ local function CreateNameplatesPanel()
         105
     )
 
-    local auraNotice = AF.CreateFontString(auraPane, L["Debuff timer appearance changes apply to hostile and friendly NPC and player nameplates."], "gray")
+    local auraNotice = AF.CreateFontString(
+        auraPane,
+        L["Enemy debuffs only. Friendly dispellable debuffs will return separately. Global Colors do not affect nameplates."],
+        "gray"
+    )
     AF.SetPoint(auraNotice, "TOPLEFT", auraPane, 15, -30)
     AF.SetPoint(auraNotice, "TOPRIGHT", auraPane, -15, -30)
     auraNotice:SetJustifyH("LEFT")
@@ -2793,9 +2803,10 @@ local function CreateNameplatesPanel()
         -45
     )
 
-    -- Retail 12.0.7's native DurationTextBinding cannot apply threshold
-    -- colors without exposing restricted duration values to Lua. Keep the
-    -- supported normal color here; 12.1 curve modes need a separate design.
+    -- Saved seconds/percent thresholds remain part of this row and AF r40+
+    -- applies the selected rule through its native duration color curve.
+    -- This picker edits only the ordinary saved normal color; BFI never
+    -- reads restricted remaining-duration values.
     local normalColor = AF.CreateColorPicker(
         durationPane,
         L["Normal"]
@@ -2974,8 +2985,8 @@ local function CreateNameplatesPanel()
             anchorPoint, relativePoint, xOffset, yOffset)
         auraPreview:Refresh(
             NP.config.hostile_npc,
-            IsIndicatorEnabledForAnyPlateType("debuffs"),
-            IsDebuffDurationEnabledForAnyPlateType()
+            IsIndicatorEnabledForScope("hostile", "debuffs"),
+            IsHostileDebuffDurationEnabled()
         )
     end
 
@@ -3063,8 +3074,8 @@ local function CreateNameplatesPanel()
 
         auraPreview:Refresh(
             NP.config.hostile_npc,
-            IsIndicatorEnabledForAnyPlateType("debuffs"),
-            IsDebuffDurationEnabledForAnyPlateType()
+            IsIndicatorEnabledForScope("hostile", "debuffs"),
+            IsHostileDebuffDurationEnabled()
         )
     end
 
@@ -3090,7 +3101,7 @@ local function CreateNameplatesPanel()
             config.hostile_npc.nameText.placement or "outside"
         )
         castBar:SetChecked(IsIndicatorEnabledForAnyPlateType("castBar"))
-        debuffs:SetChecked(IsIndicatorEnabledForAnyPlateType("debuffs"))
+        debuffs:SetChecked(IsIndicatorEnabledForScope("hostile", "debuffs"))
 
         UpdateSemanticColorWidgets()
         UpdateCastWidgets()
@@ -3101,7 +3112,7 @@ local function CreateNameplatesPanel()
         UpdateThreatWidgets()
 
         cooldownStyle:SetSelectedValue(config.hostile_npc.debuffs.cooldownStyle)
-        durationEnabled:SetChecked(IsDebuffDurationEnabledForAnyPlateType())
+        durationEnabled:SetChecked(IsHostileDebuffDurationEnabled())
         normalColor:SetColor(durationConfig.color.normal)
         font:SetSelectedValue(durationConfig.font[1])
         outline:SetSelectedValue(durationConfig.font[3])
