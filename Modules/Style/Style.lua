@@ -1219,7 +1219,7 @@ function S.StyleTitleBarInfoButton(frame, button)
     AF.SetFrameLevel(button, 1, frame.BFIHeader)
 end
 
-function S.StyleTitledFrame(frame, movableTarget)
+function S.StyleTitledFrame(frame, movableTarget, useLightweightBackdrop)
     assert(frame, "StyleTitledFrame: frame is nil")
 
     if frame._BFIStyled then return end
@@ -1239,7 +1239,11 @@ function S.StyleTitledFrame(frame, movableTarget)
 
     -- style into bfi -----------------------------------------------
     -- bg
-    frame.BFIBg = AF.CreateBorderedFrame(frame)
+    local CreateBorderedFrame = useLightweightBackdrop
+        and AF.CreateLightweightBorderedFrame
+        or AF.CreateBorderedFrame
+
+    frame.BFIBg = CreateBorderedFrame(frame)
     frame.BFIBg:SetAllPoints(frame)
     AF.SetFrameLevel(frame.BFIBg)
 
@@ -1247,7 +1251,7 @@ function S.StyleTitledFrame(frame, movableTarget)
     AF.AddToPixelUpdater_CustomGroup("BFIStyled", frame.BFIBg)
 
     -- title
-    frame.BFIHeader = AF.CreateBorderedFrame(frame, nil, nil, nil, "header", "border")
+    frame.BFIHeader = CreateBorderedFrame(frame, nil, nil, nil, "header", "border")
     frame.BFIHeader:SetPoint("TOPLEFT")
     frame.BFIHeader:SetPoint("TOPRIGHT")
     AF.SetHeight(frame.BFIHeader, 20)

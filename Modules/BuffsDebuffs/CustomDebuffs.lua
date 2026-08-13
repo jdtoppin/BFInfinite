@@ -3,18 +3,18 @@ local BFI = select(2, ...)
 ---@class BuffsDebuffs
 local BD = BFI.modules.BuffsDebuffs
 
--- Retail 12.1.0.69189 (wow-ui-source a520b6c2) lets a HARMFUL
--- CustomAuraContainer present ordinary and private auras without exposing
--- AuraData. The public API has no source filter that can split or reserve
--- private entries, so both sources intentionally share this native group's
--- sort and user-configured cap. The default cap of 25 exceeds the pinned
--- legacy capacity of 16 ordinary plus 6 private Debuffs, but no finite cap can
--- guarantee private priority. AF r39's nativeDispelColor style delegates both
--- typed dispel colours and the untyped None/red fallback to Blizzard's
--- AuraButton API.
-if type(BD.RegisterCustomAuraContainerPane) ~= "function"
-    or type(BD.HasCustomHarmfulAuraContainerCapability) ~= "function"
-    or not BD.HasCustomHarmfulAuraContainerCapability()
+-- Retail 12.1.0.69273 (wow-ui-source
+-- eb941aad028d73ddc69e3e8ef4da709f4d3cd744) lets a native HARMFUL group
+-- describe ordinary and private presentation without exposing AuraData. The
+-- source does not prove that hiding DebuffFrame's six XML anchors suppresses
+-- separately pooled private renderers, and the public group contract cannot
+-- reserve private entries inside a finite PublicAndPrivate cap. Keep this
+-- compiler dormant until a future explicit opt-in accepts the cap semantics
+-- and a source-proven suppression primitive exists. AF r42's
+-- nativeDispelColor style remains the required presentation contract.
+if type(BD.HasCustomHarmfulAuraDescriptorCapability) ~= "function"
+    or BD.HasCustomHarmfulAuraDescriptorCapability() ~= true
+    or type(BD.GetDefaults) ~= "function"
 then
     return
 end
@@ -32,6 +32,8 @@ local processingPolicy = _G.CustomAuraContainerAuraProcessingPolicy
 
 local defaults = BD.GetDefaults().debuffs
 local CONSTRUCTION_SCHEMA = 1
+local ACTIVATION_BLOCKED =
+    "CUSTOM_HARMFUL_REQUIRES_OPT_IN_AND_PROVEN_SUPPRESSION"
 
 local SORT_METHODS = {
     INDEX = sortMethod.AuraInstanceIDOnly,
@@ -145,6 +147,33 @@ end
 local function NormalizeDurationText(config)
     if type(config) ~= "table" then config = {} end
     local color = type(config.color) == "table" and config.color or {}
+    local defaultColor = defaults.duration.color
+    local seconds = type(color.seconds) == "table" and color.seconds or {}
+    local percent = type(color.percent) == "table" and color.percent or {}
+
+    local threshold
+    if NormalizeBoolean(seconds.enabled, defaultColor.seconds.enabled) then
+        local value = tonumber(seconds.value)
+        if not IsFiniteNumber(value) or value <= 0 then
+            value = defaultColor.seconds.value
+        end
+        threshold = {
+            mode = "seconds",
+            value = value,
+            rgb = NormalizeColor(seconds.rgb, defaultColor.seconds.rgb),
+        }
+    elseif NormalizeBoolean(percent.enabled, defaultColor.percent.enabled) then
+        local value = tonumber(percent.value)
+        if not IsFiniteNumber(value) or value <= 0 or value >= 1 then
+            value = defaultColor.percent.value
+        end
+        threshold = {
+            mode = "percent",
+            value = value,
+            rgb = NormalizeColor(percent.rgb, defaultColor.percent.rgb),
+        }
+    end
+
     return {
         enabled = NormalizeBoolean(config.enabled, defaults.duration.enabled),
         font = NormalizeFont(config.font, defaults.duration.font),
@@ -155,13 +184,14 @@ local function NormalizeDurationText(config)
         color = {
             normal = NormalizeColor(
                 color.normal,
-                defaults.duration.color.normal
+                defaultColor.normal
             ),
+            threshold = threshold,
         },
     }
 end
 
-local function CompileDebuffs(config)
+local function CompileDebuffsDraft(config)
     if type(config) ~= "table" then config = {} end
 
     local separateOwn = tonumber(config.separateOwn)
@@ -241,8 +271,12 @@ local function CompileDebuffs(config)
         nativeDispelColor = true,
     }
 
-    return {
-        enabled = config.enabled == true,
+    local descriptor = {
+        -- This must not project the existing Debuffs enabled flag. A future
+        -- opt-in needs its own migration and product decision before any
+        -- controller can construct or suppress a harmful replacement.
+        enabled = false,
+        activationBlocked = ACTIVATION_BLOCKED,
         constructionKey = {
             schema = CONSTRUCTION_SCHEMA,
             buttonStyle = buttonStyle,
@@ -252,7 +286,7 @@ local function CompileDebuffs(config)
             height = height,
         },
         holderRolesets = "buffs",
-        holderAnchor = {
+        proposedHolderAnchor = {
             globalName = "DebuffFrame",
             point = "TOPRIGHT",
             relativePoint = "TOPRIGHT",
@@ -293,6 +327,9 @@ local function CompileDebuffs(config)
         },
         itemEnchantments = {},
     }
+    return descriptor, ACTIVATION_BLOCKED
 end
 
-BD.RegisterCustomAuraContainerPane("debuffs", CompileDebuffs)
+-- Deliberately no RegisterCustomAuraContainerPane call: compiling this draft
+-- must create no controller, frame, native group, or suppression transition.
+BD.CompileCustomDebuffsDraftDescriptor = CompileDebuffsDraft

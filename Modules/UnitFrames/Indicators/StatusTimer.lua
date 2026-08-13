@@ -42,9 +42,12 @@ end
 -- timer
 ---------------------------------------------------------------------
 local timers = {}
+-- Retail 12.1.0.69273 UnitDocumentation.lua (wow-ui-source eb941aad)
+-- marks UnitGUID SecretWhenUnitIdentityRestricted. Gate it before truth tests
+-- or table keys so a restricted result never reaches Lua coercion/indexing.
 local function ShowTimer(self)
     local guid = UnitGUID(self.root.unit)
-    if not guid or not F.isValueNonSecret(guid) then return end
+    if not F.isValueNonSecret(guid) or not guid then return end
 
     if not timers[guid] then
         timers[guid] = {status = self.status, start = GetTime()}
@@ -60,7 +63,7 @@ end
 
 local function HideTimer(self)
     local guid = UnitGUID(self.root.unit)
-    if guid and F.isValueNonSecret(guid) then
+    if F.isValueNonSecret(guid) and guid then
         timers[guid] = nil
     end
     self.updater:Hide()

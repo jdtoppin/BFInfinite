@@ -21,6 +21,33 @@ local function ForbiddenObserver(label)
     end
 end
 
+local secretParents = {}
+local secretEqualityCalls = 0
+
+local function IsValueNonSecret(value)
+    for _, secret in ipairs(secretParents) do
+        if rawequal(value, secret) then
+            return false
+        end
+    end
+    return true
+end
+
+local function SetSecretParent(object, expected)
+    local equalityTrap = {
+        __eq = function()
+            secretEqualityCalls = secretEqualityCalls + 1
+            error("secret parent must be gated before equality", 2)
+        end,
+    }
+    setmetatable(expected, equalityTrap)
+    local secret = setmetatable({}, equalityTrap)
+    secretParents[#secretParents + 1] = secret
+    function object:GetParent()
+        return secret
+    end
+end
+
 local function NewContainer(parent, label)
     local container = {
         shown = true,
@@ -163,15 +190,8 @@ local function NewDebuffFrame()
     frame.AuraContainer = NewContainer(frame, "DebuffFrame.AuraContainer")
     frame.publicButton = NewAuraButton(frame.AuraContainer, "DebuffFrame public aura")
     frame.auraFrames[1] = frame.publicButton
-    frame.PrivateAuraAnchors = {}
-    for index = 1, 6 do
-        local anchor = NewContainer(
-            frame,
-            "DebuffFrame.privateAuraAnchor" .. index
-        )
-        frame["privateAuraAnchor" .. index] = anchor
-        frame.PrivateAuraAnchors[index] = anchor
-    end
+    frame.privateAnchor = NewUntouchableFrame(frame, "DebuffFrame private aura anchor")
+    frame.PrivateAuraAnchors = {frame.privateAnchor}
     return frame
 end
 
@@ -216,6 +236,9 @@ local function LoadAdapter(hasRestrictedAuraButtons)
     _G.C_AuraContainerUtil = hasRestrictedAuraButtons and {} or nil
     local adapter = {}
     local BFI = {
+        funcs = {
+            isValueNonSecret = IsValueNonSecret,
+        },
         modules = {
             BuffsDebuffs = adapter,
         },
@@ -312,10 +335,7 @@ assertEqual(#_G.GameTooltip.hidden, 6, "idempotent buff restore cleanup")
 assertEqual(BD.SetNativePublicAurasSuppressed("debuffs", true), true, "suppress debuffs")
 assertEqual(BD.AreNativePublicAurasSuppressed("debuffs"), true, "suppressed debuff state")
 assertWrites(debuffFrame.AuraContainer.shownWrites, {false}, "debuff container suppression")
-for index, anchor in ipairs(debuffFrame.PrivateAuraAnchors) do
-    assertWrites(anchor.shownWrites, {false},
-        "private anchor suppression " .. index)
-end
+assertEqual(debuffFrame.privateAnchor.mutationCount, 0, "private anchor suppression boundary")
 assertEqual(deadlyDebuffFrame.mutationCount, 0, "deadly debuff suppression boundary")
 assertEqual(hookCounts[debuffFrame], 1, "single debuff cleanup hook")
 assertEqual(#_G.GameTooltip.hidden, 7, "initial debuff tooltip cleanup")
@@ -329,10 +349,7 @@ assertEqual(#_G.HelpTip.hidden, 8, "hooked debuff help-tip cleanup")
 assertEqual(BD.SetNativePublicAurasSuppressed("debuffs", false), true, "restore debuffs")
 assertEqual(BD.AreNativePublicAurasSuppressed("debuffs"), false, "restored debuff state")
 assertWrites(debuffFrame.AuraContainer.shownWrites, {false, true}, "debuff container constants")
-for index, anchor in ipairs(debuffFrame.PrivateAuraAnchors) do
-    assertWrites(anchor.shownWrites, {false, true},
-        "private anchor restoration " .. index)
-end
+assertEqual(debuffFrame.privateAnchor.mutationCount, 0, "private anchor restore boundary")
 assertEqual(deadlyDebuffFrame.mutationCount, 0, "deadly debuff restore boundary")
 assertEqual(#_G.GameTooltip.hidden, 9, "restore debuff tooltip cleanup")
 assertEqual(#_G.HelpTip.hidden, 9, "restore debuff help-tip cleanup")
@@ -380,22 +397,10 @@ assertWrites(
 )
 assertEqual(restrictedButtonCalls, 0, "restricted suppression button calls")
 assertEqual(hooks[restrictedFrame], nil, "restricted update hook omitted")
-for index, anchor in ipairs(restrictedFrame.PrivateAuraAnchors) do
-    assertWrites(anchor.shownWrites, {false},
-        "restricted private anchor suppression " .. index)
-end
+assertEqual(restrictedFrame.privateAnchor.mutationCount, 0,
+    "restricted private anchor boundary")
 assertEqual(deadlyDebuffFrame.mutationCount, 0,
     "restricted deadly debuff boundary")
-
-assertEqual(
-    restrictedBD.ReassertNativePublicAuraSuppression("debuffs"),
-    true,
-    "restricted Debuff suppression reassertion"
-)
-for index, anchor in ipairs(restrictedFrame.PrivateAuraAnchors) do
-    assertWrites(anchor.shownWrites, {false, false},
-        "restricted private anchor reassertion " .. index)
-end
 assertEqual(
     restrictedBD.SetNativePublicAurasSuppressed("debuffs", false),
     true,
@@ -403,88 +408,80 @@ assertEqual(
 )
 assertWrites(
     restrictedFrame.AuraContainer.shownWrites,
-    {false, false, true},
+    {false, true},
     "restricted debuff container restoration"
 )
-for index, anchor in ipairs(restrictedFrame.PrivateAuraAnchors) do
-    assertWrites(anchor.shownWrites, {false, false, true},
-        "restricted private anchor restoration " .. index)
-end
 assertEqual(restrictedButtonCalls, 0, "restricted restoration button calls")
 
-local editModeFrame = NewDebuffFrame()
-_G.DebuffFrame = editModeFrame
-local editModeBD = LoadAdapter(true)
-assertEqual(
-    editModeBD.SetNativePublicAurasSuppressed("debuffs", true),
-    true,
-    "Edit Mode fixture suppression"
-)
-assertEqual(
-    editModeBD.SuspendNativePublicAuraSuppressionForEditMode("debuffs"),
-    true,
-    "Edit Mode releases the ordinary native preview"
-)
-assertEqual(
-    editModeBD.AreNativePublicAurasSuppressed("debuffs"),
-    false,
-    "Edit Mode releases the suppression ledger"
-)
-assertWrites(
-    editModeFrame.AuraContainer.shownWrites,
-    {false, true},
-    "Edit Mode restores the ordinary container"
-)
-for index, anchor in ipairs(editModeFrame.PrivateAuraAnchors) do
-    assertWrites(anchor.shownWrites, {false, false},
-        "Edit Mode keeps private anchor hidden " .. index)
-end
-assertEqual(
-    editModeBD.SetNativePublicAurasSuppressed("debuffs", true),
-    true,
-    "Edit Mode exit suppresses native Debuffs again"
-)
-assertWrites(
-    editModeFrame.AuraContainer.shownWrites,
-    {false, true, false},
-    "Edit Mode exit hides the ordinary container"
-)
-for index, anchor in ipairs(editModeFrame.PrivateAuraAnchors) do
-    assertWrites(anchor.shownWrites, {false, false, false},
-        "Edit Mode exit keeps private anchor hidden " .. index)
-end
+local secretBD = LoadAdapter(false)
 
-local malformedFrame = NewDebuffFrame()
-malformedFrame.privateAuraAnchor6 = malformedFrame.privateAuraAnchor5
-_G.DebuffFrame = malformedFrame
-local malformedBD = LoadAdapter(true)
+local secretContainerFrame = NewBuffFrame()
+SetSecretParent(secretContainerFrame.AuraContainer, secretContainerFrame)
+_G.BuffFrame = secretContainerFrame
 assertEqual(
-    malformedBD.CanSuppressNativePublicAuras("debuffs"),
+    secretBD.CanSuppressNativePublicAuras("buffs"),
     false,
-    "mismatched fixed private-anchor identity fails closed"
+    "secret container parent"
 )
 
-local sparseFrame = NewDebuffFrame()
-sparseFrame.PrivateAuraAnchors[3] = nil
-assertEqual(#sparseFrame.PrivateAuraAnchors, 6,
-    "Lua length does not expose the interior private-anchor hole")
-_G.DebuffFrame = sparseFrame
-local sparseBD = LoadAdapter(true)
+local secretControlFrame = NewBuffFrame()
+SetSecretParent(secretControlFrame.CollapseAndExpandButton, secretControlFrame)
+_G.BuffFrame = secretControlFrame
 assertEqual(
-    sparseBD.CanSuppressNativePublicAuras("debuffs"),
+    secretBD.CanSuppressNativePublicAuras("buffs"),
     false,
-    "interior private-anchor hole fails closed"
+    "secret control parent"
 )
 
-local shortFrame = NewDebuffFrame()
-shortFrame.PrivateAuraAnchors[6] = nil
-_G.DebuffFrame = shortFrame
-local shortBD = LoadAdapter(true)
+local secretTooltipFrame = NewBuffFrame()
+local secretTooltip = secretTooltipFrame.ConsolidatedBuffs.Tooltip
+SetSecretParent(secretTooltip, secretTooltipFrame.ConsolidatedBuffs)
+_G.BuffFrame = secretTooltipFrame
 assertEqual(
-    shortBD.CanSuppressNativePublicAuras("debuffs"),
+    secretBD.CanSuppressNativePublicAuras("buffs"),
     false,
-    "changed private-anchor count fails closed"
+    "secret consolidated tooltip parent"
 )
+
+local secretAurasFrame = NewBuffFrame()
+local secretAurasTooltip = secretAurasFrame.ConsolidatedBuffs.Tooltip
+SetSecretParent(secretAurasTooltip.Auras, secretAurasTooltip)
+_G.BuffFrame = secretAurasFrame
+assertEqual(
+    secretBD.CanSuppressNativePublicAuras("buffs"),
+    false,
+    "secret consolidated auras parent"
+)
+
+local secretNestedContainerFrame = NewBuffFrame()
+local secretNestedAuras =
+    secretNestedContainerFrame.ConsolidatedBuffs.Tooltip.Auras
+SetSecretParent(secretNestedAuras.AuraContainer, secretNestedAuras)
+_G.BuffFrame = secretNestedContainerFrame
+assertEqual(
+    secretBD.CanSuppressNativePublicAuras("buffs"),
+    false,
+    "secret consolidated container parent"
+)
+
+local secretPrivateFrame = NewDebuffFrame()
+SetSecretParent(secretPrivateFrame.privateAnchor, secretPrivateFrame)
+_G.DebuffFrame = secretPrivateFrame
+assertEqual(
+    secretBD.CanSuppressNativePublicAuras("debuffs"),
+    false,
+    "secret private-anchor parent"
+)
+
+local secretButtonFrame = NewDebuffFrame()
+SetSecretParent(secretButtonFrame.publicButton, secretButtonFrame.AuraContainer)
+_G.DebuffFrame = secretButtonFrame
+assertEqual(
+    secretBD.SetNativePublicAurasSuppressed("debuffs", true),
+    true,
+    "secret legacy button parent suppression"
+)
+assertEqual(secretEqualityCalls, 0, "secret parents never compared")
 
 local sourceFile = assert(io.open("Modules/BuffsDebuffs/NativeAuraFrames.lua", "r"))
 local source = sourceFile:read("*a")
@@ -502,5 +499,18 @@ assertEqual(
     nil,
     "hover helper source guard"
 )
+local getParentPosition = assert(source:find(
+    "local parent = object:GetParent()", 1, true
+))
+local gatePosition = assert(source:find(
+    "IsValueNonSecret(parent)", getParentPosition, true
+))
+local comparisonPosition = assert(source:find(
+    "parent == expected", gatePosition, true
+))
+assertEqual(getParentPosition < gatePosition, true, "GetParent before secret gate")
+assertEqual(gatePosition < comparisonPosition, true, "secret gate before equality")
+local _, getParentCalls = source:gsub(":GetParent%(%)", "")
+assertEqual(getParentCalls, 1, "GetParent calls centralized behind gate")
 
 print("buffs_debuffs_native_aura_frames_test: ok")

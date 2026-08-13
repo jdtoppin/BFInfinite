@@ -119,6 +119,8 @@ local function NameText_LoadConfig(self, config)
             type = "custom_color",
             rgb = config.color.rgb,
         }
+    elseif config.color.type == "class_color" then
+        self.color = {type = "class_color"}
     else
         self.color = {type = "selection_color"}
     end
