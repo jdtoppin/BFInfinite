@@ -361,8 +361,10 @@ local function makeHarness(options)
     end
 
     function AF.SetCustomAuraContainerEnabled(container, enabled)
-        assertEqual(harness.inCombat, false,
-            "native enabled state changed in combat")
+        if harness.inCombat then
+            assertEqual(harness.allowCombatEnabledMutation, true,
+                "native enabled state changed in combat")
+        end
         container.enabled = enabled
         record(harness, "af.enabled", container, enabled)
     end
@@ -2134,6 +2136,87 @@ local function testCombatVisibilityDefersProtectedWrites()
     assertEqual(holder.alpha, 1, "OOC show removes curtain")
 end
 
+local function testNameplateCombatInitialBuildAndRetarget()
+    local defaultHarness = makeHarness()
+    defaultHarness:SetCombat(true)
+    local defaultController =
+        defaultHarness.UF.CreateNativeAuraContainerController(
+            {},
+            "BFIDefaultCombatAuraHolder",
+            completeSpec("target", true)
+        )
+
+    assertEqual(#defaultHarness.containers, 0,
+        "non-opted combat build remains deferred")
+    assertTrue(defaultHarness.regenCallback,
+        "non-opted combat build regen queue")
+    assertEqual(defaultController:GetFrame().alpha, 0,
+        "non-opted combat build curtain")
+
+    local harness = makeHarness()
+    harness.allowCombatEnabledMutation = true
+    harness:SetCombat(true)
+
+    local controller = harness.UF.CreateNativeAuraContainerController(
+        {},
+        "BFINameplateDebuffs",
+        completeSpec("nameplate7", true),
+        nil,
+        {
+            liveUnitChanges = true,
+            allowCombatInitialBuild = true,
+            alphaOnlyVisibility = true,
+        }
+    )
+    local holder = controller:GetFrame()
+    local container = harness.containers[1]
+
+    assertTrue(container, "combat nameplate container")
+    assertEqual(container.unit, "nameplate7", "combat nameplate unit")
+    assertEqual(container.enabled, true, "combat nameplate enabled")
+    assertEqual(countEvents(harness, "af.enabled"), 1,
+        "combat nameplate final enabled mutation")
+    assertEqual(holder.alpha, 1, "combat nameplate exposed after build")
+    assertEqual(countEvents(harness, "native.hide"), 0,
+        "combat nameplate native Hide")
+    assertEqual(countEvents(harness, "native.show"), 0,
+        "combat nameplate native Show")
+    assertEqual(countEvents(harness, "holder.shown"), 0,
+        "combat nameplate holder SetShown")
+    assertEqual(harness.regenCallback, nil,
+        "combat nameplate initial-build regen queue")
+
+    clearEvents(harness)
+    controller:SetUnit("nameplate12")
+
+    assertEqual(container.unit, "nameplate12", "live nameplate retarget")
+    assertEqual(holder.alpha, 1, "live nameplate retarget visibility")
+    assertEqual(countEvents(harness, "af.unit"), 1,
+        "live nameplate retarget count")
+    assertEqual(countEvents(harness, "native.hide"), 0,
+        "live nameplate retarget native Hide")
+    assertEqual(countEvents(harness, "native.show"), 0,
+        "live nameplate retarget native Show")
+    assertEqual(harness.regenCallback, nil,
+        "live nameplate retarget regen queue")
+
+    clearEvents(harness)
+    controller:ApplyTuning(tuningSpec())
+    assertEqual(holder.alpha, 0,
+        "combat nameplate tuning fail-closed curtain")
+    assertEqual(countEvents(harness, "af.update"), 0,
+        "combat nameplate tuning remains deferred")
+    assertTrue(harness.regenCallback,
+        "combat nameplate tuning regen queue")
+
+    harness:SetCombat(false)
+    harness:FireRegen()
+    assertEqual(holder.alpha, 1,
+        "deferred nameplate tuning visibility")
+    assertEqual(container.groups.helpful.filterString, "HELPFUL|PLAYER",
+        "deferred nameplate tuning filter")
+end
+
 local function testDestroyCompletesWithoutVisibilityRead()
     local harness = makeHarness()
     local controller = harness.UF.CreateNativeAuraContainerController(
@@ -3512,6 +3595,7 @@ testPartialAddFailureDiagnostics()
 testVisibilityUsesWriteLedger()
 testHideReversalUsesWriteLedger()
 testCombatVisibilityDefersProtectedWrites()
+testNameplateCombatInitialBuildAndRetarget()
 testDestroyCompletesWithoutVisibilityRead()
 testProductionAvoidsVisibilityInspection()
 testMaxFrameCountContract()
