@@ -277,6 +277,8 @@ function UF.SetupUnitFrame(frame, config, indicators, skipIndicatorUpdates)
     if not skipIndicatorUpdates then
         UF.SetupIndicators(frame, indicators, config)
     end
+
+    UF.RefreshRangeFade(frame)
 end
 
 ---------------------------------------------------------------------
@@ -315,6 +317,7 @@ function UF.SetupUnitGroup(group, config, indicators, skipIndicatorUpdates)
         if not skipIndicatorUpdates then
             UF.SetupIndicators(b, indicators, config)
         end
+        UF.RefreshRangeFade(b)
         -- position
         AF.ClearPoints(b)
         if last then

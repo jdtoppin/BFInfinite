@@ -59,3 +59,6 @@ jobs:
 
       - name: Test secure group-header unit routing
         run: luajit tests/unit_frame_group_header_routing_test.lua
+
+      - name: Test secret-safe unit-frame range fade
+        run: luajit tests/unit_frame_range_fade_secret_safety_test.lua
