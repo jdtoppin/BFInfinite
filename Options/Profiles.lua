@@ -586,6 +586,7 @@ local function CreateImportExportFrame()
             data.name = data.name .. " (" .. i .. ")"
             i = i + 1
         end
+        F.ReviseProfile(data.profile, true)
         BFIProfile[data.name] = data.profile
 
         LoadAll()
@@ -887,6 +888,7 @@ local function CreateModuleCopyFrame()
 
     local from, to
     local data = {
+        {text = L["Click Casting"], id = "clickCastings"},
         {text = L["Unit Frames"], id = "unitFrames"},
         {text = L["Nameplates"], id = "nameplates"},
         {text = L["Action Bars"], id = "actionBars"},
@@ -924,7 +926,15 @@ local function CreateModuleCopyFrame()
             end
         else
             for _, module in next, modules do
-                AF.MergeExistingKeys(BFIProfile[to][module], BFIProfile[from][module])
+                if module == "clickCastings" then
+                    wipe(BFIProfile[to][module])
+                    AF.Merge(
+                        BFIProfile[to][module],
+                        AF.Copy(BFIProfile[from][module])
+                    )
+                else
+                    AF.MergeExistingKeys(BFIProfile[to][module], BFIProfile[from][module])
+                end
             end
         end
 

@@ -4,7 +4,7 @@ _G.BFInfinite = BFI
 
 BFI.prefix = "BFI"
 BFI.name = "BFInfinite"
-BFI.requiredAFVersion = 42
+BFI.requiredAFVersion = 43
 
 ---@class BFI
 ---@field L table
@@ -21,6 +21,7 @@ BFI.requiredAFVersion = 42
 ---@field Misc Misc
 ---@field Style Style
 ---@field ActionBars ActionBars
+---@field ClickCastings ClickCastings
 ---@field Bags Bags
 ---@field BuffsDebuffs BuffsDebuffs
 ---@field Chat Chat
@@ -65,6 +66,9 @@ BFI.libs = {}
 ---------------------------------------------------------------------
 
 -- profile
+BFI.modules.ClickCastings = {}
+AF.AddEventHandler(BFI.modules.ClickCastings)
+
 BFI.modules.UIWidgets = {}
 AF.AddEventHandler(BFI.modules.UIWidgets)
 

@@ -23,6 +23,7 @@ local auraColorsAvailable = AF.isRetail
 ---------------------------------------------------------------------
 local list = {
     "general",
+    "clickCastings",
     "SEPARATOR",
     "enhancements",
     "colors",
@@ -48,7 +49,7 @@ local list = {
 }
 
 local frameWidths = {
-
+    clickCastings = 920,
 }
 
 local function CreateButton(name)

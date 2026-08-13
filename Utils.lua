@@ -24,6 +24,7 @@ local moduleNames = {
     colors = {localized = L["Colors"], class = "Colors"},
     auras = {localized = L["Auras"], class = "Auras"},
     -- profile
+    clickCastings = {localized = L["Click Casting"], class = "ClickCastings"},
     actionBars = {localized = L["Action Bars"], class = "ActionBars"},
     bags = {localized = L["Bags"], class = "Bags"},
     buffsDebuffs = {localized = L["Buffs & Debuffs"], class = "BuffsDebuffs"},
@@ -63,6 +64,7 @@ end
 
 function F.GetProfileModuleClassNames()
     return {
+        "ClickCastings",
         "ActionBars",
         "Bags",
         "BuffsDebuffs",
@@ -109,6 +111,11 @@ function F.FixModule(profileTbl, moduleKey)
     local M = BFI.modules[F.GetModuleClassName(moduleKey)]
     assert(M, "Fix: module not found: " .. moduleKey)
     if not M.GetDefaults then return false end
+
+    if M.NormalizeConfig then
+        profileTbl[moduleKey] = M.NormalizeConfig(profileTbl[moduleKey])
+        return true
+    end
 
     profileTbl[moduleKey] = F.MergeMissingDefaults(profileTbl[moduleKey], M.GetDefaults())
     return true

@@ -44,6 +44,9 @@ local resetterInfo = {
     auras = {isCommon = true},
 
     -- profile
+    clickCastings = {
+        extraInfo = L["Only this class's Click Casting settings will be reset"],
+    },
     unitFrames = {},
     nameplates = {},
     actionBars = {},
