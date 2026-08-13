@@ -430,25 +430,18 @@ local function CreatePanel()
     panel.header = header
     AF.SetPoint(header, "TOPLEFT", 15, -15)
     AF.SetPoint(header, "TOPRIGHT", -15, -15)
+    header:SetTips(
+        L["Click Casting"],
+        L["Click Casting bindings apply to every BFI unit frame. They use the active BFI profile; class-specific binding sets remain separate inside profiles shared by multiple classes. Drop a spell, macro, or item onto the Value field to add its ID."]
+    )
 
     local profile = AF.CreateFontString(header)
     panel.profile = profile
-    AF.SetPoint(profile, "BOTTOMRIGHT", header.line, "TOPRIGHT", -1, 2)
+    AF.SetPoint(profile, "BOTTOMRIGHT", header.tips, "BOTTOMLEFT", -5, 2)
     profile:SetColor("tip")
 
-    local description = AF.CreateFontString(
-        panel,
-        L["Click Casting bindings apply to every BFI unit frame. They use the active BFI profile; class-specific binding sets remain separate inside profiles shared by multiple classes. Drop a spell, macro, or item onto the Value field to add its ID."]
-    )
-    AF.SetPoint(description, "TOPLEFT", header.line, "BOTTOMLEFT", 0, -8)
-    AF.SetPoint(description, "TOPRIGHT", header.line, "BOTTOMRIGHT", 0, -8)
-    description:SetJustifyH("LEFT")
-    description:SetJustifyV("TOP")
-    description:SetWordWrap(true)
-    description:SetColor("tip")
-
     enabled = AF.CreateCheckButton(panel, L["Enable BFI Click Casting"])
-    AF.SetPoint(enabled, "TOPLEFT", description, "BOTTOMLEFT", 0, -15)
+    AF.SetPoint(enabled, "TOPLEFT", header.line, "BOTTOMLEFT", 0, -15)
     enabled:SetOnCheck(function(checked)
         GetConfig().enabled = checked
         list.Load()
@@ -460,7 +453,7 @@ local function CreatePanel()
     AF.SetPoint(
         smartResurrection,
         "TOPLEFT",
-        description,
+        header.line,
         "BOTTOMLEFT",
         250,
         -15
@@ -502,7 +495,7 @@ local function CreatePanel()
     )
 
     local add = AF.CreateButton(panel, L["Add Binding"], "BFI_hover", 110, 22)
-    AF.SetPoint(add, "TOPRIGHT", description, "BOTTOMRIGHT", 0, -45)
+    AF.SetPoint(add, "TOPRIGHT", header.line, "BOTTOMRIGHT", 0, -45)
     add:SetOnClick(function()
         GetConfig().bindings[#GetConfig().bindings + 1] = {
             "notBound",

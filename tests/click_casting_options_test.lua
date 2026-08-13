@@ -258,6 +258,11 @@ local function createHarness()
         pane.title = newWidget("fontString", pane)
         pane.title.text = title
         pane.line = newWidget("texture", pane)
+        function pane:SetTips(...)
+            self.tips = newWidget("tipsButton", self)
+            self.tips.tips = {...}
+            self.tips:SetPoint("BOTTOMRIGHT", self.line, "TOPRIGHT")
+        end
         state.headerPane = pane
         return pane
     end
@@ -454,9 +459,18 @@ assertEqual(harness.headerPane.points[2][1], "TOPRIGHT",
     "viewport heading line spans the full content width")
 assertEqual(harness.headerPane.color, "BFI",
     "viewport heading uses the BFI signature accent")
+assertEqual(harness.headerPane.tips.tips[1], "Click Casting",
+    "header information tooltip has a title")
+assertEqual(
+    harness.headerPane.tips.tips[2],
+    "Click Casting bindings apply to every BFI unit frame. They use the active BFI profile; class-specific binding sets remain separate inside profiles shared by multiple classes. Drop a spell, macro, or item onto the Value field to add its ID.",
+    "header information tooltip contains the former description"
+)
 local clickPanel = harness.namedFrames.BFIOptionsFrame_ClickCastingsPanel
-assertEqual(clickPanel.profile.points[1][2], harness.headerPane.line,
-    "profile, class, and spec metadata sits above the accent line")
+assertEqual(clickPanel.profile.points[1][2], harness.headerPane.tips,
+    "profile, class, and spec metadata sits beside the info button")
+assertEqual(harness.enabledCheckButton.points[1][2], harness.headerPane.line,
+    "controls reflow directly beneath the accent line")
 local classColorCall
 for _, call in ipairs(harness.wrapColorCalls) do
     if call.text == "PRIEST" and call.color == "PRIEST" then
