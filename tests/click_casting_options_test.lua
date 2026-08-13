@@ -24,10 +24,19 @@ local function newWidget(kind, parent)
 
     function widget:CancelCapture()
         self.captureCancelled = true
+        self.capturing = false
+    end
+
+    function widget:ClearFocus()
+        self.focused = false
     end
 
     function widget:GetParent()
         return self.parent
+    end
+
+    function widget:HasFocus()
+        return self.focused and true or false
     end
 
     function widget:GetText()
@@ -53,6 +62,17 @@ local function newWidget(kind, parent)
 
     function widget:SetBinding(binding)
         self.binding = binding
+    end
+
+    function widget:SetFocus()
+        self.focused = true
+        if self.onEditFocusGained then
+            self.onEditFocusGained(self)
+        end
+    end
+
+    function widget:StartCapture()
+        self.capturing = true
     end
 
     function widget:SetChecked(checked)
@@ -110,6 +130,10 @@ local function newWidget(kind, parent)
 
     function widget:SetOnEnterPressed(callback)
         self.onEnterPressed = callback
+    end
+
+    function widget:SetOnEditFocusGained(callback)
+        self.onEditFocusGained = callback
     end
 
     function widget:SetOnHide(callback)
@@ -551,9 +575,22 @@ assertEqual(firstRow.payload.label, "Spell ID or click to pick",
     "spell field has an in-field picker prompt")
 assertEqual(firstRow.payload:GetText(), "2061",
     "saved spell ID is displayed as text")
+local otherRowCapture = harness.list.widgets[2].capture
+otherRowCapture:StartCapture()
+assertTrue(otherRowCapture.capturing,
+    "binding capture is active before entering the value field")
 firstRow.payload.scripts.OnMouseDown(firstRow.payload, "LeftButton")
+assertTrue(firstRow.payload:HasFocus(),
+    "clicking the spell picker field retains text-entry focus")
 assertEqual(harness.cascadingMenu.owner, firstRow.payload,
     "spell picker opens from and anchors to the value field")
+assertTrue(otherRowCapture.captureCancelled,
+    "opening a value field cancels its active binding capture")
+otherRowCapture.captureCancelled = false
+otherRowCapture:StartCapture()
+firstRow.payload.onEditFocusGained(firstRow.payload)
+assertTrue(otherRowCapture.captureCancelled,
+    "value focus gained independently cancels active binding capture")
 assertEqual(harness.cascadingMenu.items[1].text, "Class Spells",
     "spell picker groups class spells")
 assertEqual(harness.cascadingMenu.items[2].text, "Specialization Spells",
@@ -572,6 +609,8 @@ closeCalls = harness.cascadingMenuCloseCalls
 harness:FireCallback("AF_COMBAT_ENTER")
 assertEqual(harness.cascadingMenuCloseCalls, closeCalls + 1,
     "combat entry closes the picker outside the panel combat mask")
+assertTrue(not firstRow.payload:HasFocus(),
+    "combat entry releases value-field keyboard focus")
 
 harness.resurrectionCapabilities = {
     normal = false,

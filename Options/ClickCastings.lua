@@ -68,6 +68,19 @@ local function RefreshRuntime()
     AF.Fire("BFI_UpdateModule", "clickCastings")
 end
 
+local function CancelBindingCaptures()
+    for _, row in ipairs(rows) do
+        if row.capture then row.capture:CancelCapture() end
+    end
+end
+
+local function ReleaseKeyboardInput()
+    CancelBindingCaptures()
+    for _, row in ipairs(rows) do
+        if row.payload then row.payload:ClearFocus() end
+    end
+end
+
 local function MoveBinding(from, to)
     local bindings = GetConfig().bindings
     if from == to or not bindings[from] then return end
@@ -324,7 +337,10 @@ local function CreateRow(index)
     payload:SetScript("OnReceiveDrag", function()
         SetPayloadFromCursor(row)
     end)
+    payload:SetOnEditFocusGained(CancelBindingCaptures)
     payload:SetScript("OnMouseDown", function(_, button)
+        CancelBindingCaptures()
+        payload:SetFocus()
         local binding = GetConfig().bindings[row.index]
         if button == "LeftButton"
             and binding
@@ -643,7 +659,7 @@ local function CreatePanel()
     conflictText:SetWordWrap(true)
 
     panel:SetOnHide(function()
-        for _, row in ipairs(rows) do row.capture:CancelCapture() end
+        ReleaseKeyboardInput()
         AF.CloseCascadingMenu()
     end)
 end
@@ -685,7 +701,10 @@ AF.RegisterCallback("AF_PLAYER_SPEC_UPDATE", function()
 end, "low")
 
 AF.RegisterCallback("AF_COMBAT_ENTER", function()
-    if panel and panel:IsShown() then AF.CloseCascadingMenu() end
+    if panel and panel:IsShown() then
+        ReleaseKeyboardInput()
+        AF.CloseCascadingMenu()
+    end
 end)
 
 AF.RegisterCallback("BFI_ShowOptionsPanel", function(_, id)
