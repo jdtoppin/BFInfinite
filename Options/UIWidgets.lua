@@ -43,6 +43,7 @@ local function CreateContentPane()
     list:SetData({
         {text = L["Micro Menu"], id = "microMenu"},
         {text = _G.HUD_EDIT_MODE_OBJECTIVE_TRACKER_LABEL, id = "objectiveTracker"},
+        {text = L["Mythic+ Timer"], id = "mythicPlus"},
         {text = L["Ready"] .. " & " .. L["Pull"], id = "readyPull"},
         {text = L["Markers"], id = "markers", combatProtect = true},
     })
@@ -63,6 +64,11 @@ end
 local lastSelf
 
 LoadOptions = function(self)
+    if lastSelf and lastSelf.id == "mythicPlus"
+        and self.id ~= "mythicPlus"
+    then
+        AF.Fire("BFI_HideMythicPlusPreview")
+    end
     lastSelf = self
 
     local scroll = contentPane.scrollSettings
@@ -129,6 +135,7 @@ AF.RegisterCallback("BFI_ShowOptionsPanel", function(_, id)
         end
         uiWidgetsPanel:Show()
     elseif uiWidgetsPanel then
+        AF.Fire("BFI_HideMythicPlusPreview")
         uiWidgetsPanel:Hide()
     end
 end)

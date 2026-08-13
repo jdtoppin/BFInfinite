@@ -5,7 +5,6 @@ local UF = BFI.modules.UnitFrames
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local GetUnitName = GetUnitName
 local IsInRaid = IsInRaid
 local UnitClassBase = AF.UnitClassBase
 local UnitGUID = UnitGUID
@@ -14,11 +13,13 @@ local UnitHasVehicleUI = UnitHasVehicleUI
 local UnitIsGroupAssistant = UnitIsGroupAssistant
 local UnitIsGroupLeader = UnitIsGroupLeader
 local UnitIsPlayer = UnitIsPlayer
+local UnitName = UnitName
 local UnitPhaseReason = UnitPhaseReason
 
--- Retail 12.1 PTR 7 makes several identity APIs secret when the unit's
--- identity is secret. Keep this as the single BFI boundary: callers receive
--- either an ordinary value or nil plus a false access flag.
+-- Retail 12.1.0.69273 / wow-ui-source eb941aad makes several identity API
+-- results secret when the unit's identity is restricted. Keep this as the
+-- single BFI boundary: callers receive either an ordinary value or nil plus
+-- a false access flag.
 function UF.GetPublicUnitIdentityValue(value)
     if F.isValueNonSecret(value) then
         return value, true
@@ -26,8 +27,28 @@ function UF.GetPublicUnitIdentityValue(value)
     return nil, false
 end
 
+function UF.GetPublicUnitName(unit)
+    -- Use C_Unit-derived UnitName directly. FrameXML GetUnitName branches,
+    -- compares, and concatenates these results before BFI can reject secrets.
+    local name, server = UnitName(unit)
+    local publicName, namePublic =
+        UF.GetPublicUnitIdentityValue(name)
+    local publicServer, serverPublic =
+        UF.GetPublicUnitIdentityValue(server)
+    if not namePublic or not serverPublic then
+        return nil, false
+    end
+    if publicName == nil then
+        return nil, true
+    end
+    if publicServer and publicServer ~= "" then
+        return publicName .. "-" .. publicServer, true
+    end
+    return publicName, true
+end
+
 function UF.GetPublicUnitIdentitySnapshot(unit)
-    local name = UF.GetPublicUnitIdentityValue(GetUnitName(unit, true))
+    local name = UF.GetPublicUnitName(unit)
     local class = UF.GetPublicUnitIdentityValue(UnitClassBase(unit))
     local guid = UF.GetPublicUnitIdentityValue(UnitGUID(unit))
     local isPlayer = UF.GetPublicUnitIdentityValue(UnitIsPlayer(unit))

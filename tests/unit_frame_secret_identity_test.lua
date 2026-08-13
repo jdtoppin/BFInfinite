@@ -14,10 +14,15 @@ local function assertTrue(value, message)
     end
 end
 
-local secret = {}
+local secret = setmetatable({}, {
+    __concat = function()
+        error("secret identity value must not be concatenated", 2)
+    end,
+})
 local state = {
     inRaid = true,
-    name = "Public-Realm",
+    name = "Public",
+    server = "Realm",
     class = "MAGE",
     guid = "Player-1",
     isPlayer = true,
@@ -28,8 +33,8 @@ local state = {
     phaseReason = 2,
 }
 
-GetUnitName = function()
-    return state.name
+UnitName = function()
+    return state.name, state.server
 end
 IsInRaid = function()
     return state.inRaid
@@ -66,7 +71,7 @@ local AF = {
 local BFI = {
     funcs = {
         isValueNonSecret = function(value)
-            return value ~= secret
+            return not rawequal(value, secret)
         end,
     },
     modules = {
@@ -86,14 +91,38 @@ value, valuePublic = UF.GetPublicUnitIdentityValue(secret)
 assertEqual(value, nil, "secret identity value")
 assertEqual(valuePublic, false, "secret identity access")
 
+local publicName, namePublic = UF.GetPublicUnitName("target")
+assertEqual(publicName, "Public-Realm", "public full unit name")
+assertEqual(namePublic, true, "public full unit name access")
+
+state.server = ""
+publicName, namePublic = UF.GetPublicUnitName("target")
+assertEqual(publicName, "Public", "empty realm unit name")
+assertEqual(namePublic, true, "empty realm unit name access")
+
+state.name = secret
+state.server = "Realm"
+publicName, namePublic = UF.GetPublicUnitName("target")
+assertEqual(publicName, nil, "secret name is rejected")
+assertEqual(namePublic, false, "secret name access")
+
+state.name = "Public"
+state.server = secret
+publicName, namePublic = UF.GetPublicUnitName("target")
+assertEqual(publicName, nil, "secret realm is rejected")
+assertEqual(namePublic, false, "secret realm access")
+
+state.name = "Public"
+state.server = "Realm"
 local snapshot = UF.GetPublicUnitIdentitySnapshot("target")
-assertEqual(snapshot.name, state.name, "public snapshot name")
+assertEqual(snapshot.name, "Public-Realm", "public snapshot name")
 assertEqual(snapshot.class, state.class, "public snapshot class")
 assertEqual(snapshot.guid, state.guid, "public snapshot guid")
 assertEqual(snapshot.isPlayer, true, "public snapshot player")
 assertEqual(snapshot.inVehicle, false, "public snapshot vehicle")
 
 state.name = secret
+state.server = "Realm"
 state.class = secret
 state.guid = secret
 state.isPlayer = secret
@@ -359,12 +388,51 @@ local buttonIndex = assert(
 assertTrue(identityIndex < buttonIndex,
     "secret identity helper must load before UnitButton")
 
-local core = assert(io.open("Core.lua", "r"))
-local coreSource = core:read("*a")
-core:close()
+local identityFile = assert(io.open(
+    "Modules/UnitFrames/SecretIdentity.lua",
+    "r"
+))
+local identitySource = identityFile:read("*a")
+identityFile:close()
+
 assertTrue(
-    coreSource:find("REQUIRED_AF_VERSION = 35", 1, true) ~= nil,
-    "AF r35 dependency gate"
+    identitySource:find("GetUnitName(", 1, true) == nil,
+    "identity boundary must call direct UnitName"
 )
+local nameSanitizerIndex = assert(identitySource:find(
+    "UF.GetPublicUnitIdentityValue(name)",
+    1,
+    true
+))
+local serverSanitizerIndex = assert(identitySource:find(
+    "UF.GetPublicUnitIdentityValue(server)",
+    1,
+    true
+))
+local serverTruthIndex = assert(identitySource:find(
+    "if publicServer",
+    1,
+    true
+))
+local serverComparisonIndex = assert(identitySource:find(
+    'publicServer ~= ""',
+    1,
+    true
+))
+local nameConcatIndex = assert(identitySource:find(
+    'publicName .. "-" .. publicServer',
+    1,
+    true
+))
+assertTrue(nameSanitizerIndex < serverTruthIndex,
+    "name must be sanitized before server truth testing")
+assertTrue(serverSanitizerIndex < serverTruthIndex,
+    "server must be sanitized before truth testing")
+assertTrue(serverSanitizerIndex < serverComparisonIndex,
+    "server must be sanitized before comparison")
+assertTrue(nameSanitizerIndex < nameConcatIndex,
+    "name must be sanitized before concatenation")
+assertTrue(serverSanitizerIndex < nameConcatIndex,
+    "server must be sanitized before concatenation")
 
 print("unit_frame_secret_identity_test.lua: ok")

@@ -42,8 +42,9 @@ end
 -- timer
 ---------------------------------------------------------------------
 local timers = {}
--- Retail 12.0.7.68887 UnitDocumentation.lua marks UnitGUID secret while
--- unit identity is restricted. Gate it before truth tests or table keys.
+-- Retail 12.1.0.69273 UnitDocumentation.lua (wow-ui-source eb941aad)
+-- marks UnitGUID SecretWhenUnitIdentityRestricted. Gate it before truth tests
+-- or table keys so a restricted result never reaches Lua coercion/indexing.
 local function ShowTimer(self)
     local guid = UnitGUID(self.root.unit)
     if not F.isValueNonSecret(guid) or not guid then return end
@@ -73,14 +74,6 @@ end
 ---------------------------------------------------------------------
 -- status
 ---------------------------------------------------------------------
--- Retail 12.0.7.68887 UnitDocumentation.lua marks UnitIsAFK secret
--- while chat messaging lockdown is active. Gate its return before testing.
-local function IsUnitAFK(unit)
-    local isAFK = UnitIsAFK(unit)
-    if not F.isValueNonSecret(isAFK) then return false end
-    return isAFK
-end
-
 local function SetStatus(self, status)
     if self.useEn then
         self.status = status
@@ -107,19 +100,40 @@ local function UpdateStatus(self)
         return
     end
 
-    if not UnitIsConnected(unit) then
+    local isConnected = UnitIsConnected(unit)
+    if not F.isValueNonSecret(isConnected) then
+        SetStatus(self)
+        return
+    end
+    if not isConnected then
         SetStatus(self, "OFFLINE")
-    elseif IsUnitAFK(unit) then
+        return
+    end
+
+    local isAFK = UnitIsAFK(unit)
+    if F.isValueNonSecret(isAFK) and isAFK then
         SetStatus(self, "AFK")
-    elseif UnitIsDeadOrGhost(unit) then
-        if UnitIsGhost(unit) then
+        return
+    end
+
+    local isDeadOrGhost = UnitIsDeadOrGhost(unit)
+    if not F.isValueNonSecret(isDeadOrGhost) then
+        SetStatus(self)
+        return
+    end
+    if isDeadOrGhost then
+        local isGhost = UnitIsGhost(unit)
+        if not F.isValueNonSecret(isGhost) then
+            SetStatus(self)
+        elseif isGhost then
             SetStatus(self, "GHOST")
         else
             SetStatus(self, "DEAD")
         end
-    else
-        SetStatus(self)
+        return
     end
+
+    SetStatus(self)
 end
 
 ---------------------------------------------------------------------

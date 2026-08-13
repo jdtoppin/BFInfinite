@@ -16,9 +16,12 @@ end
 
 local secret = {}
 local state = {
+    guid = "Player-1",
     guidCalls = 0,
     identityChecks = 0,
     indicatorUpdates = 0,
+    isPlayer = true,
+    snapshotPublic = true,
     unitIsPlayerCalls = 0,
 }
 local UF = {}
@@ -40,11 +43,20 @@ function UF.GetPublicUnitIdentityValue(value)
 end
 
 function UF.GetPublicUnitIdentitySnapshot(unit)
+    if not state.snapshotPublic then
+        return {
+            name = nil,
+            class = nil,
+            guid = nil,
+            isPlayer = nil,
+            inVehicle = nil,
+        }
+    end
     return {
-        name = unit,
+        name = "Public-Realm",
         class = "MAGE",
-        guid = nil,
-        isPlayer = false,
+        guid = state.guid,
+        isPlayer = state.isPlayer,
         inVehicle = false,
     }
 end
@@ -81,7 +93,7 @@ local environment = {
     end,
     UnitGUID = function()
         state.guidCalls = state.guidCalls + 1
-        return secret
+        return state.guid
     end,
     UnitHasVehicleUI = function()
         return false
@@ -89,7 +101,7 @@ local environment = {
     UnitIsPlayer = function()
         state.unitIsPlayerCalls =
             state.unitIsPlayerCalls + 1
-        return true
+        return state.isPlayer
     end,
     error = error,
     next = next,
@@ -186,11 +198,51 @@ frame.scripts.OnUpdate(frame, 0.25)
 frame.scripts.OnUpdate(frame, 0.25)
 assertEqual(state.guidCalls, 1,
     "identical unit tokens reuse the effective GUID query")
-assertEqual(state.unitIsPlayerCalls, 0,
+assertEqual(state.unitIsPlayerCalls, 1,
+    "public GUID checks UnitIsPlayer")
+assertEqual(frame.__effectiveGuid, "Player-1",
+    "public effective GUID is cached")
+assertEqual(frame.__unitGuid, "Player-1",
+    "public player GUID is cached")
+
+state.guid = secret
+state.snapshotPublic = false
+frame.scripts.OnEvent(frame, "UNIT_NAME_UPDATE", "targettarget")
+frame.scripts.OnUpdate(frame, 0.25)
+frame.scripts.OnUpdate(frame, 0.25)
+assertEqual(state.guidCalls, 2,
+    "secret transition still queries one effective GUID")
+assertEqual(state.unitIsPlayerCalls, 1,
     "secret GUID short-circuits UnitIsPlayer")
 assertEqual(frame.__effectiveGuid, nil,
-    "secret effective GUID is cleared")
+    "secret transition clears effective GUID")
 assertEqual(frame.__unitGuid, nil,
-    "secret unit GUID is not cached")
+    "secret transition clears prior public unit GUID")
+assertEqual(frame.states.name, nil,
+    "secret transition clears cached name")
+assertEqual(frame.states.class, nil,
+    "secret transition clears cached class")
+assertEqual(frame.states.guid, nil,
+    "secret transition clears cached state GUID")
+assertEqual(frame.states.isPlayer, nil,
+    "secret transition clears cached player state")
+assertEqual(frame.states.inVehicle, nil,
+    "secret transition clears cached vehicle state")
+
+state.guid = "Player-2"
+state.isPlayer = true
+frame.scripts.OnUpdate(frame, 0.25)
+frame.scripts.OnUpdate(frame, 0.25)
+assertEqual(frame.__unitGuid, "Player-2",
+    "later public player GUID can be cached")
+
+state.guid = "Creature-1"
+state.isPlayer = false
+frame.scripts.OnUpdate(frame, 0.25)
+frame.scripts.OnUpdate(frame, 0.25)
+assertEqual(frame.__effectiveGuid, "Creature-1",
+    "ordinary nonplayer effective GUID remains public")
+assertEqual(frame.__unitGuid, nil,
+    "ordinary nonplayer clears prior player GUID")
 
 print("unit_frame_secret_identity_unit_button_test.lua: ok")

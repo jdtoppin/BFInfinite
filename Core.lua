@@ -5,8 +5,9 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF #23/r35 rejects PTR 7 secret UnitClass values before they reach BFI.
-local REQUIRED_AF_VERSION = 35
+-- AF #39/r42 adds native dispel-color textures on top of r41's native
+-- dispel-overlay slots. Selection and color stay inside Blizzard's container.
+local REQUIRED_AF_VERSION = 42
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar
@@ -267,6 +268,9 @@ local function InitAndBackupCVars()
         "AutoPushSpellToActionBar",
         -- bags
         "combinedBags",
+        -- damage meter
+        "damageMeterEnabled",
+        "damageMeterResetOnNewInstance",
         -- chat
         "chatStyle",
         "whisperMode",

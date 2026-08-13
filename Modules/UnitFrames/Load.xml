@@ -4,8 +4,14 @@
     <Script file="SecretIdentity.lua"/>
     <Script file="UnitButton.lua"/>
     <Include file="UnitButton.xml"/>
+    <Script file="AuraPolicy.lua"/>
+    <Script file="AuraSpec.lua"/>
+    <Script file="AuraController.lua"/>
+    <Script file="DispelSpec.lua"/>
     <!-- indicators -->
     <Script file="Indicators\Auras.lua"/>
+    <Script file="AuraRuntime.lua"/>
+    <Script file="DispelRuntime.lua"/>
     <Script file="Indicators\HealthBar.lua"/>
     <Script file="Indicators\PowerBar.lua"/>
     <Script file="Indicators\ExtraManaBar.lua"/>
