@@ -18,6 +18,29 @@ local macroEditorBinding
 local GetCursorInfo = _G.GetCursorInfo
 local ClearCursor = _G.ClearCursor
 local UpdateConflictNotice
+local optionsStage = "not started"
+
+-- AF.Fire intentionally isolates callback failures. Options construction is
+-- non-secret UI work, so retain and forward its traceback here instead of
+-- leaving users with a silently cached, partially constructed blank panel.
+local function CaptureOptionsError(message)
+    local trace = type(_G.debugstack) == "function"
+        and _G.debugstack(2, 20, 20) or ""
+    return ("Click Casting options failed during %s: %s\n%s"):format(
+        optionsStage,
+        tostring(message),
+        trace
+    )
+end
+
+local function ReportOptionsError(message)
+    BFI.vars.clickCastingOptionsError = message
+    AF.Print(message)
+    if type(_G.geterrorhandler) == "function" then
+        local handler = _G.geterrorhandler()
+        if type(handler) == "function" then handler(message) end
+    end
+end
 
 local actionItems = {
     {text = L["Target"], value = "target"},
@@ -230,6 +253,7 @@ local function ShowMacroEditor(row)
 end
 
 local function CreateRow(index)
+    optionsStage = "binding row " .. index .. " frame"
     local row = AF.CreateFrame(list, nil, nil, 26)
     row.index = index
 
@@ -239,6 +263,7 @@ local function CreateRow(index)
     order:SetWidth(20)
     order:SetJustifyH("CENTER")
 
+    optionsStage = "binding row " .. index .. " capture"
     local capture = AF.CreateBindingCapture(
         row,
         145,
@@ -268,6 +293,7 @@ local function CreateRow(index)
         UpdateConflictNotice()
     end)
 
+    optionsStage = "binding row " .. index .. " action"
     local action = AF.CreateDropdown(row, 125)
     row.action = action
     AF.SetPoint(action, "LEFT", capture, "RIGHT", 7, 0)
@@ -285,6 +311,7 @@ local function CreateRow(index)
         UpdateConflictNotice()
     end)
 
+    optionsStage = "binding row " .. index .. " value"
     local payload = AF.CreateEditBox(row, nil, 190, 22, "trim")
     row.payload = payload
     AF.SetPoint(payload, "LEFT", action, "RIGHT", 7, 0)
@@ -323,6 +350,7 @@ local function CreateRow(index)
         payload.confirmBtn:Hide()
     end)
 
+    optionsStage = "binding row " .. index .. " controls"
     local editPayload = AF.CreateButton(
         row,
         L["Edit"],
@@ -366,6 +394,7 @@ local function CreateRow(index)
 end
 
 local function LoadRow(row, index, binding)
+    optionsStage = "binding row " .. index .. " data"
     row.index = index
     row.order:SetText(index)
     row.capture:SetBinding(CC.DecodeBinding(binding[1]))
@@ -413,6 +442,7 @@ local function LoadRow(row, index, binding)
 end
 
 local function CreatePanel()
+    optionsStage = "panel frame"
     panel = AF.CreateFrame(
         BFIOptionsFrame_ContentPane,
         "BFIOptionsFrame_ClickCastingsPanel"
@@ -420,6 +450,7 @@ local function CreatePanel()
     panel:SetAllPoints()
     AF.ApplyCombatProtectionToFrame(panel)
 
+    optionsStage = "panel header"
     local header = AF.CreateTitledPane(
         panel,
         AF.GetGradientText(L["Click Casting"], "BFI", "white"),
@@ -440,6 +471,7 @@ local function CreatePanel()
     AF.SetPoint(profile, "BOTTOMRIGHT", header.tips, "BOTTOMLEFT", -5, 2)
     profile:SetColor("tip")
 
+    optionsStage = "panel controls"
     enabled = AF.CreateCheckButton(panel, L["Enable BFI Click Casting"])
     AF.SetPoint(enabled, "TOPLEFT", header.line, "BOTTOMLEFT", 0, -15)
     enabled:SetOnCheck(function(checked)
@@ -520,6 +552,7 @@ local function CreatePanel()
         end
     end)
 
+    optionsStage = "binding list"
     local bindingHeader = AF.CreateFontString(panel, L["Binding"], "gray")
     AF.SetPoint(bindingHeader, "TOPLEFT", enabled, "BOTTOMLEFT", 30, -45)
     local actionHeader = AF.CreateFontString(panel, L["Action"], "gray")
@@ -588,6 +621,7 @@ local function CreatePanel()
         end
     end
 
+    optionsStage = "panel footer"
     conflictText = AF.CreateFontString(panel)
     AF.SetPoint(conflictText, "BOTTOMLEFT", 15, 17)
     AF.SetPoint(conflictText, "BOTTOMRIGHT", -15, 17)
@@ -601,6 +635,7 @@ local function CreatePanel()
 end
 
 local function LoadPanel()
+    optionsStage = "profile metadata"
     local localizedClass = AF.GetLocalizedClassName(AF.player.class)
     local classText = AF.WrapTextInColor(localizedClass, AF.player.class)
     panel.profile:SetText(
@@ -611,7 +646,9 @@ local function LoadPanel()
             AF.player.localizedSpec or L["Unknown"]
         )
     )
+    optionsStage = "binding list data"
     list.Load()
+    optionsStage = "native binding conflicts"
     UpdateConflictNotice()
 end
 
@@ -639,9 +676,17 @@ end)
 
 AF.RegisterCallback("BFI_ShowOptionsPanel", function(_, id)
     if id == "clickCastings" then
-        if not panel then CreatePanel() end
-        LoadPanel()
-        panel:Show()
+        local success, message = _G.xpcall(function()
+            if not panel then CreatePanel() end
+            LoadPanel()
+            optionsStage = "panel show"
+            panel:Show()
+        end, CaptureOptionsError)
+        if success then
+            BFI.vars.clickCastingOptionsError = nil
+        else
+            ReportOptionsError(message)
+        end
     elseif panel then
         panel:Hide()
     end

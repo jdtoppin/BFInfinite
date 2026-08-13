@@ -253,6 +253,7 @@ local function createHarness()
     end
 
     function AF.CreateTitledPane(parent, title, _, _, color)
+        if state.failTitledPane then error("injected titled-pane failure") end
         local pane = newWidget("titledPane", parent)
         pane.color = color
         pane.title = newWidget("fontString", pane)
@@ -333,6 +334,10 @@ local function createHarness()
         return text
     end
 
+    function AF.Print(message)
+        state.printedError = message
+    end
+
     local config = {
         enabled = true,
         smartResurrection = "disabled",
@@ -399,6 +404,13 @@ local function createHarness()
         tonumber = tonumber,
         tostring = tostring,
         type = type,
+        xpcall = xpcall,
+        debugstack = function() return "injected stack" end,
+        geterrorhandler = function()
+            return function(message)
+                state.errorHandlerMessage = message
+            end
+        end,
     }
     environment._G = environment
     setmetatable(environment, {
@@ -683,5 +695,17 @@ harness:FireCallback("AF_PLAYER_SPEC_UPDATE")
 harness:FireCallback("AF_COMBAT_ENTER")
 assertEqual(harness.cascadingMenuCloseCalls, closeCalls,
     "hidden Click Casting panel does not close unrelated cascading menus")
+
+local failingHarness = createHarness()
+failingHarness.failTitledPane = true
+failingHarness:FireCallback("BFI_ShowOptionsPanel", "clickCastings")
+local optionsError = failingHarness.BFI.vars.clickCastingOptionsError
+assertTrue(type(optionsError) == "string"
+    and optionsError:find("during panel header", 1, true),
+    "panel construction failures retain their exact stage")
+assertEqual(failingHarness.printedError, optionsError,
+    "panel construction failures are printed despite AF callback isolation")
+assertEqual(failingHarness.errorHandlerMessage, optionsError,
+    "panel construction failures reach the configured Lua error handler")
 
 print("click_casting_options_test: ok")
