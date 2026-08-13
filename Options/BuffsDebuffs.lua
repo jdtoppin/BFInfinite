@@ -7,6 +7,7 @@ local AF = _G.AbstractFramework
 
 local LoadOptions, UpdateStatus
 local selected, currentConfig, currentTextConfig, currentTextKind, currentPolicy
+local InCombatLockdown = InCombatLockdown
 local min = math.min
 
 local function IsFiniteNumber(value)
@@ -69,6 +70,24 @@ local function IsBlizzardOwnedDurationControl()
         and currentPolicy.blizzardDebuffStyle == true
 end
 
+local function GetSharedAuraMoverState()
+    local config = BD.config and BD.config.buffs
+    if not config
+        or config.enabled ~= true
+        or type(BD.GetCustomAuraContainerState) ~= "function"
+    then
+        return nil
+    end
+    return BD.GetCustomAuraContainerState("buffs")
+end
+
+local function IsSharedAuraMoverActive()
+    local state = GetSharedAuraMoverState()
+    return state ~= nil
+        and state.active == true
+        and state.nativeFollowerActive == true
+end
+
 function BD.GetBuffsDebuffsOptionsPolicy(which)
     local backend = BD.GetAuraBackend(which)
     local custom = which == "buffs"
@@ -104,12 +123,14 @@ function BD.GetBuffsDebuffsOptionsPolicy(which)
                 disabled = custom or blizzardDebuffStyle,
             },
         },
+        arrangementControls = not blizzardDebuffStyle and not custom,
         constructionOwnedStyle = custom,
         durationColorModes = true,
         durationAppearanceControls = not blizzardDebuffStyle,
         durationEnabledControl = true,
         iconSizeControls = true,
         layoutControls = not blizzardDebuffStyle,
+        fixedArrangement = custom and "right_to_left_then_up" or nil,
         maximumIconSize = blizzardDebuffStyle and 30 or 100,
         separateOwnControl = not blizzardDebuffStyle,
         stackAppearanceControls = true,
@@ -124,10 +145,28 @@ function BD.GetBuffsDebuffsOptionsStatus(which)
         type(BD.IsBuffsDebuffsUpdatePending) == "function"
         and BD.IsBuffsDebuffsUpdatePending(which)
     if policy.blizzardDebuffStyle then
-        if dispatcherPending then
+        local moverState = GetSharedAuraMoverState()
+        if dispatcherPending
+            or (moverState and moverState.operationPending)
+            or (
+                moverState
+                and moverState.pending
+                and moverState.diagnostic
+                    ~= "NATIVE_FOLLOWER_REFRESH_FAILED"
+            )
+        then
             return {code = "PENDING_SAFE_UPDATE"}
         end
-        return {code = "BLIZZARD_DEBUFF_STYLE"}
+        if moverState
+            and moverState.diagnostic == "NATIVE_FOLLOWER_REFRESH_FAILED"
+        then
+            return {code = "NATIVE_FOLLOWER_REFRESH_FAILED"}
+        end
+        return {
+            code = IsSharedAuraMoverActive()
+                and "BFI_SHARED_AURA_MOVER"
+                or "BLIZZARD_DEBUFF_STYLE",
+        }
     end
     if not policy.custom then return nil end
 
@@ -136,12 +175,24 @@ function BD.GetBuffsDebuffsOptionsStatus(which)
         and BD.GetCustomAuraContainerState(which)
         or nil
     local diagnostic = state and state.diagnostic
+    local operationPending = dispatcherPending
+        or (state and state.operationPending)
     if (config and config.separateOwn ~= 0)
         or diagnostic == "UNSUPPORTED_SEPARATE_OWN"
     then
         return {
             code = "UNSUPPORTED_SEPARATE_OWN",
             action = "RECOVER_SEPARATE_OWN",
+        }
+    elseif diagnostic == "NATIVE_FOLLOWER_REFRESH_FAILED"
+        and operationPending
+    then
+        return {
+            code = "PENDING_SAFE_UPDATE",
+        }
+    elseif diagnostic == "NATIVE_FOLLOWER_REFRESH_FAILED" then
+        return {
+            code = "NATIVE_FOLLOWER_REFRESH_FAILED",
         }
     elseif diagnostic
         and diagnostic ~= "CONSTRUCTION_CHANGE_REQUIRES_RELOAD"
@@ -157,6 +208,10 @@ function BD.GetBuffsDebuffsOptionsStatus(which)
     elseif dispatcherPending or (state and state.pending) then
         return {
             code = "PENDING_SAFE_UPDATE",
+        }
+    elseif IsSharedAuraMoverActive() then
+        return {
+            code = "BFI_SHARED_AURA_MOVER",
         }
     end
 end
@@ -247,6 +302,11 @@ local function CreateNormalPane()
     arrangement:SetLabel(L["Arrangement"])
     arrangement:SetItems(AF.GetDropdownItems_Arrangement_Complex())
     arrangement:SetOnSelect(function(value)
+        if currentPolicy
+            and currentPolicy.arrangementControls ~= true
+        then
+            return
+        end
         currentConfig.orientation = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
@@ -715,8 +775,11 @@ local function CreateNormalPane()
         local layoutEnabled = currentConfig.enabled
             and policy.layoutControls
         AF.SetEnabled(
+            currentConfig.enabled and policy.arrangementControls,
+            arrangement
+        )
+        AF.SetEnabled(
             layoutEnabled,
-            arrangement,
             sortMethod,
             sortDirection,
             spacingX,
@@ -736,7 +799,9 @@ local function CreateNormalPane()
         width:SetMinMaxValues(10, policy.maximumIconSize)
         height:SetMinMaxValues(10, policy.maximumIconSize)
         separateOwn:SetItems(policy.separateOwnItems)
-        arrangement:SetSelectedValue(currentConfig.orientation)
+        arrangement:SetSelectedValue(
+            policy.fixedArrangement or currentConfig.orientation
+        )
         sortMethod:SetSelectedValue(currentConfig.sortMethod)
         sortDirection:SetSelectedValue(currentConfig.sortDirection)
         separateOwn:SetSelectedValue(currentConfig.separateOwn)
@@ -756,6 +821,14 @@ local function CreateNormalPane()
         textsPane.Load(textSwitch:GetSelectedValue())
         UpdateStatus()
     end
+end
+
+local function OpenBFIEditMode()
+    if InCombatLockdown() then return end
+    local optionsFrame = _G.BFIOptionsFrame
+    if optionsFrame then optionsFrame:Hide() end
+    BFI.funcs.PrepareEditModePositions()
+    AF.ShowMovers()
 end
 
 UpdateStatus = function()
@@ -800,6 +873,22 @@ UpdateStatus = function()
                 or L["Buffs update is waiting for combat to end."]
         )
         statusButton:Hide()
+    elseif status.code == "NATIVE_FOLLOWER_REFRESH_FAILED" then
+        AF.SetWidth(statusText, 530)
+        statusText:SetWordWrap(true)
+        statusText:SetText(L[
+            "The shared DebuffFrame attachment could not be refreshed. The current safe layout remains in place while native frame access recovers."
+        ])
+        statusButton:Hide()
+    elseif status.code == "BFI_SHARED_AURA_MOVER" then
+        AF.SetWidth(statusText, 350)
+        statusText:SetWordWrap(true)
+        statusText:SetText(L[
+            "The BFI Buff Frame mover positions the combined Buffs row and Blizzard's DebuffFrame root together. Movement is unavailable in combat."
+        ])
+        statusButton:SetText(L["Open BFI Edit Mode"])
+        statusButton:SetOnClick(OpenBFIEditMode)
+        statusButton:Show()
     elseif status.code == "BLIZZARD_DEBUFF_STYLE" then
         AF.SetWidth(statusText, 530)
         statusText:SetWordWrap(true)

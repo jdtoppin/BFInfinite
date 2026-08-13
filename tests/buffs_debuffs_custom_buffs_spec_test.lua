@@ -274,68 +274,20 @@ assertEqual(
 local compile = harness.state.registrations[1].compiler
 
 local orientationCases = {
-    {
-        key = "left_to_right_then_down",
-        axis = "HORIZONTAL",
-        anchor = "TOPLEFT",
-        horizontal = "RIGHT",
-        vertical = "DOWN",
-    },
-    {
-        key = "left_to_right_then_up",
-        axis = "HORIZONTAL",
-        anchor = "BOTTOMLEFT",
-        horizontal = "RIGHT",
-        vertical = "UP",
-    },
-    {
-        key = "right_to_left_then_down",
-        axis = "HORIZONTAL",
-        anchor = "TOPRIGHT",
-        horizontal = "LEFT",
-        vertical = "DOWN",
-    },
-    {
-        key = "right_to_left_then_up",
-        axis = "HORIZONTAL",
-        anchor = "BOTTOMRIGHT",
-        horizontal = "LEFT",
-        vertical = "UP",
-    },
-    {
-        key = "top_to_bottom_then_left",
-        axis = "VERTICAL",
-        anchor = "TOPRIGHT",
-        horizontal = "LEFT",
-        vertical = "DOWN",
-    },
-    {
-        key = "top_to_bottom_then_right",
-        axis = "VERTICAL",
-        anchor = "TOPLEFT",
-        horizontal = "RIGHT",
-        vertical = "DOWN",
-    },
-    {
-        key = "bottom_to_top_then_left",
-        axis = "VERTICAL",
-        anchor = "BOTTOMRIGHT",
-        horizontal = "LEFT",
-        vertical = "UP",
-    },
-    {
-        key = "bottom_to_top_then_right",
-        axis = "VERTICAL",
-        anchor = "BOTTOMLEFT",
-        horizontal = "RIGHT",
-        vertical = "UP",
-    },
+    "left_to_right_then_down",
+    "left_to_right_then_up",
+    "right_to_left_then_down",
+    "right_to_left_then_up",
+    "top_to_bottom_then_left",
+    "top_to_bottom_then_right",
+    "bottom_to_top_then_left",
+    "bottom_to_top_then_right",
 }
 
-for _, expected in ipairs(orientationCases) do
+for _, savedOrientation in ipairs(orientationCases) do
     local config = NewConfig()
     config.enabled = true
-    config.orientation = expected.key
+    config.orientation = savedOrientation
     config.width = 20
     config.height = 30
     config.spacingX = 2
@@ -345,86 +297,88 @@ for _, expected in ipairs(orientationCases) do
 
     local descriptor = assert(compile(config))
     local flow = descriptor.flowLayout
-    assertEqual(flow.axis, expected.axis, expected.key .. " axis")
+    assertEqual(flow.axis, "HORIZONTAL",
+        savedOrientation .. " fixed horizontal axis")
     assertEqual(
         flow.anchorPoint,
-        expected.anchor,
-        expected.key .. " flow anchor"
+        "BOTTOMRIGHT",
+        savedOrientation .. " fixed flow anchor"
     )
     assertEqual(
         flow.horizontalGrowthDirection,
-        expected.horizontal,
-        expected.key .. " horizontal growth"
+        "LEFT",
+        savedOrientation .. " fixed horizontal growth"
     )
     assertEqual(
         flow.verticalGrowthDirection,
-        expected.vertical,
-        expected.key .. " vertical growth"
+        "UP",
+        savedOrientation .. " fixed vertical growth"
     )
     assertEqual(
         descriptor.containerPoint.point,
-        expected.anchor,
-        expected.key .. " container point"
+        "BOTTOMRIGHT",
+        savedOrientation .. " fixed container point"
     )
     assertEqual(
         descriptor.containerPoint.relativePoint,
-        expected.anchor,
-        expected.key .. " container relative point"
+        "BOTTOMRIGHT",
+        savedOrientation .. " fixed container relative point"
     )
 
-    local horizontal = expected.axis == "HORIZONTAL"
     assertEqual(
         flow.maximumLineSize,
-        horizontal and 86 or 129,
-        expected.key .. " maximum line"
+        86,
+        savedOrientation .. " maximum line"
     )
     assertEqual(
         descriptor.holder.width,
-        horizontal and 86 or 64,
-        expected.key .. " holder width"
+        86,
+        savedOrientation .. " holder width"
     )
     assertEqual(
         descriptor.holder.height,
-        horizontal and 96 or 129,
-        expected.key .. " holder height"
+        30,
+        savedOrientation .. " one-row holder height"
     )
 
     local groupLayout = descriptor.groups[1].layout
     assertEqual(
         groupLayout.elementSpacing,
-        horizontal and 2 or 3,
-        expected.key .. " primary spacing"
+        2,
+        savedOrientation .. " primary spacing"
     )
     assertEqual(
         groupLayout.lineSpacing,
-        horizontal and 3 or 2,
-        expected.key .. " cross spacing"
+        3,
+        savedOrientation .. " cross spacing"
     )
     assertEqual(groupLayout.groupSpacing, 0,
-        expected.key .. " group spacing")
+        savedOrientation .. " group spacing")
     assertEqual(
         groupLayout.groupLineSpacing,
-        horizontal and 3 or 2,
-        expected.key .. " group line spacing"
+        3,
+        savedOrientation .. " group line spacing"
     )
     assertEqual(groupLayout.elementWidth, 20,
-        expected.key .. " element width")
+        savedOrientation .. " element width")
     assertEqual(groupLayout.elementHeight, 30,
-        expected.key .. " element height")
+        savedOrientation .. " element height")
     assertTablesEqual(
         descriptor.itemEnchantmentLayout,
         {
-            elementSpacing = horizontal and 2 or 3,
-            lineSpacing = horizontal and 3 or 2,
+            elementSpacing = 2,
+            lineSpacing = 3,
             groupSpacing = 0,
-            groupLineSpacing = horizontal and 3 or 2,
+            groupLineSpacing = 3,
             forceNewLine = false,
             elementWidth = 20,
             elementHeight = 30,
             placement = "BEFORE",
         },
-        expected.key .. " enchantment layout"
+        savedOrientation .. " enchantment layout"
     )
+    assertEqual(config.orientation, savedOrientation,
+        savedOrientation .. " remains dormant in saved data")
 end
 
 do
@@ -477,6 +431,7 @@ end
 
 do
     local config = NewConfig()
+    config.position = {"TOPRIGHT", "TOPRIGHT", -12, -16}
     local profilePosition = config.position
     config.width = 20
     config.height = 30
@@ -492,9 +447,24 @@ do
         "compiler does not mutate saved Buffs configuration")
     assertEqual(descriptor.enabled, false,
         "shipped Buffs pane remains dormant by default")
-    assertEqual(descriptor.positionSave, profilePosition,
-        "mover save keeps profile identity")
-    assertEqual(descriptor.moverText, "Buff Frame", "native mover label")
+    assertTablesEqual(descriptor.position, profilePosition,
+        "saved BFI position remains the holder location")
+    assertEqual(type(descriptor.positionSave), "function",
+        "mover uses a profile position save callback")
+    descriptor.positionSave("BOTTOMLEFT", 14, 18)
+    assertTablesEqual(profilePosition, {"BOTTOMLEFT", 14, 18},
+        "mover callback canonicalizes the profile position")
+    assertNil(profilePosition[4],
+        "mover callback removes a stale relative anchor field")
+    assertEqual(descriptor.moverText, "Buff Frame", "BFI mover label")
+    assertEqual(descriptor.holderRolesets, "buffs", "Buff roleset")
+    assertTablesEqual(descriptor.nativeFollower, {
+        globalName = "DebuffFrame",
+        point = "TOPRIGHT",
+        relativePoint = "BOTTOMRIGHT",
+        x = 0,
+        y = -5,
+    }, "native DebuffFrame follows the BFI holder seam")
     assertEqual(descriptor.processing.policy, "NONE", "processing policy")
     assertNil(descriptor.processing.options, "None policy has no options")
 
@@ -634,13 +604,12 @@ do
     assertNil(descriptor.constructionKey.wrapAfter,
         "wrapping remains live")
 
-    -- Two aura slots plus two enchantments at one icon per line need four
-    -- lines; this proves holder sizing does not mistake maxFrameCount for a
-    -- strict global cap.
+    -- The mover owns only the first-row seam. Additional native rows grow
+    -- upward outside it so Debuffs remain immediately below the mover.
     assertEqual(descriptor.holder.width, 20,
         "single-column holder width")
-    assertEqual(descriptor.holder.height, 138,
-        "holder includes two enchantment lines")
+    assertEqual(descriptor.holder.height, 30,
+        "holder reserves exactly one icon row")
 end
 
 do
@@ -897,8 +866,8 @@ do
         "normalized integer cap")
     assertEqual(descriptor.groups[1].sortMethod, "EXPIRATION",
         "invalid sort falls back")
-    assertEqual(descriptor.flowLayout.anchorPoint, "TOPRIGHT",
-        "invalid orientation falls back")
+    assertEqual(descriptor.flowLayout.anchorPoint, "BOTTOMRIGHT",
+        "saved orientation is dormant behind the fixed follower layout")
     assertEqual(descriptor.groups[1].buttonStyle.width, 26,
         "invalid width falls back")
     assertEqual(descriptor.groups[1].buttonStyle.height, 10,
@@ -957,7 +926,7 @@ do
 
     assertTrue(source:find("PublicAndPrivate", 1, true) ~= nil,
         "source documents the combined native source list")
-    assertTrue(source:find("combined ordinary/private", 1, true) ~= nil,
+    assertTrue(source:find("combined native source", 1, true) ~= nil,
         "source discloses inseparable authorized Buffs")
     assertNil(source:find("public Buffs replacement", 1, true),
         "source does not claim public-only Buffs")

@@ -10,25 +10,63 @@ local IsValueNonSecret = BFI.funcs.isValueNonSecret
 local C_Timer = C_Timer
 local CreateFrame = CreateFrame
 local InCombatLockdown = InCombatLockdown
+local rawget = rawget
 
 -- Retail 12.1.0.69273 (wow-ui-source
 -- eb941aad028d73ddc69e3e8ef4da709f4d3cd744) makes aura groups and
 -- item-enchantment sources add-only, then conditionally denies tainted button
 -- access whenever aura data is secret after AF's initializer returns. This
--- controller owns configuration state, plain holders, and native container
--- shells; it never reads aura data, restricted buttons, or native geometry.
+-- controller owns configuration state, plain holders, native container shells,
+-- and one validated Edit Mode root anchor; it never reads aura data,
+-- restricted buttons, private anchors, DeadlyDebuffFrame, or aura geometry.
+-- The follower transaction reads only validated DebuffFrame Edit Mode root
+-- anchor metadata documented by the pinned build above.
 local NATIVE_GROUP_INITIAL_RESERVATIONS = 10
+local ALLOWED_NATIVE_FOLLOWER_GLOBALS = {
+    DebuffFrame = true,
+}
+local ALLOWED_RESTORE_RELATIVE_GLOBALS = {
+    BuffFrame = true,
+    UIParent = true,
+}
+local VALID_ANCHOR_POINTS = {
+    BOTTOM = true,
+    BOTTOMLEFT = true,
+    BOTTOMRIGHT = true,
+    CENTER = true,
+    LEFT = true,
+    RIGHT = true,
+    TOP = true,
+    TOPLEFT = true,
+    TOPRIGHT = true,
+}
 
 local registrations = {}
 local pendingControllers = {}
 local regenRegistered
 local unitEventsRegistered
+local nativeFollowerLifecycleRegistered
+local nativeFollowerEditModeActive
+local nativeFollowerRefreshQueued
+
+local function SetNativeFollowerRefreshPending(controller, pending)
+    controller.nativeFollowerRefreshPending = pending and true or nil
+end
 
 local function NotifyControllerState(controller)
     local signature = table.concat({
         controller.state or "",
-        pendingControllers[controller] and "1" or "0",
+        (
+            pendingControllers[controller]
+            or (
+                controller.nativeFollowerRefreshPending
+                and controller.active
+                and controller.descriptor
+                and controller.descriptor.nativeFollower
+            )
+        ) and "1" or "0",
         controller.reloadRequired and "1" or "0",
+        controller.nativeFollowerActive and "1" or "0",
         controller.diagnostic or "",
     }, "\031")
     if controller.optionsStateSignature == signature then return end
@@ -100,10 +138,12 @@ end
 
 local function ResolvePlayerUnit()
     local playerFrame = _G.PlayerFrame
-    local unit
-    if playerFrame then
-        unit = playerFrame.unit
+    if not IsValueNonSecret(playerFrame)
+        or (type(playerFrame) ~= "table" and type(playerFrame) ~= "userdata")
+    then
+        return "player"
     end
+    local unit = playerFrame.unit
     if IsValueNonSecret(unit)
         and type(unit) == "string"
         and (unit == "player" or unit == "vehicle")
@@ -165,34 +205,643 @@ local function AssertDescriptor(descriptor)
     assert(descriptor.position == nil or type(descriptor.position) == "table",
         "custom aura descriptor position must be a table or nil")
     assert(descriptor.positionSave == nil
-        or type(descriptor.positionSave) == "table",
-        "custom aura descriptor positionSave must be a table or nil")
+        or type(descriptor.positionSave) == "table"
+        or type(descriptor.positionSave) == "function",
+        "custom aura descriptor positionSave must be a table, function, or nil")
+    assert(descriptor.nativeFollower == nil
+        or (
+            type(descriptor.nativeFollower) == "table"
+            and descriptor.nativeFollower.globalName == "DebuffFrame"
+            and descriptor.nativeFollower.point == "TOPRIGHT"
+            and descriptor.nativeFollower.relativePoint == "BOTTOMRIGHT"
+            and descriptor.nativeFollower.x == 0
+            and descriptor.nativeFollower.y == -5
+        ),
+        "custom aura descriptor requires an allowed native follower")
+    assert(descriptor.holderRolesets == nil
+        or descriptor.holderRolesets == "buffs",
+        "custom aura descriptor holderRolesets must be literal buffs or nil")
+    assert(descriptor.nativeFollower == nil or descriptor.position ~= nil,
+        "custom aura native follower requires a holder position")
+    assert(descriptor.position ~= nil or descriptor.positionSave == nil,
+        "custom aura descriptor cannot save a missing holder position")
 end
 
 local function CopyDescriptor(descriptor)
     AssertDescriptor(descriptor)
     local copy = Copy(descriptor)
-    -- Mover saves must retain the profile-owned table identity. All native
-    -- construction/tuning inputs remain isolated copies.
+    -- Mover saves must retain their profile-owned table identity or closure.
+    -- All native construction/tuning inputs remain isolated copies.
     copy.positionSave = descriptor.positionSave
     return copy
+end
+
+local function IsOrdinaryNumber(value)
+    return type(IsValueNonSecret) == "function"
+        and IsValueNonSecret(value)
+        and type(value) == "number"
+        and value == value
+        and value ~= math.huge
+        and value ~= -math.huge
+end
+
+local function IsOrdinaryPositiveNumber(value)
+    return IsOrdinaryNumber(value) and value > 0
+end
+
+local function IsOrdinaryValue(value)
+    return type(IsValueNonSecret) == "function"
+        and IsValueNonSecret(value)
+end
+
+local function IsOrdinaryTable(value)
+    return IsOrdinaryValue(value) and type(value) == "table"
+end
+
+local function IsOrdinaryFunction(value)
+    return IsOrdinaryValue(value) and type(value) == "function"
+end
+
+local function IsOrdinaryString(value)
+    return type(IsValueNonSecret) == "function"
+        and IsValueNonSecret(value)
+        and type(value) == "string"
+        and value ~= ""
+end
+
+local function IsOutOfCombat()
+    local locked = InCombatLockdown()
+    return IsOrdinaryValue(locked)
+        and type(locked) == "boolean"
+        and locked == false
+end
+
+local function CanAccessScriptObject(target)
+    if not IsOrdinaryValue(target) then return false end
+    local targetType = type(target)
+    if targetType ~= "table" and targetType ~= "userdata" then
+        return false
+    end
+
+    local canAccessMethod = target.CanBeAccessedInContext
+    if not IsOrdinaryFunction(canAccessMethod) then return false end
+    local canAccess = canAccessMethod(target)
+    if not IsOrdinaryValue(canAccess)
+        or type(canAccess) ~= "boolean"
+        or canAccess ~= true
+    then
+        return
+    end
+    return canAccessMethod
+end
+
+local function ResolveAccessibleGlobal(globalName, allowedGlobals)
+    if not IsOrdinaryString(globalName) or allowedGlobals[globalName] ~= true then
+        return
+    end
+    local target = rawget(_G, globalName)
+    local canAccessMethod = CanAccessScriptObject(target)
+    if not canAccessMethod then return end
+    return target, canAccessMethod
+end
+
+local function CaptureSystemAnchor(anchorInfo, scale)
+    if not IsOrdinaryTable(anchorInfo)
+        or not IsOrdinaryPositiveNumber(scale)
+    then
+        return
+    end
+
+    local point = anchorInfo.point
+    local relativeTo = anchorInfo.relativeTo
+    local relativePoint = anchorInfo.relativePoint
+    local offsetX = anchorInfo.offsetX
+    local offsetY = anchorInfo.offsetY
+    if not IsOrdinaryString(point)
+        or VALID_ANCHOR_POINTS[point] ~= true
+        or not IsOrdinaryString(relativeTo)
+        or not IsOrdinaryString(relativePoint)
+        or VALID_ANCHOR_POINTS[relativePoint] ~= true
+        or not IsOrdinaryNumber(offsetX)
+        or not IsOrdinaryNumber(offsetY)
+    then
+        return
+    end
+
+    local relativeObject, relativeAccessMethod = ResolveAccessibleGlobal(
+        relativeTo,
+        ALLOWED_RESTORE_RELATIVE_GLOBALS
+    )
+    if not relativeObject then return end
+    local x = offsetX / scale
+    local y = offsetY / scale
+    if not IsOrdinaryNumber(x) or not IsOrdinaryNumber(y) then return end
+    return {
+        source = anchorInfo,
+        point = point,
+        relativeName = relativeTo,
+        relativeObject = relativeObject,
+        relativeAccessMethod = relativeAccessMethod,
+        relativePoint = relativePoint,
+        offsetX = offsetX,
+        offsetY = offsetY,
+        x = x,
+        y = y,
+    }
+end
+
+local function CaptureNativeFollowerSnapshot()
+    local target, canAccessMethod = ResolveAccessibleGlobal(
+        "DebuffFrame",
+        ALLOWED_NATIVE_FOLLOWER_GLOBALS
+    )
+    if not target then return end
+    local getScale = target.GetScale
+    local clearPoints = target.ClearAllPointsBase
+    local setPoint = target.SetPointBase
+    local systemInfo = target.systemInfo
+    if not IsOrdinaryFunction(getScale)
+        or not IsOrdinaryFunction(clearPoints)
+        or not IsOrdinaryFunction(setPoint)
+        or not IsOrdinaryTable(systemInfo)
+    then
+        return
+    end
+
+    local scale = getScale(target)
+    if not IsOrdinaryPositiveNumber(scale) then return end
+
+    local anchorInfo = systemInfo.anchorInfo
+    local anchorInfo2 = systemInfo.anchorInfo2
+    if not IsOrdinaryTable(anchorInfo)
+        or not IsOrdinaryValue(anchorInfo2)
+    then
+        return
+    end
+    if anchorInfo2 ~= nil then
+        if not IsOrdinaryTable(anchorInfo2)
+            or rawequal(anchorInfo, anchorInfo2)
+        then
+            return
+        end
+    end
+
+    local first = CaptureSystemAnchor(anchorInfo, scale)
+    if not first then return end
+    local points = {first}
+    if anchorInfo2 ~= nil then
+        local second = CaptureSystemAnchor(anchorInfo2, scale)
+        if not second then return end
+        points[2] = second
+    end
+    return {
+        target = target,
+        canAccessMethod = canAccessMethod,
+        getScale = getScale,
+        clearPoints = clearPoints,
+        setPoint = setPoint,
+        systemInfo = systemInfo,
+        anchorInfo = anchorInfo,
+        anchorInfo2 = anchorInfo2,
+        scale = scale,
+        points = points,
+    }
+end
+
+local function RevalidateSystemAnchor(point, source, scale)
+    if not IsOrdinaryTable(point) or not rawequal(point.source, source) then
+        return false
+    end
+    local current = CaptureSystemAnchor(source, scale)
+    return current ~= nil
+        and current.point == point.point
+        and current.relativeName == point.relativeName
+        and rawequal(current.relativeObject, point.relativeObject)
+        and rawequal(
+            current.relativeAccessMethod,
+            point.relativeAccessMethod
+        )
+        and current.relativePoint == point.relativePoint
+        and current.offsetX == point.offsetX
+        and current.offsetY == point.offsetY
+        and current.x == point.x
+        and current.y == point.y
+end
+
+local function HasExactSystemAnchorIdentity(original, current, source)
+    if not IsOrdinaryTable(original)
+        or not IsOrdinaryTable(current)
+        or not IsOrdinaryTable(source)
+    then
+        return false
+    end
+    if not rawequal(original.source, source)
+        or not rawequal(current.source, source)
+    then
+        return false
+    end
+    local point = source.point
+    if not IsOrdinaryString(point) then return false end
+    local relativeName = source.relativeTo
+    if not IsOrdinaryString(relativeName) then return false end
+    local relativePoint = source.relativePoint
+    if not IsOrdinaryString(relativePoint) then return false end
+    local offsetX = source.offsetX
+    if not IsOrdinaryNumber(offsetX) then return false end
+    local offsetY = source.offsetY
+    if not IsOrdinaryNumber(offsetY) then return false end
+    if ALLOWED_RESTORE_RELATIVE_GLOBALS[relativeName] ~= true
+        or point ~= original.point
+        or point ~= current.point
+        or relativeName ~= original.relativeName
+        or relativeName ~= current.relativeName
+        or relativePoint ~= original.relativePoint
+        or relativePoint ~= current.relativePoint
+        or offsetX ~= original.offsetX
+        or offsetX ~= current.offsetX
+        or offsetY ~= original.offsetY
+        or offsetY ~= current.offsetY
+    then
+        return false
+    end
+    local relativeObject = rawget(_G, relativeName)
+    if not IsOrdinaryValue(relativeObject) then return false end
+    local relativeType = type(relativeObject)
+    if relativeType ~= "table" and relativeType ~= "userdata"
+    then
+        return false
+    end
+    local relativeAccessMethod = relativeObject.CanBeAccessedInContext
+    if not IsOrdinaryFunction(relativeAccessMethod) then return false end
+    return original.x == current.x
+        and original.y == current.y
+        and rawequal(relativeObject, original.relativeObject)
+        and rawequal(relativeObject, current.relativeObject)
+        and rawequal(
+            relativeAccessMethod,
+            original.relativeAccessMethod
+        )
+        and rawequal(
+            relativeAccessMethod,
+            current.relativeAccessMethod
+        )
+end
+
+local function HasExactNativeFollowerIdentity(original, current)
+    if not IsOrdinaryTable(original) or not IsOrdinaryTable(current) then
+        return false
+    end
+    local target = rawget(_G, "DebuffFrame")
+    if not IsOrdinaryValue(target) then return false end
+    local targetType = type(target)
+    if targetType ~= "table" and targetType ~= "userdata"
+    then
+        return false
+    end
+    local canAccessMethod = target.CanBeAccessedInContext
+    if not IsOrdinaryFunction(canAccessMethod) then return false end
+    local getScale = target.GetScale
+    if not IsOrdinaryFunction(getScale) then return false end
+    local clearPoints = target.ClearAllPointsBase
+    if not IsOrdinaryFunction(clearPoints) then return false end
+    local setPoint = target.SetPointBase
+    if not IsOrdinaryFunction(setPoint) then return false end
+    local systemInfo = target.systemInfo
+    if not IsOrdinaryTable(systemInfo) then return false end
+    local anchorInfo = systemInfo.anchorInfo
+    if not IsOrdinaryTable(anchorInfo) then return false end
+    local anchorInfo2 = systemInfo.anchorInfo2
+    if not IsOrdinaryValue(anchorInfo2) then return false end
+    if anchorInfo2 ~= nil and not IsOrdinaryTable(anchorInfo2) then
+        return false
+    end
+    if not rawequal(target, original.target)
+        or not rawequal(target, current.target)
+        or not rawequal(canAccessMethod, original.canAccessMethod)
+        or not rawequal(canAccessMethod, current.canAccessMethod)
+        or not rawequal(getScale, original.getScale)
+        or not rawequal(getScale, current.getScale)
+        or not rawequal(clearPoints, original.clearPoints)
+        or not rawequal(clearPoints, current.clearPoints)
+        or not rawequal(setPoint, original.setPoint)
+        or not rawequal(setPoint, current.setPoint)
+        or not rawequal(systemInfo, original.systemInfo)
+        or not rawequal(systemInfo, current.systemInfo)
+        or not rawequal(anchorInfo, original.anchorInfo)
+        or not rawequal(anchorInfo, current.anchorInfo)
+        or not rawequal(anchorInfo2, original.anchorInfo2)
+        or not rawequal(anchorInfo2, current.anchorInfo2)
+        or original.scale ~= current.scale
+    then
+        return false
+    end
+    return HasExactSystemAnchorIdentity(
+        original.points[1],
+        current.points[1],
+        original.anchorInfo
+    ) and (
+        original.anchorInfo2 == nil
+        or HasExactSystemAnchorIdentity(
+            original.points[2],
+            current.points[2],
+            original.anchorInfo2
+        )
+    )
+end
+
+local function RevalidateNativeFollowerSnapshot(snapshot)
+    if not IsOrdinaryTable(snapshot) then return false end
+    local current = CaptureNativeFollowerSnapshot()
+    if not current
+        or not rawequal(current.target, snapshot.target)
+        or not rawequal(current.canAccessMethod, snapshot.canAccessMethod)
+        or not rawequal(current.getScale, snapshot.getScale)
+        or not rawequal(current.clearPoints, snapshot.clearPoints)
+        or not rawequal(current.setPoint, snapshot.setPoint)
+        or not rawequal(current.systemInfo, snapshot.systemInfo)
+        or not rawequal(current.anchorInfo, snapshot.anchorInfo)
+        or not rawequal(current.anchorInfo2, snapshot.anchorInfo2)
+        or current.scale ~= snapshot.scale
+        or not RevalidateSystemAnchor(
+            snapshot.points[1],
+            snapshot.anchorInfo,
+            current.scale
+        )
+    then
+        return false
+    end
+    if current.anchorInfo2 == nil then
+        return current.points[2] == nil
+            and snapshot.points[2] == nil
+            and snapshot.points[3] == nil
+            and HasExactNativeFollowerIdentity(snapshot, current)
+    end
+    return current.points[3] == nil
+        and snapshot.points[3] == nil
+        and RevalidateSystemAnchor(
+            snapshot.points[2],
+            snapshot.anchorInfo2,
+            current.scale
+        )
+        and HasExactNativeFollowerIdentity(snapshot, current)
+end
+
+local function CaptureNativeFollowerEditModeState()
+    local manager, canAccessMethod = ResolveAccessibleGlobal(
+        "EditModeManagerFrame",
+        {EditModeManagerFrame = true}
+    )
+    if not manager or not canAccessMethod then return end
+    local active = manager.editModeActive
+    if not IsOrdinaryValue(active)
+        or (active ~= nil and active ~= false)
+    then
+        return
+    end
+    return {
+        manager = manager,
+        canAccessMethod = canAccessMethod,
+        active = active,
+    }
+end
+
+local function IsNativeFollowerEditModeInactive()
+    return CaptureNativeFollowerEditModeState() ~= nil
+end
+
+local function ClearNativeFollowerState(controller)
+    controller.nativeFollowerActive = nil
+    controller.nativeFollowerTarget = nil
+    controller.nativeFollowerRestoreSnapshot = nil
+    controller.nativeFollowerSpec = nil
+end
+
+local function MarkNativeFollowerRefreshPending(controller)
+    SetNativeFollowerRefreshPending(controller, true)
+    if controller.active then
+        controller.state = "ACTIVE_REFRESH_FAILED"
+        controller.diagnostic = "NATIVE_FOLLOWER_REFRESH_FAILED"
+    else
+        controller.state = "NATIVE_UNAVAILABLE"
+        controller.diagnostic = "NATIVE_FOLLOWER_UNAVAILABLE"
+    end
+end
+
+local function IsExactNativeFollowerPayload(descriptor, follower)
+    return IsOrdinaryTable(descriptor)
+        and rawequal(descriptor.nativeFollower, follower)
+        and IsOrdinaryTable(follower)
+        and IsOrdinaryString(follower.globalName)
+        and follower.globalName == "DebuffFrame"
+        and IsOrdinaryString(follower.point)
+        and follower.point == "TOPRIGHT"
+        and IsOrdinaryString(follower.relativePoint)
+        and follower.relativePoint == "BOTTOMRIGHT"
+        and IsOrdinaryNumber(follower.x)
+        and follower.x == 0
+        and IsOrdinaryNumber(follower.y)
+        and follower.y == -5
+end
+
+local function CaptureExactNativeFollowerPayload(descriptor, follower)
+    if not IsExactNativeFollowerPayload(descriptor, follower) then return end
+    return {
+        globalName = follower.globalName,
+        point = follower.point,
+        relativePoint = follower.relativePoint,
+        x = follower.x,
+        y = follower.y,
+    }
+end
+
+local function HasExactApplyTransactionIdentity(
+    controller,
+    descriptor,
+    follower,
+    payload,
+    original,
+    current,
+    holder,
+    holderAccessMethod,
+    editMode
+)
+    local manager = rawget(_G, "EditModeManagerFrame")
+    if not IsOrdinaryValue(manager) then return false end
+    local managerType = type(manager)
+    if managerType ~= "table" and managerType ~= "userdata"
+    then
+        return false
+    end
+    local managerAccessMethod = manager.CanBeAccessedInContext
+    if not IsOrdinaryFunction(managerAccessMethod) then return false end
+    local editModeActive = manager.editModeActive
+    if not IsOrdinaryValue(editModeActive) then return false end
+
+    if not IsOrdinaryValue(holder) then return false end
+    local holderType = type(holder)
+    if holderType ~= "table" and holderType ~= "userdata" then return false end
+    if not rawequal(controller.holder, holder) then return false end
+    local liveHolderAccessMethod = holder.CanBeAccessedInContext
+    if not IsOrdinaryFunction(liveHolderAccessMethod) then return false end
+
+    if not IsOrdinaryTable(descriptor) then return false end
+    local liveFollower = descriptor.nativeFollower
+    if not IsOrdinaryTable(liveFollower)
+        or not rawequal(liveFollower, follower)
+    then
+        return false
+    end
+    local globalName = follower.globalName
+    if not IsOrdinaryString(globalName) then return false end
+    local point = follower.point
+    if not IsOrdinaryString(point) then return false end
+    local relativePoint = follower.relativePoint
+    if not IsOrdinaryString(relativePoint) then return false end
+    local x = follower.x
+    if not IsOrdinaryNumber(x) then return false end
+    local y = follower.y
+    if not IsOrdinaryNumber(y) then return false end
+    return rawequal(liveHolderAccessMethod, holderAccessMethod)
+        and rawequal(manager, editMode.manager)
+        and rawequal(managerAccessMethod, editMode.canAccessMethod)
+        and editModeActive == editMode.active
+        and globalName == payload.globalName
+        and point == payload.point
+        and relativePoint == payload.relativePoint
+        and x == payload.x
+        and y == payload.y
+        and HasExactNativeFollowerIdentity(original, current)
+end
+
+local function RestoreNativeFollower(controller)
+    if not controller.nativeFollowerActive then
+        ClearNativeFollowerState(controller)
+        return true
+    end
+    local snapshot = controller.nativeFollowerRestoreSnapshot
+    if not RevalidateNativeFollowerSnapshot(snapshot) then return false end
+    -- Revalidation above can call target/relative access methods. Capture the
+    -- complete boundary once more, then finish with trusted secret-predicate
+    -- and identity checks (no object methods/getters) before the final combat
+    -- gate and first protected write.
+    local current = CaptureNativeFollowerSnapshot()
+    if not current
+        or not HasExactNativeFollowerIdentity(snapshot, current)
+    then
+        return false
+    end
+    if not IsOutOfCombat() then return false end
+    snapshot.clearPoints(snapshot.target)
+    for index = 1, snapshot.points[2] == nil and 1 or 2 do
+        local point = snapshot.points[index]
+        snapshot.setPoint(
+            snapshot.target,
+            point.point,
+            point.relativeObject,
+            point.relativePoint,
+            point.x,
+            point.y
+        )
+    end
+    ClearNativeFollowerState(controller)
+    return true
+end
+
+local function ApplyNativeFollower(controller, descriptor, refreshRestore)
+    local follower = descriptor.nativeFollower
+    if not follower then
+        return RestoreNativeFollower(controller)
+    end
+    local payload = CaptureExactNativeFollowerPayload(descriptor, follower)
+    if not payload
+        or not nativeFollowerLifecycleRegistered
+    then
+        return false
+    end
+
+    if controller.nativeFollowerActive
+        and TablesEqual(controller.nativeFollowerSpec, follower)
+    then
+        if not refreshRestore then return true end
+    elseif controller.nativeFollowerActive then
+        if not RestoreNativeFollower(controller) then return false end
+    end
+    local original = CaptureNativeFollowerSnapshot()
+    if not original then return false end
+    local holder = controller.holder
+    local holderAccessMethod = CanAccessScriptObject(holder)
+    if not holderAccessMethod then return false end
+    local firstEditMode = CaptureNativeFollowerEditModeState()
+    if not firstEditMode then return false end
+
+    -- Second complete validation pass. These checks can call access/getter
+    -- methods, so a final trusted secret-predicate/identity pass with no object
+    -- methods or getters follows them.
+    local current = CaptureNativeFollowerSnapshot()
+    local currentHolderAccessMethod = CanAccessScriptObject(holder)
+    local currentEditMode = CaptureNativeFollowerEditModeState()
+    local currentPayload = CaptureExactNativeFollowerPayload(
+        descriptor,
+        follower
+    )
+    if not current
+        or not currentHolderAccessMethod
+        or not currentEditMode
+        or not currentPayload
+        or not rawequal(holderAccessMethod, currentHolderAccessMethod)
+        or not rawequal(firstEditMode.manager, currentEditMode.manager)
+        or not rawequal(
+            firstEditMode.canAccessMethod,
+            currentEditMode.canAccessMethod
+        )
+        or firstEditMode.active ~= currentEditMode.active
+        or not HasExactApplyTransactionIdentity(
+            controller,
+            descriptor,
+            follower,
+            payload,
+            original,
+            current,
+            holder,
+            holderAccessMethod,
+            currentEditMode
+        )
+    then
+        return false
+    end
+    if not IsOutOfCombat() then return false end
+    original.clearPoints(original.target)
+    original.setPoint(
+        original.target,
+        payload.point,
+        holder,
+        payload.relativePoint,
+        payload.x,
+        payload.y
+    )
+    controller.nativeFollowerTarget = original.target
+    controller.nativeFollowerRestoreSnapshot = original
+    controller.nativeFollowerSpec = Copy(follower)
+    controller.nativeFollowerActive = true
+    return true
 end
 
 local function ApplyHolder(controller, descriptor)
     local holder = controller.holder
     AF.SetSize(holder, descriptor.holder.width, descriptor.holder.height)
 
+    if holder.mover then
+        AF.UpdateMoverSave(
+            holder,
+            descriptor.positionSave or descriptor.position
+        )
+    end
     if descriptor.position then
-        if holder.mover then
-            AF.UpdateMoverSave(
-                holder,
-                descriptor.positionSave or descriptor.position
-            )
-        end
         BFI.funcs.LoadPosition(holder, descriptor.position)
     end
 
     holder.enabled = descriptor.enabled
+    return true
 end
 
 local function PositionContainer(controller, descriptor)
@@ -209,7 +858,7 @@ end
 
 local function ApplyNativeTuning(controller, descriptor)
     local container = controller.container
-    ApplyHolder(controller, descriptor)
+    if not ApplyHolder(controller, descriptor) then return false end
     PositionContainer(controller, descriptor)
     AF.SetCustomAuraContainerFlowLayout(container, descriptor.flowLayout)
     AF.SetCustomAuraContainerProcessingPolicy(
@@ -263,6 +912,7 @@ local function ApplyNativeTuning(controller, descriptor)
         controller.unit = unit
     end
     AF.UpdateCustomAuraContainer(container)
+    return true
 end
 
 local function RestoreNative(controller)
@@ -281,50 +931,119 @@ local function HideCustom(controller)
     controller.active = nil
 end
 
+local function ShowCustom(controller)
+    AF.SetCustomAuraContainerEnabled(controller.container, true)
+    controller.container:Show()
+    controller.holder.enabled = true
+    controller.holder:Show()
+    controller.active = true
+end
+
 local function Deactivate(controller, state)
+    if not RestoreNativeFollower(controller) then
+        return false
+    end
     if not RestoreNative(controller) then
         return false
     end
 
     HideCustom(controller)
+    SetNativeFollowerRefreshPending(controller, false)
     controller.state = state or (controller.buildCompleted and "INACTIVE" or "NEW")
     return true
 end
 
 local function Activate(controller)
     local container = controller.container
+    if not ApplyNativeFollower(
+        controller,
+        controller.descriptor,
+        controller.nativeFollowerRefreshPending == true
+    ) then
+        -- A temporarily unavailable follower (most notably while Blizzard
+        -- Edit Mode owns DebuffFrame) must also release the public Buff
+        -- fallback. Otherwise an update could hide the custom container while
+        -- Blizzard Buffs remain suppressed, leaving no Buff display at all.
+        if controller.active then
+            MarkNativeFollowerRefreshPending(controller)
+            return false
+        end
+        if RestoreNative(controller) then
+            HideCustom(controller)
+        else
+            ShowCustom(controller)
+        end
+        MarkNativeFollowerRefreshPending(controller)
+        return false
+    end
+
     AF.SetCustomAuraContainerEnabled(container, true)
 
     -- Fail native: do not hide Blizzard until the replacement has completed
     -- its one-shot construction and final enable transition.
     if not BD.SetNativePublicAurasSuppressed(controller.which, true) then
-        AF.SetCustomAuraContainerEnabled(container, false)
-        container:Hide()
-        controller.holder:Hide()
-        controller.active = nil
-        controller.state = "SUPPRESSION_FAILED"
-        controller.diagnostic = "NATIVE_SUPPRESSION_FAILED"
+        local nativeRestored = RestoreNative(controller)
+        local followerRestored = RestoreNativeFollower(controller)
+        if nativeRestored then
+            HideCustom(controller)
+            if followerRestored then
+                controller.state = "SUPPRESSION_FAILED"
+                controller.diagnostic = "NATIVE_SUPPRESSION_FAILED"
+            else
+                MarkNativeFollowerRefreshPending(controller)
+            end
+        else
+            ShowCustom(controller)
+            MarkNativeFollowerRefreshPending(controller)
+        end
         return false
     end
 
-    container:Show()
-    controller.holder.enabled = true
-    controller.holder:Show()
-    controller.active = true
+    ShowCustom(controller)
+    SetNativeFollowerRefreshPending(controller, false)
     controller.state = "ACTIVE"
     controller.diagnostic = nil
     return true
 end
 
 local function CreateHolder(controller, descriptor)
-    if controller.holder then return end
+    if controller.holder then return true end
 
-    local holder = CreateFrame("Frame", nil, AF.UIParent)
-    controller.holder = holder
-    holder:Hide()
+    local holder = controller.pendingHolder
+    if not holder then
+        holder = CreateFrame("Frame", nil, AF.UIParent)
+        holder:Hide()
+        -- SetRolesets is protected and its final combat gate can race. Retain
+        -- this unpublished frame so every retry reuses the same allocation;
+        -- mover/container publication remains after roleset success.
+        controller.pendingHolder = holder
+    end
+    if descriptor.holderRolesets then
+        if controller.holderRolesetsApplied ~= descriptor.holderRolesets then
+            local holderAccessMethod = CanAccessScriptObject(holder)
+            if not holderAccessMethod then return false end
+            local setRolesets = holder.SetRolesets
+            if not IsOrdinaryFunction(setRolesets) then return false end
+            local currentHolderAccessMethod = CanAccessScriptObject(holder)
+            local currentSetRolesets = holder.SetRolesets
+            if not currentHolderAccessMethod
+                or not IsOrdinaryFunction(currentSetRolesets)
+                or not rawequal(
+                    holderAccessMethod,
+                    currentHolderAccessMethod
+                )
+                or not rawequal(currentSetRolesets, setRolesets)
+                or not IsOutOfCombat()
+            then return false end
+            setRolesets(holder, descriptor.holderRolesets)
+            controller.holderRolesetsApplied = descriptor.holderRolesets
+        end
+    elseif controller.holderRolesetsApplied ~= nil then
+        return false
+    end
     AF.SetSize(holder, descriptor.holder.width, descriptor.holder.height)
 
-    if descriptor.moverText then
+    if descriptor.moverText and descriptor.position then
         AF.CreateMover(
             holder,
             "BFI: " .. L["UI Widgets"],
@@ -332,6 +1051,9 @@ local function CreateHolder(controller, descriptor)
             descriptor.positionSave or descriptor.position
         )
     end
+    controller.holder = holder
+    controller.pendingHolder = nil
+    return true
 end
 
 local function RecordExpectedConstruction(descriptor)
@@ -359,14 +1081,18 @@ local function Build(controller, descriptor)
         return false
     end
 
+    if not CreateHolder(controller, descriptor) then
+        controller.state = "NATIVE_UNAVAILABLE"
+        controller.diagnostic = "HOLDER_ROLESET_UNAVAILABLE"
+        return false
+    end
+    ApplyHolder(controller, descriptor)
+
     controller.buildAttempted = true
     controller.state = "BUILDING"
     constructionStats.buildAttempts = constructionStats.buildAttempts + 1
     local expectedReservations = RecordExpectedConstruction(descriptor)
     controller.expectedInitialReservations = expectedReservations
-
-    CreateHolder(controller, descriptor)
-    ApplyHolder(controller, descriptor)
 
     local container = AF.CreateCustomAuraContainer(controller.holder)
     controller.container = container
@@ -457,8 +1183,8 @@ end
 
 function ControllerMixin:_ApplyPending()
     -- Retargeting is a supported live native write in combat. Apply the
-    -- sanitized unit first, while leaving any queued config operation pending
-    -- for its protected out-of-combat tuning pass.
+    -- sanitized unit first while any latest tuning operation remains queued
+    -- for its protected out-of-combat pass.
     if self.pendingUnit then
         self:_ApplyRetarget()
     end
@@ -536,8 +1262,13 @@ function ControllerMixin:_ApplyPending()
     else
         self.reloadRequired = nil
         self.descriptor = descriptor
-        ApplyNativeTuning(self, descriptor)
-        Activate(self)
+        if not ApplyNativeTuning(self, descriptor)
+            or not Activate(self)
+        then
+            if not self.nativeFollowerRefreshPending then
+                MarkNativeFollowerRefreshPending(self)
+            end
+        end
     end
 
     UnregisterRegenIfIdle()
@@ -570,9 +1301,17 @@ function ControllerMixin:GetState()
         which = self.which,
         state = self.state,
         active = self.active == true,
-        pending = pendingControllers[self] == true,
+        operationPending = pendingControllers[self] == true,
+        pending = pendingControllers[self] == true
+            or (
+                self.nativeFollowerRefreshPending == true
+                and self.active == true
+                and self.descriptor ~= nil
+                and self.descriptor.nativeFollower ~= nil
+            ),
         buildAttempted = self.buildAttempted == true,
         buildCompleted = self.buildCompleted == true,
+        nativeFollowerActive = self.nativeFollowerActive == true,
         reloadRequired = self.reloadRequired == true,
         diagnostic = self.diagnostic,
         unit = self.unit,
@@ -581,12 +1320,128 @@ function ControllerMixin:GetState()
     }
 end
 
+local function RefreshNativeAuraFollowers()
+    nativeFollowerRefreshQueued = nil
+    if not IsOutOfCombat() then
+        for _, controller in pairs(registrations) do
+            local descriptor = controller.descriptor
+            if controller.active
+                and descriptor
+                and descriptor.nativeFollower
+            then
+                SetNativeFollowerRefreshPending(controller, true)
+            end
+            NotifyControllerState(controller)
+        end
+        return
+    end
+    if nativeFollowerEditModeActive then return end
+    for _, controller in pairs(registrations) do
+        local descriptor = controller.descriptor
+        if not controller.pendingOperation
+            and controller.active
+            and descriptor
+            and descriptor.nativeFollower
+        then
+            if ApplyNativeFollower(controller, descriptor, true) then
+                SetNativeFollowerRefreshPending(controller, false)
+                controller.state = "ACTIVE"
+                controller.diagnostic = nil
+            else
+                MarkNativeFollowerRefreshPending(controller)
+            end
+            NotifyControllerState(controller)
+        elseif not controller.pendingOperation
+            and controller.buildCompleted
+            and descriptor
+            and descriptor.enabled
+            and descriptor.nativeFollower
+            and controller.diagnostic == "NATIVE_FOLLOWER_UNAVAILABLE"
+        then
+            -- The native frame can be temporarily unavailable while Blizzard
+            -- Edit Mode owns it or before its systemInfo is initialized. A
+            -- later lifecycle event retries the completed container without
+            -- allocating another native shell.
+            Activate(controller)
+            NotifyControllerState(controller)
+        end
+    end
+end
+
+local function QueueNativeAuraFollowerRefresh()
+    if nativeFollowerRefreshQueued then return end
+    nativeFollowerRefreshQueued = true
+    C_Timer.After(0, RefreshNativeAuraFollowers)
+end
+
+local function OnNativeAuraFollowerEvent()
+    QueueNativeAuraFollowerRefresh()
+end
+
+local function OnEditModeEnter()
+    nativeFollowerEditModeActive = true
+    for _, controller in pairs(registrations) do
+        if controller.nativeFollowerActive then
+            if not RestoreNativeFollower(controller) then
+                MarkNativeFollowerRefreshPending(controller)
+            end
+            NotifyControllerState(controller)
+        end
+    end
+end
+
+local function OnEditModeExit()
+    nativeFollowerEditModeActive = false
+    QueueNativeAuraFollowerRefresh()
+end
+
+local function RegisterNativeFollowerLifecycle()
+    if nativeFollowerLifecycleRegistered then return true end
+
+    local eventRegistry = rawget(_G, "EventRegistry")
+    if not IsOrdinaryTable(eventRegistry) then return false end
+    local registerCallback = eventRegistry.RegisterCallback
+    if not IsOrdinaryFunction(registerCallback) then return false end
+
+    -- Blizzard leaves editModeActive nil until the first Enter; exact ordinary
+    -- nil/false are inactive, while true, another value, or secrecy fail closed.
+    nativeFollowerEditModeActive = not IsNativeFollowerEditModeInactive()
+
+    registerCallback(
+        eventRegistry,
+        "EditMode.Enter",
+        OnEditModeEnter,
+        BD
+    )
+    registerCallback(
+        eventRegistry,
+        "EditMode.Exit",
+        OnEditModeExit,
+        BD
+    )
+    BD:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED", OnNativeAuraFollowerEvent)
+    BD:RegisterEvent("PLAYER_ENTERING_WORLD", OnNativeAuraFollowerEvent)
+    BD:RegisterEvent("PLAYER_REGEN_ENABLED", OnNativeAuraFollowerEvent)
+    BD:RegisterEvent(
+        "PLAYER_SPECIALIZATION_CHANGED",
+        OnNativeAuraFollowerEvent
+    )
+    BD:RegisterEvent(
+        "ACTIVE_PLAYER_SPECIALIZATION_CHANGED",
+        OnNativeAuraFollowerEvent
+    )
+    nativeFollowerLifecycleRegistered = true
+    return true
+end
+
 function BD.RegisterCustomAuraContainerPane(which, compiler)
     assert(IsPane(which), "custom aura pane must be buffs or debuffs")
     assert(type(compiler) == "function",
         "custom aura pane compiler must be a function")
     assert(registrations[which] == nil,
         "custom aura pane is already registered: " .. which)
+
+    RegisterNativeFollowerLifecycle()
 
     local controller = {
         which = which,
