@@ -78,7 +78,9 @@ end
 
 local function UpdateEnabledState(checked)
     enabled:SetText(checked and L["Enabled"] or L["Disabled"])
-    enabled:SetTextColor(checked and "softlime" or "firebrick")
+    enabled.label:SetTextColor(
+        AF.GetColorRGB(checked and "softlime" or "firebrick")
+    )
 end
 
 local function SetPayload(row, value)
