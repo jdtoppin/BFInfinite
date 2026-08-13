@@ -6,9 +6,9 @@
     <Script file="Enhancements_Options.lua"/>
     <Script file="Enhancements.lua"/>
     <Script file="Colors.lua"/>
-    <!-- Global spell-ID aura lists are disabled until they have a verified
-         secret-safe runtime consumer. -->
-    <!-- <Script file="Auras.lua"/> -->
+    <!-- Only the 12.1 native Global Colors consumer is restored here.
+         Global blacklist and priority lists remain retired. -->
+    <Script file="Auras.lua"/>
     <Script file="UnitFrames_Options.lua"/>
     <Script file="UnitFrames.lua"/>
     <Script file="NameplatesPreview.lua"/>
@@ -31,5 +31,6 @@
     <Script file="Profiles.lua"/>
     <Script file="About.lua"/>
     <Script file="CVarRestoreFrame.lua"/>
+    <Script file="ChangelogData.lua"/>
     <Script file="ChangelogsFrame.lua"/>
 </Ui>

@@ -679,8 +679,18 @@ assertNotContains(
 )
 assertContains(
     rendererCode,
+    "local window = AF.CreateBorderedFrame(",
+    "Damage Meter windows must use the shared bordered surface"
+)
+assertNotContains(
+    rendererCode,
     "AF.ApplyDefaultBackdrop_NoBorder(header)",
-    "Damage Meter title bars must use the shared BFI backdrop"
+    "Damage Meter headers must not cover the window border"
+)
+assertNotContains(
+    rendererCode,
+    "AF.ApplyDefaultBackdrop_NoBorder(body)",
+    "Damage Meter bodies must not cover the window border"
 )
 
 local flatDropdown = extractSection(
@@ -835,6 +845,11 @@ assertContains(
     options,
     "DM.config.windowHeights[index] = value",
     "each BFI meter exposes a live independent height"
+)
+assertContains(
+    rendererCode,
+    'AF.Fire("BFI_RefreshOptions", "damageMeter")',
+    "completed meter resizes must refresh open Damage Meter options"
 )
 assertContains(
     options,

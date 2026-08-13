@@ -46,7 +46,15 @@ assertFalse(
     "Character styling must not enumerate visibility-dependent stat rows"
 )
 assertFalse(
-    moduleSource:find("GetAverageItemLevel()", 1, true),
+    moduleSource:find("EnumerateActive", 1, true),
+    "Character styling must not enumerate active stat rows"
+)
+assertFalse(
+    moduleSource:find("Background:IsShown", 1, true),
+    "Character styling must not branch on stat-row visibility"
+)
+assertFalse(
+    moduleSource:find("GetAverageItemLevel", 1, true),
     "Character styling must not query or reformat restricted stat values"
 )
 assertFalse(
