@@ -128,6 +128,10 @@ local function newWidget(kind, parent)
         self.scripts[script] = callback
     end
 
+    function widget:SetShown(shown)
+        self.shown = shown and true or false
+    end
+
     function widget:SetSelectedValue(value)
         self.selectedValue = value
     end
@@ -285,6 +289,10 @@ local function createHarness()
             (state.cascadingMenuCloseCalls or 0) + 1
     end
 
+    function AF.ClearPoints(widget)
+        widget.points = {}
+    end
+
     function AF.ShowCascadingMenu(owner, items)
         state.cascadingMenu = {owner = owner, items = items}
     end
@@ -432,9 +440,17 @@ assertEqual(harness.list.points[2][1], "BOTTOMRIGHT",
     "binding list bottom and right share the panel anchor")
 
 local firstRow = harness.list.widgets[1]
-firstRow.editPayload.onClick()
-assertEqual(harness.cascadingMenu.owner, firstRow.editPayload,
-    "spell picker anchors to the row action button")
+assertTrue(not firstRow.editPayload.shown,
+    "spell rows do not show a separate picker button")
+assertEqual(firstRow.payload.width, 239,
+    "spell field uses the space released by the picker button")
+assertEqual(firstRow.payload.label, "Spell ID or click to pick",
+    "spell field has an in-field picker prompt")
+assertEqual(firstRow.payload:GetText(), "2061",
+    "saved spell ID is displayed as text")
+firstRow.payload.scripts.OnMouseDown(firstRow.payload, "LeftButton")
+assertEqual(harness.cascadingMenu.owner, firstRow.payload,
+    "spell picker opens from and anchors to the value field")
 assertEqual(harness.cascadingMenu.items[1].text, "Class Spells",
     "spell picker groups class spells")
 assertEqual(harness.cascadingMenu.items[2].text, "Specialization Spells",
@@ -442,6 +458,8 @@ assertEqual(harness.cascadingMenu.items[2].text, "Specialization Spells",
 harness.cascadingMenu.items[2].children[1].callback()
 assertEqual(harness.config.bindings[1][3], 47540,
     "suggested spell selection persists its spell ID")
+assertEqual(firstRow.payload:GetText(), "47540",
+    "suggested spell selection immediately populates the value field")
 
 local closeCalls = harness.cascadingMenuCloseCalls or 0
 harness:FireCallback("AF_PLAYER_SPEC_UPDATE")
@@ -503,9 +521,19 @@ assertEqual(harness.config.bindings[1][2], "custom",
     "action switch updates action type")
 assertEqual(harness.config.bindings[1][3], "",
     "action switch clears the prior spell payload")
+assertTrue(firstRow.editPayload.shown,
+    "custom macros retain their separate editor button")
+assertEqual(firstRow.payload.width, 190,
+    "custom macro field leaves room for its editor button")
 firstRow.action.onSelect("target")
 assertEqual(harness.config.bindings[1][3], nil,
     "payload-free action clears the custom payload slot")
+assertTrue(not firstRow.editPayload.shown,
+    "payload-free actions hide the editor button")
+harness.cascadingMenu = nil
+firstRow.payload.scripts.OnMouseDown(firstRow.payload, "LeftButton")
+assertEqual(harness.cascadingMenu, nil,
+    "non-spell fields do not open the spell picker")
 
 harness.smartResurrection.onSelect("normal+combat")
 assertEqual(harness.config.smartResurrection, "normal+combat",

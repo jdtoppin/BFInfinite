@@ -184,7 +184,7 @@ local function ShowSpellPicker(row)
             disabled = true,
         }
     end
-    AF.ShowCascadingMenu(row.editPayload, items, 15)
+    AF.ShowCascadingMenu(row.payload, items, 15)
 end
 
 local function ShowMacroEditor(row)
@@ -291,6 +291,15 @@ local function CreateRow(index)
     payload:SetScript("OnReceiveDrag", function()
         SetPayloadFromCursor(row)
     end)
+    payload:SetScript("OnMouseDown", function(_, button)
+        local binding = GetConfig().bindings[row.index]
+        if button == "LeftButton"
+            and binding
+            and binding[2] == "spell"
+        then
+            ShowSpellPicker(row)
+        end
+    end)
     payload:SetConfirmButton(function(value)
         SetPayload(row, value)
         -- AF's confirm wrapper records the submitted text after this callback.
@@ -328,8 +337,6 @@ local function CreateRow(index)
         if not binding then return end
         if binding[2] == "custom" then
             ShowMacroEditor(row)
-        elseif binding[2] == "spell" then
-            ShowSpellPicker(row)
         end
     end)
 
@@ -365,11 +372,19 @@ local function LoadRow(row, index, binding)
     row.action:SetSelectedValue(binding[2])
 
     local hasPayload = payloadActions[binding[2]]
-    row.editPayload:SetEnabled(
-        binding[2] == "custom" or binding[2] == "spell"
-    )
-    row.editPayload:SetText(
-        binding[2] == "spell" and L["Pick"] or L["Edit"]
+    local hasCustomEditor = binding[2] == "custom"
+    row.editPayload:SetEnabled(hasCustomEditor)
+    row.editPayload:SetShown(hasCustomEditor)
+    row.editPayload:SetText(L["Edit"])
+    row.payload:SetWidth(hasCustomEditor and 190 or 239)
+    AF.ClearPoints(row.up)
+    AF.SetPoint(
+        row.up,
+        "LEFT",
+        hasCustomEditor and row.editPayload or row.payload,
+        "RIGHT",
+        7,
+        0
     )
     row.payload:SetEnabled(hasPayload)
     row.payload:SetNotUserChangable(binding[2] == "custom")
@@ -378,9 +393,9 @@ local function LoadRow(row, index, binding)
         if binding[2] == "custom" then
             displayValue = tostring(displayValue):gsub("[\r\n]+", "  /  ")
         end
-        row.payload:SetText(displayValue)
+        row.payload:SetText(tostring(displayValue))
         if binding[2] == "spell" then
-            row.payload:SetLabel(L["Spell ID"])
+            row.payload:SetLabel(L["Spell ID or click to pick"])
         elseif binding[2] == "macro" then
             row.payload:SetLabel(L["Macro Name or Index"])
         elseif binding[2] == "custom" then
@@ -566,7 +581,6 @@ local function CreatePanel()
             ])
             row.editPayload:SetEnabled(
                 config.bindings[row.index][2] == "custom"
-                or config.bindings[row.index][2] == "spell"
             )
             row.up:SetEnabled(row.index > 1)
             row.down:SetEnabled(
