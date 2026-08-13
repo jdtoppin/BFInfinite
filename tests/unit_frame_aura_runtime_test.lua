@@ -2593,6 +2593,28 @@ local function testDisabledConfigModePreviewCannotEscape()
     assertEqual(controller.shown, true, "post-preview live holder")
 end
 
+local function testCompositePresentationsSuppressLegacyPreview()
+    for _, presentation in ipairs({
+        "icon_duration_bar",
+        "frame_highlight",
+    }) do
+        local harness = makeHarness()
+        local root = newRoot("CompositePreview", "target")
+        local runtime = createRuntime(harness, root)
+        runtime.enabled = true
+        runtime:LoadConfig(validConfig({
+            presentation = presentation,
+        }))
+
+        root.inConfigMode = true
+        runtime:EnableConfigMode()
+        assertEqual(#harness.legacyFrames, 0,
+            presentation .. " legacy preview suppression")
+        assertEqual(runtime:GetNativeAuraState().configMode, true,
+            presentation .. " config-mode state")
+    end
+end
+
 local function testWaitingUnitAndTerminalDestroy()
     local harness = makeHarness()
     local root = newRoot("Waiting", nil)
@@ -3970,6 +3992,7 @@ local function testNameplateRuntimeOptions()
         false,
         {
             includeSpellColors = false,
+            includePartition = false,
             allowCombatInitialBuild = true,
             keepNativeEnabledWhenHidden = true,
             immediateConfigCommit = true,
@@ -4001,6 +4024,16 @@ local function testNameplateRuntimeOptions()
     harness:SetCombat(true)
     runtime:LoadConfig(validConfig({
         offset = 9,
+        subFrame = {
+            enabled = true,
+            filter = "notCastByMe",
+            desaturated = true,
+            width = 8,
+            height = 8,
+        },
+        spellColors = {
+            [999] = {1, 0, 0, 1},
+        },
     }))
     runtime:Enable()
 
@@ -4015,7 +4048,9 @@ local function testNameplateRuntimeOptions()
     assertEqual(controller.frame.position[3], 9,
         "nameplate custom placement offset")
     assertEqual(harness.compiles[1].config.spellColors, nil,
-        "nameplate Global Colors opt-out")
+        "nameplate Global and imported spell-color opt-out")
+    assertEqual(harness.compiles[1].config.subFrame, nil,
+        "bounded runtime Separate Own partition opt-out")
     assertEqual(harness.registered.PLAYER_REGEN_ENABLED, nil,
         "nameplate combat initial regen queue")
 
@@ -4084,6 +4119,7 @@ testSecretSafeWholeHolderGates()
 testSpellIDReactionGates()
 testConfigModeNeverRetargetsPlayer()
 testDisabledConfigModePreviewCannotEscape()
+testCompositePresentationsSuppressLegacyPreview()
 testWaitingUnitAndTerminalDestroy()
 testPolymorphicGlobalRefreshSource()
 testGlobalSpellColorRefresh()

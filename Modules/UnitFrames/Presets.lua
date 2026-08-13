@@ -1153,6 +1153,20 @@ local default_groups = {
     },
 }
 
+-- Buff Displays extend the existing Party/Raid Buffs rows. Keep their three
+-- built-in templates present but disabled by default; the shipped base rows
+-- remain the only active helpful presentation until a user opts in.
+if type(UF.NormalizeBuffDisplayCollection) == "function" then
+    UF.NormalizeBuffDisplayCollection(
+        default_groups.party.indicators.buffs,
+        {healingWhitelist = default_whitelist}
+    )
+    UF.NormalizeBuffDisplayCollection(
+        default_groups.raid.indicators.buffs,
+        {healingWhitelist = default_whitelist}
+    )
+end
+
 local default_1 = {
     player = {
         general = {
@@ -6350,6 +6364,31 @@ local function MigrateGroupDispels(config, owner)
     end
 end
 
+local function MigrateGroupBuffDisplays(config, owner)
+    if type(UF.NormalizeBuffDisplayCollection) ~= "function" then
+        return
+    end
+    local group = type(config[owner]) == "table"
+        and config[owner]
+        or nil
+    local indicators = group
+        and type(group.indicators) == "table"
+        and group.indicators
+        or nil
+    if not indicators then return end
+
+    if type(indicators.buffs) ~= "table" then
+        indicators.buffs = AF.Copy(
+            default_groups[owner].indicators.buffs
+        )
+        indicators.buffs.enabled = false
+    end
+    UF.NormalizeBuffDisplayCollection(
+        indicators.buffs,
+        {healingWhitelist = default_whitelist}
+    )
+end
+
 function UF.MigrateConfig(config)
     -- A missing module table means a genuinely new profile; hydration below
     -- should install the enabled Party and Raid defaults. Existing profiles
@@ -6359,6 +6398,8 @@ function UF.MigrateConfig(config)
 
     MigrateGroupDispels(config, "party")
     MigrateGroupDispels(config, "raid")
+    MigrateGroupBuffDisplays(config, "party")
+    MigrateGroupBuffDisplays(config, "raid")
     return config
 end
 

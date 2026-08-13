@@ -110,10 +110,18 @@ end
 
 local function CopyCompilerConfig(runtime, config)
     local copied = AF.Copy(config)
-    if runtime._includeSpellColors
-        and A
-        and type(A.GetNativeSpellColorMap) == "function"
-    then
+    if not runtime._includePartition then
+        -- Bounded integrations may opt out of the Separate Own partition,
+        -- whose relation variants expand native group construction. Preserve
+        -- SavedVariables but compile a single presentation topology.
+        copied.subFrame = nil
+    end
+    if not runtime._includeSpellColors then
+        -- Callers that opt out own a fixed native group budget. Remove both
+        -- suite-global colors and any imported profile-local color buckets so
+        -- SavedVariables cannot silently expand that reviewed topology.
+        copied.spellColors = nil
+    elseif A and type(A.GetNativeSpellColorMap) == "function" then
         copied.spellColors = A.GetNativeSpellColorMap()
     end
     return copied
@@ -1102,12 +1110,30 @@ local function DisablePreview(runtime)
 end
 
 local function SyncPreview(runtime)
-    local preview = EnsurePreview(runtime)
-    preview.enabled = runtime.enabled
     -- The preview is synthetic and never evaluates live aura identity. Feed
     -- it the preserved profile-local source so its ordinary appearance stays
     -- faithful even when the native group-harmful compiler copy is sanitized.
     local previewConfig = runtime._sourceConfig or runtime._config
+    if previewConfig
+        and not runtime._includePartition
+        and previewConfig.subFrame ~= nil
+    then
+        previewConfig = AF.Copy(previewConfig)
+        previewConfig.subFrame = nil
+    end
+    local presentation = previewConfig and previewConfig.presentation
+        or "icons"
+    if presentation ~= "icons" then
+        -- The legacy synthetic renderer cannot faithfully represent managed
+        -- Icon + Duration Bar or Frame Highlight presentations. Suppress it
+        -- instead of previewing a misleading ordinary icon row; Blizzard's
+        -- live/test native provider remains the release-security authority.
+        DisablePreview(runtime)
+        return
+    end
+
+    local preview = EnsurePreview(runtime)
+    preview.enabled = runtime.enabled
     if previewConfig then
         preview:LoadConfig(AF.Copy(previewConfig))
     end
@@ -1589,6 +1615,7 @@ local function InitializeNativeAuraIndicator(
     frame._controller = controller
     frame._groupManaged = groupManaged == true
     frame._includeSpellColors = options.includeSpellColors ~= false
+    frame._includePartition = options.includePartition ~= false
     frame._allowCombatInitialBuild =
         options.allowCombatInitialBuild == true
     frame._keepNativeEnabledWhenHidden =
@@ -1682,7 +1709,8 @@ function UF.CreateNativeGroupAuraIndicator(
     parent,
     name,
     auraFilter,
-    seedContainer
+    seedContainer,
+    options
 )
     if not UF.HasNativeAuraContainerBackend() then
         return nil, "NATIVE_AURA_BACKEND_UNAVAILABLE"
@@ -1703,7 +1731,7 @@ function UF.CreateNativeGroupAuraIndicator(
         controller,
         false,
         true,
-        nil
+        options
     )
 end
 

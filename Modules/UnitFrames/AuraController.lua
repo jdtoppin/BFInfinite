@@ -10,25 +10,27 @@ local InCombatLockdown = InCombatLockdown
 local floor, huge = math.floor, math.huge
 local ipairs, next, pairs, type = ipairs, next, pairs, type
 
--- Retail 12.1.0.69273 (wow-ui-source eb941aad) makes native aura
+-- Retail 12.1.0.69299 (wow-ui-source 31c7f7b9cc79) makes native aura
 -- groups/slots add-only and restricts their buttons after initialization.
 -- This controller owns only configuration-derived state and never reads aura
 -- data, live buttons, native container geometry, or native visibility.
--- AF #39/r42 adds native dispel-color textures on top of r41's native
--- dispel-overlay slots, static Block colors, construction ledgers, and the
--- duration carrier consumed here.
-local REQUIRED_AF_VERSION = 42
+-- AF r43 adds the scriptless aura-overlay slot and remaining-time icon
+-- underbar capabilities on top of r42's native dispel-color presentation.
+local REQUIRED_AF_VERSION = 43
 local NATIVE_GROUP_AURA_TEMPLATE = "CustomAuraContainerTemplate"
 -- CustomAuraContainerConstants.FrameCreationBatchSize in the pinned build.
 local NATIVE_INITIAL_GROUP_RESERVATIONS = 10
 local REQUIRED_AF_METHODS = {
     "AddCustomAuraGroup",
     "AddCustomAuraDispelOverlaySlot",
+    "AddCustomAuraOverlaySlot",
     "AddCustomAuraSlot",
     "CreateCustomAuraContainer",
     "GetCustomAuraContainerConstructionStats",
     "GetCustomAuraContainerConstructionTotals",
     "HasCustomAuraContainer",
+    "HasCustomAuraIconDurationBar",
+    "HasCustomAuraOverlaySlot",
     "HasNativeDispelColorTexture",
     "SetCustomAuraContainerEnabled",
     "SetCustomAuraContainerFlowLayout",
@@ -128,6 +130,8 @@ function UF.HasNativeAuraContainerBackend()
     end
 
     return AF.HasCustomAuraContainer()
+        and AF.HasCustomAuraIconDurationBar()
+        and AF.HasCustomAuraOverlaySlot()
         and AF.HasNativeDispelColorTexture()
 end
 
@@ -271,6 +275,12 @@ local function NormalizeSlot(slot, seenKeys, includeStyle)
             -- identity rather than copying a script object as configuration.
             normalized.anchorTarget = slot.anchorTarget
             normalized.overlayStyle = CopyTable(slot.overlayStyle or {})
+        elseif slot.kind == "auraOverlay" then
+            assert(slot.anchorTo == "healthBar" or slot.anchorTo == "root",
+                "aura overlay slot anchorTo must be healthBar or root")
+            normalized.kind = "auraOverlay"
+            normalized.anchorTo = slot.anchorTo
+            normalized.overlayStyle = CopyTable(slot.overlayStyle or {})
         else
             assert(slot.kind == nil or slot.kind == "aura",
                 "unsupported aura slot kind")
@@ -283,6 +293,17 @@ local function NormalizeSlot(slot, seenKeys, includeStyle)
         end
     end
     return normalized
+end
+
+local function ResolveAuraOverlayAnchorTarget(controller, anchorTo)
+    local root = controller._parent
+    assert(root ~= nil, "aura overlay controller root is required")
+    if anchorTo == "healthBar" then
+        local indicators = root.indicators
+        return indicators and indicators.healthBar or root
+    end
+    assert(anchorTo == "root", "unsupported aura overlay anchor")
+    return root
 end
 
 local function NormalizeSources(groups, slots, includeStyle)
@@ -457,7 +478,7 @@ local function SetExternalContainerCurtained(controller, curtained)
     if controller._containerAlpha == alpha then return end
 
     -- A seeded container is not parented to the plain holder, so curtain its
-    -- inherited Frame alpha separately. The 12.1.0.69273/eb941aad
+    -- inherited Frame alpha separately. The 12.1.0.69299/31c7f7b9cc79
     -- SimpleRegion contract permits this constant SetAlpha write. This
     -- remains a write-only gate: BFI never reads native visibility, children,
     -- or aura state.
@@ -489,7 +510,7 @@ local function SetHolderShownSafe(controller, shown)
         return false
     end
 
-    -- Retail 12.1.0.69273 can make visibility and hover accessors secret when
+    -- Retail 12.1.0.69299 can make visibility and hover accessors secret when
     -- a holder is anchored to a native aura container. Keep an ordinary
     -- write-only ledger instead of inspecting frame state.
     controller.frame:SetShown(shown)
@@ -746,6 +767,25 @@ function ControllerMixin:_Build()
                 },
                 slot.overlayStyle
             )
+        elseif slot.kind == "auraOverlay" then
+            AF.AddCustomAuraOverlaySlot(
+                container,
+                slot.key,
+                slot.filterString,
+                {
+                    candidateFilters = slot.candidateFilters,
+                    sortMethod = slot.sortMethod,
+                    sortDirection = slot.sortDirection,
+                    anchor = {
+                        matchAnchorBounds = true,
+                        relativeTo = ResolveAuraOverlayAnchorTarget(
+                            self,
+                            slot.anchorTo
+                        ),
+                    },
+                },
+                slot.overlayStyle
+            )
         else
             AF.AddCustomAuraSlot(container, slot.key, slot.filterString, {
                 candidateFilters = slot.candidateFilters,
@@ -768,7 +808,7 @@ function ControllerMixin:_Build()
     AF.SetCustomAuraContainerUnit(container, spec.unit)
     AF.UpdateCustomAuraContainer(container)
     -- SetEnabled is a secure-delegated inbound AuraContainer method in the
-    -- pinned 12.1.0.69273 build. Submit the final configured state explicitly
+    -- pinned 12.1.0.69299 build. Submit the final configured state explicitly
     -- even for a combat-created container so event registration never
     -- depends on template initialization details.
     AF.SetCustomAuraContainerEnabled(container, spec.enabled)
@@ -801,7 +841,7 @@ local function ApplyLiveUnitRetarget(controller)
         return false
     end
 
-    -- 12.1.0.69273 exposes SetUnit and UpdateAllAuras as inbound,
+    -- 12.1.0.69299 exposes SetUnit and UpdateAllAuras as inbound,
     -- combat-live operations on an already-built container. This is the
     -- only native mutation group controllers may perform before regen.
     AF.SetCustomAuraContainerUnit(controller._container, controller._spec.unit)
@@ -1140,7 +1180,7 @@ function ControllerMixin:Refresh()
         return
     end
 
-    -- 69273's inbound UpdateAllAuras only marks a full native dirty rebuild.
+    -- 69299's inbound UpdateAllAuras only marks a full native dirty rebuild.
     -- It does not expose aura values and is safe for stable-token refreshes.
     AF.UpdateCustomAuraContainer(self._container)
 end
@@ -1178,6 +1218,7 @@ local function CreateController(parent, name, completeSpec, options)
         options.alphaOnlyVisibility == true
     controller._allowCombatInitialBuild =
         options.allowCombatInitialBuild == true
+    controller._parent = parent
     controller.frame = CreateFrame(
         "Frame",
         name,

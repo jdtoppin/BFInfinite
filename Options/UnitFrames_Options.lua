@@ -190,6 +190,9 @@ local settings = {
         "numericFormat",
     },
     buffs = {
+        "buffDisplayManager",
+        "buffDisplayPresentation",
+        "buffDisplayPresentationStyle",
         "enabled",
         "cooldownStyle",
         "auraBaseFilters",
@@ -426,7 +429,10 @@ local function RequiresNativeAuraReload(t, count)
         local requiresReload = indicator
             and indicator.RequiresReloadForConfig
         if type(requiresReload) == "function"
-            and requiresReload(indicator, t.cfg) == true
+            and requiresReload(
+                indicator,
+                t.runtimeCfg or t.cfg
+            ) == true
         then
             return true
         end
@@ -446,8 +452,12 @@ local function ShowNativeAuraReloadDialog()
         return
     end
 
+    local dialogOwner = rawget(
+        _G,
+        "BFIOptionsFrame_UnitFramesPanel"
+    ) or rawget(_G, "BFIOptionsFrame") or _G.UIParent
     local dialog = AF.GetDialog(
-        BFIOptionsFrame_UnitFramesPanel,
+        dialogOwner,
         L["Native aura layout changes require a UI reload\nDo it now?"],
         300
     )
@@ -484,12 +494,16 @@ LoadIndicatorConfig = function(t)
         UF.LoadIndicatorConfig(
             GetIndicatorFrame(t, i),
             t.id,
-            t.cfg
+            t.runtimeCfg or t.cfg
         )
     end
 
     if reloadRequired then
         ShowNativeAuraReloadDialog()
+    end
+
+    if t.displayID then
+        AF.Fire("BFI_RefreshOptions", "unitFrames")
     end
 
     -- The native dispel overlay receives the saved Health Bar level only
@@ -849,7 +863,20 @@ builder["enabled"] = function(parent)
     end
 
     enabled:SetOnCheck(function(checked)
-        pane.t.cfg.enabled = checked
+        if pane.t.displayID then
+            local record = UF.SetBuffDisplayEnabled(
+                pane.t.runtimeCfg,
+                pane.t.displayID,
+                checked
+            )
+            if not record then
+                checked = false
+                pane.t.cfg.enabled = false
+                enabled:SetChecked(false)
+            end
+        else
+            pane.t.cfg.enabled = checked
+        end
         UpdateColor(checked)
         -- pane.t is list button that carries info
         pane.t:SetTextColor(checked and "white" or "disabled")
@@ -3946,8 +3973,8 @@ builder["auraBaseFilters"] = function(parent)
             notPlayer:Show()
             castByMe:SetText(L["Player, Pet, or Vehicle"])
             notPlayer:SetText(L["Not Player, Pet, or Vehicle"])
-            castByOthers:SetText(L["Big Defensive"])
-            castByUnit:SetText(L["External Defensive"])
+            castByOthers:SetText(L["Defensives"])
+            castByUnit:SetText(L["Externals"])
             castByNPC:SetText(L["Raid In Combat"])
             castByBoss:SetText(L["Raid Player-Dispellable"])
             dispellable:SetText(L["Any Dispel Type"])
@@ -5499,6 +5526,22 @@ end
 ---------------------------------------------------------------------
 -- get
 ---------------------------------------------------------------------
+function F.RegisterUnitFrameOptionBuilder(name, optionBuilder)
+    assert(type(name) == "string" and name ~= "",
+        "unit-frame option builder name is required")
+    assert(type(optionBuilder) == "function",
+        "unit-frame option builder must be a function")
+    assert(builder[name] == nil,
+        "unit-frame option builder is already registered: " .. name)
+    builder[name] = function(parent)
+        local pane = optionBuilder(parent)
+        created[name] = pane
+        return pane
+    end
+end
+
+F.LoadUnitFrameIndicatorConfig = LoadIndicatorConfig
+
 function F.GetUnitFrameOptions(parent, info)
     for _, pane in pairs(created) do
         pane:Hide()
@@ -5506,16 +5549,41 @@ function F.GetUnitFrameOptions(parent, info)
     end
 
     wipe(options)
-    tinsert(options, builder["copy,paste,reset"](parent))
-    created["copy,paste,reset"]:Show()
+    if info.displayID == nil then
+        tinsert(options, builder["copy,paste,reset"](parent))
+        created["copy,paste,reset"]:Show()
+    end
 
     local id = info.id
     if not settings[id] then return options end
 
-    for _, option in pairs(settings[id]) do
+    local presentation = info.displayID
+        and info.cfg.presentation
+        or nil
+    local frameHighlightOptions = {
+        buffDisplayManager = true,
+        buffDisplayPresentation = true,
+        buffDisplayPresentationStyle = true,
+        enabled = true,
+        auraBaseFilters = true,
+        auraBlackListWhitelist = true,
+    }
+
+    for _, option in ipairs(settings[id]) do
+        local applicable = true
+        if presentation == "frame_highlight" then
+            applicable = frameHighlightOptions[option] == true
+        elseif presentation == "icon_duration_bar"
+            and option == "cooldownStyle"
+        then
+            applicable = false
+        end
+
         if builder[option] then
             local pane = builder[option](parent)
-            if not pane.IsApplicable or pane.IsApplicable(info) then
+            if applicable
+                and (not pane.IsApplicable or pane.IsApplicable(info))
+            then
                 tinsert(options, pane)
                 pane:Show()
             end

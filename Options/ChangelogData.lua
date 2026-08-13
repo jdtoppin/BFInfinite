@@ -9,6 +9,14 @@ BFI.changelog = {
         date = "2026-08-04 00:00 GMT+8",
         notes = {
             {
+                enUS = "Party and Raid Buffs now support bounded child Buff Displays, including Healing Auras, Defensives, Externals, and user-created displays",
+                zhCN = "小队与团队增益现在支持有数量限制的子增益显示，包括治疗光环、减伤技能、外部减伤和用户自定义显示",
+            },
+            {
+                enUS = "Buff Displays add secret-safe Icon + Duration Bar and Health Bar highlight presentations through Blizzard's native aura providers",
+                zhCN = "增益显示现可通过暴雪原生光环提供器使用安全处理受限数据的“图标 + 持续时间条”和生命条高亮显示方式",
+            },
+            {
                 enUS = "Individual Bags view keeps full-size icons and grows from the Combined View baseline height",
                 zhCN = "独立背包视图保留完整大小的图标，并以合并视图的基准高度为起点向上增长",
             },

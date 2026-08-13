@@ -281,7 +281,7 @@ local function makeHarness(options)
     }
     local AF = {
         isRetail = options.isRetail ~= false,
-        versionNum = options.versionNum or 42,
+        versionNum = options.versionNum or 43,
     }
     local UF = {}
     local afConstructionTotals = {
@@ -324,6 +324,14 @@ local function makeHarness(options)
 
     function AF.HasNativeDispelColorTexture()
         return options.hasNativeDispelColor ~= false
+    end
+
+    function AF.HasCustomAuraIconDurationBar()
+        return options.hasIconDurationBar ~= false
+    end
+
+    function AF.HasCustomAuraOverlaySlot()
+        return options.hasAuraOverlay ~= false
     end
 
     function AF.CreateCustomAuraContainer(parent)
@@ -560,6 +568,53 @@ local function makeHarness(options)
         record(
             harness,
             "af.add-dispel-overlay-slot",
+            container,
+            key,
+            filterString,
+            slotOptions,
+            overlayStyle
+        )
+        button:SetAllPoints(slotOptions.anchor.relativeTo)
+        return button
+    end
+
+    function AF.AddCustomAuraOverlaySlot(
+        container,
+        key,
+        filterString,
+        slotOptions,
+        overlayStyle
+    )
+        afConstructionTotals.slotAddAttempts =
+            afConstructionTotals.slotAddAttempts + 1
+        afConstructionTotals.initialFrameReservationsAttempted =
+            afConstructionTotals.initialFrameReservationsAttempted + 1
+        validateSort(slotOptions.sortMethod, slotOptions.sortDirection)
+        assertTrue(type(slotOptions.anchor) == "table",
+            "missing mock aura overlay anchor")
+        assertEqual(slotOptions.anchor.matchAnchorBounds, true,
+            "mock aura overlay bounds mode")
+        assertTrue(slotOptions.anchor.relativeTo ~= nil,
+            "missing mock aura overlay bounds target")
+        local button = newSlotButton(harness, container, key)
+        container.slots[key] = {
+            filterString = filterString,
+            options = slotOptions,
+            overlayStyle = overlayStyle,
+            button = button,
+            kind = "auraOverlay",
+        }
+        container.afConstructionStats.slotsAdded =
+            container.afConstructionStats.slotsAdded + 1
+        container.afConstructionStats.initialFrameReservationsCompleted =
+            container.afConstructionStats.initialFrameReservationsCompleted + 1
+        afConstructionTotals.slotsAdded =
+            afConstructionTotals.slotsAdded + 1
+        afConstructionTotals.initialFrameReservationsCompleted =
+            afConstructionTotals.initialFrameReservationsCompleted + 1
+        record(
+            harness,
+            "af.add-aura-overlay-slot",
             container,
             key,
             filterString,
@@ -1119,6 +1174,7 @@ local function assertNoNativeMutation(harness, message)
         "af.flow",
         "af.processing",
         "af.add-group",
+        "af.add-aura-overlay-slot",
         "af.add-dispel-overlay-slot",
         "af.add-slot",
         "af.unit",
@@ -1173,11 +1229,18 @@ local function testCapabilityGate()
     )
     assertEqual(#priorAF.holders, 0, "AF r41 holder count")
 
-    local currentAF = makeHarness({versionNum = 42})
+    local previousAF = makeHarness({versionNum = 42})
+    assertEqual(
+        previousAF.UF.HasNativeAuraContainerBackend(),
+        false,
+        "AF r42 Buff Display presentation gate"
+    )
+
+    local currentAF = makeHarness({versionNum = 43})
     assertEqual(
         currentAF.UF.HasNativeAuraContainerBackend(),
         true,
-        "AF r42 native Debuff color gate"
+        "AF r43 native Buff Display gate"
     )
 
     local legacyClient = makeHarness({isRetail = false})
@@ -1222,6 +1285,42 @@ local function testCapabilityGate()
         missingDispelOverlay.UF.HasNativeAuraContainerBackend(),
         false,
         "missing dispel-overlay method gate"
+    )
+
+    local missingAuraOverlay = makeHarness({
+        missingMethod = "AddCustomAuraOverlaySlot",
+    })
+    assertEqual(
+        missingAuraOverlay.UF.HasNativeAuraContainerBackend(),
+        false,
+        "missing aura-overlay method gate"
+    )
+
+    local missingIconDurationBar = makeHarness({
+        missingMethod = "HasCustomAuraIconDurationBar",
+    })
+    assertEqual(
+        missingIconDurationBar.UF.HasNativeAuraContainerBackend(),
+        false,
+        "missing icon-duration-bar capability gate"
+    )
+
+    local unavailableAuraOverlay = makeHarness({
+        hasAuraOverlay = false,
+    })
+    assertEqual(
+        unavailableAuraOverlay.UF.HasNativeAuraContainerBackend(),
+        false,
+        "unavailable aura-overlay capability gate"
+    )
+
+    local unavailableIconDurationBar = makeHarness({
+        hasIconDurationBar = false,
+    })
+    assertEqual(
+        unavailableIconDurationBar.UF.HasNativeAuraContainerBackend(),
+        false,
+        "unavailable icon-duration-bar capability gate"
     )
 
     local missingNativeDispelColor = makeHarness({
@@ -1284,12 +1383,12 @@ local function testGlobalFrameworkRequirement()
     assertTrue(chunk, loadError)
     setfenv(chunk, environment)
     chunk("BFInfinite", BFI)
-    assertEqual(BFI.requiredAFVersion, 42, "published global AF minimum")
+    assertEqual(BFI.requiredAFVersion, 43, "published global AF minimum")
 
     local ok, versionError = pcall(eventHandler.ADDON_LOADED, eventHandler, BFI.name)
     assertEqual(ok, false, "global AF version check stops harness")
     assertEqual(versionError, stopAfterVersionCheck, "global AF version check sentinel")
-    assertEqual(requiredVersion, 42, "global AF minimum")
+    assertEqual(requiredVersion, 43, "global AF minimum")
 end
 
 local function testDispelOverlaySlotContract()
@@ -1407,6 +1506,167 @@ local function testDispelOverlaySlotContract()
     assertEqual(countEvents(harness, "af.add-dispel-overlay-slot"), 1,
         "repeated dispel tuning slot count")
 end
+
+
+local function testAuraOverlaySlotContract()
+    local harness = makeHarness()
+    local healthBar = {frameLevel = 4}
+    local parent = {
+        indicators = {
+            healthBar = healthBar,
+        },
+    }
+    local overlayStyle = {
+        texture = "AF_BORDER",
+        vertexColor = {0.2, 0.7, 1, 0.8},
+        alpha = 1,
+        blendMode = "ADD",
+        inset = 1,
+        frameLevelOffset = 1,
+    }
+    local controller = harness.UF.CreateNativeAuraContainerController(
+        parent,
+        "BFITestAuraOverlay",
+        {
+            unit = "party1",
+            enabled = true,
+            shown = true,
+            holder = {width = 1, height = 1},
+            containerPoint = {
+                point = "CENTER",
+                relativePoint = "CENTER",
+                x = 0,
+                y = 0,
+            },
+            flowLayout = {},
+            processing = {policy = MOCK_PROCESSING_POLICY.None},
+            groups = {},
+            slots = {
+                {
+                    kind = "auraOverlay",
+                    key = "frameHighlight",
+                    filterString = "HELPFUL|BIG_DEFENSIVE",
+                    candidateFilters = {
+                        includeSpellIDs = {[33206] = true},
+                    },
+                    sortMethod = MOCK_SORT_METHOD.Default,
+                    sortDirection = MOCK_SORT_DIRECTION.Normal,
+                    anchorTo = "healthBar",
+                    overlayStyle = overlayStyle,
+                },
+            },
+        }
+    )
+
+    local slot = harness.containers[1].slots.frameHighlight
+    assertTrue(slot, "native aura overlay slot")
+    assertEqual(slot.kind, "auraOverlay", "aura overlay slot kind")
+    assertEqual(slot.filterString, "HELPFUL|BIG_DEFENSIVE",
+        "aura overlay native filter")
+    assertEqual(slot.options.anchor.relativeTo, healthBar,
+        "aura overlay health-bar anchor identity")
+    assertEqual(slot.button.allPoints, healthBar,
+        "aura overlay button bounds")
+    assertTrue(slot.overlayStyle ~= overlayStyle,
+        "aura overlay style copied as config")
+    for index, component in ipairs({0.2, 0.7, 1, 0.8}) do
+        assertEqual(slot.overlayStyle.vertexColor[index], component,
+            "aura overlay vertex color " .. index)
+    end
+    assertEqual(countEvents(harness, "af.add-slot"), 0,
+        "ordinary slot adapter bypassed for aura overlay")
+    assertEqual(countEvents(harness, "af.add-dispel-overlay-slot"), 0,
+        "dispel adapter bypassed for aura overlay")
+    assertEqual(countEvents(harness, "af.add-aura-overlay-slot"), 1,
+        "aura overlay adapter count")
+
+    local constructionBefore = assertConstructionStats(harness, {
+        controllersCreated = 1,
+        buildAttempts = 1,
+        buildCompletions = 1,
+        frameworkBuilds = 1,
+        expectedGroups = 0,
+        expectedSlots = 1,
+        expectedInitialReservations = 1,
+        afContainerAllocations = 1,
+        afGroupsAdded = 0,
+        afSlotsAdded = 1,
+        afInitialFrameReservationsCompleted = 1,
+    }, "aura overlay construction")
+    local tuning = {
+        holder = {width = 1, height = 1},
+        containerPoint = {
+            point = "CENTER",
+            relativePoint = "CENTER",
+            x = 0,
+            y = 0,
+        },
+        flowLayout = {},
+        processing = {policy = MOCK_PROCESSING_POLICY.None},
+        groups = {},
+        slots = {
+            {
+                key = "frameHighlight",
+                filterString = "HELPFUL|EXTERNAL_DEFENSIVE",
+                candidateFilters = {
+                    includeSpellIDs = {[47788] = true},
+                },
+                sortMethod = MOCK_SORT_METHOD.Default,
+                sortDirection = MOCK_SORT_DIRECTION.Normal,
+            },
+        },
+    }
+    controller:ApplyTuning(tuning)
+    assertEqual(slot.filterString, "HELPFUL|EXTERNAL_DEFENSIVE",
+        "aura overlay tuned filter")
+    assertEqual(slot.options.candidateFilters.includeSpellIDs[47788],
+        true, "aura overlay tuned candidate map")
+    local constructionAfter = harness.UF.GetNativeAuraConstructionStats()
+    for field, beforeValue in pairs(constructionBefore) do
+        assertEqual(constructionAfter[field], beforeValue,
+            "aura overlay tuning construction delta " .. field)
+    end
+
+    local fallbackHarness = makeHarness()
+    local fallbackRoot = {}
+    fallbackHarness.UF.CreateNativeAuraContainerController(
+        fallbackRoot,
+        "BFITestAuraOverlayFallback",
+        {
+            unit = "party2",
+            enabled = true,
+            shown = true,
+            holder = {width = 1, height = 1},
+            containerPoint = {
+                point = "CENTER",
+                relativePoint = "CENTER",
+                x = 0,
+                y = 0,
+            },
+            flowLayout = {},
+            processing = {policy = MOCK_PROCESSING_POLICY.None},
+            groups = {},
+            slots = {
+                {
+                    kind = "auraOverlay",
+                    key = "frameHighlight",
+                    filterString = "HELPFUL",
+                    sortMethod = MOCK_SORT_METHOD.Default,
+                    sortDirection = MOCK_SORT_DIRECTION.Normal,
+                    anchorTo = "healthBar",
+                    overlayStyle = overlayStyle,
+                },
+            },
+        }
+    )
+    assertEqual(
+        fallbackHarness.containers[1].slots.frameHighlight
+            .options.anchor.relativeTo,
+        fallbackRoot,
+        "missing health bar falls back to unit-frame root"
+    )
+end
+
 local function testBuildContract()
     local harness = makeHarness()
     local parent = {}
@@ -3583,6 +3843,7 @@ testConstructionStatsContract()
 testGlobalFrameworkRequirement()
 testCapabilityGate()
 testDispelOverlaySlotContract()
+testAuraOverlaySlotContract()
 testBuildContract()
 testTuningContract()
 testHolderConfigQueue()

@@ -28,7 +28,7 @@ local indicators = {
     "targetHighlight",
     "mouseoverHighlight",
     "threatGlow",
-    {"groupNativeAuras", "buffs", "HELPFUL", "buffs"},
+    {"groupBuffDisplays", "buffs", "HELPFUL", "buffs"},
     {"groupNativeAuras", "debuffs", "HARMFUL", "debuffs"},
     {"groupNativeDispels", "dispels", "dispels"},
 }
@@ -65,11 +65,33 @@ local function CreateParty()
     party.driverKey = "state-visibility"
     party.driverValue = "[@raid1,exists] hide;[@party1,exists] show;[group:party] show;hide"
 
+    local reservedBuffDisplays = {}
+    local reservedBuffDisplayCosts = {}
+    if hasNativeGroupAuras
+        and type(UF.GetActiveBuffDisplayReservationPlan) == "function"
+    then
+        local buffs = UF.config.party.indicators.buffs
+        local plan, _, metrics =
+            UF.GetActiveBuffDisplayReservationPlan(buffs)
+        local costs = metrics and metrics.reservationCosts or {}
+        for index = 1, #(plan or {}) do
+            local id = plan[index].id
+            reservedBuffDisplays[#reservedBuffDisplays + 1] = id
+            reservedBuffDisplayCosts[id] = costs[id]
+        end
+    end
+
     for i = 1, 5 do
         local button = header[i]
         if hasNativeGroupAuras then
             assert(button.AuraContainer,
                 "secure Party child is missing its native aura container")
+            local buffDisplaySeeds = {}
+            for index = 1, #reservedBuffDisplays do
+                local id = reservedBuffDisplays[index]
+                buffDisplaySeeds[id] =
+                    UF.CreateNativeGroupAuraContainerSeed(button)
+            end
             button._nativeAuraContainers = {
                 -- Blizzard supplies one header-born shell. Party's displays
                 -- have independent anchors/flows, so eagerly allocate the
@@ -79,7 +101,10 @@ local function CreateParty()
                 -- The full-frame dispel tint has an independent lifecycle
                 -- and topology from the visible harmful-icon row.
                 dispels = UF.CreateNativeGroupAuraContainerSeed(button),
+                buffDisplays = buffDisplaySeeds,
             }
+            button._nativeAuraBuffDisplayReservationCosts =
+                reservedBuffDisplayCosts
         end
 
         button._updateOnGroupUpdate = true

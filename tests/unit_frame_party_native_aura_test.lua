@@ -22,7 +22,7 @@ local function countKeys(value)
     return count
 end
 
-local function makeHarness(hasNativeBackend)
+local function makeHarness(hasNativeBackend, buffDisplayPlan)
     local harness = {
         callbacks = {},
         configGroups = {},
@@ -273,6 +273,19 @@ local function makeHarness(hasNativeBackend)
         },
     }
 
+    if buffDisplayPlan then
+        UF.config.party.indicators.buffs = {}
+        function UF.GetActiveBuffDisplayReservationPlan()
+            local costs = {}
+            for _, display in ipairs(buffDisplayPlan) do
+                costs[display.id] = display.reservationCost or 10
+            end
+            return buffDisplayPlan, {}, {
+                reservationCosts = costs,
+            }
+        end
+    end
+
     function UF.AddToConfigMode(group, frame)
         local frames = harness.configGroups[group]
         if not frames then
@@ -429,7 +442,9 @@ local function makeHarness(hasNativeBackend)
             if type(descriptor) == "table" then
                 local builder = descriptor[1]
                 local name = descriptor[2]
-                if builder == "groupNativeAuras" then
+                if builder == "groupNativeAuras"
+                    or builder == "groupBuffDisplays"
+                then
                     frame.indicators[name] =
                         UF.CreateGroupNativeAuras(
                             frame,
@@ -683,7 +698,7 @@ local function testNativeHeaderSeedsAndBuilderArguments()
     local dispelsTuple = findAuraTuple(indicators, "dispels")
     assertTrue(buffsTuple, "Party buffs tuple")
     assertEqual(#buffsTuple, 4, "Party buffs tuple size")
-    assertEqual(buffsTuple[1], "groupNativeAuras",
+    assertEqual(buffsTuple[1], "groupBuffDisplays",
         "Party buffs builder")
     assertEqual(buffsTuple[2], "buffs", "Party buffs name")
     assertEqual(buffsTuple[3], "HELPFUL",
@@ -717,8 +732,10 @@ local function testNativeHeaderSeedsAndBuilderArguments()
             rawget(button, "_nativeAuraContainers")
         assertTrue(containers,
             "Party child native container map " .. index)
-        assertEqual(countKeys(containers), 3,
+        assertEqual(countKeys(containers), 4,
             "Party child explicit seed count " .. index)
+        assertEqual(countKeys(containers.buffDisplays), 0,
+            "Party child disabled Buff Display seed count " .. index)
         assertEqual(containers.debuffs, button.AuraContainer,
             "Party header-born harmful seed " .. index)
         assertEqual(containers.debuffs.origin, "header",
@@ -787,6 +804,34 @@ local function testNativeHeaderSeedsAndBuilderArguments()
     -- this fixed construction budget.
     assertEqual(#harness.groupAuraCalls * 10 + #harness.dispelCalls,
         105, "Party initial native button reservations")
+end
+
+local function testEnabledBuffDisplaySeedsArePreallocated()
+    local display = {
+        id = "healing_auras",
+    }
+    local harness = makeHarness(true, {display})
+    harness:FireUpdate()
+
+    local header = harness.framesByName.BFI_PartyHeader
+    assertEqual(#harness.nativeSeeds, 15,
+        "enabled Buff Display adds one seed per Party child")
+    for index, button in ipairs(header.children) do
+        local seed = button._nativeAuraContainers
+            .buffDisplays.healing_auras
+        assertTrue(seed,
+            "Party Buff Display seed " .. index)
+        assertEqual(seed.child, button,
+            "Party Buff Display seed parent " .. index)
+        assertEqual(seed.origin, "eager",
+            "Party Buff Display seed origin " .. index)
+        assertEqual(
+            button._nativeAuraBuffDisplayReservationCosts
+                .healing_auras,
+            10,
+            "Party Buff Display reservation cost " .. index
+        )
+    end
 end
 
 local function testUnavailableBackendIsExactLegacyPath()
@@ -976,6 +1021,7 @@ local function testPartyOwnsDriverDecision()
 end
 
 testNativeHeaderSeedsAndBuilderArguments()
+testEnabledBuffDisplaySeedsArePreallocated()
 testUnavailableBackendIsExactLegacyPath()
 testSkipGuardAndConfigRegistrationSurviveDisable()
 testConfigModeReenableRestoresPreviewState()

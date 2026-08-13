@@ -1,6 +1,8 @@
 ---@type BFI
 local BFI = select(2, ...)
 local UF = BFI.modules.UnitFrames
+---@type AbstractFramework
+local AF = _G.AbstractFramework
 
 local ceil, floor, huge, max, min =
     math.ceil, math.floor, math.huge, math.max, math.min
@@ -8,7 +10,7 @@ local ipairs, next, pairs, rawget, sort, type =
     ipairs, next, pairs, rawget, table.sort, type
 local format, sub = string.format, string.sub
 
--- Retail 12.1.0.69273 (wow-ui-source eb941aad) creates restricted
+-- Retail 12.1.0.69299 (wow-ui-source 31c7f7b9cc79) creates restricted
 -- CustomAuraContainer buttons in batches of ten. Keep the constant here as
 -- audit metadata only; this compiler never creates a frame.
 local NATIVE_BUTTON_BATCH_SIZE = 10
@@ -45,6 +47,41 @@ local COOLDOWN_STYLES = {
     clock_with_leading_edge = true,
     none = true,
     vertical = true,
+}
+
+local PRESENTATIONS = {
+    frame_highlight = true,
+    icon_duration_bar = true,
+    icons = true,
+}
+
+local FRAME_HIGHLIGHT_ANCHORS = {
+    healthBar = true,
+    root = true,
+}
+
+local FRAME_HIGHLIGHT_BLEND_MODES = {
+    ADD = true,
+    ALPHAKEY = true,
+    BLEND = true,
+    DISABLE = true,
+    MOD = true,
+}
+
+local DEFAULT_DURATION_BAR = {
+    height = 3,
+    gap = 1,
+    inset = 0,
+    color = {1, 1, 1, 1},
+    backgroundColor = {0, 0, 0, 0.75},
+}
+
+local DEFAULT_FRAME_HIGHLIGHT = {
+    anchorTo = "healthBar",
+    color = {1, 0.82, 0, 0.9},
+    blendMode = "ADD",
+    inset = 0,
+    frameLevelOffset = 1,
 }
 
 local TOOLTIP_ANCHOR_TARGETS = {
@@ -134,6 +171,18 @@ local function IsColor(color)
         and (color[4] == nil or IsFiniteNumber(color[4]))
 end
 
+local function IsNormalizedColor(color)
+    if not IsColor(color) then return false end
+
+    for index = 1, 4 do
+        local component = color[index]
+        if component ~= nil and (component < 0 or component > 1) then
+            return false
+        end
+    end
+    return true
+end
+
 local function CopyFont(font)
     return {font[1], font[2], font[3], font[4]}
 end
@@ -144,6 +193,116 @@ end
 
 local function CopyColor(color)
     return {color[1], color[2], color[3], color[4]}
+end
+
+local function NormalizePresentation(presentation)
+    presentation = presentation or "icons"
+    if not PRESENTATIONS[presentation] then
+        return nil, "INVALID_PRESENTATION"
+    end
+    return presentation
+end
+
+local function NormalizeDurationBar(config)
+    local source = config.durationBar or {}
+    if type(source) ~= "table" then
+        return nil, "INVALID_DURATION_BAR"
+    end
+
+    local supported = {
+        backgroundColor = true,
+        color = true,
+        gap = true,
+        height = true,
+        inset = true,
+    }
+    for key in pairs(source) do
+        if not supported[key] then
+            return nil, "INVALID_DURATION_BAR"
+        end
+    end
+
+    local color = source.color == nil
+        and DEFAULT_DURATION_BAR.color
+        or source.color
+    local backgroundColor = source.backgroundColor == nil
+        and DEFAULT_DURATION_BAR.backgroundColor
+        or source.backgroundColor
+    if not IsNormalizedColor(color)
+        or not IsNormalizedColor(backgroundColor)
+    then
+        return nil, "INVALID_DURATION_BAR"
+    end
+
+    local style = {
+        height = source.height or DEFAULT_DURATION_BAR.height,
+        gap = source.gap or DEFAULT_DURATION_BAR.gap,
+        inset = source.inset or DEFAULT_DURATION_BAR.inset,
+        color = CopyColor(color),
+        backgroundColor = CopyColor(backgroundColor),
+    }
+    if not IsFiniteNumber(style.height)
+        or style.height <= 0
+        or not IsFiniteNumber(style.gap)
+        or style.gap < 0
+        or not IsFiniteNumber(style.inset)
+        or style.inset < 0
+    then
+        return nil, "INVALID_DURATION_BAR"
+    end
+    if config.width <= style.inset * 2
+        or config.height
+            <= style.inset * 2 + style.height + style.gap
+    then
+        return nil, "INVALID_DURATION_BAR_GEOMETRY"
+    end
+    return style
+end
+
+local function NormalizeFrameHighlight(config)
+    local source = config.frameHighlight or {}
+    if type(source) ~= "table" then
+        return nil, "INVALID_FRAME_HIGHLIGHT"
+    end
+
+    local supported = {
+        anchorTo = true,
+        blendMode = true,
+        color = true,
+        frameLevelOffset = true,
+        inset = true,
+    }
+    for key in pairs(source) do
+        if not supported[key] then
+            return nil, "INVALID_FRAME_HIGHLIGHT"
+        end
+    end
+
+    local color = source.color == nil
+        and DEFAULT_FRAME_HIGHLIGHT.color
+        or source.color
+    if not IsNormalizedColor(color) then
+        return nil, "INVALID_FRAME_HIGHLIGHT"
+    end
+
+    local style = {
+        anchorTo = source.anchorTo or DEFAULT_FRAME_HIGHLIGHT.anchorTo,
+        color = CopyColor(color),
+        blendMode = source.blendMode
+            or DEFAULT_FRAME_HIGHLIGHT.blendMode,
+        inset = source.inset or DEFAULT_FRAME_HIGHLIGHT.inset,
+        frameLevelOffset = source.frameLevelOffset
+            or DEFAULT_FRAME_HIGHLIGHT.frameLevelOffset,
+    }
+    if not FRAME_HIGHLIGHT_ANCHORS[style.anchorTo]
+        or not FRAME_HIGHLIGHT_BLEND_MODES[style.blendMode]
+        or not IsFiniteNumber(style.inset)
+        or style.inset < 0
+        or not IsFiniteNumber(style.frameLevelOffset)
+    then
+        return nil, "INVALID_FRAME_HIGHLIGHT"
+    end
+    return style
 end
 
 local function IsBlockCooldownStyle(style)
@@ -617,7 +776,7 @@ local function NewButtonStyle(
     appearance,
     blockColor
 )
-    -- Retail 12.1.0.69273 (wow-ui-source eb941aad) lets Blizzard
+    -- Retail 12.1.0.69299 (wow-ui-source 31c7f7b9cc79) lets Blizzard
     -- privately apply typed and None/red colors to AF's square PreserveAsset
     -- border. The compiler supplies only ordinary saved configuration.
     local style = {
@@ -633,6 +792,10 @@ local function NewButtonStyle(
             and config.auraTypeColor.debuffType == true,
         tooltip = Copy(tooltip),
     }
+
+    if config.cooldownStyle == "icon_duration_bar" then
+        style.durationBar = Copy(config.durationBar)
+    end
 
     -- This is ordinary saved configuration, never aura-derived data. Omit it
     -- for icon styles so an inactive setting cannot affect native construction.
@@ -807,6 +970,7 @@ local function CompileContainerVariant(
     local completeGroups = {}
     local tuningGroups = {}
     local constructionKey = {
+        presentation = config.presentation or "icons",
         groups = {},
         slots = {},
     }
@@ -990,6 +1154,171 @@ local function GetCompositeHolder(friendlyHolder, hostileHolder)
     }
 end
 
+local function CompileFrameHighlightDescriptor(
+    unit,
+    baseFilter,
+    config,
+    policy,
+    candidateFilters,
+    identityFilterActive,
+    schema
+)
+    if baseFilter ~= "HELPFUL" then
+        return nil, "FRAME_HIGHLIGHT_REQUIRES_HELPFUL_FILTER"
+    end
+
+    local partition, partitionError = NormalizePartition(config.subFrame)
+    if partitionError then
+        return nil, partitionError
+    end
+    if partition then
+        return nil, "FRAME_HIGHLIGHT_UNSUPPORTED_PARTITION"
+    end
+
+    local highlight, highlightError = NormalizeFrameHighlight(config)
+    if not highlight then
+        return nil, highlightError
+    end
+    if not policy.empty and #policy.groups ~= 1 then
+        return nil, "FRAME_HIGHLIGHT_REQUIRES_SINGLE_FILTER_GROUP"
+    end
+
+    local degradations = Copy(policy.degradations)
+    degradations.defaultSortPriority = not policy.empty
+    degradations.fixedHolderExtent = false
+    degradations.spellIDListsIgnored = false
+    degradations.spellIDFiltersRestrictedByUnitReaction =
+        not policy.empty and identityFilterActive
+    degradations.globalSpellColorsUseIndependentGroups = false
+    degradations.globalSpellColorsBudgetExceeded = false
+    degradations.auraTypeColorSourceRulesIgnored = false
+    degradations.tooltipPlacementApproximate = false
+    degradations.partitionDeferred = false
+    degradations.partitionSecretFallback = false
+
+    local descriptor = {
+        completeSpec = nil,
+        tuningSpec = nil,
+        constructionKey = {
+            presentation = "frame_highlight",
+            groups = {},
+            slots = {},
+        },
+        placement = {
+            position = CopyPosition(config.position),
+            anchorTo = config.anchorTo,
+            frameLevel = config.frameLevel,
+        },
+        visibility = {
+            requiresVisible = policy.requiresVisible,
+            requiresAssist = policy.requiresAssist
+                or identityFilterActive,
+            spellIDFilterRequiresPublicAssist = identityFilterActive,
+            spellIDFilterRequiresPublicNonAssist = false,
+        },
+        presentation = "frame_highlight",
+        migrationReady = not policy.empty,
+        empty = policy.empty,
+        diagnostics = {},
+        degradations = degradations,
+        metrics = EmptyMetrics(),
+    }
+    if policy.empty then
+        return descriptor
+    end
+
+    AddDiagnostic(
+        descriptor.diagnostics,
+        "NATIVE_FRAME_HIGHLIGHT_USES_SINGLE_SLOT"
+    )
+    AddDiagnostic(descriptor.diagnostics, "NATIVE_DEFAULT_SORT_ADDS_PRIORITY")
+    if identityFilterActive then
+        AddDiagnostic(
+            descriptor.diagnostics,
+            "SPELL_ID_FILTERS_RESTRICTED_BY_UNIT_REACTION"
+        )
+    end
+
+    local policyGroup = policy.groups[1]
+    local overlayStyle = {
+        texture = AF.GetTexture("Border"),
+        vertexColor = CopyColor(highlight.color),
+        alpha = 1,
+        blendMode = highlight.blendMode,
+        inset = highlight.inset,
+        frameLevelOffset = highlight.frameLevelOffset,
+    }
+    local completeSlot = {
+        kind = "auraOverlay",
+        key = "frameHighlight",
+        filterString = policyGroup.filterString,
+        candidateFilters = Copy(candidateFilters),
+        sortMethod = schema.defaultSort,
+        sortDirection = schema.normalSort,
+        anchorTo = highlight.anchorTo,
+        overlayStyle = Copy(overlayStyle),
+    }
+    local tuningSlot = {
+        key = completeSlot.key,
+        filterString = completeSlot.filterString,
+        candidateFilters = Copy(candidateFilters),
+        sortMethod = completeSlot.sortMethod,
+        sortDirection = completeSlot.sortDirection,
+    }
+    descriptor.completeSpec = {
+        unit = unit,
+        enabled = config.enabled,
+        shown = false,
+        holder = {width = 1, height = 1},
+        containerPoint = {
+            point = "CENTER",
+            relativePoint = "CENTER",
+            x = 0,
+            y = 0,
+        },
+        flowLayout = {},
+        processing = {
+            policy = schema.noProcessing,
+        },
+        groups = {},
+        slots = {completeSlot},
+    }
+    descriptor.tuningSpec = {
+        holder = {width = 1, height = 1},
+        containerPoint = {
+            point = "CENTER",
+            relativePoint = "CENTER",
+            x = 0,
+            y = 0,
+        },
+        flowLayout = {},
+        processing = {
+            policy = schema.noProcessing,
+        },
+        groups = {},
+        slots = {tuningSlot},
+    }
+    descriptor.constructionKey.slots[1] = {
+        kind = completeSlot.kind,
+        key = completeSlot.key,
+        anchorTo = completeSlot.anchorTo,
+        overlayStyle = Copy(overlayStyle),
+    }
+    descriptor.metrics = {
+        groupCount = 0,
+        legacyMaxFrameCount = 1,
+        nativeVisibleCapacity = 1,
+        nativeBatchSize = 1,
+        initialRestrictedButtonCount = 1,
+        freshContainerRestrictedButtonCountCeiling = 1,
+        requestedColorBucketCount = 0,
+        requestedColorExpandedGroupCount = 0,
+        requestedColorExpandedCapacity = 0,
+        colorGroupBudgetExceeded = false,
+    }
+    return descriptor
+end
+
 -- Compile only configuration-derived data. In particular, this function does
 -- not read units, auras, frames, native buttons, combat state, or secrets.
 function UF.CompileNativeAuraSpec(unit, baseFilter, config)
@@ -998,6 +1327,12 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     end
     if type(config) ~= "table" or type(config.enabled) ~= "boolean" then
         return nil, "INVALID_AURA_CONFIG"
+    end
+
+    local presentation, presentationError =
+        NormalizePresentation(config.presentation)
+    if not presentation then
+        return nil, presentationError
     end
 
     local policy, policyError = UF.CompileNativeAuraPolicy(baseFilter, config.filters)
@@ -1017,6 +1352,25 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     if not IsNonNegativeInteger(config.frameLevel) then
         return nil, "INVALID_FRAME_LEVEL"
     end
+
+
+    local schema = GetNativeSchema()
+    if not schema then
+        return nil, "NATIVE_AURA_SCHEMA_UNAVAILABLE"
+    end
+
+    if presentation == "frame_highlight" then
+        return CompileFrameHighlightDescriptor(
+            unit,
+            baseFilter,
+            config,
+            policy,
+            candidateFilters,
+            identityFilterActive,
+            schema
+        )
+    end
+
     if not ORIENTATIONS[config.orientation] then
         return nil, "INVALID_ORIENTATION"
     end
@@ -1036,8 +1390,21 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     then
         return nil, "INVALID_COUNTS"
     end
-    if not COOLDOWN_STYLES[config.cooldownStyle] then
+    if presentation == "icons"
+        and not COOLDOWN_STYLES[config.cooldownStyle]
+    then
         return nil, "INVALID_COOLDOWN_STYLE"
+    end
+
+    if presentation == "icon_duration_bar" then
+        local durationBar, durationBarError = NormalizeDurationBar(config)
+        if not durationBar then
+            return nil, durationBarError
+        end
+        config = Copy(config)
+        config.presentation = presentation
+        config.cooldownStyle = "icon_duration_bar"
+        config.durationBar = durationBar
     end
     local spellColorBuckets, coloredSpellIDs, spellColorsRequested,
         spellColorError =
@@ -1075,11 +1442,6 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         )
     then
         return nil, "INVALID_SUBFRAME"
-    end
-
-    local schema = GetNativeSchema()
-    if not schema then
-        return nil, "NATIVE_AURA_SCHEMA_UNAVAILABLE"
     end
 
     local empty = policy.empty
@@ -1150,6 +1512,7 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         completeSpec = nil,
         tuningSpec = nil,
         constructionKey = {
+            presentation = presentation,
             groups = {},
             slots = {},
         },
@@ -1182,6 +1545,7 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
                 ),
         },
         partition = Copy(partition),
+        presentation = presentation,
         migrationReady = not empty,
         empty = empty,
         diagnostics = {},
