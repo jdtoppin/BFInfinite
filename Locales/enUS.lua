@@ -1,6 +1,5 @@
 select(2, ...).L = setmetatable({
     ["Click Casting"] = "Click Casting",
-    ["Enable BFI Click Casting"] = "Enable BFI Click Casting",
     ["Click Casting bindings apply to every BFI unit frame. They use the active BFI profile; class-specific binding sets remain separate inside profiles shared by multiple classes. Drop a spell, macro, or item onto the Value field to add its ID."] = "Click Casting bindings apply to every BFI unit frame. They use the active BFI profile; class-specific binding sets remain separate inside profiles shared by multiple classes. Drop a spell, macro, or item onto the Value field to add its ID.",
     ["Add Binding"] = "Add Binding",
     ["Set Binding"] = "Set Binding",

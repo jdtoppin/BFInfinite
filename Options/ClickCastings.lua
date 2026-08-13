@@ -76,6 +76,11 @@ UpdateConflictNotice = function()
     end
 end
 
+local function UpdateEnabledState(checked)
+    enabled:SetText(checked and L["Enabled"] or L["Disabled"])
+    enabled:SetTextColor(checked and "softlime" or "firebrick")
+end
+
 local function SetPayload(row, value)
     local binding = GetConfig().bindings[row.index]
     if not binding then return end
@@ -440,7 +445,7 @@ local function CreatePanel()
     AF.SetPoint(profile, "BOTTOMRIGHT", header.tips, "BOTTOMLEFT", -5, 2)
     profile:SetColor("tip")
 
-    enabled = AF.CreateCheckButton(panel, L["Enable BFI Click Casting"])
+    enabled = AF.CreateCheckButton(panel, L["Enabled"])
     AF.SetPoint(enabled, "TOPLEFT", header.line, "BOTTOMLEFT", 0, -15)
     enabled:SetOnCheck(function(checked)
         GetConfig().enabled = checked
@@ -539,6 +544,7 @@ local function CreatePanel()
             and CC.GetSmartResurrectionCapabilities()
             or {normal = true, mass = true, combat = true}
         enabled:SetChecked(config.enabled)
+        UpdateEnabledState(config.enabled)
         smartResurrection:SetItems({
             {text = L["Disabled"], value = "disabled"},
             {

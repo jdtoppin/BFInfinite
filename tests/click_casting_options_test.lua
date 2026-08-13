@@ -140,6 +140,10 @@ local function newWidget(kind, parent)
         self.text = text
     end
 
+    function widget:SetTextColor(color)
+        self.textColor = color
+    end
+
     function widget:SetTooltip(...)
         self.tooltip = {...}
     end
@@ -212,7 +216,7 @@ local function createHarness()
     function AF.CreateCheckButton(parent, text)
         local checkButton = newWidget("checkButton", parent)
         checkButton.text = text
-        if text == L["Enable BFI Click Casting"] then
+        if text == L["Enabled"] then
             state.enabledCheckButton = checkButton
         elseif text == L["Prefer Mass Resurrection"] then
             state.preferMassResurrection = checkButton
@@ -451,6 +455,10 @@ assertEqual(harness.cascadingMenuCloseCalls or 0, 0,
 harness:FireCallback("BFI_ShowOptionsPanel", "clickCastings")
 assertEqual(#harness.combatProtected, 1,
     "settings panel receives combat protection")
+assertEqual(harness.enabledCheckButton.text, "Enabled",
+    "enabled click casting uses concise state text")
+assertEqual(harness.enabledCheckButton.textColor, "softlime",
+    "enabled click casting uses the standard green state color")
 assertTrue(harness.headerPane ~= nil,
     "viewport heading uses the standard titled-pane treatment")
 assertEqual(harness.headerPane.points[1][1], "TOPLEFT",
@@ -665,6 +673,10 @@ assertEqual(#oldConfig.bindings, 4, "delete removes one binding")
 
 harness.enabledCheckButton.onCheck(false)
 assertEqual(oldConfig.enabled, false, "module disabled")
+assertEqual(harness.enabledCheckButton.text, "Disabled",
+    "disabled click casting updates its state text")
+assertEqual(harness.enabledCheckButton.textColor, "firebrick",
+    "disabled click casting uses the standard red state color")
 assertTrue(harness.addButton.enabled,
     "disabled module still permits adding bindings")
 for index, row in ipairs(harness.list.widgets) do

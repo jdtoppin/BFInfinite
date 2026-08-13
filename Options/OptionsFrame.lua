@@ -52,6 +52,21 @@ local frameWidths = {
     clickCastings = 920,
 }
 
+local optionButtonEnabled = {
+    clickCastings = function()
+        local config = BFI.modules.ClickCastings.activeConfig
+        return not config or config.enabled ~= false
+    end,
+}
+
+local function RefreshOptionButton(id)
+    local button = optionButtons[id]
+    local isEnabled = optionButtonEnabled[id]
+    if button and isEnabled then
+        button:SetTextColor(isEnabled() and "white" or "disabled")
+    end
+end
+
 local function CreateButton(name)
     local disabled
     name, disabled = name:gsub("^-", "")
@@ -121,6 +136,7 @@ local function BuildList()
             item = CreateButton(name)
             tinsert(buttons, item)
             optionButtons[item.id] = item
+            RefreshOptionButton(item.id)
             if not first then first = item end
         end
 
@@ -310,3 +326,8 @@ function F.OpenOptionsFrame(id)
     optionsFrame:Raise()
     return button ~= nil and button:IsEnabled()
 end
+
+AF.RegisterCallback("BFI_UpdateModule", function(_, module)
+    if module and module ~= "clickCastings" then return end
+    RefreshOptionButton("clickCastings")
+end, "low")
