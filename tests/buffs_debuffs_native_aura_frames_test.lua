@@ -483,7 +483,7 @@ assertEqual(
 )
 assertEqual(secretEqualityCalls, 0, "secret parents never compared")
 
-local function NewHarmfulHarness()
+local function NewHarmfulHarness(configureFrameBoundary)
     local calls = {}
     local secretValues = {}
     local state = {
@@ -503,6 +503,10 @@ local function NewHarmfulHarness()
         return true
     end
 
+    local function MarkSecret(value)
+        secretValues[#secretValues + 1] = value
+    end
+
     local function CanBeAccessedInContext(object)
         object.accessCalls = (object.accessCalls or 0) + 1
         if state.onAccess then
@@ -514,29 +518,40 @@ local function NewHarmfulHarness()
         return true
     end
 
+    local frameAPI = {
+        CanBeAccessedInContext = CanBeAccessedInContext,
+    }
+    function frameAPI.GetParent(object)
+        return object.parent
+    end
+    function frameAPI.GetWidth(object)
+        return object.width
+    end
+    function frameAPI.GetHeight(object)
+        if state.onRegionHeight then
+            state.onRegionHeight(object)
+        end
+        return object.height
+    end
+    function frameAPI.SetShown(object, shown)
+        Record("container:" .. tostring(shown))
+        if state.failContainerValue == shown then
+            state.failContainerValue = nil
+            error("opaque harmful container failure", 2)
+        end
+        object.shown = shown
+    end
+    local frameMetatable = {__index = frameAPI}
+
     local function NewRegion(parent, label)
-        local region = {
+        return setmetatable({
             parent = parent,
             width = 26,
             height = 26,
-            CanBeAccessedInContext = CanBeAccessedInContext,
             IsShown = ForbiddenObserver(label .. ":IsShown"),
             GetAlpha = ForbiddenObserver(label .. ":GetAlpha"),
             GetPoint = ForbiddenObserver(label .. ":GetPoint"),
-        }
-        function region:GetParent()
-            return self.parent
-        end
-        function region:GetWidth()
-            return self.width
-        end
-        function region:GetHeight()
-            if state.onRegionHeight then
-                state.onRegionHeight(self)
-            end
-            return self.height
-        end
-        return region
+        }, frameMetatable)
     end
 
     local function SetUnit(anchor, unit, showDispelType)
@@ -564,41 +579,27 @@ local function NewHarmfulHarness()
     end
 
     local function NewTopology()
-        local frame = {
+        local frame = setmetatable({
             auraFrames = {},
             maxPrivateAuras = 6,
-            CanBeAccessedInContext = CanBeAccessedInContext,
-        }
+        }, frameMetatable)
         function frame:UpdateAuraButtons()
         end
 
-        local container = {
+        local container = setmetatable({
             parent = frame,
             showDispelType = true,
-            CanBeAccessedInContext = CanBeAccessedInContext,
             IsShown = ForbiddenObserver("harmful AuraContainer:IsShown"),
             GetAlpha = ForbiddenObserver("harmful AuraContainer:GetAlpha"),
-        }
-        function container:GetParent()
-            return self.parent
-        end
-        function container:SetShown(shown)
-            Record("container:" .. tostring(shown))
-            if state.failContainerValue == shown then
-                state.failContainerValue = nil
-                error("opaque harmful container failure", 2)
-            end
-            self.shown = shown
-        end
+        }, frameMetatable)
         frame.AuraContainer = container
 
         local anchors = {}
         for index = 1, 6 do
-            local anchor = {
+            local anchor = setmetatable({
                 auraIndex = index,
                 isAuraAnchor = true,
                 parent = frame,
-                CanBeAccessedInContext = CanBeAccessedInContext,
                 SetUnit = SetUnit,
                 IsShown = ForbiddenObserver(
                     "private anchor " .. index .. ":IsShown"
@@ -612,10 +613,7 @@ local function NewHarmfulHarness()
                 Show = ForbiddenObserver(
                     "private anchor " .. index .. ":Show"
                 ),
-            }
-            function anchor:GetParent()
-                return self.parent
-            end
+            }, frameMetatable)
             anchor.Icon = NewRegion(
                 anchor,
                 "private anchor " .. index .. " Icon"
@@ -648,6 +646,16 @@ local function NewHarmfulHarness()
         end,
     }
     _G.DebuffFrame = frame
+    _G.GetFrameMetatable = function()
+        return frameMetatable
+    end
+    if configureFrameBoundary then
+        configureFrameBoundary({
+            frameAPI = frameAPI,
+            frameMetatable = frameMetatable,
+            markSecret = MarkSecret,
+        })
+    end
     _G.C_AuraContainerUtil = {}
     _G.InCombatLockdown = function()
         if state.combatFunction then
@@ -691,15 +699,15 @@ local function NewHarmfulHarness()
         calls = calls,
         container = container,
         frame = frame,
+        frameAPI = frameAPI,
+        frameMetatable = frameMetatable,
         state = state,
         clearCalls = function()
             for index = #calls, 1, -1 do
                 calls[index] = nil
             end
         end,
-        markSecret = function(value)
-            secretValues[#secretValues + 1] = value
-        end,
+        markSecret = MarkSecret,
     }
     harness.getHarmfulSnapshot = function()
         return GetUpvalue(
@@ -739,9 +747,39 @@ local function RestoreWrites(unit)
     return writes
 end
 
+local intrinsicFrameMethods = {
+    "CanBeAccessedInContext",
+    "GetParent",
+    "GetWidth",
+    "GetHeight",
+    "SetShown",
+}
+
+local function AssertNoRawFrameIntrinsics(harness)
+    local objects = {harness.frame, harness.container}
+    for index = 1, 6 do
+        local anchor = harness.frame.PrivateAuraAnchors[index]
+        objects[#objects + 1] = anchor
+        objects[#objects + 1] = anchor.Icon
+        objects[#objects + 1] = anchor.Duration
+    end
+    for objectIndex, object in ipairs(objects) do
+        for _, methodName in ipairs(intrinsicFrameMethods) do
+            assertEqual(
+                rawget(object, methodName),
+                nil,
+                "live proxy raw intrinsic "
+                    .. objectIndex .. ":" .. methodName
+            )
+        end
+    end
+end
+
 do
     local harness = NewHarmfulHarness()
     local harmfulBD = harness.BD
+
+    AssertNoRawFrameIntrinsics(harness)
 
     assertEqual(
         harmfulBD.CanSuppressNativeHarmfulAuras(),
@@ -821,6 +859,151 @@ do
         "idempotent harmful restore"
     )
     assertWrites(harness.calls, {}, "idempotent harmful restore writes")
+end
+
+do
+    local harness = NewHarmfulHarness()
+    local poison = ForbiddenObserver("raw intrinsic override")
+    local anchor = harness.frame.PrivateAuraAnchors[1]
+    rawset(harness.frame, "CanBeAccessedInContext", poison)
+    rawset(harness.container, "GetParent", poison)
+    rawset(harness.container, "SetShown", poison)
+    rawset(anchor, "GetParent", poison)
+    rawset(anchor.Icon, "GetWidth", poison)
+    rawset(anchor.Duration, "GetHeight", poison)
+
+    assertEqual(
+        harness.BD.CanSuppressNativeHarmfulAuras(),
+        true,
+        "canonical Frame API ignores raw intrinsic poison"
+    )
+    assertEqual(
+        harness.BD.SetNativeHarmfulAurasSuppressed(true),
+        true,
+        "raw intrinsic poison suppression"
+    )
+    assertWrites(harness.calls, suppressWrites,
+        "raw intrinsic poison suppression order")
+
+    harness.clearCalls()
+    assertEqual(
+        harness.BD.ReassertNativeHarmfulAuraSuppression(),
+        true,
+        "raw intrinsic poison reassert"
+    )
+    assertWrites(harness.calls, suppressWrites,
+        "raw intrinsic poison reassert order")
+
+    harness.clearCalls()
+    assertEqual(
+        harness.BD.SetNativeHarmfulAurasSuppressed(false, "player"),
+        true,
+        "raw intrinsic poison restore"
+    )
+    assertWrites(harness.calls, RestoreWrites("player"),
+        "raw intrinsic poison restore-first order")
+end
+
+local function AssertFrameBoundaryRejects(name, configure)
+    local harness = NewHarmfulHarness(configure)
+    local capabilityOK, capability = pcall(
+        harness.BD.CanSuppressNativeHarmfulAuras
+    )
+    assertEqual(capabilityOK, true, name .. " capability no error")
+    assertEqual(capability, false, name .. " capability rejected")
+
+    local suppressOK, suppressed = pcall(
+        harness.BD.SetNativeHarmfulAurasSuppressed,
+        true
+    )
+    assertEqual(suppressOK, true, name .. " suppression no error")
+    assertEqual(suppressed, false, name .. " suppression rejected")
+    assertWrites(harness.calls, {}, name .. " zero writes")
+end
+
+for _, boundaryCase in ipairs({
+    {
+        name = "missing GetFrameMetatable",
+        configure = function()
+            _G.GetFrameMetatable = nil
+        end,
+    },
+    {
+        name = "secret GetFrameMetatable",
+        configure = function(boundary)
+            boundary.markSecret(_G.GetFrameMetatable)
+        end,
+    },
+    {
+        name = "noncallable GetFrameMetatable",
+        configure = function()
+            _G.GetFrameMetatable = true
+        end,
+    },
+    {
+        name = "missing Frame metatable",
+        configure = function()
+            _G.GetFrameMetatable = function()
+                return nil
+            end
+        end,
+    },
+    {
+        name = "secret Frame metatable",
+        configure = function(boundary)
+            boundary.markSecret(boundary.frameMetatable)
+        end,
+    },
+    {
+        name = "non-table Frame metatable",
+        configure = function()
+            _G.GetFrameMetatable = function()
+                return true
+            end
+        end,
+    },
+    {
+        name = "missing Frame API index",
+        configure = function(boundary)
+            boundary.frameMetatable.__index = nil
+        end,
+    },
+    {
+        name = "secret Frame API index",
+        configure = function(boundary)
+            boundary.markSecret(boundary.frameAPI)
+        end,
+    },
+    {
+        name = "callable Frame API index",
+        configure = function(boundary)
+            boundary.frameMetatable.__index = function()
+            end
+        end,
+    },
+}) do
+    AssertFrameBoundaryRejects(
+        boundaryCase.name,
+        boundaryCase.configure
+    )
+end
+
+for _, methodName in ipairs(intrinsicFrameMethods) do
+    for _, mutation in ipairs({"missing", "secret", "noncallable"}) do
+        AssertFrameBoundaryRejects(
+            mutation .. " Frame API " .. methodName,
+            function(boundary)
+                local method = boundary.frameAPI[methodName]
+                if mutation == "missing" then
+                    boundary.frameAPI[methodName] = nil
+                elseif mutation == "secret" then
+                    boundary.markSecret(method)
+                else
+                    boundary.frameAPI[methodName] = true
+                end
+            end
+        )
+    end
 end
 
 do
@@ -1223,11 +1406,11 @@ end
 
 do
     local harness = NewHarmfulHarness()
-    local widthCalls = 0
     local icon = harness.frame.PrivateAuraAnchors[1].Icon
-    function icon:GetWidth()
-        widthCalls = widthCalls + 1
-        return 26 + widthCalls
+    harness.state.onRegionHeight = function(region)
+        if rawequal(region, icon) then
+            region.height = region.height + 1
+        end
     end
     assertEqual(
         harness.BD.CanSuppressNativeHarmfulAuras(),
@@ -1435,6 +1618,101 @@ do
     assertEqual(heightCalls, 24,
         "revocation occurs at the final capture callback boundary")
     assertWrites(harness.calls, {}, "final-capture revocation zero writes")
+end
+
+for _, mutationCase in ipairs({
+    {
+        name = "root count",
+        mutate = function(harness)
+            harness.frame.maxPrivateAuras = 5
+        end,
+    },
+    {
+        name = "root anchor alias",
+        mutate = function(harness)
+            harness.frame.privateAuraAnchor1 =
+                harness.frame.PrivateAuraAnchors[2]
+        end,
+    },
+    {
+        name = "anchor array",
+        mutate = function(harness)
+            harness.frame.PrivateAuraAnchors[1] =
+                harness.frame.PrivateAuraAnchors[2]
+        end,
+    },
+    {
+        name = "anchor setter",
+        mutate = function(harness)
+            harness.frame.PrivateAuraAnchors[1].SetUnit = function()
+            end
+        end,
+    },
+    {
+        name = "root restore method",
+        mutate = function()
+            _G.DebuffFrameMixin.UpdatePrivateAuraAnchors = function()
+            end
+        end,
+    },
+    {
+        name = "Frame API method",
+        mutate = function(harness)
+            harness.frameAPI.GetParent = function()
+            end
+        end,
+    },
+    {
+        name = "Frame API getter",
+        mutate = function(harness)
+            _G.GetFrameMetatable = function()
+                return harness.frameMetatable
+            end
+        end,
+    },
+    {
+        name = "secret Frame API getter",
+        mutate = function(harness)
+            harness.markSecret(_G.GetFrameMetatable)
+        end,
+    },
+    {
+        name = "Frame API index",
+        mutate = function(harness)
+            local replacement = {}
+            for key, value in pairs(harness.frameAPI) do
+                replacement[key] = value
+            end
+            harness.frameMetatable.__index = replacement
+        end,
+    },
+    {
+        name = "secret Frame API index",
+        mutate = function(harness)
+            harness.markSecret(harness.frameAPI)
+        end,
+    },
+}) do
+    local harness = NewHarmfulHarness()
+    local heightCalls = 0
+    harness.state.onRegionHeight = function()
+        heightCalls = heightCalls + 1
+        if heightCalls == 24 then
+            mutationCase.mutate(harness)
+        end
+    end
+    local ok, result = pcall(
+        harness.BD.SetNativeHarmfulAurasSuppressed,
+        true
+    )
+    assertEqual(ok, true,
+        "final raw " .. mutationCase.name .. " no error")
+    assertEqual(result, false,
+        "final raw " .. mutationCase.name .. " rejected")
+    assertEqual(heightCalls, 24,
+        "final raw " .. mutationCase.name .. " mutation timing")
+    assertWrites(harness.calls, {},
+        "final raw " .. mutationCase.name .. " zero writes")
 end
 
 local sourceFile = assert(io.open("Modules/BuffsDebuffs/NativeAuraFrames.lua", "r"))
