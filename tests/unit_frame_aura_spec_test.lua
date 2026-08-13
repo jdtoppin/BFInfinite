@@ -109,14 +109,14 @@ local function makeHarness(withNativeSchema)
     })
 
     local BFI = {
+        funcs = {
+            isValueNonSecret = forbidden("F.isValueNonSecret"),
+        },
         L = setmetatable({}, {
             __index = function(_, key)
                 return key
             end,
         }),
-        funcs = {
-            isValueNonSecret = forbidden("F.isValueNonSecret"),
-        },
         modules = {
             UnitFrames = UF,
         },
@@ -137,10 +137,14 @@ local function makeHarness(withNativeSchema)
         tostring = tostring,
         type = type,
         AbstractFramework = AF,
-        GetCVar = function()
-            return "0"
-        end,
+        AuraUtil = {
+            AuraFilters = {
+                Important = "IMPORTANT",
+                Dispellable = "DISPELLABLE",
+            },
+        },
         CreateFrame = forbidden("CreateFrame"),
+        GetCVar = forbidden("GetCVar"),
         InCombatLockdown = forbidden("InCombatLockdown"),
         C_Timer = forbiddenTable("C_Timer"),
         UnitCanAssist = forbidden("UnitCanAssist"),
@@ -150,14 +154,6 @@ local function makeHarness(withNativeSchema)
         C_UnitAuras = forbiddenTable("C_UnitAuras"),
         C_Secrets = forbiddenTable("C_Secrets"),
         AuraData = forbiddenTable("AuraData"),
-        AuraUtil = {
-            AuraFilters = withNativeSchema
-                and {
-                    Important = "IMPORTANT",
-                    Dispellable = "DISPELLABLE",
-                }
-                or {},
-        },
     }
     environment["is" .. "secretvalue"] = forbidden("secret-value API")
     environment._G = environment
@@ -320,7 +316,7 @@ local function expectedStackText()
     }
 end
 
-local function expectedButtonStyle(dispelColor)
+local function expectedButtonStyle(nativeDispelColor)
     return {
         noBorder = true,
         width = 10,
@@ -329,7 +325,7 @@ local function expectedButtonStyle(dispelColor)
         cooldownStyle = "clock_with_leading_edge",
         durationText = expectedDurationText(),
         stackText = expectedStackText(),
-        dispelColor = dispelColor,
+        nativeDispelColor = nativeDispelColor,
         tooltip = {
             enabled = true,
             anchorPoint = "ANCHOR_BOTTOMRIGHT",
@@ -383,7 +379,7 @@ local function testLegacyLoadAndSchemaGate()
     assertEqual(
         type(legacy.UF.CompileNativeAuraSpec),
         "function",
-        "12.0.7 compiler export"
+        "unavailable-schema compiler export"
     )
 
     local descriptor, errorCode = legacy.UF.CompileNativeAuraSpec(
@@ -391,13 +387,14 @@ local function testLegacyLoadAndSchemaGate()
         "HARMFUL",
         baseConfig()
     )
-    assertEqual(descriptor, nil, "12.0.7 descriptor")
+    assertEqual(descriptor, nil, "unavailable-schema descriptor")
     assertEqual(
         errorCode,
         "NATIVE_AURA_SCHEMA_UNAVAILABLE",
-        "12.0.7 schema error"
+        "unavailable-schema error"
     )
-    assertEqual(#legacy.forbiddenCalls, 0, "12.0.7 forbidden calls")
+    assertEqual(#legacy.forbiddenCalls, 0,
+        "unavailable-schema forbidden calls")
 end
 
 local function testCompleteSpecContract()
@@ -714,7 +711,7 @@ local function testOrientationAndGeometry()
         height = 6,
     }, "negative-spacing holder")
 
-    -- d3915c78's flow cursor already retains elementSpacing after the prior
+    -- eb941aad's flow cursor already retains elementSpacing after the prior
     -- group's last element. A non-zero groupSpacing would double the 2px gap
     -- and can wrap the next group early.
     local boundary = compile("target", "HARMFUL", baseConfig())
@@ -790,9 +787,9 @@ local function testStyleProjection()
     helpful.filters.isBossAura = false
     local helpfulDescriptor = compile("target", "HELPFUL", helpful)
     assertEqual(
-        helpfulDescriptor.completeSpec.groups[1].buttonStyle.dispelColor,
+        helpfulDescriptor.completeSpec.groups[1].buttonStyle.nativeDispelColor,
         false,
-        "helpful dispel color"
+        "helpful native dispel color"
     )
 
     local harmfulNoColor = baseConfig()
@@ -800,9 +797,9 @@ local function testStyleProjection()
     harmfulNoColor.auraTypeColor.debuffType = false
     local noColorDescriptor = compile("target", "HARMFUL", harmfulNoColor)
     assertEqual(
-        noColorDescriptor.completeSpec.groups[1].buttonStyle.dispelColor,
+        noColorDescriptor.completeSpec.groups[1].buttonStyle.nativeDispelColor,
         false,
-        "disabled harmful dispel color"
+        "disabled harmful native dispel color"
     )
 
     harmfulNoColor.auraTypeColor.debuffType = true
@@ -810,9 +807,24 @@ local function testStyleProjection()
     harmfulNoColor.auraTypeColor.dispellable = false
     local colorDescriptor = compile("target", "HARMFUL", harmfulNoColor)
     assertEqual(
-        colorDescriptor.completeSpec.groups[1].buttonStyle.dispelColor,
+        colorDescriptor.completeSpec.groups[1].buttonStyle.nativeDispelColor,
         true,
-        "harmful dispel color"
+        "harmful native dispel color"
+    )
+    assertEqual(
+        colorDescriptor.completeSpec.groups[1].buttonStyle.dispelColor,
+        nil,
+        "harmful custom dispel color is retired"
+    )
+    assertEqual(
+        colorDescriptor.completeSpec.groups[1].buttonStyle.dispelColorCurve,
+        nil,
+        "harmful custom dispel color curve is not emitted"
+    )
+    assertDeepEqual(
+        colorDescriptor.metrics,
+        noColorDescriptor.metrics,
+        "native dispel color does not change topology or metrics"
     )
 
     local noSourceRules = baseConfig()
@@ -833,9 +845,9 @@ local function testStyleProjection()
     noSourceRules.auraTypeColor = nil
     local noAuraColorDescriptor = compile("target", "HARMFUL", noSourceRules)
     assertEqual(
-        noAuraColorDescriptor.completeSpec.groups[1].buttonStyle.dispelColor,
+        noAuraColorDescriptor.completeSpec.groups[1].buttonStyle.nativeDispelColor,
         false,
-        "missing aura color config"
+        "missing native aura color config"
     )
 
     local fractional = baseConfig()
@@ -1120,40 +1132,18 @@ local function testEmptyPolicies()
     assertEqual(
         widened.completeSpec.groups[1].key,
         "all",
-        "cast-by-unit all group"
+        "widened harmful all-auras key"
     )
     assertEqual(
         widened.completeSpec.groups[1].filterString,
         "HARMFUL",
-        "cast-by-unit base filter"
+        "widened harmful all-auras filter"
     )
     assertEqual(
         widened.degradations.legacySourceFilterUsesSuperset,
         true,
-        "cast-by-unit widening metadata"
+        "widened harmful source degradation"
     )
-
-    config.filters = {
-        castByOthers = true,
-    }
-    local notPlayer = compile("target", "HARMFUL", config)
-    assertEqual(notPlayer.empty, false, "source-only harmful state")
-    assertEqual(
-        notPlayer.completeSpec.groups[1].key,
-        "notPlayer",
-        "source-only not-player group"
-    )
-    assertEqual(
-        notPlayer.completeSpec.groups[1].filterString,
-        "HARMFUL|!PLAYER",
-        "source-only not-player filter"
-    )
-    assertDeepEqual(notPlayer.visibility, {
-        requiresVisible = true,
-        requiresAssist = false,
-        spellIDFilterRequiresPublicAssist = false,
-        spellIDFilterRequiresPublicNonAssist = false,
-    }, "source-only visibility")
 
     config = baseConfig()
     config.enabled = false
@@ -1738,12 +1728,12 @@ local function testShippedTargetPartitionMetrics()
     config.numPerLine = 11
     config.numTotal = 22
     config.filters = {
-        player = true,
-        notPlayer = false,
-        raidInCombat = true,
-        raidPlayerDispellable = true,
-        bigDefensive = false,
-        externalDefensive = false,
+        castByMe = true,
+        castByOthers = true,
+        castByUnit = true,
+        castByNPC = true,
+        isBossAura = true,
+        dispellable = true,
     }
     config.subFrame = {
         enabled = true,
@@ -1755,56 +1745,52 @@ local function testShippedTargetPartitionMetrics()
 
     local descriptor = compile("target", "HARMFUL", config)
     local hostile = descriptor.partition.hostile
-    assertEqual(#descriptor.completeSpec.groups, 3, "shipped friendly groups")
-    assertEqual(#hostile.main.completeSpec.groups, 1, "shipped main groups")
+    local main = hostile.main
+    local complement = hostile.complement
+
+    assertEqual(#descriptor.completeSpec.groups, 1,
+        "shipped friendly groups")
+    assertEqual(#main.completeSpec.groups, 1,
+        "shipped main groups")
+    assertEqual(#complement.completeSpec.groups, 1,
+        "shipped complement groups")
     assertEqual(
-        #hostile.complement.completeSpec.groups,
-        2,
-        "shipped complement groups"
-    )
-    assertDeepEqual({
         descriptor.completeSpec.groups[1].filterString,
-        descriptor.completeSpec.groups[2].filterString,
-        descriptor.completeSpec.groups[3].filterString,
-    }, {
-        "HARMFUL|PLAYER",
-        "HARMFUL|RAID_IN_COMBAT|!PLAYER",
-        "HARMFUL|RAID_PLAYER_DISPELLABLE|!PLAYER|!RAID_IN_COMBAT",
-    }, "shipped friendly filters")
-    assertDeepEqual({
-        hostile.main.completeSpec.groups[1].filterString,
-    }, {
-        "HARMFUL|PLAYER",
-    }, "shipped main filters")
-    assertDeepEqual({
-        hostile.complement.completeSpec.groups[1].filterString,
-        hostile.complement.completeSpec.groups[2].filterString,
-    }, {
-        "HARMFUL|RAID_IN_COMBAT|!PLAYER",
-        "HARMFUL|RAID_PLAYER_DISPELLABLE|!PLAYER|!RAID_IN_COMBAT",
-    }, "shipped complement filters")
+        "HARMFUL",
+        "shipped friendly all-auras filter"
+    )
     assertEqual(
-        hostile.main.completeSpec.groups[1].layout.elementHeight,
+        main.completeSpec.groups[1].filterString,
+        "HARMFUL|PLAYER",
+        "shipped main filter"
+    )
+    assertEqual(
+        complement.completeSpec.groups[1].filterString,
+        "HARMFUL|!PLAYER",
+        "shipped complement filter"
+    )
+    assertEqual(
+        main.completeSpec.groups[1].layout.elementHeight,
         21,
         "shipped clamped-empty main element height"
     )
     assertEqual(
-        hostile.main.completeSpec.groups[1].layout.lineSpacing,
+        main.completeSpec.groups[1].layout.lineSpacing,
         -1,
         "shipped clamped-empty main line spacing"
     )
     assertEqual(
-        hostile.complement.completeSpec.groups[1].buttonStyle.width,
+        complement.completeSpec.groups[1].buttonStyle.width,
         17,
         "shipped complement width"
     )
     assertEqual(
-        hostile.complement.completeSpec.groups[1].buttonStyle.height,
+        complement.completeSpec.groups[1].buttonStyle.height,
         17,
         "shipped complement height"
     )
     assertEqual(
-        hostile.complement.completeSpec.groups[1].buttonStyle.desaturated,
+        complement.completeSpec.groups[1].buttonStyle.desaturated,
         true,
         "shipped complement desaturation"
     )
@@ -1816,36 +1802,36 @@ local function testShippedTargetPartitionMetrics()
         y = -1,
     }, "shipped attachment")
     assertDeepEqual(descriptor.metrics, {
-        groupCount = 3,
+        groupCount = 1,
         legacyMaxFrameCount = 22,
-        nativeVisibleCapacity = 66,
+        nativeVisibleCapacity = 44,
         nativeBatchSize = 10,
-        initialRestrictedButtonCount = 60,
-        freshContainerRestrictedButtonCountCeiling = 180,
+        initialRestrictedButtonCount = 30,
+        freshContainerRestrictedButtonCountCeiling = 90,
         prebuiltContainerCount = 3,
-        prebuiltGroupCount = 6,
-        maxActiveGroupCount = 3,
+        prebuiltGroupCount = 3,
+        maxActiveGroupCount = 2,
         requestedColorBucketCount = 0,
         requestedColorExpandedGroupCount = 0,
         requestedColorExpandedCapacity = 0,
         colorGroupBudgetExceeded = false,
         hostileHolder = {
             width = 219,
-            height = 111,
+            height = 75,
         },
         compositeHolder = {
             width = 219,
-            height = 119,
+            height = 75,
         },
         variants = {
             friendly = {
-                groupCount = 3,
-                nativeVisibleCapacity = 66,
-                initialRestrictedButtonCount = 30,
-                freshContainerRestrictedButtonCountCeiling = 90,
+                groupCount = 1,
+                nativeVisibleCapacity = 22,
+                initialRestrictedButtonCount = 10,
+                freshContainerRestrictedButtonCountCeiling = 30,
                 holder = {
                     width = 219,
-                    height = 119,
+                    height = 39,
                 },
             },
             hostileMain = {
@@ -1859,23 +1845,22 @@ local function testShippedTargetPartitionMetrics()
                 },
             },
             hostileComplement = {
-                groupCount = 2,
-                nativeVisibleCapacity = 44,
-                initialRestrictedButtonCount = 20,
-                freshContainerRestrictedButtonCountCeiling = 60,
+                groupCount = 1,
+                nativeVisibleCapacity = 22,
+                initialRestrictedButtonCount = 10,
+                freshContainerRestrictedButtonCountCeiling = 30,
                 holder = {
                     width = 197,
-                    height = 71,
+                    height = 35,
                 },
             },
         },
     }, "shipped physical metrics")
     assertDeepEqual(descriptor.partition.holder, {
         width = 219,
-        height = 119,
+        height = 75,
     }, "shipped composite holder")
 end
-
 local function testCapacityMetrics()
     local single = baseConfig()
     single.numPerLine = 2
@@ -1905,175 +1890,39 @@ local function testCapacityMetrics()
         "single-group sort degradation"
     )
 
-    local legacyAll = baseConfig()
-    legacyAll.numPerLine = 11
-    legacyAll.numTotal = 22
-    legacyAll.filters = {
-        castByMe = true,
-        castByOthers = true,
-        castByUnit = true,
-        castByNPC = true,
-        isBossAura = true,
-        dispellable = true,
-    }
-    local allDescriptor =
-        compile("target", "HELPFUL", legacyAll)
-    assertEqual(
-        allDescriptor.completeSpec.groups[1].filterString,
-        "HELPFUL",
-        "legacy all base filter"
-    )
-    assertDeepEqual(allDescriptor.metrics, {
-        groupCount = 1,
-        legacyMaxFrameCount = 22,
-        nativeVisibleCapacity = 22,
-        nativeBatchSize = 10,
-        initialRestrictedButtonCount = 10,
-        freshContainerRestrictedButtonCountCeiling = 30,
-        requestedColorBucketCount = 0,
-        requestedColorExpandedGroupCount = 0,
-        requestedColorExpandedCapacity = 0,
-        colorGroupBudgetExceeded = false,
-    }, "legacy all metrics")
-    assertEqual(
-        allDescriptor.degradations.perGroupLimit,
-        false,
-        "legacy all limit degradation"
-    )
-    assertEqual(
-        allDescriptor.degradations.perGroupSort,
-        false,
-        "legacy all sort degradation"
-    )
-    assertDeepEqual(allDescriptor.visibility, {
-        requiresVisible = false,
-        requiresAssist = false,
-        spellIDFilterRequiresPublicAssist = false,
-        spellIDFilterRequiresPublicNonAssist = false,
-    }, "legacy all visibility")
-
-    local canonicalAll = copy(legacyAll)
-    canonicalAll.filters = {
-        all = true,
-    }
-    local canonicalAllDescriptor =
-        compile("target", "HELPFUL", canonicalAll)
-    assertDeepEqual(
-        canonicalAllDescriptor.completeSpec.groups,
-        allDescriptor.completeSpec.groups,
-        "legacy and canonical all groups"
-    )
-    assertDeepEqual(
-        canonicalAllDescriptor.constructionKey,
-        allDescriptor.constructionKey,
-        "legacy and canonical all construction keys"
-    )
-
-    local seven = baseConfig()
-    seven.numPerLine = 11
-    seven.numTotal = 22
-    seven.filters = {
+    local five = baseConfig()
+    five.numPerLine = 11
+    five.numTotal = 22
+    five.filters = {
         player = true,
-        notPlayer = false,
         raidInCombat = true,
         raidPlayerDispellable = true,
         bigDefensive = true,
         externalDefensive = true,
-        important = true,
-        anyDispellable = true,
     }
-    local sevenDescriptor =
-        compile("target", "HELPFUL", seven)
-    assertDeepEqual(sevenDescriptor.metrics, {
-        groupCount = 7,
+    local fiveDescriptor = compile("target", "HELPFUL", five)
+    assertDeepEqual(fiveDescriptor.metrics, {
+        groupCount = 5,
         legacyMaxFrameCount = 22,
-        nativeVisibleCapacity = 154,
+        nativeVisibleCapacity = 110,
         nativeBatchSize = 10,
-        initialRestrictedButtonCount = 70,
-        freshContainerRestrictedButtonCountCeiling = 210,
+        initialRestrictedButtonCount = 50,
+        freshContainerRestrictedButtonCountCeiling = 150,
         requestedColorBucketCount = 0,
         requestedColorExpandedGroupCount = 0,
         requestedColorExpandedCapacity = 0,
         colorGroupBudgetExceeded = false,
-    }, "seven-category metrics")
+    }, "five-group metrics")
     assertEqual(
-        sevenDescriptor.degradations.perGroupLimit,
+        fiveDescriptor.degradations.perGroupLimit,
         true,
-        "seven-category limit degradation"
+        "five-group limit degradation"
     )
     assertEqual(
-        sevenDescriptor.degradations.perGroupSort,
+        fiveDescriptor.degradations.perGroupSort,
         true,
-        "seven-category sort degradation"
+        "five-group sort degradation"
     )
-    assertEqual(
-        sevenDescriptor.completeSpec.groups[6].key,
-        "important",
-        "important spec group order"
-    )
-    assertEqual(
-        sevenDescriptor.completeSpec.groups[6].filterString,
-        "HELPFUL|IMPORTANT|!PLAYER|!RAID_IN_COMBAT"
-            .. "|!RAID_PLAYER_DISPELLABLE|!BIG_DEFENSIVE"
-            .. "|!EXTERNAL_DEFENSIVE",
-        "important spec filter"
-    )
-    assertEqual(
-        sevenDescriptor.completeSpec.groups[7].key,
-        "anyDispellable",
-        "any-dispellable spec group order"
-    )
-    assertEqual(
-        sevenDescriptor.completeSpec.groups[7].filterString,
-        "HELPFUL|DISPELLABLE|!PLAYER|!RAID_IN_COMBAT"
-            .. "|!RAID_PLAYER_DISPELLABLE|!BIG_DEFENSIVE"
-            .. "|!EXTERNAL_DEFENSIVE|!IMPORTANT",
-        "any-dispellable spec filter"
-    )
-    assertEqual(
-        sevenDescriptor.visibility.spellIDFilterRequiresPublicAssist,
-        false,
-        "category-only helpful policy has no spell-ID assist gate"
-    )
-    assertEqual(
-        sevenDescriptor.visibility.spellIDFilterRequiresPublicNonAssist,
-        false,
-        "category-only helpful policy has no spell-ID non-assist gate"
-    )
-
-    local splitDefensive = baseConfig()
-    splitDefensive.filters = {
-        player = false,
-        raidInCombat = false,
-        raidPlayerDispellable = false,
-        bigDefensive = true,
-        externalDefensive = false,
-    }
-    local splitDescriptor =
-        compile("target", "HELPFUL", splitDefensive)
-    assertEqual(
-        #splitDescriptor.completeSpec.groups,
-        1,
-        "split defensive group count"
-    )
-    assertEqual(
-        splitDescriptor.completeSpec.groups[1].filterString,
-        "HELPFUL|BIG_DEFENSIVE",
-        "split defensive filter"
-    )
-    assertDeepEqual(splitDescriptor.metrics, {
-        groupCount = 1,
-        legacyMaxFrameCount = 4,
-        nativeVisibleCapacity = 4,
-        nativeBatchSize = 10,
-        initialRestrictedButtonCount = 10,
-        freshContainerRestrictedButtonCountCeiling = 10,
-        requestedColorBucketCount = 0,
-        requestedColorExpandedGroupCount = 0,
-        requestedColorExpandedCapacity = 0,
-        colorGroupBudgetExceeded = false,
-    }, "split defensive metrics")
-
     local spellFilter = baseConfig()
     spellFilter.blacklist = {12345}
     spellFilter.whitelist = {67890}
@@ -2094,16 +1943,6 @@ local function testCapacityMetrics()
             .spellIDFiltersRestrictedByUnitReaction,
         true,
         "spell-filter reaction degradation"
-    )
-    assertEqual(
-        spellDescriptor.visibility.spellIDFilterRequiresPublicAssist,
-        false,
-        "harmful spell filter does not require assist"
-    )
-    assertEqual(
-        spellDescriptor.visibility.spellIDFilterRequiresPublicNonAssist,
-        true,
-        "harmful spell filter requires a public non-assist reaction"
     )
 end
 
@@ -2155,13 +1994,13 @@ local function testSpellIDCandidateFilters()
         whitelistDescriptor.visibility
             .spellIDFilterRequiresPublicAssist,
         true,
-        "helpful identity filter requires a public assist reaction"
+        "helpful identity filter requires public assist"
     )
     assertEqual(
         whitelistDescriptor.visibility
             .spellIDFilterRequiresPublicNonAssist,
         false,
-        "helpful identity filter does not require non-assist"
+        "helpful identity filter does not require public non-assist"
     )
     assertEqual(
         whitelistDescriptor.degradations.spellIDListsIgnored,
@@ -2224,13 +2063,13 @@ local function testSpellIDCandidateFilters()
         emptyWhitelistDescriptor.visibility
             .spellIDFilterRequiresPublicAssist,
         true,
-        "empty helpful whitelist remains an active assist gate"
+        "empty helpful whitelist retains public assist gate"
     )
     assertEqual(
         emptyWhitelistDescriptor.visibility
             .spellIDFilterRequiresPublicNonAssist,
         false,
-        "empty helpful whitelist does not require non-assist"
+        "empty helpful whitelist has no public non-assist gate"
     )
     assertEqual(
         emptyWhitelistDescriptor.degradations
@@ -2260,39 +2099,13 @@ local function testSpellIDCandidateFilters()
         blacklistDescriptor.visibility
             .spellIDFilterRequiresPublicAssist,
         false,
-        "harmful identity filter does not require assist"
+        "harmful identity filter has no public assist gate"
     )
     assertEqual(
         blacklistDescriptor.visibility
             .spellIDFilterRequiresPublicNonAssist,
         true,
-        "harmful identity filter requires a public non-assist reaction"
-    )
-
-    local importantWhitelist = baseConfig()
-    importantWhitelist.filters = {
-        important = true,
-    }
-    importantWhitelist.mode = "whitelist"
-    importantWhitelist.whitelist = {505}
-    local importantWhitelistDescriptor =
-        compile("focus", "HELPFUL", importantWhitelist)
-    assertEqual(
-        importantWhitelistDescriptor.completeSpec.groups[1].key,
-        "important",
-        "important category remains selected with a spell-ID whitelist"
-    )
-    assertEqual(
-        importantWhitelistDescriptor.visibility
-            .spellIDFilterRequiresPublicAssist,
-        true,
-        "important whitelist retains the strict assist gate"
-    )
-    assertEqual(
-        importantWhitelistDescriptor.visibility
-            .spellIDFilterRequiresPublicNonAssist,
-        false,
-        "important whitelist does not add a non-assist gate"
+        "harmful identity filter requires public non-assist"
     )
 
     local emptyBlacklist = baseConfig()
@@ -2319,13 +2132,13 @@ local function testSpellIDCandidateFilters()
         emptyBlacklistDescriptor.visibility
             .spellIDFilterRequiresPublicAssist,
         false,
-        "empty blacklist has no strict assist gate"
+        "empty blacklist has no public assist gate"
     )
     assertEqual(
         emptyBlacklistDescriptor.visibility
             .spellIDFilterRequiresPublicNonAssist,
         false,
-        "empty blacklist has no strict non-assist gate"
+        "empty blacklist has no public non-assist gate"
     )
     assertEqual(
         #emptyBlacklistDescriptor.diagnostics,
@@ -2533,7 +2346,32 @@ local function testTargetPartitionPreservesSpellColorFamilies()
     assertEqual(#main, 3, "partition color hostile main groups")
     assertEqual(#complement, 3,
         "partition color hostile complement groups")
+    local seenThresholds = {}
+    local seenThresholdColors = {}
     for _, groups in ipairs({friendly, main, complement}) do
+        for _, group in ipairs(groups) do
+            local threshold =
+                group.buttonStyle.durationText.color.threshold
+            assertDeepEqual(threshold, {
+                mode = "seconds",
+                value = 5,
+                rgb = {0.9, 0.8, 0.7, 0.6},
+            }, "partition duration threshold copy")
+            assertTrue(
+                not seenThresholds[threshold],
+                "partition duration threshold descriptor alias"
+            )
+            seenThresholds[threshold] = true
+            assertTrue(
+                threshold.rgb ~= config.durationText.color.seconds.rgb,
+                "partition duration threshold saved-color alias"
+            )
+            assertTrue(
+                not seenThresholdColors[threshold.rgb],
+                "partition duration threshold color alias"
+            )
+            seenThresholdColors[threshold.rgb] = true
+        end
         assertDeepEqual(groups[1].candidateFilters, {
             includeSpellIDs = {
                 [101] = true,
@@ -2566,17 +2404,12 @@ local function testTargetPartitionPreservesSpellColorFamilies()
     assertEqual(
         descriptor.metrics.requestedColorExpandedGroupCount,
         6,
-        "partition color budget uses policy count"
+        "partition color budget uses max active variant"
     )
     assertEqual(
         descriptor.metrics.initialRestrictedButtonCount,
         120,
         "partition color prebuilt initial reservations"
-    )
-    assertEqual(
-        descriptor.metrics.freshContainerRestrictedButtonCountCeiling,
-        120,
-        "partition color prebuilt fresh ceiling"
     )
     assertEqual(
         descriptor.metrics.prebuiltGroupCount,
@@ -2588,16 +2421,30 @@ local function testTargetPartitionPreservesSpellColorFamilies()
         6,
         "partition color active group ceiling"
     )
-    assertEqual(
-        descriptor.metrics.variants.friendly.groupCount,
-        6,
-        "partition friendly expanded groups"
+
+    local off = copy(config)
+    off.durationText.color.seconds.enabled = false
+    off.durationText.color.percent.enabled = false
+    local offDescriptor = compile("target", "HARMFUL", off)
+    assertDeepEqual(
+        descriptor.completeSpec.holder,
+        offDescriptor.completeSpec.holder,
+        "duration threshold preserves friendly holder metrics"
     )
-    assertEqual(
-        descriptor.metrics.variants.hostileMain.groupCount
-            + descriptor.metrics.variants.hostileComplement.groupCount,
-        6,
-        "partition hostile expanded groups"
+    assertDeepEqual(
+        descriptor.partition.hostile.holder,
+        offDescriptor.partition.hostile.holder,
+        "duration threshold preserves hostile holder metrics"
+    )
+    assertDeepEqual(
+        descriptor.partition.holder,
+        offDescriptor.partition.holder,
+        "duration threshold preserves composite holder metrics"
+    )
+    assertDeepEqual(
+        descriptor.metrics,
+        offDescriptor.metrics,
+        "duration threshold preserves group, capacity, and prebuilt metrics"
     )
 end
 
@@ -2819,46 +2666,40 @@ local function testPartitionColorBudgetUsesMaxActiveVariant()
 
     local exactDescriptor = compile("target", "HARMFUL", exact)
     assertEqual(
-        exactDescriptor.metrics.maxActiveGroupCount,
-        8,
-        "partition exact max-active budget"
-    )
-    assertEqual(
-        exactDescriptor.metrics.prebuiltGroupCount,
-        16,
-        "partition exact prebuilt groups"
-    )
-    assertEqual(
-        exactDescriptor.metrics.initialRestrictedButtonCount,
-        160,
-        "partition exact prebuilt reservations"
-    )
-    assertEqual(
         exactDescriptor.metrics.requestedColorExpandedGroupCount,
         8,
-        "partition exact requested max-active groups"
+        "player partition requested max-active groups"
     )
     assertEqual(
         exactDescriptor.metrics.colorGroupBudgetExceeded,
         false,
-        "partition exact budget accepted"
+        "player partition exact budget accepted"
     )
     assertEqual(
-        #exactDescriptor.completeSpec.groups,
+        exactDescriptor.metrics.maxActiveGroupCount,
         8,
-        "partition exact friendly groups"
+        "player partition max-active groups"
+    )
+    assertEqual(
+        exactDescriptor.metrics.prebuiltGroupCount,
+        16,
+        "player partition prebuilt groups"
+    )
+    assertEqual(
+        exactDescriptor.metrics.initialRestrictedButtonCount,
+        160,
+        "player partition prebuilt reservations"
     )
 
     local inverse = copy(exact)
     inverse.filters = {
         notPlayer = true,
     }
-    local inverseDescriptor =
-        compile("target", "HARMFUL", inverse)
+    local inverseDescriptor = compile("target", "HARMFUL", inverse)
     assertEqual(
         inverseDescriptor.metrics.requestedColorExpandedGroupCount,
         8,
-        "not-player partition exact requested max-active groups"
+        "not-player partition requested max-active groups"
     )
     assertEqual(
         inverseDescriptor.metrics.colorGroupBudgetExceeded,
@@ -2868,25 +2709,24 @@ local function testPartitionColorBudgetUsesMaxActiveVariant()
     assertEqual(
         inverseDescriptor.metrics.maxActiveGroupCount,
         8,
-        "not-player partition exact max-active budget"
+        "not-player partition max-active groups"
     )
     assertEqual(
         inverseDescriptor.metrics.prebuiltGroupCount,
         16,
-        "not-player partition exact prebuilt groups"
+        "not-player partition prebuilt groups"
     )
     assertEqual(
-        #inverseDescriptor.completeSpec.groups,
-        8,
-        "not-player partition exact friendly groups"
+        inverseDescriptor.metrics.initialRestrictedButtonCount,
+        160,
+        "not-player partition prebuilt reservations"
     )
 
     local duplicated = copy(exact)
     duplicated.filters = {
         all = true,
     }
-    local duplicatedDescriptor =
-        compile("target", "HARMFUL", duplicated)
+    local duplicatedDescriptor = compile("target", "HARMFUL", duplicated)
     local hostile = duplicatedDescriptor.partition.hostile
     assertEqual(
         duplicatedDescriptor.metrics.requestedColorExpandedGroupCount,
@@ -2931,14 +2771,12 @@ local function testPartitionColorBudgetUsesMaxActiveVariant()
         )
     end
     assertEqual(
-        duplicatedDescriptor.visibility
-            .spellIDFilterRequiresPublicAssist,
+        duplicatedDescriptor.visibility.spellIDFilterRequiresPublicAssist,
         false,
         "unused partition colors do not add assist gate"
     )
     assertEqual(
-        duplicatedDescriptor.visibility
-            .spellIDFilterRequiresPublicNonAssist,
+        duplicatedDescriptor.visibility.spellIDFilterRequiresPublicNonAssist,
         false,
         "unused partition colors do not add non-assist gate"
     )
@@ -2948,7 +2786,6 @@ local function testPartitionColorBudgetPreservesLargeGrayBaseline()
     local baseline = baseConfig()
     baseline.cooldownStyle = "block_vertical"
     baseline.filters = {
-        notPlayer = true,
         raidInCombat = true,
         raidPlayerDispellable = true,
         bigDefensive = true,
@@ -2964,38 +2801,31 @@ local function testPartitionColorBudgetPreservesLargeGrayBaseline()
         height = 7,
     }
 
-    local baselineDescriptor =
-        compile("target", "HELPFUL", baseline)
+    local baselineDescriptor = compile("target", "HELPFUL", baseline)
     assertEqual(
         baselineDescriptor.metrics.maxActiveGroupCount,
-        7,
+        12,
         "large gray baseline active groups"
     )
     assertEqual(
         baselineDescriptor.metrics.prebuiltGroupCount,
-        14,
+        18,
         "large gray baseline prebuilt groups"
     )
     assertEqual(
-        #baselineDescriptor.completeSpec.groups,
-        7,
-        "large gray friendly baseline groups"
-    )
-    assertEqual(
-        baselineDescriptor.metrics.colorGroupBudgetExceeded,
-        false,
-        "large gray baseline is not a color-budget failure"
+        baselineDescriptor.metrics.initialRestrictedButtonCount,
+        180,
+        "large gray baseline prebuilt reservations"
     )
 
     local colored = copy(baseline)
     colored.spellColors = {
         [1001] = {0.1, 0.2, 0.3, 1},
     }
-    local fallbackDescriptor =
-        compile("target", "HELPFUL", colored)
+    local fallbackDescriptor = compile("target", "HELPFUL", colored)
     assertEqual(
         fallbackDescriptor.metrics.requestedColorExpandedGroupCount,
-        14,
+        24,
         "large baseline requested color groups"
     )
     assertEqual(
@@ -3005,13 +2835,18 @@ local function testPartitionColorBudgetPreservesLargeGrayBaseline()
     )
     assertEqual(
         fallbackDescriptor.metrics.maxActiveGroupCount,
-        7,
+        12,
         "large fallback keeps baseline active groups"
     )
     assertEqual(
         fallbackDescriptor.metrics.prebuiltGroupCount,
-        14,
+        18,
         "large fallback keeps baseline prebuilt groups"
+    )
+    assertEqual(
+        fallbackDescriptor.metrics.initialRestrictedButtonCount,
+        180,
+        "large fallback keeps baseline reservations"
     )
     assertDeepEqual(
         fallbackDescriptor.completeSpec,
@@ -3031,16 +2866,55 @@ local function testPartitionColorBudgetPreservesLargeGrayBaseline()
     assertDeepEqual(
         fallbackDescriptor.tuningSpec,
         baselineDescriptor.tuningSpec,
-        "large fallback keeps tuning baseline"
+        "large fallback friendly tuning baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.partition.hostile.main.tuningSpec,
+        baselineDescriptor.partition.hostile.main.tuningSpec,
+        "large fallback hostile-main tuning baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.partition.hostile.complement.tuningSpec,
+        baselineDescriptor.partition.hostile.complement.tuningSpec,
+        "large fallback hostile-complement tuning baseline"
     )
     assertDeepEqual(
         fallbackDescriptor.constructionKey,
         baselineDescriptor.constructionKey,
-        "large fallback keeps construction baseline"
+        "large fallback friendly construction baseline"
     )
+    assertDeepEqual(
+        fallbackDescriptor.partition.hostile.main.constructionKey,
+        baselineDescriptor.partition.hostile.main.constructionKey,
+        "large fallback hostile-main construction baseline"
+    )
+    assertDeepEqual(
+        fallbackDescriptor.partition.hostile.complement.constructionKey,
+        baselineDescriptor.partition.hostile.complement.constructionKey,
+        "large fallback hostile-complement construction baseline"
+    )
+    for _, key in ipairs({
+        "groupCount",
+        "legacyMaxFrameCount",
+        "nativeVisibleCapacity",
+        "nativeBatchSize",
+        "initialRestrictedButtonCount",
+        "freshContainerRestrictedButtonCountCeiling",
+        "prebuiltContainerCount",
+        "prebuiltGroupCount",
+        "maxActiveGroupCount",
+        "hostileHolder",
+        "compositeHolder",
+        "variants",
+    }) do
+        assertDeepEqual(
+            fallbackDescriptor.metrics[key],
+            baselineDescriptor.metrics[key],
+            "large fallback metric baseline " .. key
+        )
+    end
     assertEqual(
-        fallbackDescriptor.visibility
-            .spellIDFilterRequiresPublicAssist,
+        fallbackDescriptor.visibility.spellIDFilterRequiresPublicAssist,
         false,
         "large fallback adds no reaction gate"
     )

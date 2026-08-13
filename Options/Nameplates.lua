@@ -2803,9 +2803,10 @@ local function CreateNameplatesPanel()
         -45
     )
 
-    -- Retail 12.0.7's native DurationTextBinding cannot apply threshold
-    -- colors without exposing restricted duration values to Lua. Keep the
-    -- supported normal color here; 12.1 curve modes need a separate design.
+    -- Saved seconds/percent thresholds remain part of this row and AF r40+
+    -- applies the selected rule through its native duration color curve.
+    -- This picker edits only the ordinary saved normal color; BFI never
+    -- reads restricted remaining-duration values.
     local normalColor = AF.CreateColorPicker(
         durationPane,
         L["Normal"]

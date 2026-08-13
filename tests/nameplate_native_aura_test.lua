@@ -23,6 +23,41 @@ local function copy(value)
     return result
 end
 
+local function assertDeepEqual(actual, expected, message, seen)
+    message = message or "tables differ"
+    if type(actual) ~= type(expected) then
+        error(("%s: type mismatch (%s ~= %s)"):format(
+            message,
+            type(actual),
+            type(expected)
+        ), 2)
+    end
+    if type(actual) ~= "table" then
+        assertEqual(actual, expected, message)
+        return
+    end
+
+    seen = seen or {}
+    if seen[actual] == expected then return end
+    seen[actual] = expected
+    for key, expectedValue in pairs(expected) do
+        assertDeepEqual(
+            actual[key],
+            expectedValue,
+            ("%s.%s"):format(message, tostring(key)),
+            seen
+        )
+    end
+    for key in pairs(actual) do
+        if expected[key] == nil then
+            error(("%s: unexpected key %s"):format(
+                message,
+                tostring(key)
+            ), 2)
+        end
+    end
+end
+
 local sourceFile = assert(io.open(
     "Modules/Nameplates/Indicators/Auras.lua",
     "r"
@@ -172,9 +207,51 @@ local hostileConfig = {
     enabled = true,
     position = {"BOTTOM", "TOP", 0, 18},
     anchorTo = "healthBar",
-    cooldownStyle = "block_clock",
+    orientation = "left_to_right",
+    cooldownStyle = "clock",
+    width = 25,
+    height = 15,
+    spacingX = 3,
+    spacingY = 6,
+    numPerLine = 4,
+    numTotal = 8,
+    frameLevel = 2,
+    durationText = {
+        enabled = true,
+        font = {"BFI", 10, "outline", false},
+        position = {"RIGHT", "TOPRIGHT", 0, -2},
+        color = {
+            normal = {1, 1, 1, 1},
+            percent = {
+                enabled = false,
+                value = 0.5,
+                rgb = {1, 0.8, 0, 1},
+            },
+            seconds = {
+                enabled = true,
+                value = 5,
+                rgb = {1, 0.2, 0.2, 1},
+            },
+        },
+    },
+    stackText = {
+        enabled = true,
+        font = {"BFI", 10, "outline", false},
+        position = {"RIGHT", "BOTTOMRIGHT", 0, 2},
+        color = {1, 1, 1, 1},
+    },
     spellColors = {
         [774] = {0.2, 0.8, 0.3, 1},
+    },
+    blacklist = {8326, 57723},
+    whitelist = {774},
+    blockers = {
+        crowdControlType = true,
+    },
+    auraTypeColor = {
+        castByMe = false,
+        dispellable = false,
+        debuffType = true,
     },
     filters = {
         all = true,
@@ -182,19 +259,154 @@ local hostileConfig = {
 }
 plateConfig.debuffs = hostileConfig
 NP.config.hostile_npc = plateConfig
+local hostileConfigSnapshot = copy(hostileConfig)
 
 debuffs:LoadConfig(hostileConfig, plateConfig)
 local normalized = nativeConfigs[1]
+assertDeepEqual(hostileConfig, hostileConfigSnapshot,
+    "saved nameplate config remains unchanged")
 assertEqual(normalized.enabled, true, "hostile debuffs enabled")
 assertEqual(normalized.mode, "blacklist", "native spell-list mode")
 assertEqual(#normalized.blacklist, 0, "native empty spell blacklist")
 assertEqual(normalized.whitelist, nil, "native whitelist omission")
+assertEqual(normalized.blockers, nil, "native blocker omission")
 assertEqual(normalized.filters.player, true, "enemy player-cast filter")
 assertEqual(normalized.filters.all, false, "enemy all-aura filter")
 assertEqual(normalized.tooltip.enabled, false, "nameplate aura tooltip")
 assertEqual(normalized.subFrame, nil, "nameplate aura subframe")
 assertEqual(normalized.spellColors, nil, "nameplate spell colors")
+assertEqual(normalized.auraTypeColor.debuffType, true,
+    "native debuff-type color request")
+assertDeepEqual(
+    normalized.durationText.color.seconds,
+    hostileConfig.durationText.color.seconds,
+    "saved seconds threshold survives normalization"
+)
+assertDeepEqual(
+    normalized.durationText.color.percent,
+    hostileConfig.durationText.color.percent,
+    "saved percent threshold survives normalization"
+)
 assertEqual(normalized.position[4], 6, "inside-name reserved offset")
+
+local compilerUF = {}
+local compilerBFI = {
+    funcs = {},
+    L = setmetatable({}, {
+        __index = function(_, key)
+            return key
+        end,
+    }),
+    modules = {
+        UnitFrames = compilerUF,
+    },
+}
+function compilerBFI.funcs.ResolveUnitFrameAuraFilters(_, filters)
+    return {
+        all = filters.all == true,
+        player = filters.player == true,
+        notPlayer = filters.notPlayer == true,
+        raidInCombat = filters.raidInCombat == true,
+        raidPlayerDispellable =
+            filters.raidPlayerDispellable == true,
+        bigDefensive = filters.bigDefensive == true,
+        externalDefensive = filters.externalDefensive == true,
+        important = filters.important == true,
+        anyDispellable = filters.anyDispellable == true,
+    }, {
+        legacySourceFilterUsesSuperset = false,
+        bossAuraUsesCuratedRaidInCombat = false,
+        legacyDispellableUsesRaidPlayerDispellable = false,
+    }
+end
+local compilerEnvironment = {
+    _G = false,
+    AbstractFramework = {
+        Copy = copy,
+    },
+    AnchorUtil = {
+        FlowLayoutAxis = {
+            Horizontal = 101,
+            Vertical = 102,
+        },
+        FlowDirection = {
+            Left = 201,
+            Right = 202,
+            Up = 203,
+            Down = 204,
+        },
+    },
+    AuraContainerSortMethod = {
+        Default = 301,
+    },
+    AuraContainerSortDirection = {
+        Normal = 401,
+    },
+    CustomAuraContainerAuraProcessingPolicy = {
+        None = 501,
+    },
+    AuraUtil = {
+        AuraFilters = {
+            Important = "IMPORTANT",
+            Dispellable = "DISPELLABLE",
+        },
+    },
+    assert = assert,
+    error = error,
+    ipairs = ipairs,
+    math = math,
+    next = next,
+    pairs = pairs,
+    rawget = rawget,
+    select = select,
+    setmetatable = setmetatable,
+    string = string,
+    table = table,
+    tonumber = tonumber,
+    tostring = tostring,
+    type = type,
+}
+compilerEnvironment._G = compilerEnvironment
+setmetatable(compilerEnvironment, {
+    __index = function(_, key)
+        error("unexpected aura-compiler global: " .. tostring(key), 2)
+    end,
+})
+for _, path in ipairs({
+    "Modules/UnitFrames/AuraPolicy.lua",
+    "Modules/UnitFrames/AuraSpec.lua",
+}) do
+    local compilerChunk, compilerError = loadfile(path)
+    assertTrue(compilerChunk, compilerError)
+    setfenv(compilerChunk, compilerEnvironment)
+    compilerChunk("BFInfinite", compilerBFI)
+end
+local descriptor, compileError = compilerUF.CompileNativeAuraSpec(
+    "nameplate7",
+    "HARMFUL",
+    normalized
+)
+assertTrue(descriptor, compileError)
+assertEqual(#descriptor.completeSpec.groups, 1,
+    "nameplate native group count")
+local compiledGroup = descriptor.completeSpec.groups[1]
+assertEqual(compiledGroup.filterString, "HARMFUL|PLAYER",
+    "nameplate native filter")
+assertEqual(compiledGroup.buttonStyle.nativeDispelColor, true,
+    "nameplate native dispel-type color")
+assertEqual(compiledGroup.buttonStyle.dispelColor, nil,
+    "nameplate custom dispel color omission")
+assertEqual(compiledGroup.buttonStyle.dispelColorCurve, nil,
+    "nameplate custom dispel curve omission")
+assertEqual(compiledGroup.buttonStyle.blockColor, nil,
+    "nameplate block color omission")
+assertDeepEqual(compiledGroup.buttonStyle.durationText.color.threshold, {
+    mode = "seconds",
+    value = 5,
+    rgb = {1, 0.2, 0.2, 1},
+}, "nameplate native seconds threshold")
+assertEqual(descriptor.degradations.privateAuraSourceUnseparable, true,
+    "nameplate private aura source disclosure")
 
 debuffs:LoadConfig(copy(hostileConfig), copy(plateConfig))
 assertEqual(#nativeConfigs, 1,

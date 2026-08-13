@@ -22,8 +22,9 @@ local indicators = {
     "targetHighlight",
     "mouseoverHighlight",
     "threatGlow",
-    {"auras", "buffs", "HELPFUL"},
-    {"auras", "debuffs", "HARMFUL"},
+    {"groupNativeAuras", "buffs", "HELPFUL", "buffs"},
+    {"groupNativeAuras", "debuffs", "HARMFUL", "debuffs"},
+    {"groupNativeDispels", "dispels", "dispels"},
 }
 
 -- bottom_to_top_then_left
@@ -47,15 +48,17 @@ local function CreateRaid()
     raid.header = header
     UF.AddToConfigMode("raid.header", header)
     header:SetAttribute("template", "BFIUnitButtonTemplate")
+    local hasNativeGroupAuras = UF.PrepareNativeGroupAuraHeader(header)
+
+    -- Keep the filter set empty so SecureGroupHeaders.lua sees zero
+    -- filtered units and makes needButtons exactly 40 in every context.
+    header:SetAttribute("startingIndex", -39)
+    header:Show()
+    header:SetAttribute("startingIndex", 1)
     header:SetAttribute("showSolo", true)
     header:SetAttribute("showRaid", true)
     header:SetAttribute("showParty", true)
     header:SetAttribute("showPlayer", true)
-
-    --! to make needButtons == 40 in SecureGroupHeaders.lua
-    header:SetAttribute("startingIndex", -39)
-    header:Show()
-    header:SetAttribute("startingIndex", 1)
 
     header:HookScript("OnAttributeChanged", function(self, attr)
         if not self.inConfigMode then return end
@@ -68,12 +71,31 @@ local function CreateRaid()
     raid.driverValue = "[@raid1,exists] show; hide"
 
     for i = 1, 40 do
-        header[i]._updateOnGroupUpdate = true
-        header[i]._deferUpdateOnUnitChange = true
-        header[i]._enableUnitButtonMapping = true
-        UF.AddToConfigMode("raid", header[i])
-        UF.CreateIndicators(header[i], indicators)
-        UF.CreatePreviewRect(header[i])
+        local button = header[i]
+        if hasNativeGroupAuras then
+            assert(button.AuraContainer,
+                "secure Raid child is missing its native aura container")
+            button._nativeAuraContainers = {
+                -- Blizzard supplies one header-born shell. Raid's displays
+                -- have independent anchors/flows, so eagerly allocate the
+                -- second bounded shell before indicator construction. The
+                -- dispel tint needs a third independent shell because its
+                -- single slot has a separate lifecycle from the icon rows.
+                -- The shipped topology reserves 1,640 restricted buttons
+                -- across this fixed 40-child header: ten helpful, thirty
+                -- harmful, and one dispel slot per child.
+                buffs = UF.CreateNativeGroupAuraContainerSeed(button),
+                debuffs = button.AuraContainer,
+                dispels = UF.CreateNativeGroupAuraContainerSeed(button),
+            }
+        end
+
+        button._updateOnGroupUpdate = true
+        button._deferUpdateOnUnitChange = true
+        button._enableUnitButtonMapping = true
+        UF.AddToConfigMode("raid", button)
+        UF.CreateIndicators(button, indicators)
+        UF.CreatePreviewRect(button)
     end
 
     -- mover
@@ -95,6 +117,7 @@ local function UpdateRaid(_, module, which, skipIndicatorUpdates)
     if which and which ~= "raid" then return end
 
     local config = UF.config.raid
+    local wasEnabled = raid and raid.enabled == true
 
     if not (UF.config.general.enabled and config.general.enabled) then
         if raid then
@@ -102,7 +125,6 @@ local function UpdateRaid(_, module, which, skipIndicatorUpdates)
             for i = 1, 40 do
                 UF.DisableIndicators(raid.header[i])
             end
-            UF.RemoveFromConfigMode("raid")
             raid.enabled = false -- for mover
             raid:Hide()
         end
@@ -114,9 +136,16 @@ local function UpdateRaid(_, module, which, skipIndicatorUpdates)
     end
 
     raid.enabled = true -- for mover
+    local skipCurrentIndicatorUpdates =
+        skipIndicatorUpdates == true and wasEnabled
 
     -- setup
     local header = raid.header
+    if raid.inConfigMode then
+        -- A disabled config-mode group remains registered. Restore its
+        -- visible parent before indicator setup so previews can re-enable.
+        raid:Show()
+    end
 
     -- mover
     AF.UpdateMoverSave(raid, config.general.position)
@@ -151,8 +180,15 @@ local function UpdateRaid(_, module, which, skipIndicatorUpdates)
         -- color
         AF.ApplyDefaultBackdropWithColors(button, config.general.bgColor, config.general.borderColor)
         -- indicators
-        if not skipIndicatorUpdates then
+        if not skipCurrentIndicatorUpdates then
             UF.SetupIndicators(button, indicators, config)
+            if raid.inConfigMode then
+                for _, indicator in next, button.indicators do
+                    if indicator.EnableConfigMode then
+                        indicator:EnableConfigMode()
+                    end
+                end
+            end
         end
     end
 
@@ -181,9 +217,11 @@ local function UpdateRaid(_, module, which, skipIndicatorUpdates)
     header:SetAttribute("unitsPerColumn", config.general.unitsPerColumn)
     header:Show()
 
-    if not UF.configModeEnabled then
+    if not raid.inConfigMode then
         -- visibility NOTE: show must invoke after settings applied
         RegisterAttributeDriver(raid, raid.driverKey, raid.driverValue)
+    else
+        raid:Show()
     end
 end
 AF.RegisterCallback("BFI_UpdateModule", UpdateRaid)

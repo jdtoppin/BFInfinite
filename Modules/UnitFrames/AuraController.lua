@@ -10,23 +10,26 @@ local InCombatLockdown = InCombatLockdown
 local floor, huge = math.floor, math.huge
 local ipairs, next, pairs, type = ipairs, next, pairs, type
 
--- Retail 12.1.0.68914 (wow-ui-source d3915c78) makes native aura
+-- Retail 12.1.0.69273 (wow-ui-source eb941aad) makes native aura
 -- groups/slots add-only and restricts their buttons after initialization.
 -- This controller owns only configuration-derived state and never reads aura
 -- data, live buttons, native container geometry, or native visibility.
--- AF r37 adds native duration-text color curves driven by Blizzard's opaque
--- remaining-time binding.
-local REQUIRED_AF_VERSION = 37
+-- AF #39/r42 adds native dispel-color textures on top of r41's native
+-- dispel-overlay slots, static Block colors, construction ledgers, and the
+-- duration carrier consumed here.
+local REQUIRED_AF_VERSION = 42
 local NATIVE_GROUP_AURA_TEMPLATE = "CustomAuraContainerTemplate"
 -- CustomAuraContainerConstants.FrameCreationBatchSize in the pinned build.
 local NATIVE_INITIAL_GROUP_RESERVATIONS = 10
 local REQUIRED_AF_METHODS = {
     "AddCustomAuraGroup",
+    "AddCustomAuraDispelOverlaySlot",
     "AddCustomAuraSlot",
     "CreateCustomAuraContainer",
     "GetCustomAuraContainerConstructionStats",
     "GetCustomAuraContainerConstructionTotals",
     "HasCustomAuraContainer",
+    "HasNativeDispelColorTexture",
     "SetCustomAuraContainerEnabled",
     "SetCustomAuraContainerFlowLayout",
     "SetCustomAuraContainerProcessingPolicy",
@@ -125,12 +128,13 @@ function UF.HasNativeAuraContainerBackend()
     end
 
     return AF.HasCustomAuraContainer()
+        and AF.HasNativeDispelColorTexture()
 end
 
 -- Retail 12.1 SecureGroupHeaderTemplate creates one unconfigured
 -- AuraContainer for each child when this attribute is present before the
--- child is born. 12.0.7 does not know the attribute, so callers must use
--- this capability-gated helper instead of setting it unconditionally.
+-- child is born. Callers use this capability-gated helper rather than
+-- assuming that the native backend is available.
 function UF.PrepareNativeGroupAuraHeader(header)
     if not UF.HasNativeAuraContainerBackend() then
         return false
@@ -259,11 +263,24 @@ local function NormalizeSlot(slot, seenKeys, includeStyle)
         sortDirection = sortDirection,
     }
     if includeStyle then
-        normalized.point = NormalizePoint(slot.point, {
-            point = "CENTER",
-            relativePoint = "CENTER",
-        })
-        normalized.buttonStyle = CopyTable(slot.buttonStyle or {})
+        if slot.kind == "dispelOverlay" then
+            assert(slot.anchorTarget ~= nil,
+                "dispel overlay slot anchorTarget is required")
+            normalized.kind = "dispelOverlay"
+            -- This is a construction-owned frame reference. Keep it by
+            -- identity rather than copying a script object as configuration.
+            normalized.anchorTarget = slot.anchorTarget
+            normalized.overlayStyle = CopyTable(slot.overlayStyle or {})
+        else
+            assert(slot.kind == nil or slot.kind == "aura",
+                "unsupported aura slot kind")
+            normalized.kind = "aura"
+            normalized.point = NormalizePoint(slot.point, {
+                point = "CENTER",
+                relativePoint = "CENTER",
+            })
+            normalized.buttonStyle = CopyTable(slot.buttonStyle or {})
+        end
     end
     return normalized
 end
@@ -440,7 +457,7 @@ local function SetExternalContainerCurtained(controller, curtained)
     if controller._containerAlpha == alpha then return end
 
     -- A seeded container is not parented to the plain holder, so curtain its
-    -- inherited Frame alpha separately. The 12.1.0.68914/d3915c78
+    -- inherited Frame alpha separately. The 12.1.0.69273/eb941aad
     -- SimpleRegion contract permits this constant SetAlpha write. This
     -- remains a write-only gate: BFI never reads native visibility, children,
     -- or aura state.
@@ -463,8 +480,8 @@ local function SetHolderShownSafe(controller, shown)
     if controller._alphaOnlyVisibility then
         -- Nameplate aura holders remain ordinary shown addon frames and use
         -- the write-only alpha curtain as their sole visibility gate. This
-        -- avoids protected Show/Hide/SetShown calls while a 12.1 container is
-        -- created or retargeted during combat.
+        -- avoids protected Show/Hide/SetShown calls while a native container
+        -- is created or retargeted during combat.
         controller._holderShown = shown
         return true
     end
@@ -472,7 +489,7 @@ local function SetHolderShownSafe(controller, shown)
         return false
     end
 
-    -- Retail 12.1.0.68914 can make visibility and hover accessors secret when
+    -- Retail 12.1.0.69273 can make visibility and hover accessors secret when
     -- a holder is anchored to a native aura container. Keep an ordinary
     -- write-only ledger instead of inspecting frame state.
     controller.frame:SetShown(shown)
@@ -713,18 +730,36 @@ function ControllerMixin:_Build()
     end
 
     for _, slot in ipairs(spec.slots) do
-        AF.AddCustomAuraSlot(container, slot.key, slot.filterString, {
-            candidateFilters = slot.candidateFilters,
-            sortMethod = slot.sortMethod,
-            sortDirection = slot.sortDirection,
-            anchor = {
-                point = slot.point.point,
-                relativeTo = holder,
-                relativePoint = slot.point.relativePoint,
-                x = slot.point.x,
-                y = slot.point.y,
-            },
-        }, slot.buttonStyle)
+        if slot.kind == "dispelOverlay" then
+            AF.AddCustomAuraDispelOverlaySlot(
+                container,
+                slot.key,
+                slot.filterString,
+                {
+                    candidateFilters = slot.candidateFilters,
+                    sortMethod = slot.sortMethod,
+                    sortDirection = slot.sortDirection,
+                    anchor = {
+                        matchAnchorBounds = true,
+                        relativeTo = slot.anchorTarget,
+                    },
+                },
+                slot.overlayStyle
+            )
+        else
+            AF.AddCustomAuraSlot(container, slot.key, slot.filterString, {
+                candidateFilters = slot.candidateFilters,
+                sortMethod = slot.sortMethod,
+                sortDirection = slot.sortDirection,
+                anchor = {
+                    point = slot.point.point,
+                    relativeTo = holder,
+                    relativePoint = slot.point.relativePoint,
+                    x = slot.point.x,
+                    y = slot.point.y,
+                },
+            }, slot.buttonStyle)
+        end
         AddKnownBuildReservations(self, 1)
     end
 
@@ -733,9 +768,9 @@ function ControllerMixin:_Build()
     AF.SetCustomAuraContainerUnit(container, spec.unit)
     AF.UpdateCustomAuraContainer(container)
     -- SetEnabled is a secure-delegated inbound AuraContainer method in the
-    -- pinned 12.1 build. Submit the final configured state explicitly even
-    -- for a combat-created container so event registration never depends on
-    -- template initialization details.
+    -- pinned 12.1.0.69273 build. Submit the final configured state explicitly
+    -- even for a combat-created container so event registration never
+    -- depends on template initialization details.
     AF.SetCustomAuraContainerEnabled(container, spec.enabled)
 
     if not containerIsExternal and not self._alphaOnlyVisibility then
@@ -766,7 +801,7 @@ local function ApplyLiveUnitRetarget(controller)
         return false
     end
 
-    -- 12.1.0.68914 exposes SetUnit and UpdateAllAuras as inbound,
+    -- 12.1.0.69273 exposes SetUnit and UpdateAllAuras as inbound,
     -- combat-live operations on an already-built container. This is the
     -- only native mutation group controllers may perform before regen.
     AF.SetCustomAuraContainerUnit(controller._container, controller._spec.unit)
@@ -799,11 +834,10 @@ function ControllerMixin:_ApplyPending()
     local holderHidden = SetControllerShownSafe(self, false)
     if InCombatLockdown() then
         if self._allowCombatInitialBuild and self._needsRebuild then
-            -- PTR 7 permits addon AuraContainers to be created during combat.
-            -- This opt-in path is used only by nameplates born after combat
-            -- starts. The complete presentation stays behind the plain
-            -- holder's alpha curtain, and native visibility methods are not
-            -- called while restricted.
+            -- The pinned client permits addon AuraContainers to be created
+            -- during combat. This opt-in is used only by nameplates born
+            -- after combat starts; the complete presentation stays behind
+            -- the plain holder's write-only alpha curtain throughout.
             if self._holderConfig then
                 local configure = self._holderConfig
                 self._holderConfig = nil
@@ -1106,7 +1140,7 @@ function ControllerMixin:Refresh()
         return
     end
 
-    -- 68914's inbound UpdateAllAuras only marks a full native dirty rebuild.
+    -- 69273's inbound UpdateAllAuras only marks a full native dirty rebuild.
     -- It does not expose aura values and is safe for stable-token refreshes.
     AF.UpdateCustomAuraContainer(self._container)
 end
@@ -1154,8 +1188,8 @@ local function CreateController(parent, name, completeSpec, options)
     controller._holderAlpha = 0
     if controller._alphaOnlyVisibility then
         -- CreateFrame returns a shown plain frame. Track the requested state
-        -- independently and keep it visually inert until a complete native
-        -- presentation has been committed.
+        -- independently and keep it visually inert until the native
+        -- presentation has been completely committed.
         controller._holderShown = false
     elseif not InCombatLockdown() then
         controller.frame:Hide()
@@ -1202,23 +1236,6 @@ function UF.CreateNativeAuraContainerController(
         liveUnitChanges = options.liveUnitChanges,
         allowCombatInitialBuild = options.allowCombatInitialBuild,
         alphaOnlyVisibility = options.alphaOnlyVisibility,
-    })
-end
-
-function UF.CreateNativeGroupAuraContainerController(
-    parent,
-    name,
-    seedContainer,
-    completeSpec
-)
-    if not UF.HasNativeAuraContainerBackend() then
-        return nil
-    end
-
-    assert(seedContainer, "native group aura container seed is required")
-    return CreateController(parent, name, completeSpec, {
-        seedContainer = seedContainer,
-        liveUnitChanges = true,
     })
 end
 
@@ -1344,11 +1361,15 @@ local function SyncPartitionVisibility(controller)
     local shown = spec ~= nil and spec.enabled and spec.shown
     local variant = controller._variant or PARTITION_FRIENDLY
 
+    -- The outer holder is the atomic curtain for all prebuilt variants. Its
+    -- alpha is write-only BFI state; no child/native visibility is inspected.
     SetHolderCurtained(controller, true)
     if InCombatLockdown() then
         local applied = controller._holderShown == shown
             and (not shown or controller._shownVariant == variant)
         if applied and shown then
+            -- A latest-wins reversal may expose the already-applied variant
+            -- without making any protected child visibility writes.
             SetHolderCurtained(controller, false)
             controller._presentationApplied = true
         elseif applied then
@@ -1356,6 +1377,7 @@ local function SyncPartitionVisibility(controller)
         end
         return applied
     end
+
     if not shown then
         if not SetHolderShownSafe(controller, false) then
             return false
@@ -1364,8 +1386,8 @@ local function SyncPartitionVisibility(controller)
             SetPartitionChildShown(controller[key], false)
         end
         controller._shownVariant = nil
-        -- Hidden partitions remain behind the write-only curtain. Protected
-        -- visibility writes must never be the sole stale-row suppression.
+        -- Hidden partitions remain behind the outer curtain even after every
+        -- protected child write has completed.
         return true
     end
 
@@ -1470,6 +1492,10 @@ local function BuildPartitionChild(
 end
 
 local function BuildPartition(controller)
+    assert(not controller._buildAttempted,
+        "aura partition controller initial build already attempted")
+    controller._buildAttempted = true
+
     local spec = controller._spec
     AF.SetSize(controller.frame, spec.holder.width, spec.holder.height)
 
@@ -1544,6 +1570,8 @@ function PartitionControllerMixin:_ApplyPending()
         return
     end
 
+    -- Structural work always starts behind the outer curtain. In combat no
+    -- child visibility, enabled-state, anchoring, or construction write runs.
     SetHolderCurtained(self, true)
     if InCombatLockdown() then
         QueueController(self)
@@ -1781,4 +1809,21 @@ function UF.CreateNativeAuraPartitionController(parent, name)
         "DisableUntrustedLayoutScriptsTemplate"
     )
     return controller
+end
+
+function UF.CreateNativeGroupAuraContainerController(
+    parent,
+    name,
+    seedContainer,
+    completeSpec
+)
+    if not UF.HasNativeAuraContainerBackend() then
+        return nil
+    end
+
+    assert(seedContainer, "native group aura container seed is required")
+    return CreateController(parent, name, completeSpec, {
+        seedContainer = seedContainer,
+        liveUnitChanges = true,
+    })
 end

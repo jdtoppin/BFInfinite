@@ -9,6 +9,11 @@ trap 'rm -f "$current" "$additions"' EXIT
 
 cd "$repo_root"
 
+command -v rg >/dev/null 2>&1 || {
+    echo "rg (ripgrep) is required for the secret-value policy gate." >&2
+    exit 127
+}
+
 rg -n \
     --glob '*.lua' \
     --glob '!Libs/**' \

@@ -10,4 +10,9 @@
     <Script file="ReadyPull.lua"/>
     <Script file="Markers.lua"/>
     <Script file="ObjectiveTracker.lua"/>
+    <Script file="MythicPlusHistory.lua"/>
+    <Script file="MythicPlusModel.lua"/>
+    <Script file="MythicPlusMeter.lua"/>
+    <Script file="MythicPlusAnalysis.lua"/>
+    <Script file="MythicPlus.lua"/>
 </Ui>

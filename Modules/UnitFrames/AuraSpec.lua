@@ -8,14 +8,14 @@ local ipairs, next, pairs, rawget, sort, type =
     ipairs, next, pairs, rawget, table.sort, type
 local format, sub = string.format, string.sub
 
--- Retail 12.1.0.68914 (wow-ui-source d3915c78) creates restricted
+-- Retail 12.1.0.69273 (wow-ui-source eb941aad) creates restricted
 -- CustomAuraContainer buttons in batches of ten. Keep the constant here as
 -- audit metadata only; this compiler never creates a frame.
 local NATIVE_BUTTON_BATCH_SIZE = 10
--- Cap only the extra groups requested by spell-colour expansion. A baseline
--- policy may already require more than eight active groups after a relation
--- partition duplicates any-scope categories; that exact gray policy remains
--- intact. Colour expansion falls back as a whole and never drops categories.
+-- Preserve #90's existing ceiling of eight groups in one active native row.
+-- Integrations that prebuild mutually exclusive relation variants account
+-- those physical copies separately; colour expansion still falls back as a
+-- whole rather than exceeding the active-row layout budget.
 local MAX_NATIVE_COLOR_EXPANDED_GROUPS = 8
 
 local ANCHOR_POINTS = {
@@ -617,6 +617,9 @@ local function NewButtonStyle(
     appearance,
     blockColor
 )
+    -- Retail 12.1.0.69273 (wow-ui-source eb941aad) lets Blizzard
+    -- privately apply typed and None/red colors to AF's square PreserveAsset
+    -- border. The compiler supplies only ordinary saved configuration.
     local style = {
         noBorder = true,
         width = appearance.width,
@@ -625,7 +628,7 @@ local function NewButtonStyle(
         cooldownStyle = config.cooldownStyle,
         durationText = NormalizeDurationText(config.durationText),
         stackText = NormalizeStackText(config.stackText),
-        dispelColor = baseFilter == "HARMFUL"
+        nativeDispelColor = baseFilter == "HARMFUL"
             and config.auraTypeColor ~= nil
             and config.auraTypeColor.debuffType == true,
         tooltip = Copy(tooltip),
@@ -1116,11 +1119,12 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     local spellColorsActive = not empty
         and spellColorsRequested
         and not colorGroupBudgetExceeded
-    -- 12.1 evaluates these maps inside the restricted aura container.
-    -- Identity matching is reaction-gated there: helpful auras require an
-    -- assistable unit and harmful auras require a non-assistable unit, except
-    -- for spells Blizzard classifies NeverSecret. Keep the full map and make
-    -- BFI's holder use only the direction where the map cannot be bypassed.
+    -- 12.1 evaluates these maps inside the restricted aura container. For
+    -- secret-capable auras, helpful maps require a publicly assistable unit
+    -- and harmful maps require a publicly non-assistable unit; the opposite
+    -- reaction bypasses the map except for NeverSecret auras. Keep the map
+    -- declarative and let the runtime show the holder only where it cannot be
+    -- bypassed.
     local spellIDFiltersRestricted = not empty
         and (identityFilterActive or spellColorsActive)
     local sourceColorsIgnored = not empty
