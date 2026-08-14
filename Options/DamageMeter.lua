@@ -27,13 +27,21 @@ local autoOverallOnMythicPlusCompleteChecks = {}
 local CreateSlider
 
 local CONTENT_WIDTH = 530
-local CONTENT_HEIGHT = 1180
+local CONTENT_HEIGHT = 1235
 local SECTION_GAP = 12
 local GENERAL_HEIGHT = 60
 local GENERAL_STATUS_HEIGHT = 80
 local CONTROL_WIDTH = 150
 local WIDE_CONTROL_WIDTH = 240
 local SLIDER_WIDTH = 140
+local MIN_WINDOW_HEIGHT = 84
+local MAX_WINDOW_HEIGHT = 520
+local MIN_ROW_TEXT_SIZE = 8
+local MAX_ROW_TEXT_SIZE = 14
+local ROW_TEXT_VERTICAL_PADDING = 4
+local MIN_HEADER_TEXT_SIZE = 8
+local MAX_HEADER_TEXT_SIZE = 14
+local HEADER_TEXT_VERTICAL_PADDING = 6
 
 local function GetMeterTypeText(globalName, fallback)
     return _G[globalName] or L[fallback]
@@ -136,6 +144,46 @@ end
 
 local function RefreshDamageMeter()
     AF.Fire("BFI_UpdateModule", "damageMeter")
+end
+
+local function GetMinimumWindowHeight(config)
+    return math.max(
+        MIN_WINDOW_HEIGHT,
+        config.headerHeight + (config.padding * 2) + config.barHeight
+    )
+end
+
+local function GetMaximumRowTextSize(config)
+    return math.max(
+        MIN_ROW_TEXT_SIZE,
+        math.min(
+            MAX_ROW_TEXT_SIZE,
+            config.barHeight - ROW_TEXT_VERTICAL_PADDING
+        )
+    )
+end
+
+local function GetMaximumHeaderTextSize(config)
+    return math.max(
+        MIN_HEADER_TEXT_SIZE,
+        math.min(
+            MAX_HEADER_TEXT_SIZE,
+            config.headerHeight - HEADER_TEXT_VERTICAL_PADDING
+        )
+    )
+end
+
+local function RefreshWindowHeightBounds()
+    local config = DM.config
+    local minimumWindowHeight = GetMinimumWindowHeight(config)
+
+    for index, slider in ipairs(windowHeightSliders) do
+        if config.windowHeights[index] < minimumWindowHeight then
+            config.windowHeights[index] = minimumWindowHeight
+        end
+        slider:SetMinMaxValues(minimumWindowHeight, MAX_WINDOW_HEIGHT)
+        slider:SetValue(config.windowHeights[index])
+    end
 end
 
 local function CreateDamageMeterPanel()
@@ -264,8 +312,8 @@ local function CreateWindowHeightSlider(parent, index, x, y)
         L["Meter %d Height"]:format(index),
         x,
         y,
-        120,
-        520,
+        MIN_WINDOW_HEIGHT,
+        MAX_WINDOW_HEIGHT,
         1
     )
     slider:SetAfterValueChanged(function(value)
@@ -338,6 +386,7 @@ local function CreateWindowsPane()
         windowCount:SetSelectedValue(DM.config.windowCount)
         lockMeters:SetChecked(DM.config.locked)
         alwaysShowPlayer:SetChecked(DM.config.alwaysShowPlayer)
+        RefreshWindowHeightBounds()
         for index, dropdown in ipairs(windowTypeDropdowns) do
             dropdown:SetSelectedValue(DM.config.windowTypes[index])
             windowHeightSliders[index]:SetValue(
@@ -526,7 +575,7 @@ local function CreateAppearancePane()
         scroll.scrollContent,
         L["Appearance"],
         CONTENT_WIDTH,
-        285
+        340
     )
     AF.SetPoint(
         appearancePane,
@@ -542,6 +591,30 @@ local function CreateAppearancePane()
         L["BFI Damage Meter Appearance Tip"]
     )
 
+    local barTextSize
+    local headerTextSize
+    local function RefreshBarTextSizeBounds()
+        if not barTextSize then return end
+
+        local maximum = GetMaximumRowTextSize(DM.config)
+        if DM.config.rowTextSize > maximum then
+            DM.config.rowTextSize = maximum
+        end
+        barTextSize:SetMinMaxValues(MIN_ROW_TEXT_SIZE, maximum)
+        barTextSize:SetValue(DM.config.rowTextSize)
+    end
+
+    local function RefreshHeaderTextSizeBounds()
+        if not headerTextSize then return end
+
+        local maximum = GetMaximumHeaderTextSize(DM.config)
+        if DM.config.headerTextSize > maximum then
+            DM.config.headerTextSize = maximum
+        end
+        headerTextSize:SetMinMaxValues(MIN_HEADER_TEXT_SIZE, maximum)
+        headerTextSize:SetValue(DM.config.headerTextSize)
+    end
+
     local width = CreateSlider(
         appearancePane, L["Frame Width"], 15, -55, 220, 520, 1
     )
@@ -555,6 +628,8 @@ local function CreateAppearancePane()
     )
     headerHeight:SetAfterValueChanged(function(value)
         DM.config.headerHeight = value
+        RefreshHeaderTextSizeBounds()
+        RefreshWindowHeightBounds()
         RefreshDamageMeter()
     end)
 
@@ -563,6 +638,8 @@ local function CreateAppearancePane()
     )
     barHeight:SetAfterValueChanged(function(value)
         DM.config.barHeight = value
+        RefreshBarTextSizeBounds()
+        RefreshWindowHeightBounds()
         RefreshDamageMeter()
     end)
 
@@ -579,6 +656,7 @@ local function CreateAppearancePane()
     )
     padding:SetAfterValueChanged(function(value)
         DM.config.padding = value
+        RefreshWindowHeightBounds()
         RefreshDamageMeter()
     end)
 
@@ -656,11 +734,41 @@ local function CreateAppearancePane()
         RefreshDamageMeter()
     end)
 
+    barTextSize = CreateSlider(
+        appearancePane,
+        L["Bar Text Size"],
+        15,
+        -305,
+        MIN_ROW_TEXT_SIZE,
+        GetMaximumRowTextSize(DM.config),
+        1
+    )
+    barTextSize:SetAfterValueChanged(function(value)
+        DM.config.rowTextSize = value
+        RefreshDamageMeter()
+    end)
+
+    headerTextSize = CreateSlider(
+        appearancePane,
+        L["Header Text Size"],
+        190,
+        -305,
+        MIN_HEADER_TEXT_SIZE,
+        GetMaximumHeaderTextSize(DM.config),
+        1
+    )
+    headerTextSize:SetAfterValueChanged(function(value)
+        DM.config.headerTextSize = value
+        RefreshDamageMeter()
+    end)
+
     function appearancePane.Load()
         local config = DM.config
         width:SetValue(config.width)
         headerHeight:SetValue(config.headerHeight)
         barHeight:SetValue(config.barHeight)
+        RefreshBarTextSizeBounds()
+        RefreshHeaderTextSizeBounds()
         spacing:SetValue(config.spacing)
         padding:SetValue(config.padding)
         backgroundAlpha:SetValue(config.backgroundAlpha)
@@ -688,15 +796,15 @@ local function CreateActionsPane()
         -SECTION_GAP
     )
 
-    local bottomRight = AF.CreateButton(
+    local placeMeters = AF.CreateButton(
         actionsPane,
-        L["Place Meters Bottom Right"],
+        L["Place Meters Below Objective Tracker"],
         "BFI",
         245,
         25
     )
-    AF.SetPoint(bottomRight, "TOPLEFT", actionsPane, 15, -42)
-    bottomRight:SetOnClick(function()
+    AF.SetPoint(placeMeters, "TOPLEFT", actionsPane, 15, -42)
+    placeMeters:SetOnClick(function()
         if DM.Renderer
             and type(DM.Renderer.ResetPosition) == "function" then
             DM.Renderer.ResetPosition()

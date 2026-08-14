@@ -35,11 +35,22 @@ local panes = {}
 local buttons = {}
 local checkButtons = {}
 local sliders = {}
+local fontStrings = {}
 local dropdowns = {}
 local dialogs = {}
 local fires = {}
 local previewCalls = {}
 local clearHistoryCalls = 0
+local nativeObjectiveTrackerHeight = 650
+local nativeObjectiveTrackerHeightReason
+local nativeObjectiveTrackerHeightWrites = 0
+local nativeObjectiveTrackerPlacementIsDefault = true
+local nativeObjectiveTrackerPlacementReason
+local nativeObjectiveTrackerPlacementWrites = 0
+local nativeObjectiveTrackerPlacementCanSet = true
+local nativeObjectiveTrackerPlacementCanSetReason
+local nativeEditModeShown
+local optionsHidden = false
 
 local AF = {
     noop = function()
@@ -107,8 +118,14 @@ function AF.CreateButton(_, label)
     local button = {
         labelText = label,
     }
+    function button:SetEnabled(value)
+        self.enabled = value
+    end
     function button:SetOnClick(callback)
         self.onClick = callback
+    end
+    function button:SetTooltip(...)
+        self.tooltip = {...}
     end
     buttons[#buttons + 1] = button
     return button
@@ -130,6 +147,9 @@ function AF.CreateCheckButton(_, label)
     end
     function checkButton:SetEnabled(value)
         self.enabled = value
+    end
+    function checkButton:SetTooltip(...)
+        self.tooltip = {...}
     end
     checkButtons[#checkButtons + 1] = checkButton
     return checkButton
@@ -155,6 +175,9 @@ function AF.CreateSlider(_, label, width, minimum, maximum, step)
     end
     function slider:SetValue(value)
         self.value = value
+    end
+    function slider:SetEnabled(value)
+        self.enabled = value
     end
     function slider:SetTooltip(...)
         self.tooltip = {...}
@@ -188,6 +211,16 @@ function AF.CreateFontString(_, text)
     function fontString:SetJustifyH(value)
         self.justifyH = value
     end
+    function fontString:SetText(value)
+        self.text = value
+    end
+    function fontString:SetShown(value)
+        self.shown = value
+    end
+    function fontString:SetWordWrap(value)
+        self.wordWrap = value
+    end
+    fontStrings[#fontStrings + 1] = fontString
     return fontString
 end
 
@@ -225,6 +258,18 @@ function AF.LSM_GetFontOutlineDropdownItems()
 end
 
 local W = {
+    GetObjectiveTrackerNativeHeight = function()
+        return nativeObjectiveTrackerHeight,
+            nativeObjectiveTrackerHeightReason
+    end,
+    GetObjectiveTrackerNativePlacement = function()
+        return nativeObjectiveTrackerPlacementIsDefault,
+            nativeObjectiveTrackerPlacementReason
+    end,
+    CanSetObjectiveTrackerBFIRightStackPlacement = function()
+        return nativeObjectiveTrackerPlacementCanSet,
+            nativeObjectiveTrackerPlacementCanSetReason
+    end,
     MythicPlus = {
         SetPreview = function(shown)
             previewCalls[#previewCalls + 1] = shown
@@ -233,6 +278,19 @@ local W = {
             clearHistoryCalls = clearHistoryCalls + 1
         end,
     },
+    SetObjectiveTrackerNativeHeight = function(value)
+        nativeObjectiveTrackerHeight = value
+        nativeObjectiveTrackerHeightWrites =
+            nativeObjectiveTrackerHeightWrites + 1
+        return true
+    end,
+    SetObjectiveTrackerBFIRightStackPlacement = function()
+        nativeObjectiveTrackerPlacementIsDefault = false
+        nativeObjectiveTrackerHeight = 640
+        nativeObjectiveTrackerPlacementWrites =
+            nativeObjectiveTrackerPlacementWrites + 1
+        return true
+    end,
 }
 local F = {}
 local L = setmetatable({}, {
@@ -251,7 +309,20 @@ local BFI = {
 local environment = {
     _G = false,
     AbstractFramework = AF,
+    BFIOptionsFrame = {
+        Hide = function()
+            optionsHidden = true
+        end,
+    },
     BFIOptionsFrame_UIWidgetsPanel = {},
+    EditModeManagerFrame = {
+        CanEnterEditMode = function()
+            return true
+        end,
+    },
+    InCombatLockdown = function()
+        return false
+    end,
     READY_CHECK = "Ready Check",
     RESET = "Reset",
     ROLE_POLL = "Role Poll",
@@ -260,6 +331,9 @@ local environment = {
     next = next,
     pairs = pairs,
     select = select,
+    ShowUIPanel = function(frame)
+        nativeEditModeShown = frame
+    end,
     table = table,
     tinsert = table.insert,
     tostring = tostring,
@@ -289,6 +363,15 @@ assertEqual(defaults.hideObjectiveTracker, true,
     "default tracker replacement")
 assertEqual(defaults.showPlayerBreakdown, true,
     "default player breakdown display")
+local objectiveDefaults = freshProfile.uiWidgets.objectiveTracker
+assertEqual(objectiveDefaults.enabled, true,
+    "Objective Tracker styling defaults to enabled")
+assertEqual(objectiveDefaults.backgroundAlpha, 0.85,
+    "default Objective Tracker background opacity")
+assertEqual(objectiveDefaults.autoAcceptQuests, false,
+    "Objective Tracker auto-accept defaults to off")
+assertEqual(objectiveDefaults.autoTurnInQuests, false,
+    "Objective Tracker auto-turn-in defaults to off")
 
 local existingProfile = {
     uiWidgets = {
@@ -300,6 +383,10 @@ local existingProfile = {
 updateProfile(nil, existingProfile)
 assertEqual(existingProfile.uiWidgets.mythicPlus.enabled, false,
     "existing profile receives new module defaults")
+assertEqual(existingProfile.uiWidgets.objectiveTracker.backgroundAlpha, 0.85,
+    "existing profile receives Objective Tracker background defaults")
+assertEqual(existingProfile.uiWidgets.objectiveTracker.autoAcceptQuests, false,
+    "existing profile receives opt-in quest automation defaults")
 
 local partialProfile = {
     uiWidgets = {
@@ -313,6 +400,37 @@ assertEqual(partialProfile.uiWidgets.mythicPlus.enabled, true,
     "existing Mythic+ choice is preserved")
 assertEqual(partialProfile.uiWidgets.mythicPlus.width, 320,
     "partial Mythic+ config is filled")
+
+local partialObjectiveProfile = {
+    uiWidgets = {
+        objectiveTracker = {
+            enabled = true,
+            backgroundAlpha = 0.37,
+            autoAcceptQuests = true,
+        },
+    },
+}
+updateProfile(nil, partialObjectiveProfile)
+assertEqual(
+    partialObjectiveProfile.uiWidgets.objectiveTracker.backgroundAlpha,
+    0.37,
+    "existing Objective Tracker opacity is preserved"
+)
+assertEqual(
+    type(partialObjectiveProfile.uiWidgets.objectiveTracker.font),
+    "table",
+    "partial Objective Tracker config is filled"
+)
+assertEqual(
+    partialObjectiveProfile.uiWidgets.objectiveTracker.autoAcceptQuests,
+    true,
+    "existing Objective Tracker auto-accept choice is preserved"
+)
+assertEqual(
+    partialObjectiveProfile.uiWidgets.objectiveTracker.autoTurnInQuests,
+    false,
+    "missing Objective Tracker auto-turn-in choice is filled"
+)
 
 local optionsChunk, optionsLoadError =
     loadfile("Options/UIWidgets_Options.lua")
@@ -341,6 +459,181 @@ local function findByLabel(widgets, label)
         end
     end
 end
+
+local function findByText(widgets, text)
+    for _, widget in ipairs(widgets) do
+        if widget.text == text then return widget end
+    end
+end
+
+local objectiveInfo = {
+    cfg = partialProfile.uiWidgets.objectiveTracker,
+    id = "objectiveTracker",
+    ownerName = "Objective Tracker",
+    SetTextColor = function()
+    end,
+}
+local objectiveOptionPanes = F.GetUIWidgetOptions({}, objectiveInfo)
+assertTrue(#objectiveOptionPanes >= 5, "Objective Tracker options panes")
+for _, pane in ipairs(objectiveOptionPanes) do
+    pane.Load(objectiveInfo)
+end
+
+local nativePlacement = findByLabel(buttons, "Set Default Position & Height")
+assertTrue(nativePlacement, "Objective Tracker native placement action")
+assertEqual(nativePlacement.enabled, true,
+    "native placement remains enabled for the active Blizzard layout")
+assertEqual(nativePlacement.tooltip[1], "Objective Tracker Position & Height",
+    "native placement tooltip title")
+nativePlacement.onClick()
+assertEqual(nativeObjectiveTrackerPlacementIsDefault, false,
+    "native placement leaves Blizzard's managed tracker column")
+assertEqual(nativeObjectiveTrackerPlacementWrites, 1,
+    "native placement writes once through the Blizzard adapter")
+assertEqual(nativeObjectiveTrackerHeight, 640,
+    "native placement applies BFI's default Objective Tracker height")
+assertEqual(objectiveInfo.cfg.position, nil,
+    "native placement is not stored in the BFI profile")
+local nativePlacementStatus = findByText(fontStrings,
+    "Saved default position and 640 height where supported. Open and close Blizzard Edit Mode to apply it; temporary Blizzard layouts take precedence.")
+assertTrue(nativePlacementStatus,
+    "native placement explains how Blizzard applies the saved layout")
+assertEqual(nativePlacementStatus.shown, true,
+    "native placement refresh guidance is visible")
+
+local openBlizzardEditMode = findByLabel(buttons, "Open Blizzard Edit Mode")
+assertTrue(openBlizzardEditMode,
+    "Objective Tracker opens its native Blizzard Edit Mode")
+assertEqual(openBlizzardEditMode.enabled, true,
+    "native Edit Mode launcher is available out of combat")
+assertEqual(openBlizzardEditMode.tooltip[1], "Objective Tracker Position & Height",
+    "native Edit Mode launcher tooltip title")
+assertEqual(openBlizzardEditMode.point[1], "TOPLEFT",
+    "native Edit Mode launcher stacks below the placement action")
+assertEqual(openBlizzardEditMode.point[2], nativePlacement,
+    "native Edit Mode launcher stays inside the options viewport")
+assertEqual(openBlizzardEditMode.point[3], "BOTTOMLEFT",
+    "native Edit Mode launcher anchors below the placement action")
+openBlizzardEditMode.onClick()
+assertEqual(nativeEditModeShown, environment.EditModeManagerFrame,
+    "native Edit Mode launcher opens Blizzard's manager")
+assertEqual(optionsHidden, true,
+    "native Edit Mode launcher closes BFI options first")
+
+nativeObjectiveTrackerPlacementReason = "customLayout"
+nativeObjectiveTrackerPlacementCanSet = true
+nativeObjectiveTrackerPlacementCanSetReason = "createsLayout"
+for _, pane in ipairs(objectiveOptionPanes) do
+    if pane.name == "BFI_UIWidgetOption_ObjectiveTrackerPlacement" then
+        pane.Load(objectiveInfo)
+        break
+    end
+end
+assertEqual(nativePlacement.enabled, true,
+    "fresh preset enables BFI native placement to create its layout")
+local createLayoutStatus = findByText(fontStrings,
+    "Click Set Default Position & Height to create and activate BFI's Blizzard layout.")
+assertTrue(createLayoutStatus,
+    "fresh preset placement explains that BFI will create a native layout")
+local placementWritesBeforeCreate = nativeObjectiveTrackerPlacementWrites
+nativePlacement.onClick()
+assertEqual(nativeObjectiveTrackerPlacementWrites,
+    placementWritesBeforeCreate + 1,
+    "fresh preset placement delegates to the BFI layout creator")
+
+nativeObjectiveTrackerPlacementCanSet = false
+nativeObjectiveTrackerPlacementCanSetReason = "customLayout"
+for _, pane in ipairs(objectiveOptionPanes) do
+    if pane.name == "BFI_UIWidgetOption_ObjectiveTrackerPlacement" then
+        pane.Load(objectiveInfo)
+        break
+    end
+end
+assertEqual(nativePlacement.enabled, false,
+    "saved custom layouts retain the explicit BFI placement boundary")
+nativeObjectiveTrackerPlacementReason = nil
+nativeObjectiveTrackerPlacementCanSet = true
+nativeObjectiveTrackerPlacementCanSetReason = nil
+
+local nativeHeight = findByLabel(sliders, "Objective Tracker Height")
+assertTrue(nativeHeight, "Objective Tracker native height slider")
+assertEqual(nativeHeight.minimum, 400, "native height minimum")
+assertEqual(nativeHeight.maximum, 1000, "native height maximum")
+assertEqual(nativeHeight.step, 10, "native height step")
+assertEqual(nativeHeight.value, 650,
+    "native height loads the active Blizzard layout value")
+assertEqual(nativeHeight.enabled, true,
+    "writable native height remains enabled")
+nativeHeight.afterValueChanged(500)
+assertEqual(nativeObjectiveTrackerHeight, 500,
+    "native height writes through the Blizzard adapter")
+assertEqual(nativeObjectiveTrackerHeightWrites, 1,
+    "native height writes once per completed slider edit")
+assertEqual(objectiveInfo.cfg.height, nil,
+    "native height is not stored in the BFI profile")
+local nativeHeightStatus = findByText(fontStrings,
+    "Saved. Open and close Blizzard Edit Mode to apply it.")
+assertTrue(nativeHeightStatus,
+    "native height explains the no-reload Blizzard layout refresh")
+assertEqual(nativeHeightStatus.shown, true,
+    "native height refresh guidance is visible")
+
+nativeObjectiveTrackerHeightReason = "customPosition"
+for _, pane in ipairs(objectiveOptionPanes) do
+    if pane.name == "BFI_UIWidgetOption_ObjectiveTrackerNativeHeight" then
+        pane.Load(objectiveInfo)
+        break
+    end
+end
+assertEqual(nativeHeight.enabled, false,
+    "default-position tracker disables the native height slider")
+nativeObjectiveTrackerHeightReason = nil
+
+local backgroundOpacity = findByLabel(sliders, "Background Opacity")
+assertTrue(backgroundOpacity, "Objective Tracker background opacity slider")
+assertEqual(backgroundOpacity.minimum, 0, "background opacity minimum")
+assertEqual(backgroundOpacity.maximum, 1, "background opacity maximum")
+assertEqual(backgroundOpacity.value, 0.85,
+    "background opacity loads the profile value")
+backgroundOpacity.onValueChanged(0.62)
+assertEqual(objectiveInfo.cfg.backgroundAlpha, 0.62,
+    "background opacity setting")
+assertEqual(fires[#fires][1], "BFI_UpdateModule",
+    "background opacity refreshes the Objective Tracker")
+assertEqual(fires[#fires][3], "objectiveTracker",
+    "background opacity refresh targets the Objective Tracker")
+
+local autoAcceptQuests = findByLabel(checkButtons, "Auto Accept Quests")
+local autoTurnInQuests = findByLabel(checkButtons, "Auto Turn In Quests")
+assertTrue(autoAcceptQuests and autoTurnInQuests,
+    "Objective Tracker quest automation toggles")
+assertEqual(autoAcceptQuests.checked, false,
+    "auto-accept loads the profile value")
+assertEqual(autoTurnInQuests.checked, false,
+    "auto-turn-in loads the profile value")
+local questAutomationTooltip = "Hold Shift to pause quest automation. "
+    .. "Item-started and remote completions, multiple reward choices, "
+    .. "PvP confirmations, and payments stay manual."
+assertEqual(autoAcceptQuests.tooltip[1], "Auto Accept Quests",
+    "auto-accept tooltip title")
+assertEqual(autoAcceptQuests.tooltip[2], questAutomationTooltip,
+    "auto-accept tooltip body")
+assertEqual(autoAcceptQuests._tooltipOwner,
+    environment.BFIOptionsFrame_UIWidgetsPanel,
+    "auto-accept tooltip escapes the settings scroll viewport")
+assertEqual(autoTurnInQuests.tooltip[1], "Auto Turn In Quests",
+    "auto-turn-in tooltip title")
+assertEqual(autoTurnInQuests.tooltip[2], questAutomationTooltip,
+    "auto-turn-in tooltip body")
+assertEqual(autoTurnInQuests._tooltipOwner,
+    environment.BFIOptionsFrame_UIWidgetsPanel,
+    "auto-turn-in tooltip escapes the settings scroll viewport")
+autoAcceptQuests.onCheck(true)
+autoTurnInQuests.onCheck(true)
+assertEqual(objectiveInfo.cfg.autoAcceptQuests, true,
+    "auto-accept setting")
+assertEqual(objectiveInfo.cfg.autoTurnInQuests, true,
+    "auto-turn-in setting")
 
 local showAffixes = findByLabel(checkButtons, "Show Affixes")
 assertTrue(showAffixes, "affix display toggle")

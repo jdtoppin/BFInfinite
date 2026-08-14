@@ -221,6 +221,12 @@ end
 
 local renderer = readFile("Modules/DamageMeter/Renderer.lua")
 local rendererCode = stripLineComments(renderer)
+local trackerGeometry = extractSection(
+    rendererCode,
+    "local function GetObjectiveTrackerLaneHeight(config)",
+    "local function GetRuntimeWindowLayout(config)",
+    "unable to isolate reviewed Objective Tracker geometry"
+)
 local aggregateRenderer = removeSection(
     rendererCode,
     "local function FormatDetailNumber(value)",
@@ -231,7 +237,6 @@ local aggregateRenderer = removeSection(
 local forbiddenEverywhere = {
     "hooksecurefunc",
     "issecret" .. "value",
-    "F.isValueNonSecret",
     "_G.C_DamageMeter",
     "C_DamageMeter.",
     "GetCombatSessionSource",
@@ -247,6 +252,43 @@ for _, text in ipairs(forbiddenEverywhere) do
         "renderer must use only the reviewed public data adapter"
     )
 end
+
+assertCount(
+    trackerGeometry,
+    "F.isValueNonSecret",
+    4,
+    "tracker geometry must sanitize every fallible numeric return"
+)
+assertBefore(
+    trackerGeometry,
+    "F.isValueNonSecret(bottom)",
+    'type(bottom) ~= "number"',
+    "tracker bottom must be sanitized before type inspection"
+)
+assertBefore(
+    trackerGeometry,
+    "F.isValueNonSecret(uiScale)",
+    'type(uiScale) ~= "number"',
+    "UI scale must be sanitized before type inspection"
+)
+assertBefore(
+    trackerGeometry,
+    "F.isValueNonSecret(targetScale)",
+    'type(targetScale) ~= "number"',
+    "tracker scale must be sanitized before type inspection"
+)
+assertBefore(
+    trackerGeometry,
+    "F.isValueNonSecret(uiBottom)",
+    'type(uiBottom) ~= "number"',
+    "UI bottom must be sanitized before type inspection"
+)
+assertOnlyInSections(
+    rendererCode,
+    "F.isValueNonSecret",
+    {trackerGeometry},
+    "secret inspection is isolated to tracker geometry"
+)
 
 local forbiddenAggregatePatterns = {
     "sourceGUID",
@@ -649,6 +691,21 @@ assertNotContains(
     rendererCode,
     "config.nativeEnabledBeforeBFI",
     "renderer must never serialize native CVar state into a profile"
+)
+assertContains(
+    rendererCode,
+    "local tracker = _G.ObjectiveTrackerFrame",
+    "default meters must use the Objective Tracker as a read-only boundary"
+)
+assertNotContains(
+    rendererCode,
+    "_G.ObjectiveTrackerFrame:",
+    "Damage Meter coexistence must not call Objective Tracker methods"
+)
+assertNotContains(
+    rendererCode,
+    "SetParent(_G.ObjectiveTrackerFrame",
+    "Damage Meter windows must not become Objective Tracker children"
 )
 
 assertNotContains(

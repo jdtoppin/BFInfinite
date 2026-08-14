@@ -68,6 +68,10 @@ local settings = {
         "markerSpacing",
     },
     objectiveTracker = {
+        "objectiveTrackerPlacement",
+        "objectiveTrackerNativeHeight",
+        "objectiveTrackerBackground",
+        "objectiveTrackerQuestAutomation",
         "font",
     },
     mythicPlus = {
@@ -603,6 +607,335 @@ builder["alpha"] = function(parent)
     function pane.Load(t)
         pane.t = t
         alpha:SetValue(t.cfg.alpha)
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- objectiveTrackerPlacement
+---------------------------------------------------------------------
+builder["objectiveTrackerPlacement"] = function(parent)
+    if created["objectiveTrackerPlacement"] then
+        return created["objectiveTrackerPlacement"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_ObjectiveTrackerPlacement",
+        nil,
+        110
+    )
+    created["objectiveTrackerPlacement"] = pane
+
+    local placement = AF.CreateButton(
+        pane,
+        L["Set Default Position & Height"],
+        "BFI_hover",
+        220,
+        20
+    )
+    AF.SetPoint(placement, "TOPLEFT", 15, -12)
+    placement:SetTooltip(
+        L["Objective Tracker Position & Height"],
+        L["Sets the Blizzard Objective Tracker to BFI's default position, 75 pixels higher than Blizzard's preset, and its default height to 640 where Blizzard supports it. On a fresh Blizzard preset, this creates and activates BFI's own layout. It does not save a position or height in your BFI profile."]
+    )
+
+    local openEditMode = AF.CreateButton(
+        pane,
+        L["Open Blizzard Edit Mode"],
+        "BFI_hover",
+        190,
+        20
+    )
+    AF.SetPoint(openEditMode, "TOPLEFT", placement, "BOTTOMLEFT", 0, -7)
+    openEditMode:SetTooltip(
+        L["Objective Tracker Position & Height"],
+        L["The Objective Tracker is Blizzard-owned, so it is positioned in Blizzard Edit Mode rather than BFI Edit Mode. Use this to fine-tune its location."]
+    )
+
+    local status = AF.CreateFontString(pane, nil, "disabled")
+    AF.SetPoint(status, "TOPLEFT", openEditMode, "BOTTOMLEFT", 0, -8)
+    AF.SetPoint(status, "RIGHT", -15, 0)
+    status:SetJustifyH("LEFT")
+    status:SetWordWrap(true)
+    local placementSaved
+    local placementReason
+
+    local unavailableStatus = {
+        busy = L["Saving Objective Tracker position and height..."],
+        combat = L["Unavailable in combat."],
+        customLayout = L["Use a custom Blizzard Edit Mode layout first."],
+        editMode = L["Finish editing in Blizzard Edit Mode first."],
+        layoutName = L["Unable to create the BFI Blizzard layout."],
+        unavailable = L["Unavailable on this client."],
+    }
+
+    local function CanOpenBlizzardEditMode()
+        local manager = _G.EditModeManagerFrame
+        return not (type(_G.InCombatLockdown) == "function"
+                and _G.InCombatLockdown())
+            and manager
+            and type(manager.CanEnterEditMode) == "function"
+            and manager:CanEnterEditMode()
+            and type(_G.ShowUIPanel) == "function"
+    end
+
+    local function Refresh()
+        local isDefaultPosition, reason
+        if type(W.GetObjectiveTrackerNativePlacement) == "function" then
+            isDefaultPosition, reason = W.GetObjectiveTrackerNativePlacement()
+        else
+            reason = "unavailable"
+        end
+
+        local canSet, availabilityReason
+        if type(W.CanSetObjectiveTrackerBFIRightStackPlacement) == "function" then
+            canSet, availabilityReason =
+                W.CanSetObjectiveTrackerBFIRightStackPlacement()
+        else
+            canSet = reason == nil
+                and type(W.SetObjectiveTrackerBFIRightStackPlacement)
+                    == "function"
+            availabilityReason = reason
+        end
+
+        placement:SetEnabled(canSet == true)
+        openEditMode:SetEnabled(CanOpenBlizzardEditMode() == true)
+
+        local statusText = placementSaved and L[
+            "Saved default position and 640 height where supported. Open and close Blizzard Edit Mode to apply it; temporary Blizzard layouts take precedence."
+        ] or placementReason and (
+            unavailableStatus[placementReason] or unavailableStatus.unavailable
+        ) or availabilityReason == "createsLayout" and L[
+            "Click Set Default Position & Height to create and activate BFI's Blizzard layout."
+        ] or reason and (
+            unavailableStatus[availabilityReason or reason]
+                or unavailableStatus.unavailable
+        ) or isDefaultPosition and L[
+            "Using Blizzard's right-managed position."
+        ] or L["Using a custom Blizzard Edit Mode position."]
+        status:SetText(statusText)
+        status:SetShown(true)
+    end
+
+    placement:SetOnClick(function()
+        if type(W.SetObjectiveTrackerBFIRightStackPlacement) == "function" then
+            local saved, actionReason =
+                W.SetObjectiveTrackerBFIRightStackPlacement()
+            placementSaved = saved == true
+            placementReason = placementSaved and nil or actionReason
+        end
+        Refresh()
+    end)
+
+    openEditMode:SetOnClick(function()
+        if not CanOpenBlizzardEditMode() then return end
+
+        local optionsFrame = _G.BFIOptionsFrame
+        if optionsFrame then optionsFrame:Hide() end
+        _G.ShowUIPanel(_G.EditModeManagerFrame)
+    end)
+
+    function pane.Load(t)
+        pane.t = t
+        placementSaved = nil
+        placementReason = nil
+        Refresh()
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- objectiveTrackerNativeHeight
+---------------------------------------------------------------------
+builder["objectiveTrackerNativeHeight"] = function(parent)
+    if created["objectiveTrackerNativeHeight"] then
+        return created["objectiveTrackerNativeHeight"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_ObjectiveTrackerNativeHeight",
+        nil,
+        70
+    )
+    created["objectiveTrackerNativeHeight"] = pane
+
+    local height = AF.CreateSlider(
+        pane,
+        L["Objective Tracker Height"],
+        200,
+        400,
+        1000,
+        10,
+        nil,
+        true
+    )
+    AF.SetPoint(height, "LEFT", 15, 0)
+
+    local status = AF.CreateFontString(pane, nil, "disabled")
+    AF.SetPoint(status, "LEFT", height, "RIGHT", 25, 0)
+    AF.SetPoint(status, "RIGHT", -15, 0)
+    status:SetJustifyH("LEFT")
+    status:SetWordWrap(true)
+    local nativeHeightSaved
+
+    local unavailableTips = {
+        busy = L["Objective Tracker height is temporarily busy."],
+        combat = L["Leave combat before changing the Objective Tracker height."],
+        customLayout = L["Use Set Default Position & Height above to create BFI's layout, or select an Account or Character Blizzard Edit Mode layout."],
+        customPosition = L["Use Set Default Position & Height above, or move the Objective Tracker in Blizzard Edit Mode before changing its height."],
+        editMode = L["Close Blizzard Edit Mode before changing the Objective Tracker height."],
+        invalid = L["Objective Tracker height is unavailable on this client."],
+        unavailable = L["Objective Tracker height is unavailable on this client."],
+    }
+    local unavailableStatus = {
+        busy = L["Saving Objective Tracker height..."],
+        combat = L["Unavailable in combat."],
+        customLayout = L["Use Set Default Position & Height above."],
+        customPosition = L["Use Set Default Position & Height above."],
+        editMode = L["Finish editing in Blizzard Edit Mode first."],
+        invalid = L["Unavailable on this client."],
+        unavailable = L["Unavailable on this client."],
+    }
+
+    local function Refresh()
+        local value, reason
+        if type(W.GetObjectiveTrackerNativeHeight) == "function" then
+            value, reason = W.GetObjectiveTrackerNativeHeight()
+        else
+            reason = "unavailable"
+        end
+
+        height:SetValue(value or 800)
+        height:SetEnabled(reason == nil
+            and type(W.SetObjectiveTrackerNativeHeight) == "function")
+        local statusText = reason and (
+            unavailableStatus[reason] or unavailableStatus.unavailable
+        ) or nativeHeightSaved and L[
+            "Saved. Open and close Blizzard Edit Mode to apply it."
+        ]
+        status:SetText(statusText or "")
+        status:SetShown(statusText ~= nil)
+
+        local tooltip = L["Height is saved to the active Blizzard Edit Mode layout, not to a BFI profile. It reserves the right-side lane for the tracker, but Blizzard can expand it for required objective content."]
+        if reason then
+            tooltip = tooltip .. "\n\n" .. (
+                unavailableTips[reason] or unavailableTips.unavailable
+            )
+        end
+        height:SetTooltip(L["Objective Tracker Height"], tooltip)
+    end
+
+    height:SetAfterValueChanged(function(value)
+        if type(W.SetObjectiveTrackerNativeHeight) == "function" then
+            nativeHeightSaved = W.SetObjectiveTrackerNativeHeight(value) == true
+        end
+        Refresh()
+    end)
+
+    function pane.Load(t)
+        pane.t = t
+        nativeHeightSaved = nil
+        Refresh()
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- objectiveTrackerBackground
+---------------------------------------------------------------------
+builder["objectiveTrackerBackground"] = function(parent)
+    if created["objectiveTrackerBackground"] then
+        return created["objectiveTrackerBackground"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_ObjectiveTrackerBackground",
+        nil,
+        55
+    )
+    created["objectiveTrackerBackground"] = pane
+
+    local alpha = AF.CreateSlider(
+        pane,
+        L["Background Opacity"],
+        150,
+        0,
+        1,
+        0.01,
+        true,
+        true
+    )
+    AF.SetPoint(alpha, "LEFT", 15, 0)
+    alpha:SetOnValueChanged(function(value)
+        pane.t.cfg.backgroundAlpha = value
+        AF.Fire("BFI_UpdateModule", "uiWidgets", pane.t.id)
+    end)
+
+    function pane.Load(t)
+        pane.t = t
+        alpha:SetValue(t.cfg.backgroundAlpha)
+    end
+
+    return pane
+end
+
+---------------------------------------------------------------------
+-- objectiveTrackerQuestAutomation
+---------------------------------------------------------------------
+builder["objectiveTrackerQuestAutomation"] = function(parent)
+    if created["objectiveTrackerQuestAutomation"] then
+        return created["objectiveTrackerQuestAutomation"]
+    end
+
+    local pane = AF.CreateBorderedFrame(
+        parent,
+        "BFI_UIWidgetOption_ObjectiveTrackerQuestAutomation",
+        nil,
+        34
+    )
+    created["objectiveTrackerQuestAutomation"] = pane
+
+    local tooltip = L[
+        "Hold Shift to pause quest automation. Item-started and remote completions, multiple reward choices, PvP confirmations, and payments stay manual."
+    ]
+    local definitions = {
+        {"autoAcceptQuests", L["Auto Accept Quests"]},
+        {"autoTurnInQuests", L["Auto Turn In Quests"]},
+    }
+    local controls = {}
+
+    local function CreateToggle(key, label, x)
+        local control = AF.CreateCheckButton(pane, label)
+        AF.SetPoint(control, "LEFT", x, 0)
+        -- Keep this shared tooltip out of the scroll viewport on supported
+        -- AbstractFramework installs; it remains anchored to the control.
+        control._tooltipOwner = BFIOptionsFrame_UIWidgetsPanel
+        control:SetTooltip(label, tooltip)
+        control:SetOnCheck(function(checked)
+            pane.t.cfg[key] = checked
+        end)
+        controls[key] = control
+    end
+
+    for index, definition in ipairs(definitions) do
+        CreateToggle(
+            definition[1],
+            definition[2],
+            15 + (index - 1) * 185
+        )
+    end
+
+    function pane.Load(t)
+        pane.t = t
+        for key, control in pairs(controls) do
+            control:SetChecked(t.cfg[key] == true)
+        end
     end
 
     return pane

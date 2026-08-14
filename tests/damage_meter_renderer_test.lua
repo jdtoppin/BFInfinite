@@ -40,7 +40,9 @@ end
 local function loadRenderer(
     initialNativeEnabled,
     savedRestoreEnabled,
-    availableSessionCount
+    availableSessionCount,
+    objectiveTrackerAvailable,
+    objectiveDockFrameAvailable
 )
     local state = {
         ambiguousInputs = {},
@@ -54,6 +56,7 @@ local function loadRenderer(
             },
         },
         classColorInputs = {},
+        callbacks = {},
         currentSessions = {},
         deathRecapCalls = {},
         deathRecapEvents = {},
@@ -76,6 +79,7 @@ local function loadRenderer(
         tooltipSpellCalls = {},
         unsafeOperations = 0,
         inCombat = false,
+        secretGeometryToken = {},
     }
     if type(savedRestoreEnabled) == "boolean" then
         state.nativeOverrideState.damageMeterNativeEnabledBeforeBFI =
@@ -170,6 +174,7 @@ local function loadRenderer(
     function frameMethods:SetSize(width, height)
         self.width = width
         self.height = height
+        self.sizeChangeCount = (self.sizeChangeCount or 0) + 1
         if self.scripts.OnSizeChanged then
             self.scripts.OnSizeChanged(self, width, height)
         end
@@ -348,6 +353,10 @@ local function loadRenderer(
         self.wordWrap = enabled
     end
 
+    function frameMethods:SetFontHeight(height)
+        self.fontHeight = height
+    end
+
     function frameMethods:SetText(text)
         self.text = text
     end
@@ -413,6 +422,35 @@ local function loadRenderer(
     end
 
     local uiParent = newFrame("UIParent")
+    local objectiveTracker
+    local objectiveTrackerDockFrame
+    if objectiveTrackerAvailable ~= false then
+        objectiveTracker = newFrame(
+            "ObjectiveTrackerFrame",
+            uiParent,
+            "ObjectiveTrackerFrame",
+            260,
+            805
+        )
+        objectiveTracker.isOnLeftSideOfScreen = false
+        objectiveTracker.NineSlice = newFrame(
+            "ObjectiveTrackerNineSlice",
+            objectiveTracker,
+            nil,
+            272,
+            400
+        )
+        if objectiveDockFrameAvailable ~= false then
+            objectiveTrackerDockFrame = newFrame(
+                "ObjectiveTrackerDockFrame",
+                objectiveTracker,
+                "BFIObjectiveTrackerDockFrame",
+                272,
+                400
+            )
+        end
+    end
+    state.objectiveTrackerDockFrame = objectiveTrackerDockFrame
 
     local AF = {}
 
@@ -469,6 +507,7 @@ local function loadRenderer(
         local dropdown = newFrame("Dropdown", parent, nil, width, 20)
         dropdown.button = newFrame("Button", dropdown)
         dropdown.button.bg = newFrame("Texture", dropdown.button)
+        dropdown.text = newFrame("FontString", dropdown)
 
         function dropdown:SetItems(items)
             self.items = items
@@ -476,6 +515,7 @@ local function loadRenderer(
 
         function dropdown:SetSelectedValue(value)
             self.selectedValue = value
+            self.text.fontHeight = 13
         end
 
         function dropdown:SetOnSelect(callback)
@@ -483,16 +523,25 @@ local function loadRenderer(
         end
 
         function dropdown:Select(value)
-            self.selectedValue = value
+            self:SetSelectedValue(value)
             self.onSelect(value)
         end
 
         return dropdown
     end
 
-    function AF.CreateResizeButton(target)
+    function AF.CreateResizeButton(target, minWidth, minHeight, maxWidth, maxHeight)
         local resize = newFrame("ResizeButton", target, nil, 16, 16)
         target:SetResizable(true)
+        resize.minWidth = minWidth
+        resize.minHeight = minHeight
+        resize.maxWidth = maxWidth
+        resize.maxHeight = maxHeight
+
+        function resize:SetMinHeight(height)
+            self.minHeight = height
+        end
+
         return resize
     end
 
@@ -502,6 +551,10 @@ local function loadRenderer(
 
     function AF.Fire(...)
         state.fires[#state.fires + 1] = {...}
+    end
+
+    function AF.RegisterCallback(name, registeredCallback)
+        state.callbacks[name] = registeredCallback
     end
 
     function AF.ApplyDefaultBackdrop_NoBorder(frame)
@@ -598,10 +651,13 @@ local function loadRenderer(
         classColor = true,
         enabled = true,
         headerHeight = 22,
+        headerTextSize = 12,
         height = 220,
+        dockToObjectiveTracker = true,
         locked = false,
         numberMode = "both",
         padding = 4,
+        rowTextSize = 11,
         showSpecIcon = true,
         spacing = 2,
         texture = "AF",
@@ -620,24 +676,24 @@ local function loadRenderer(
         windowAnchors = {
             {
                 relativeTo = 0,
-                point = "BOTTOMRIGHT",
-                relativePoint = "BOTTOMRIGHT",
+                point = "TOPRIGHT",
+                relativePoint = "TOPRIGHT",
                 x = -4,
-                y = 4,
+                y = -4,
             },
             {
                 relativeTo = 1,
-                point = "BOTTOMRIGHT",
-                relativePoint = "TOPRIGHT",
+                point = "TOPRIGHT",
+                relativePoint = "BOTTOMRIGHT",
                 x = 0,
-                y = 4,
+                y = -4,
             },
             {
                 relativeTo = 2,
-                point = "BOTTOMRIGHT",
-                relativePoint = "TOPRIGHT",
+                point = "TOPRIGHT",
+                relativePoint = "BOTTOMRIGHT",
                 x = 0,
-                y = 4,
+                y = -4,
             },
         },
         windowHeights = {
@@ -740,6 +796,9 @@ local function loadRenderer(
             end,
         }),
         funcs = {
+            isValueNonSecret = function(value)
+                return value ~= state.secretGeometryToken
+            end,
             OpenOptionsFrame = function(section)
                 state.openOptionsCalls[#state.openOptionsCalls + 1] =
                     section
@@ -751,8 +810,12 @@ local function loadRenderer(
         name = "BFInfinite",
         modules = {
             DamageMeter = DM,
+            UIWidgets = {
+                objectiveTrackerDockFrame = objectiveTrackerDockFrame,
+            },
         },
     }
+    state.uiWidgets = BFI.modules.UIWidgets
 
     local environment = {
         AbstractFramework = AF,
@@ -865,6 +928,7 @@ local function loadRenderer(
             return "1:35"
         end,
         SETTINGS = "Settings",
+        ObjectiveTrackerFrame = objectiveTracker,
         UIParent = uiParent,
         ipairs = ipairs,
         math = math,
@@ -876,6 +940,7 @@ local function loadRenderer(
         type = type,
     }
     environment._G = environment
+    state.environment = environment
 
     local sources = {}
     local sessions = {}
@@ -948,10 +1013,16 @@ local function loadRenderer(
     setfenv(chunk, environment)
     chunk("BFInfinite", BFI)
 
-    return DM.Renderer, DM, state, sources, sessions, uiParent
+    return DM.Renderer,
+        DM,
+        state,
+        sources,
+        sessions,
+        uiParent,
+        objectiveTracker
 end
 
-local Renderer, DM, state, sources, sessions, uiParent =
+local Renderer, DM, state, sources, sessions, uiParent, objectiveTracker =
     loadRenderer()
 
 assertEqual(Renderer.IsEnabled(), false, "renderer initially disabled")
@@ -964,6 +1035,8 @@ local third = state.namedFrames.BFIDamageMeterWindow3
 assertEqual(type(first), "table", "first addon-owned window")
 assertEqual(type(second), "table", "second addon-owned window")
 assertEqual(type(third), "table", "third addon-owned window")
+assertEqual(first.clamped, true,
+    "unresolved tracker geometry keeps normal screen clamping")
 assertEqual(
     first.kind,
     "BorderedFrame",
@@ -1017,33 +1090,150 @@ assertEqual(third.shown, true, "third window shown")
 assertPoint(
     first,
     1,
+    "TOPRIGHT",
+    state.objectiveTrackerDockFrame,
     "BOTTOMRIGHT",
-    uiParent,
-    "BOTTOMRIGHT",
-    -4,
-    4,
-    "first default anchor"
+    0,
+    -8,
+    "first default anchor starts below the Objective Tracker"
+)
+assertEqual(
+    DM.config.windowAnchors[1].relativeTo,
+    0,
+    "Objective Tracker frame is never persisted in the profile"
 )
 assertPoint(
     second,
     1,
-    "BOTTOMRIGHT",
-    first,
     "TOPRIGHT",
+    first,
+    "BOTTOMRIGHT",
     0,
-    4,
+    -4,
     "second default anchor"
 )
 assertPoint(
     third,
     1,
-    "BOTTOMRIGHT",
-    second,
     "TOPRIGHT",
+    second,
+    "BOTTOMRIGHT",
     0,
-    4,
+    -4,
     "third default anchor"
 )
+
+local EarlyRenderer, _, earlyState, _, _, _, earlyObjectiveTracker =
+    loadRenderer(nil, nil, nil, true, false)
+assertEqual(
+    EarlyRenderer.SetEnabled(true),
+    true,
+    "renderer starts before the BFI tracker surface is ready"
+)
+local earlyFirst = earlyState.namedFrames.BFIDamageMeterWindow1
+assertPoint(
+    earlyFirst,
+    1,
+    "TOPRIGHT",
+    earlyObjectiveTracker.NineSlice,
+    "BOTTOMRIGHT",
+    0,
+    -8,
+    "native content bounds provide a temporary tracker fallback"
+)
+local readyDockFrame = {}
+earlyState.uiWidgets.objectiveTrackerDockFrame = readyDockFrame
+assertEqual(
+    type(earlyState.callbacks.BFI_ObjectiveTrackerDockFrameChanged),
+    "function",
+    "Objective Tracker dock-frame callback registered"
+)
+earlyState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
+assertPoint(
+    earlyFirst,
+    1,
+    "TOPRIGHT",
+    readyDockFrame,
+    "BOTTOMRIGHT",
+    0,
+    -8,
+    "ready BFI tracker surface replaces the temporary fallback"
+)
+EarlyRenderer.SetEnabled(false)
+
+local FallbackRenderer, _, fallbackState, _, _, fallbackUIParent =
+    loadRenderer(nil, nil, nil, false)
+assertEqual(
+    FallbackRenderer.SetEnabled(true),
+    true,
+    "renderer starts before the Objective Tracker addon"
+)
+local fallbackFirst = fallbackState.namedFrames.BFIDamageMeterWindow1
+assertPoint(
+    fallbackFirst,
+    1,
+    "TOPRIGHT",
+    fallbackUIParent,
+    "TOPRIGHT",
+    -4,
+    -4,
+    "unloaded Objective Tracker uses the safe screen fallback"
+)
+local lateObjectiveTracker = {
+    isOnLeftSideOfScreen = false,
+}
+local lateObjectiveTrackerDockFrame = {}
+fallbackState.environment.ObjectiveTrackerFrame = lateObjectiveTracker
+fallbackState.uiWidgets.objectiveTrackerDockFrame =
+    lateObjectiveTrackerDockFrame
+local fallbackEventFrame
+for _, frame in ipairs(fallbackState.frames) do
+    if frame.events.ADDON_LOADED then
+        fallbackEventFrame = frame
+        break
+    end
+end
+assertEqual(
+    type(fallbackEventFrame),
+    "table",
+    "Objective Tracker load listener registered"
+)
+fallbackEventFrame:RunScript(
+    "OnEvent",
+    "ADDON_LOADED",
+    "Blizzard_ObjectiveTracker"
+)
+assertPoint(
+    fallbackFirst,
+    1,
+    "TOPRIGHT",
+    lateObjectiveTrackerDockFrame,
+    "BOTTOMRIGHT",
+    0,
+    -8,
+    "late Objective Tracker load reapplies the below-tracker anchor"
+)
+FallbackRenderer.SetEnabled(false)
+
+local OptOutRenderer, optOutDM, optOutState, _, _, optOutUIParent =
+    loadRenderer()
+optOutDM.config.dockToObjectiveTracker = false
+assertEqual(
+    OptOutRenderer.SetEnabled(true),
+    true,
+    "renderer honors saved Objective Tracker docking opt-out"
+)
+assertPoint(
+    optOutState.namedFrames.BFIDamageMeterWindow1,
+    1,
+    "TOPRIGHT",
+    optOutUIParent,
+    "TOPRIGHT",
+    -4,
+    -4,
+    "explicit opt-out retains the screen-relative anchor"
+)
+OptOutRenderer.SetEnabled(false)
 
 assertEqual(#state.nativeSetCalls, 1, "native hidden once on enable")
 assertEqual(state.nativeSetCalls[1], false, "native hidden on enable")
@@ -1074,6 +1264,17 @@ assertEqual(#state.nativeSetCalls, 1, "minimize keeps native override stable")
 local firstRow = first.rows[1]
 assertEqual(firstRow.rank.justifyH, "LEFT", "row number is left aligned")
 assertEqual(firstRow.rank.width, 16, "row number uses a compact column")
+assertEqual(firstRow.rank.fontHeight, 11, "row rank uses compact text")
+assertEqual(firstRow.name.fontHeight, 11, "row name uses compact text")
+assertEqual(firstRow.total.fontHeight, 11, "row total uses compact text")
+assertEqual(firstRow.perSecond.fontHeight, 11, "row rate uses compact text")
+assertEqual(first.typeDropdown.text.fontHeight, 12,
+    "type header uses its configured text size")
+assertEqual(first.sessionDropdown.text.fontHeight, 12,
+    "session header uses its configured text size")
+assertEqual(firstRow.total.width, 52, "compact text shrinks the total column")
+assertEqual(firstRow.perSecond.width, 52,
+    "compact text shrinks the per-second column")
 assertSame(
     firstRow.bar.maximum,
     sessions[1].maxAmount,
@@ -1302,6 +1503,8 @@ first.sessionDropdown:Select("overall")
 assertEqual(DM.config.windowSessions[1].mode, "overall", "first overall")
 assertEqual(DM.config.windowSessions[2].mode, "overall", "syncs second")
 assertEqual(DM.config.windowSessions[3].mode, "overall", "syncs third")
+assertEqual(first.sessionDropdown.text.fontHeight, 12,
+    "session selection retains its configured header text size")
 DM.config.windowSyncSessions[2] = false
 first.sessionDropdown:Select("history:91")
 local firstSessionMode, firstHistoricalSessionID =
@@ -1398,6 +1601,8 @@ assertEqual(
     "Dps",
     "filter selection stays visible"
 )
+assertEqual(first.typeDropdown.text.fontHeight, 12,
+    "type selection retains its configured header text size")
 assertSame(
     firstRow.perSecond.points[1].relativeTo,
     firstRow,
@@ -1559,7 +1764,19 @@ first.body:RunScript("OnMouseWheel", -1)
 first.body:RunScript("OnMouseWheel", -1)
 assertEqual(firstRow.rank.text, 3, "current scroll state rebuilt after clear")
 
-Renderer.SetWindowSession(1, "overall", nil, {sync = false})
+assertEqual(
+    Renderer.SetWindowSession(
+        1,
+        "overall",
+        nil,
+        {sync = false, refresh = false}
+    ),
+    true,
+    "session selection can defer a meter refresh"
+)
+assertEqual(first.sessionDropdown.text.fontHeight, 12,
+    "deferred session selection retains header text size")
+Renderer.Refresh()
 assertEqual(firstRow.rank.text, 1, "new session key starts at the top")
 first.body:RunScript("OnMouseWheel", -1)
 assertEqual(firstRow.rank.text, 2, "new session key scrolls independently")
@@ -1581,6 +1798,35 @@ assertEqual(
     type(damageMeterEventFrame),
     "table",
     "Damage Meter event frame found"
+)
+assertEqual(
+    damageMeterEventFrame.events.EDIT_MODE_LAYOUTS_UPDATED,
+    true,
+    "Damage Meter follows Objective Tracker Edit Mode layouts"
+)
+objectiveTracker.isOnLeftSideOfScreen = true
+damageMeterEventFrame:RunScript("OnEvent", "EDIT_MODE_LAYOUTS_UPDATED")
+assertPoint(
+    first,
+    1,
+    "TOPRIGHT",
+    state.objectiveTrackerDockFrame,
+    "BOTTOMRIGHT",
+    0,
+    -8,
+    "Edit Mode keeps meters below the Objective Tracker"
+)
+objectiveTracker.isOnLeftSideOfScreen = false
+damageMeterEventFrame:RunScript("OnEvent", "EDIT_MODE_LAYOUTS_UPDATED")
+assertPoint(
+    first,
+    1,
+    "TOPRIGHT",
+    state.objectiveTrackerDockFrame,
+    "BOTTOMRIGHT",
+    0,
+    -8,
+    "right-side Objective Tracker retains the vertical lane"
 )
 Renderer.SetWindowSession(1, "history", 91, {sync = false})
 first.body:RunScript("OnMouseWheel", -1)
@@ -1822,6 +2068,37 @@ assertEqual(
     "resize refresh targets Damage Meter options"
 )
 
+local function SeedUpwardDockingScenario()
+    DM.config.windowAnchors = {
+        {
+            relativeTo = 0,
+            point = "BOTTOMRIGHT",
+            relativePoint = "BOTTOMRIGHT",
+            x = -4,
+            y = 4,
+        },
+        {
+            relativeTo = 1,
+            point = "BOTTOMRIGHT",
+            relativePoint = "TOPRIGHT",
+            x = 0,
+            y = 4,
+        },
+        {
+            relativeTo = 2,
+            point = "BOTTOMRIGHT",
+            relativePoint = "TOPRIGHT",
+            x = 0,
+            y = 4,
+        },
+    }
+    Renderer.ApplySettings()
+end
+
+-- The generic drag/drop coverage exercises both insertion directions using a
+-- dedicated upward chain; default placement is asserted separately above.
+SeedUpwardDockingScenario()
+
 first.mouseOver = true
 first.centerY = 300
 state.cursorY = 350
@@ -2000,17 +2277,46 @@ assertEqual(
     "CENTER",
     "cyclic anchor uses safe center fallback"
 )
+local widthBeforePositionReset = DM.config.width
+local heightsBeforePositionReset = {
+    DM.config.windowHeights[1],
+    DM.config.windowHeights[2],
+    DM.config.windowHeights[3],
+}
 assertEqual(Renderer.ResetPosition(), true, "reset restores default stack")
+assertEqual(
+    DM.config.dockToObjectiveTracker,
+    true,
+    "reset restores Objective Tracker coexistence"
+)
+assertEqual(DM.config.width, widthBeforePositionReset,
+    "position reset preserves the user-selected width")
+for index = 1, 3 do
+    assertEqual(DM.config.windowHeights[index], heightsBeforePositionReset[index],
+        "position reset preserves window height " .. index)
+end
+assertPoint(
+    first,
+    1,
+    "TOPRIGHT",
+    state.objectiveTrackerDockFrame,
+    "BOTTOMRIGHT",
+    0,
+    -8,
+    "reset places the stack below the Objective Tracker"
+)
 assertPoint(
     second,
     1,
-    "BOTTOMRIGHT",
-    first,
     "TOPRIGHT",
+    first,
+    "BOTTOMRIGHT",
     0,
-    4,
+    -4,
     "reset restores vertical stack"
 )
+
+SeedUpwardDockingScenario()
 
 first.mouseOver = false
 second.mouseOver = true
@@ -2081,6 +2387,16 @@ assertEqual(
     0,
     "old stack stays rooted independently after the move"
 )
+assertPoint(
+    second,
+    1,
+    "TOPRIGHT",
+    state.objectiveTrackerDockFrame,
+    "BOTTOMRIGHT",
+    0,
+    -8,
+    "moving the root transfers below-tracker placement to its neighbor"
+)
 Renderer.ResetPosition()
 
 assertEqual(Renderer.SetEnabled(false), true, "renderer disable")
@@ -2108,11 +2424,13 @@ DM.config.width = 360
 DM.config.windowHeights[1] = 260
 DM.config.windowHeights[2] = 240
 DM.config.headerHeight = 26
+DM.config.headerTextSize = 8
 DM.config.barHeight = 24
 DM.config.spacing = 4
 DM.config.texture = "LiveTexture"
 DM.config.numberMode = "total"
 DM.config.padding = 6
+DM.config.rowTextSize = 8
 DM.config.showSpecIcon = false
 DM.config.classColor = false
 DM.config.backgroundAlpha = 0.65
@@ -2129,6 +2447,10 @@ assertEqual(first.width, 360, "live width")
 assertEqual(first.height, 260, "live height")
 assertEqual(second.height, 240, "second window keeps its own height")
 assertEqual(first.header.height, 26, "live header height")
+assertEqual(first.typeDropdown.text.fontHeight, 8,
+    "live type header text size")
+assertEqual(first.sessionDropdown.text.fontHeight, 8,
+    "live session header text size")
 assertEqual(
     first.backdropColor.r,
     0.04,
@@ -2145,6 +2467,7 @@ assertEqual(
     "title bar remains gradient-free after live settings"
 )
 assertEqual(firstRow.height, 24, "live bar height")
+assertEqual(firstRow.name.fontHeight, 8, "live row text size")
 assertEqual(firstRow.points[1].x, 6, "live horizontal padding")
 assertEqual(firstRow.points[1].y, -6, "live vertical padding")
 assertEqual(
@@ -2346,6 +2669,13 @@ local function RunDetailReportTests()
     assertEqual(window.detailPanel.shown, true, "detail panel is visible")
     assertEqual(row.shown, false, "summary row hides while details are open")
     assertEqual(window.detailTitle.text, "Damage Player", "detail title")
+    assertEqual(window.detailTitle.fontHeight, 11, "detail title uses meter text size")
+    assertEqual(window.detailRows[1].rank.fontHeight, 11,
+        "detail rank uses meter text size")
+    assertEqual(window.detailRows[1].label.fontHeight, 11,
+        "detail label uses meter text size")
+    assertEqual(window.detailRows[1].value.fontHeight, 11,
+        "detail value uses meter text size")
     assertEqual(window.detailRows[1].label.text, "Spell 101", "spell label")
     assertEqual(
         window.detailRows[1].value.text,
@@ -2566,6 +2896,75 @@ local function RunDetailReportTests()
         "detail-report renderer disables"
     )
 
+    local fittedRenderer, fittedDM, fittedState = loadRenderer()
+    fittedDM.config.width = 240
+    fittedDM.config.headerHeight = 20
+    fittedDM.config.barHeight = 18
+    fittedDM.config.spacing = 2
+    fittedDM.config.padding = 3
+    fittedDM.config.windowHeights[1] = 124
+    fittedDM.config.windowHeights[2] = 84
+    fittedDM.config.windowHeights[3] = 84
+    assertEqual(
+        fittedRenderer.SetEnabled(true),
+        true,
+        "fitted default renderer enables"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow1.visibleRowCount,
+        5,
+        "fitted first meter retains five rows"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow2.visibleRowCount,
+        3,
+        "fitted middle meter retains three rows"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow3.visibleRowCount,
+        3,
+        "fitted top meter retains three rows"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow2.height,
+        84,
+        "fitted middle meter uses the compact three-row height"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow3.height,
+        84,
+        "fitted top meter uses the compact three-row height"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow2.resize.minHeight,
+        84,
+        "default density permits the compact three-row resize height"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow1.width,
+        240,
+        "fitted meter uses the compact tracker-width default"
+    )
+    fittedDM.config.headerHeight = 36
+    fittedDM.config.barHeight = 36
+    fittedDM.config.padding = 12
+    fittedRenderer.ApplySettings()
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow2.resize.minHeight,
+        96,
+        "dense meter appearance keeps a complete row resize minimum"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow2.height,
+        96,
+        "dense meter appearance clamps the compact saved height to one row"
+    )
+    assertEqual(
+        fittedRenderer.SetEnabled(false),
+        true,
+        "fitted default renderer disables"
+    )
+
     local compactRenderer, compactDM, compactState = loadRenderer()
     compactDM.config.headerHeight = 36
     compactDM.config.barHeight = 36
@@ -2608,5 +3007,134 @@ local function RunDetailReportTests()
 end
 
 RunDetailReportTests()
+
+local function RunObjectiveTrackerLaneFitTests()
+    local fitRenderer, fitDM, fitState, _, _, fitUIParent =
+        loadRenderer()
+    local dockFrame = fitState.objectiveTrackerDockFrame
+    fitUIParent.bottom = 0
+    dockFrame.bottom = 260
+
+    fitDM.config.width = 240
+    fitDM.config.headerHeight = 20
+    fitDM.config.barHeight = 18
+    fitDM.config.spacing = 2
+    fitDM.config.padding = 3
+    fitDM.config.windowHeights[1] = 124
+    fitDM.config.windowHeights[2] = 104
+    fitDM.config.windowHeights[3] = 104
+
+    assertEqual(
+        fitRenderer.SetEnabled(true),
+        true,
+        "tracker-lane renderer enables"
+    )
+    local firstWindow = fitState.namedFrames.BFIDamageMeterWindow1
+    local secondWindow = fitState.namedFrames.BFIDamageMeterWindow2
+    local thirdWindow = fitState.namedFrames.BFIDamageMeterWindow3
+    local editModeEventFrame
+    for _, frame in ipairs(fitState.frames) do
+        if frame.events.EDIT_MODE_LAYOUTS_UPDATED then
+            editModeEventFrame = frame
+            break
+        end
+    end
+    assertEqual(type(editModeEventFrame), "table",
+        "tracker-lane renderer listens for native Edit Mode saves")
+    assertEqual(firstWindow.visibleRowCount, 3,
+        "constrained first meter keeps three rows")
+    assertEqual(secondWindow.visibleRowCount, 3,
+        "constrained second meter keeps three rows")
+    assertEqual(thirdWindow.visibleRowCount, 2,
+        "constrained third meter keeps two rows")
+    assertEqual(firstWindow.height, 84,
+        "constrained first height fits whole rows")
+    assertEqual(secondWindow.height, 84,
+        "constrained second height fits whole rows")
+    assertEqual(thirdWindow.height, 64,
+        "constrained third height fits whole rows")
+    assertEqual(firstWindow.clamped, false,
+        "tracker-lane root does not clamp over objectives")
+    assertEqual(secondWindow.clamped, false,
+        "tracker-lane child does not clamp over its sibling")
+    assertEqual(firstWindow.resizable, false,
+        "runtime fitting cannot overwrite the saved height")
+    assertEqual(fitDM.config.windowHeights[1], 124,
+        "runtime fitting preserves the first saved height")
+    assertEqual(fitDM.config.windowHeights[2], 104,
+        "runtime fitting preserves the second saved height")
+
+    dockFrame.bottom = 400
+    editModeEventFrame:RunScript("OnEvent", "EDIT_MODE_LAYOUTS_UPDATED")
+    assertEqual(firstWindow.visibleRowCount, 5,
+        "native height change restores first rows")
+    assertEqual(secondWindow.visibleRowCount, 4,
+        "native height change restores stacked rows")
+    assertEqual(firstWindow.height, 124,
+        "native height change restores saved first height")
+    assertEqual(secondWindow.height, 104,
+        "native height change restores saved second height")
+    assertEqual(firstWindow.resizable, true,
+        "restored saved height can be resized")
+    local unchangedSizeCount = firstWindow.sizeChangeCount
+    editModeEventFrame:RunScript("OnEvent", "EDIT_MODE_LAYOUTS_UPDATED")
+    assertEqual(firstWindow.sizeChangeCount, unchangedSizeCount,
+        "unchanged native height does not reflow the meters")
+
+    dockFrame.bottom = 80
+    fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
+    assertEqual(firstWindow.runtimeMinimized, true,
+        "full tracker collapses the first meter body")
+    assertEqual(secondWindow.runtimeMinimized, true,
+        "full tracker collapses the second meter body")
+    assertEqual(thirdWindow.runtimeMinimized, true,
+        "full tracker collapses the third meter body")
+    assertEqual(firstWindow.height + secondWindow.height
+        + thirdWindow.height + 8, 68,
+        "header-only stack remains inside the 72-unit lane")
+    assertEqual(firstWindow.body.shown, false,
+        "runtime-minimized body stays hidden")
+    assertEqual(thirdWindow.shown, true,
+        "compact headers keep every configured meter reachable")
+    firstWindow.minimize:Click()
+    assertEqual(firstWindow.minimized, nil,
+        "automatic collapse does not become a user collapse")
+
+    dockFrame.bottom = 30
+    fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
+    assertEqual(firstWindow.shown, true,
+        "the highest-priority meter header uses the final lane space")
+    assertEqual(secondWindow.shown, false,
+        "lower-priority meters hide when even headers cannot fit")
+    assertEqual(thirdWindow.shown, false,
+        "runtime hiding prevents an impossible stack from overlapping")
+    assertEqual(fitDM.config.windowCount, 3,
+        "runtime hiding preserves the configured meter count")
+
+    fitDM.config.windowAnchors[1].x = -30
+    fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
+    assertEqual(firstWindow.height, 124,
+        "custom root restores the user-owned saved height")
+    assertEqual(firstWindow.clamped, true,
+        "custom root keeps normal screen clamping")
+    assertEqual(firstWindow.runtimeConstrained, false,
+        "custom root opts out of tracker-lane fitting")
+
+    fitDM.config.windowAnchors[1].x = -4
+    dockFrame.bottom = fitState.secretGeometryToken
+    fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
+    assertEqual(firstWindow.height, 124,
+        "secret tracker geometry leaves the saved height untouched")
+    assertEqual(firstWindow.clamped, true,
+        "secret tracker geometry fails closed to screen clamping")
+
+    assertEqual(
+        fitRenderer.SetEnabled(false),
+        true,
+        "tracker-lane renderer disables"
+    )
+end
+
+RunObjectiveTrackerLaneFitTests()
 
 print("damage_meter_renderer_test.lua: ok")
