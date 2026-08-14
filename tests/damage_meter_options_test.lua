@@ -255,6 +255,7 @@ local function createHarness()
         locked = true,
         numberMode = "perSecond",
         padding = 6,
+        rowTextSize = 12,
         resetOnMythicPlusStart = true,
         showSpecIcon = false,
         spacing = 4,
@@ -462,6 +463,7 @@ local width = state.controls["Frame Width"]
 local headerHeight = state.controls["Header Height"]
 local barHeight = state.controls["Bar Height"]
 local padding = state.controls.Padding
+local meterTextSize = state.controls["Meter Text Size"]
 local windowCount = state.controls["Window Count"]
 local firstMeterType = state.controls["Meter 1 Type"]
 local secondMeterType = state.controls["Meter 2 Type"]
@@ -530,6 +532,9 @@ assertEqual(secondMeterHeight.value, 288, "second meter height loaded")
 assertEqual(thirdMeterHeight.value, 299, "third meter height loaded")
 assertEqual(firstMeterHeight.low, 84, "meter height minimum is compact")
 assertEqual(firstMeterHeight.high, 520, "meter height maximum remains available")
+assertEqual(meterTextSize.value, 12, "meter text size loaded value")
+assertEqual(meterTextSize.low, 8, "meter text size minimum")
+assertEqual(meterTextSize.high, 14, "meter text size maximum")
 assertEqual(lockMeters.checked, true, "lock state loaded")
 assertEqual(alwaysShowPlayer.checked, false, "player pin state loaded")
 assertEqual(
@@ -608,6 +613,19 @@ assertEqual(
     "per-window height writes live"
 )
 DM.config.windowHeights[3] = 84
+meterTextSize.afterValueChanged(14)
+assertEqual(DM.config.rowTextSize, 14, "meter text size writes live")
+barHeight.afterValueChanged(14)
+assertEqual(
+    meterTextSize.high,
+    10,
+    "compact bar height lowers the meter text size maximum"
+)
+assertEqual(
+    DM.config.rowTextSize,
+    10,
+    "compact bar height clamps the configured meter text size"
+)
 headerHeight.afterValueChanged(36)
 barHeight.afterValueChanged(36)
 padding.afterValueChanged(12)
@@ -617,6 +635,11 @@ assertEqual(thirdMeterHeight.low, 96,
     "every meter uses the dense appearance minimum")
 assertEqual(DM.config.windowHeights[3], 96,
     "dense appearance preserves one complete meter row")
+assertEqual(meterTextSize.high, 14,
+    "larger bars restore the meter text size maximum")
+meterTextSize.afterValueChanged(12)
+assertEqual(DM.config.rowTextSize, 12,
+    "restored meter text size writes live")
 DM.config.windowHeights[1] = 301
 DM.config.windowHeights[2] = 302
 DM.config.windowHeights[3] = 303

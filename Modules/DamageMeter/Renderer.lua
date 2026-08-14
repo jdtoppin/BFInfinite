@@ -35,6 +35,11 @@ local MIN_WINDOW_WIDTH = 220
 local MAX_WINDOW_WIDTH = 520
 local MIN_WINDOW_HEIGHT = 84
 local MAX_WINDOW_HEIGHT = 520
+local DEFAULT_ROW_TEXT_SIZE = 11
+local MIN_ROW_TEXT_SIZE = 8
+local MAX_ROW_TEXT_SIZE = 14
+local ROW_TEXT_VERTICAL_PADDING = 4
+local BASE_ROW_TEXT_SIZE = 13
 local DEFAULT_SESSION_KEY = "current"
 local SESSION_MODE_CURRENT = "current"
 local SESSION_MODE_OVERALL = "overall"
@@ -186,6 +191,50 @@ local function GetMinimumWindowHeight(config)
             + (GetDimension("padding", 3) * 2)
             + GetDimension("barHeight", 18)
     )
+end
+
+local function GetRowTextSize(config)
+    local barHeight = config.barHeight
+    if type(barHeight) ~= "number" or barHeight ~= barHeight then
+        barHeight = 18
+    end
+
+    local maximum = math.max(
+        MIN_ROW_TEXT_SIZE,
+        math.min(
+            MAX_ROW_TEXT_SIZE,
+            barHeight - ROW_TEXT_VERTICAL_PADDING
+        )
+    )
+    local textSize = config.rowTextSize
+    if type(textSize) ~= "number" or textSize ~= textSize then
+        textSize = DEFAULT_ROW_TEXT_SIZE
+    end
+    return Clamp(math.floor(textSize + 0.5), MIN_ROW_TEXT_SIZE, maximum)
+end
+
+local function GetValueColumnWidth(config, baseWidth, minimumWidth)
+    local scaledWidth = math.floor(
+        baseWidth * (GetRowTextSize(config) / BASE_ROW_TEXT_SIZE) + 0.5
+    )
+    return Clamp(scaledWidth, minimumWidth, baseWidth)
+end
+
+local function ApplyRowTextSize(row, config)
+    -- SetFontHeight is allowed for untainted scalar settings in Retail 12.1.
+    -- These font strings are BFI-owned and never carry secret measurements.
+    local textSize = GetRowTextSize(config)
+    row.rank:SetFontHeight(textSize)
+    row.name:SetFontHeight(textSize)
+    row.perSecond:SetFontHeight(textSize)
+    row.total:SetFontHeight(textSize)
+end
+
+local function ApplyDetailRowTextSize(row, config)
+    local textSize = GetRowTextSize(config)
+    row.rank:SetFontHeight(textSize)
+    row.label:SetFontHeight(textSize)
+    row.value:SetFontHeight(textSize)
 end
 
 local function GetDefaultAnchor(index)
@@ -941,6 +990,8 @@ local function ApplyRowLayout(row, index, config, texture, definition)
     row:SetPoint("TOPRIGHT", row:GetParent(), "TOPRIGHT", -config.padding, y)
     row:SetHeight(barHeight)
 
+    ApplyRowTextSize(row, config)
+
     row.bar:SetStatusBarTexture(texture)
 
     row.rank:ClearAllPoints()
@@ -962,10 +1013,12 @@ local function ApplyRowLayout(row, index, config, texture, definition)
 
     row.total:ClearAllPoints()
     row.perSecond:ClearAllPoints()
+    local dualValueWidth = GetValueColumnWidth(config, 62, 48)
+    local singleValueWidth = GetValueColumnWidth(config, 72, 52)
     if showTotal and showPerSecond then
         if definition.valuePerSecondAsPrimary then
             row.perSecond:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-            row.perSecond:SetWidth(62)
+            row.perSecond:SetWidth(dualValueWidth)
             row.total:SetPoint(
                 "RIGHT",
                 row.perSecond,
@@ -973,11 +1026,11 @@ local function ApplyRowLayout(row, index, config, texture, definition)
                 -5,
                 0
             )
-            row.total:SetWidth(62)
+            row.total:SetWidth(dualValueWidth)
             row.name:SetPoint("RIGHT", row.total, "LEFT", -5, 0)
         else
             row.total:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-            row.total:SetWidth(62)
+            row.total:SetWidth(dualValueWidth)
             row.perSecond:SetPoint(
                 "RIGHT",
                 row.total,
@@ -985,7 +1038,7 @@ local function ApplyRowLayout(row, index, config, texture, definition)
                 -5,
                 0
             )
-            row.perSecond:SetWidth(62)
+            row.perSecond:SetWidth(dualValueWidth)
             row.name:SetPoint(
                 "RIGHT",
                 row.perSecond,
@@ -996,11 +1049,11 @@ local function ApplyRowLayout(row, index, config, texture, definition)
         end
     elseif showPerSecond then
         row.perSecond:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-        row.perSecond:SetWidth(72)
+        row.perSecond:SetWidth(singleValueWidth)
         row.name:SetPoint("RIGHT", row.perSecond, "LEFT", -5, 0)
     else
         row.total:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-        row.total:SetWidth(72)
+        row.total:SetWidth(singleValueWidth)
         row.name:SetPoint("RIGHT", row.total, "LEFT", -5, 0)
     end
     row.total:SetShown(showTotal)
@@ -1437,6 +1490,8 @@ local function ApplyDetailRowLayout(
     row:SetHeight(config.barHeight)
     row.bar:SetStatusBarTexture(texture)
 
+    ApplyDetailRowTextSize(row, config)
+
     row.rank:ClearAllPoints()
     row.rank:SetPoint("LEFT", row, "LEFT", 3, 0)
     row.rank:SetWidth(16)
@@ -1448,7 +1503,7 @@ local function ApplyDetailRowLayout(
 
     row.value:ClearAllPoints()
     row.value:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-    row.value:SetWidth(104)
+    row.value:SetWidth(GetValueColumnWidth(config, 104, 72))
 
     row.label:ClearAllPoints()
     row.label:SetPoint("LEFT", row.iconHolder, "RIGHT", 3, 0)
@@ -1464,6 +1519,11 @@ local function ApplyDetailLayout(window, config, texture)
     window.visibleDetailRowCount = visibleRows
     window.detailTitleRowCount = titleRowCount
     EnsureDetailRows(window, visibleRows)
+
+    local textSize = GetRowTextSize(config)
+    window.detailTitle:SetFontHeight(textSize)
+    window.detailHint:SetFontHeight(textSize)
+    window.detailEmpty:SetFontHeight(textSize)
 
     window.detailPanel:ClearAllPoints()
     window.detailPanel:SetAllPoints(window.body)

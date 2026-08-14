@@ -101,6 +101,7 @@ select(2, ...).L = setmetatable({
     ["Bar Opacity"] = "Bar Opacity",
     ["Bar Texture"] = "Bar Texture",
     ["Background Opacity"] = "Background Opacity",
+    ["Meter Text Size"] = "Meter Text Size",
     ["Objective Tracker Height"] = "Objective Tracker Height",
     ["Height is saved to the active Blizzard Edit Mode layout, not to a BFI profile. It reserves the right-side lane for the tracker, but Blizzard can expand it for required objective content."] = "Height is saved to the active Blizzard Edit Mode layout, not to a BFI profile. It reserves the right-side lane for the tracker, but Blizzard can expand it for required objective content.",
     ["Objective Tracker height is temporarily busy."] = "Objective Tracker height is temporarily busy.",

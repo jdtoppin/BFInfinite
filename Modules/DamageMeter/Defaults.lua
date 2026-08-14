@@ -8,6 +8,9 @@ local AF = _G.AbstractFramework
 local CURRENT_SIZE_DEFAULTS_VERSION = 3
 local CURRENT_DOCK_DEFAULTS_VERSION = 2
 local MIN_WINDOW_HEIGHT = 84
+local MIN_ROW_TEXT_SIZE = 8
+local MAX_ROW_TEXT_SIZE = 14
+local ROW_TEXT_VERTICAL_PADDING = 4
 local LEGACY_DEFAULT_WIDTH = 300
 local LEGACY_DEFAULT_HEIGHT = 220
 local LEGACY_DEFAULT_WINDOW_HEIGHTS = {
@@ -115,6 +118,7 @@ local defaults = {
     sizeDefaultsVersion = CURRENT_SIZE_DEFAULTS_VERSION,
     headerHeight = 20,
     barHeight = 18,
+    rowTextSize = 11,
     spacing = 2,
     padding = 3,
     texture = "AF",
@@ -340,6 +344,16 @@ local function GetMinimumWindowHeight(config)
     )
 end
 
+local function GetMaximumRowTextSize(config)
+    return math.max(
+        MIN_ROW_TEXT_SIZE,
+        math.min(
+            MAX_ROW_TEXT_SIZE,
+            config.barHeight - ROW_TEXT_VERTICAL_PADDING
+        )
+    )
+end
+
 local function NormalizeNumber(value, default, minimum, maximum, integer)
     if type(value) ~= "number" or value ~= value then
         return default
@@ -527,6 +541,13 @@ local function NormalizeConfig(config)
         defaults.barHeight,
         14,
         36,
+        true
+    )
+    config.rowTextSize = NormalizeNumber(
+        config.rowTextSize,
+        defaults.rowTextSize,
+        MIN_ROW_TEXT_SIZE,
+        GetMaximumRowTextSize(config),
         true
     )
     config.spacing = NormalizeNumber(

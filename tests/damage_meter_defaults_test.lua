@@ -231,6 +231,7 @@ local function assertDefaults(config, message)
     assertEqual(config.height, nil, message .. " legacy height removed")
     assertEqual(config.headerHeight, 20, message .. " header height")
     assertEqual(config.barHeight, 18, message .. " bar height")
+    assertEqual(config.rowTextSize, 11, message .. " row text size")
     assertEqual(config.spacing, 2, message .. " spacing")
     assertEqual(config.padding, 3, message .. " padding")
     assertEqual(config.texture, "AF", message .. " texture")
@@ -258,6 +259,7 @@ defaultsCopy.windowAutoOverallOnMythicPlusComplete[1] = true
 defaultsCopy.mythicPlusWindowTypes[1] = "Deaths"
 defaultsCopy.windowHeights[1] = 500
 defaultsCopy.windowAnchors[1].x = 500
+defaultsCopy.rowTextSize = 14
 assertDefaults(DM.GetDefaults(), "independent defaults copy")
 
 local missingProfile = {}
@@ -359,6 +361,7 @@ assertEqual(partialConfig.width, 240, "partial width default")
 assertEqual(partialConfig.windowHeights[1], 124, "partial first height default")
 assertEqual(partialConfig.windowHeights[2], 84, "partial second height default")
 assertEqual(partialConfig.windowHeights[3], 84, "partial third height default")
+assertEqual(partialConfig.rowTextSize, 11, "partial row text size default")
 assertEqual(partialConfig.extra, "preserved", "unknown config preserved")
 
 local disabledConfig = {
@@ -803,6 +806,7 @@ local invalidConfig = {
     nativeEnabledBeforeBFI = true,
     numberMode = "verbose",
     padding = 99,
+    rowTextSize = 100,
     resetOnMythicPlusStart = "yes",
     showSpecIcon = 1,
     spacing = -10,
@@ -1015,6 +1019,7 @@ assertEqual(
 )
 assertEqual(invalidConfig.headerHeight, 18, "header height clamp")
 assertEqual(invalidConfig.barHeight, 36, "bar height clamp")
+assertEqual(invalidConfig.rowTextSize, 14, "row text size clamp")
 assertEqual(invalidConfig.spacing, 0, "spacing clamp")
 assertEqual(invalidConfig.padding, 12, "padding clamp")
 assertEqual(invalidConfig.texture, "AF", "texture normalization")
@@ -1023,6 +1028,25 @@ assertEqual(invalidConfig.showSpecIcon, true, "spec icon normalization")
 assertEqual(invalidConfig.classColor, true, "class color normalization")
 assertEqual(invalidConfig.backgroundAlpha, 0, "background alpha clamp")
 assertEqual(invalidConfig.barAlpha, 1, "bar alpha clamp")
+
+local compactTextConfig = {
+    barHeight = 14,
+    rowTextSize = 100,
+}
+updateProfile(nil, {
+    damageMeter = compactTextConfig,
+})
+assertEqual(compactTextConfig.rowTextSize, 10,
+    "compact bar height caps row text size")
+
+local malformedTextConfig = {
+    rowTextSize = "bad",
+}
+updateProfile(nil, {
+    damageMeter = malformedTextConfig,
+})
+assertEqual(malformedTextConfig.rowTextSize, 11,
+    "malformed row text size uses the default")
 
 local denseWindowConfig = {
     headerHeight = 36,

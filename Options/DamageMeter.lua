@@ -36,6 +36,9 @@ local WIDE_CONTROL_WIDTH = 240
 local SLIDER_WIDTH = 140
 local MIN_WINDOW_HEIGHT = 84
 local MAX_WINDOW_HEIGHT = 520
+local MIN_ROW_TEXT_SIZE = 8
+local MAX_ROW_TEXT_SIZE = 14
+local ROW_TEXT_VERTICAL_PADDING = 4
 
 local function GetMeterTypeText(globalName, fallback)
     return _G[globalName] or L[fallback]
@@ -144,6 +147,16 @@ local function GetMinimumWindowHeight(config)
     return math.max(
         MIN_WINDOW_HEIGHT,
         config.headerHeight + (config.padding * 2) + config.barHeight
+    )
+end
+
+local function GetMaximumRowTextSize(config)
+    return math.max(
+        MIN_ROW_TEXT_SIZE,
+        math.min(
+            MAX_ROW_TEXT_SIZE,
+            config.barHeight - ROW_TEXT_VERTICAL_PADDING
+        )
     )
 end
 
@@ -565,6 +578,18 @@ local function CreateAppearancePane()
         L["BFI Damage Meter Appearance Tip"]
     )
 
+    local rowTextSize
+    local function RefreshRowTextSizeBounds()
+        if not rowTextSize then return end
+
+        local maximum = GetMaximumRowTextSize(DM.config)
+        if DM.config.rowTextSize > maximum then
+            DM.config.rowTextSize = maximum
+        end
+        rowTextSize:SetMinMaxValues(MIN_ROW_TEXT_SIZE, maximum)
+        rowTextSize:SetValue(DM.config.rowTextSize)
+    end
+
     local width = CreateSlider(
         appearancePane, L["Frame Width"], 15, -55, 220, 520, 1
     )
@@ -587,6 +612,7 @@ local function CreateAppearancePane()
     )
     barHeight:SetAfterValueChanged(function(value)
         DM.config.barHeight = value
+        RefreshRowTextSizeBounds()
         RefreshWindowHeightBounds()
         RefreshDamageMeter()
     end)
@@ -682,11 +708,26 @@ local function CreateAppearancePane()
         RefreshDamageMeter()
     end)
 
+    rowTextSize = CreateSlider(
+        appearancePane,
+        L["Meter Text Size"],
+        365,
+        -250,
+        MIN_ROW_TEXT_SIZE,
+        GetMaximumRowTextSize(DM.config),
+        1
+    )
+    rowTextSize:SetAfterValueChanged(function(value)
+        DM.config.rowTextSize = value
+        RefreshDamageMeter()
+    end)
+
     function appearancePane.Load()
         local config = DM.config
         width:SetValue(config.width)
         headerHeight:SetValue(config.headerHeight)
         barHeight:SetValue(config.barHeight)
+        RefreshRowTextSizeBounds()
         spacing:SetValue(config.spacing)
         padding:SetValue(config.padding)
         backgroundAlpha:SetValue(config.backgroundAlpha)

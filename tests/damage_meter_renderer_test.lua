@@ -353,6 +353,10 @@ local function loadRenderer(
         self.wordWrap = enabled
     end
 
+    function frameMethods:SetFontHeight(height)
+        self.fontHeight = height
+    end
+
     function frameMethods:SetText(text)
         self.text = text
     end
@@ -650,6 +654,7 @@ local function loadRenderer(
         locked = false,
         numberMode = "both",
         padding = 4,
+        rowTextSize = 11,
         showSpecIcon = true,
         spacing = 2,
         texture = "AF",
@@ -1256,6 +1261,13 @@ assertEqual(#state.nativeSetCalls, 1, "minimize keeps native override stable")
 local firstRow = first.rows[1]
 assertEqual(firstRow.rank.justifyH, "LEFT", "row number is left aligned")
 assertEqual(firstRow.rank.width, 16, "row number uses a compact column")
+assertEqual(firstRow.rank.fontHeight, 11, "row rank uses compact text")
+assertEqual(firstRow.name.fontHeight, 11, "row name uses compact text")
+assertEqual(firstRow.total.fontHeight, 11, "row total uses compact text")
+assertEqual(firstRow.perSecond.fontHeight, 11, "row rate uses compact text")
+assertEqual(firstRow.total.width, 52, "compact text shrinks the total column")
+assertEqual(firstRow.perSecond.width, 52,
+    "compact text shrinks the per-second column")
 assertSame(
     firstRow.bar.maximum,
     sessions[1].maxAmount,
@@ -2394,6 +2406,7 @@ DM.config.spacing = 4
 DM.config.texture = "LiveTexture"
 DM.config.numberMode = "total"
 DM.config.padding = 6
+DM.config.rowTextSize = 8
 DM.config.showSpecIcon = false
 DM.config.classColor = false
 DM.config.backgroundAlpha = 0.65
@@ -2426,6 +2439,7 @@ assertEqual(
     "title bar remains gradient-free after live settings"
 )
 assertEqual(firstRow.height, 24, "live bar height")
+assertEqual(firstRow.name.fontHeight, 8, "live row text size")
 assertEqual(firstRow.points[1].x, 6, "live horizontal padding")
 assertEqual(firstRow.points[1].y, -6, "live vertical padding")
 assertEqual(
@@ -2627,6 +2641,13 @@ local function RunDetailReportTests()
     assertEqual(window.detailPanel.shown, true, "detail panel is visible")
     assertEqual(row.shown, false, "summary row hides while details are open")
     assertEqual(window.detailTitle.text, "Damage Player", "detail title")
+    assertEqual(window.detailTitle.fontHeight, 11, "detail title uses meter text size")
+    assertEqual(window.detailRows[1].rank.fontHeight, 11,
+        "detail rank uses meter text size")
+    assertEqual(window.detailRows[1].label.fontHeight, 11,
+        "detail label uses meter text size")
+    assertEqual(window.detailRows[1].value.fontHeight, 11,
+        "detail value uses meter text size")
     assertEqual(window.detailRows[1].label.text, "Spell 101", "spell label")
     assertEqual(
         window.detailRows[1].value.text,
