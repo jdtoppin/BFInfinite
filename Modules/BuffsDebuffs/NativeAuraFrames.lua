@@ -2,27 +2,33 @@
 local BFI = select(2, ...)
 ---@class BuffsDebuffs
 local BD = BFI.modules.BuffsDebuffs
+local IsValueNonSecret = BFI.funcs.isValueNonSecret
 
 local hooksecurefunc = hooksecurefunc
 local InCombatLockdown = InCombatLockdown
+local hasRestrictedAuraButtons = _G.C_AuraContainerUtil ~= nil
 
 local suppressedStates = {}
 local suppressedRoots = {}
 local hookedRoots = {}
+local harmfulSuppressedState
+local harmfulRecoveryState
+
+local function HasExpectedParent(object, expected)
+    if not object or type(object.GetParent) ~= "function" then return false end
+    local parent = object:GetParent()
+    return IsValueNonSecret(parent) and parent == expected
+end
 
 local function IsAuraContainer(frame)
     return frame
-        and type(frame.IsShown) == "function"
-        and type(frame.Hide) == "function"
         and type(frame.SetShown) == "function"
         and type(frame.GetParent) == "function"
 end
 
 local function IsVisualControl(frame)
     return frame
-        and type(frame.GetAlpha) == "function"
         and type(frame.SetAlpha) == "function"
-        and type(frame.IsMouseEnabled) == "function"
         and type(frame.EnableMouse) == "function"
         and type(frame.GetParent) == "function"
 end
@@ -32,10 +38,7 @@ local function HasRootPrivateAuraAnchors(frame)
     if type(anchors) ~= "table" or #anchors == 0 then return false end
 
     for _, anchor in ipairs(anchors) do
-        if not anchor
-            or type(anchor.GetParent) ~= "function"
-            or anchor:GetParent() ~= frame
-        then
+        if not HasExpectedParent(anchor, frame) then
             return false
         end
     end
@@ -57,21 +60,24 @@ local function ResolveNativePublicAuraFrame(which)
             or type(frame.UpdateAuraButtons) ~= "function"
             or type(frame.auraFrames) ~= "table"
             or not IsAuraContainer(container)
-            or container:GetParent() ~= frame
+            or not HasExpectedParent(container, frame)
             or not IsVisualControl(collapseButton)
-            or collapseButton:GetParent() ~= frame
+            or not HasExpectedParent(collapseButton, frame)
             or not IsVisualControl(consolidatedBuffs)
-            or consolidatedBuffs:GetParent() ~= frame
+            or not HasExpectedParent(consolidatedBuffs, frame)
             or not consolidatedTooltip
             or type(consolidatedTooltip.Hide) ~= "function"
             or type(consolidatedTooltip.GetParent) ~= "function"
-            or consolidatedTooltip:GetParent() ~= consolidatedBuffs
+            or not HasExpectedParent(consolidatedTooltip, consolidatedBuffs)
             or not consolidatedAuras
             or type(consolidatedAuras.auraFrames) ~= "table"
             or type(consolidatedAuras.GetParent) ~= "function"
             or not IsAuraContainer(consolidatedAuras.AuraContainer)
-            or consolidatedAuras:GetParent() ~= consolidatedTooltip
-            or consolidatedAuras.AuraContainer:GetParent() ~= consolidatedAuras
+            or not HasExpectedParent(consolidatedAuras, consolidatedTooltip)
+            or not HasExpectedParent(
+                consolidatedAuras.AuraContainer,
+                consolidatedAuras
+            )
         then
             return
         end
@@ -90,7 +96,7 @@ local function ResolveNativePublicAuraFrame(which)
             or type(frame.UpdateAuraButtons) ~= "function"
             or type(frame.auraFrames) ~= "table"
             or not IsAuraContainer(container)
-            or container:GetParent() ~= frame
+            or not HasExpectedParent(container, frame)
             or not HasRootPrivateAuraAnchors(frame)
         then
             return
@@ -105,16 +111,20 @@ local function ResolveNativePublicAuraFrame(which)
 end
 
 local function HidePublicAuraOverlays(frame, publicParent)
+    -- Retail 12.1.0.69273 AuraButtons can deny addon access while aura data is
+    -- secret. C_AuraContainerUtil identifies that native path: never enumerate
+    -- intrinsic children or install the update hook that would revisit them.
+    -- BlizzardDebuffs.lua separately validates only the pinned, fixed ordinary
+    -- DebuffFrame pool; it does not weaken this generic restricted-child rule.
+    if hasRestrictedAuraButtons then return end
+
     local auraFrames = frame.auraFrames
     if type(auraFrames) ~= "table" then return end
 
     local gameTooltip = _G.GameTooltip
     local helpTip = _G.HelpTip
     for _, button in ipairs(auraFrames) do
-        if button
-            and type(button.GetParent) == "function"
-            and button:GetParent() == publicParent
-        then
+        if HasExpectedParent(button, publicParent) then
             if gameTooltip and gameTooltip:IsOwned(button) then
                 gameTooltip:Hide()
             end
@@ -134,6 +144,8 @@ local function HideTargetOverlays(target)
 end
 
 local function InstallOverlayCleanupHook(target)
+    if hasRestrictedAuraButtons then return end
+
     local frame = target.frame
     if hookedRoots[frame] then return end
 
@@ -157,16 +169,22 @@ end
 function BD.SetNativePublicAurasSuppressed(which, suppressed)
     if which ~= "buffs" and which ~= "debuffs" then return false end
     suppressed = suppressed == true
+    if which == "debuffs"
+        and suppressed
+        and (harmfulSuppressedState or harmfulRecoveryState)
+    then
+        return false
+    end
     local state = suppressedStates[which]
     if (state ~= nil) == suppressed then return true end
     if InCombatLockdown() then return false end
 
     if state then
         HideTargetOverlays(state.target)
-        state.target.container:SetShown(state.containerShown)
-        for i, control in ipairs(state.target.controls) do
-            control:SetAlpha(state.controls[i].alpha)
-            control:EnableMouse(state.controls[i].mouseEnabled)
+        state.target.container:SetShown(true)
+        for _, control in ipairs(state.target.controls) do
+            control:SetAlpha(1)
+            control:EnableMouse(true)
         end
 
         suppressedStates[which] = nil
@@ -177,24 +195,18 @@ function BD.SetNativePublicAurasSuppressed(which, suppressed)
     local target = ResolveNativePublicAuraFrame(which)
     if not target then return false end
 
-    -- Retail 12.0.7 and 12.1 keep public aura buttons under these two visual
-    -- containers. Private anchors are direct root children and DeadlyDebuffFrame
-    -- is separate; neither is touched here.
-    state = {
-        target = target,
-        containerShown = target.container:IsShown(),
-        controls = {},
-    }
-    for i, control in ipairs(target.controls) do
-        state.controls[i] = {
-            alpha = control:GetAlpha(),
-            mouseEnabled = control:IsMouseEnabled(),
-        }
-    end
+    -- Retail 12.1.0.69273 (wow-ui-source
+    -- eb941aad028d73ddc69e3e8ef4da709f4d3cd744) creates the supported public
+    -- AuraContainerTemplate shown, with these ordinary controls at alpha 1 and
+    -- mouse enabled. Keep only a BFI-owned suppression ledger and restore those
+    -- known constants; observing visibility, alpha, or mouse state can return
+    -- secret values. Private anchors are direct root children and
+    -- DeadlyDebuffFrame is separate; neither is touched here.
+    state = {target = target}
 
     InstallOverlayCleanupHook(target)
     HideTargetOverlays(target)
-    target.container:Hide()
+    target.container:SetShown(false)
     for _, control in ipairs(target.controls) do
         control:SetAlpha(0)
         control:EnableMouse(false)
@@ -202,5 +214,1063 @@ function BD.SetNativePublicAurasSuppressed(which, suppressed)
 
     suppressedStates[which] = state
     suppressedRoots[target.frame] = state
+    return true
+end
+
+local EXPECTED_PRIVATE_ANCHOR_COUNT = 6
+
+local function IsOrdinaryValue(value)
+    return type(IsValueNonSecret) == "function"
+        and IsValueNonSecret(value) == true
+end
+
+local function IsOrdinaryFunction(value)
+    return IsOrdinaryValue(value) and type(value) == "function"
+end
+
+local function IsOrdinaryTable(value)
+    return IsOrdinaryValue(value) and type(value) == "table"
+end
+
+local function IsOrdinaryNumber(value)
+    return IsOrdinaryValue(value)
+        and type(value) == "number"
+        and value == value
+        and value ~= math.huge
+        and value ~= -math.huge
+end
+
+local function AddDistinctObject(seen, object)
+    if not IsOrdinaryTable(seen) or not IsOrdinaryValue(object) then
+        return false
+    end
+    if seen[object] then return false end
+    seen[object] = true
+    return true
+end
+
+local function IsOutOfCombat()
+    local locked = InCombatLockdown()
+    return IsOrdinaryValue(locked)
+        and type(locked) == "boolean"
+        and locked == false
+end
+
+local function CaptureNativeFrameAPI()
+    -- Retail 12.1.0.69273, wow-ui-source eb941aad: Blizzard_PrivateAurasUI
+    -- snapshots GetFrameMetatable().__index for inbound calls that bypass
+    -- per-frame hooks. Keep the harmful write boundary on that same API.
+    local getFrameMetatable = rawget(_G, "GetFrameMetatable")
+    if not IsOrdinaryFunction(getFrameMetatable) then return end
+    local frameMetatable = getFrameMetatable()
+    if not IsOrdinaryTable(frameMetatable) then return end
+    local frameAPI = rawget(frameMetatable, "__index")
+    if not IsOrdinaryTable(frameAPI) then return end
+    local canAccess = rawget(frameAPI, "CanBeAccessedInContext")
+    local getParent = rawget(frameAPI, "GetParent")
+    local getWidth = rawget(frameAPI, "GetWidth")
+    local getHeight = rawget(frameAPI, "GetHeight")
+    local setShown = rawget(frameAPI, "SetShown")
+    if not IsOrdinaryFunction(canAccess)
+        or not IsOrdinaryFunction(getParent)
+        or not IsOrdinaryFunction(getWidth)
+        or not IsOrdinaryFunction(getHeight)
+        or not IsOrdinaryFunction(setShown)
+    then
+        return
+    end
+    return {
+        getFrameMetatable = getFrameMetatable,
+        frameMetatable = frameMetatable,
+        frameAPI = frameAPI,
+        canAccess = canAccess,
+        getParent = getParent,
+        getWidth = getWidth,
+        getHeight = getHeight,
+        setShown = setShown,
+    }
+end
+
+local function HasExactNativeFrameAPI(original, current)
+    return IsOrdinaryTable(original)
+        and IsOrdinaryTable(current)
+        and rawequal(original.getFrameMetatable, current.getFrameMetatable)
+        and rawequal(original.frameMetatable, current.frameMetatable)
+        and rawequal(original.frameAPI, current.frameAPI)
+        and rawequal(original.canAccess, current.canAccess)
+        and rawequal(original.getParent, current.getParent)
+        and rawequal(original.getWidth, current.getWidth)
+        and rawequal(original.getHeight, current.getHeight)
+        and rawequal(original.setShown, current.setShown)
+end
+
+local function NativeFrameAPIRemainsOrdinary(nativeFrameAPI)
+    return IsOrdinaryTable(nativeFrameAPI)
+        and IsOrdinaryFunction(nativeFrameAPI.getFrameMetatable)
+        and IsOrdinaryTable(nativeFrameAPI.frameMetatable)
+        and IsOrdinaryTable(nativeFrameAPI.frameAPI)
+        and IsOrdinaryFunction(nativeFrameAPI.canAccess)
+        and IsOrdinaryFunction(nativeFrameAPI.getParent)
+        and IsOrdinaryFunction(nativeFrameAPI.getWidth)
+        and IsOrdinaryFunction(nativeFrameAPI.getHeight)
+        and IsOrdinaryFunction(nativeFrameAPI.setShown)
+end
+
+local function CanAccessScriptObject(object, canAccessMethod)
+    if not IsOrdinaryValue(object) then return end
+    local objectType = type(object)
+    if objectType ~= "table" and objectType ~= "userdata" then return end
+    if not IsOrdinaryFunction(canAccessMethod) then return end
+    local canAccess = canAccessMethod(object)
+    if not IsOrdinaryValue(canAccess)
+        or type(canAccess) ~= "boolean"
+        or canAccess ~= true
+    then
+        return
+    end
+    return canAccessMethod
+end
+
+local function CaptureExactArray(array, count)
+    if not IsOrdinaryTable(array) then return end
+    local captured = {}
+    for key in next, array do
+        if not IsOrdinaryValue(key)
+            or type(key) ~= "number"
+            or key ~= math.floor(key)
+            or key < 1
+            or key > count
+        then
+            return
+        end
+    end
+    for index = 1, count do
+        local value = rawget(array, index)
+        if not IsOrdinaryValue(value) or value == nil then
+            return
+        end
+        captured[index] = value
+    end
+    return captured
+end
+
+local function CaptureNativeHarmfulAuraFrame()
+    local nativeFrameAPI = CaptureNativeFrameAPI()
+    local frame = _G.DebuffFrame
+    local debuffMixin = _G.DebuffFrameMixin
+    local anchorMixin = _G.BuffFramePrivateAuraAnchorMixin
+    local unitAuras = _G.C_UnitAuras
+    if not nativeFrameAPI then return end
+    local frameAccessMethod = CanAccessScriptObject(
+        frame,
+        nativeFrameAPI.canAccess
+    )
+    if not frameAccessMethod
+        or not IsOrdinaryTable(frame)
+        or not IsOrdinaryTable(debuffMixin)
+        or not IsOrdinaryTable(anchorMixin)
+        or not IsOrdinaryTable(unitAuras)
+    then
+        return
+    end
+
+    local updatePrivateAuraAnchors = rawget(
+        frame,
+        "UpdatePrivateAuraAnchors"
+    )
+    local maxPrivateAuras = rawget(frame, "maxPrivateAuras")
+    local expectedUpdatePrivateAuraAnchors =
+        rawget(debuffMixin, "UpdatePrivateAuraAnchors")
+    local expectedSetUnit = rawget(anchorMixin, "SetUnit")
+    local addPrivateAuraAnchor = rawget(unitAuras, "AddPrivateAuraAnchor")
+    local removePrivateAuraAnchor = rawget(unitAuras, "RemovePrivateAuraAnchor")
+    local container = rawget(frame, "AuraContainer")
+    local anchors = rawget(frame, "PrivateAuraAnchors")
+    if not IsOrdinaryTable(container) then return end
+    local containerAccessMethod = CanAccessScriptObject(
+        container,
+        nativeFrameAPI.canAccess
+    )
+    if not containerAccessMethod then return end
+    local setShown = nativeFrameAPI.setShown
+    local getContainerParent = nativeFrameAPI.getParent
+    local showDispelType = rawget(container, "showDispelType")
+    local anchorObjects = CaptureExactArray(
+        anchors,
+        EXPECTED_PRIVATE_ANCHOR_COUNT
+    )
+    if not IsOrdinaryFunction(updatePrivateAuraAnchors)
+        or not IsOrdinaryNumber(maxPrivateAuras)
+        or maxPrivateAuras ~= EXPECTED_PRIVATE_ANCHOR_COUNT
+        or not IsOrdinaryFunction(expectedUpdatePrivateAuraAnchors)
+        or not rawequal(
+            updatePrivateAuraAnchors,
+            expectedUpdatePrivateAuraAnchors
+        )
+        or not IsOrdinaryFunction(expectedSetUnit)
+        or not IsOrdinaryFunction(addPrivateAuraAnchor)
+        or not IsOrdinaryFunction(removePrivateAuraAnchor)
+        or not IsOrdinaryFunction(setShown)
+        or not IsOrdinaryFunction(getContainerParent)
+        or not IsOrdinaryValue(showDispelType)
+        or type(showDispelType) ~= "boolean"
+        or not anchorObjects
+    then
+        return
+    end
+
+    local containerParent = getContainerParent(container)
+    if not IsOrdinaryValue(containerParent)
+        or not rawequal(containerParent, frame)
+    then
+        return
+    end
+
+    local snapshot = {
+        nativeFrameAPI = nativeFrameAPI,
+        frame = frame,
+        frameAccessMethod = frameAccessMethod,
+        debuffMixin = debuffMixin,
+        anchorMixin = anchorMixin,
+        unitAuras = unitAuras,
+        addPrivateAuraAnchor = addPrivateAuraAnchor,
+        removePrivateAuraAnchor = removePrivateAuraAnchor,
+        updatePrivateAuraAnchors = updatePrivateAuraAnchors,
+        maxPrivateAuras = maxPrivateAuras,
+        expectedSetUnit = expectedSetUnit,
+        container = container,
+        containerAccessMethod = containerAccessMethod,
+        containerGetParent = getContainerParent,
+        containerSetShown = setShown,
+        showDispelType = showDispelType,
+        anchors = anchors,
+        anchorObjects = anchorObjects,
+        anchorAccessMethods = {},
+        anchorGetParents = {},
+        anchorSetUnits = {},
+        anchorAuraIndexes = {},
+        anchorIsAuraAnchors = {},
+        anchorIcons = {},
+        anchorIconAccessMethods = {},
+        anchorIconGetParents = {},
+        anchorIconGetWidths = {},
+        anchorIconWidths = {},
+        anchorIconGetHeights = {},
+        anchorIconHeights = {},
+        anchorDurations = {},
+        anchorDurationAccessMethods = {},
+        anchorDurationGetParents = {},
+        anchorDurationGetWidths = {},
+        anchorDurationWidths = {},
+        anchorDurationGetHeights = {},
+        anchorDurationHeights = {},
+    }
+
+    local seenObjects = {}
+    if not AddDistinctObject(seenObjects, frame)
+        or not AddDistinctObject(seenObjects, container)
+    then
+        return
+    end
+
+    for index = 1, EXPECTED_PRIVATE_ANCHOR_COUNT do
+        local anchor = anchorObjects[index]
+        if not IsOrdinaryTable(anchor) then return end
+        local parentKey = rawget(frame, "privateAuraAnchor" .. index)
+        local accessMethod = CanAccessScriptObject(
+            anchor,
+            nativeFrameAPI.canAccess
+        )
+        if not accessMethod then return end
+        local getParent = nativeFrameAPI.getParent
+        local setUnit = rawget(anchor, "SetUnit")
+        local auraIndex = rawget(anchor, "auraIndex")
+        local isAuraAnchor = rawget(anchor, "isAuraAnchor")
+        local icon = rawget(anchor, "Icon")
+        local duration = rawget(anchor, "Duration")
+        if not IsOrdinaryTable(icon) or not IsOrdinaryTable(duration) then
+            return
+        end
+        if not AddDistinctObject(seenObjects, anchor)
+            or not AddDistinctObject(seenObjects, icon)
+            or not AddDistinctObject(seenObjects, duration)
+        then
+            return
+        end
+        local iconAccessMethod = CanAccessScriptObject(
+            icon,
+            nativeFrameAPI.canAccess
+        )
+        local durationAccessMethod = CanAccessScriptObject(
+            duration,
+            nativeFrameAPI.canAccess
+        )
+        if not iconAccessMethod or not durationAccessMethod then return end
+        local iconGetParent = nativeFrameAPI.getParent
+        local durationGetParent = nativeFrameAPI.getParent
+        local durationGetWidth = nativeFrameAPI.getWidth
+        local durationGetHeight = nativeFrameAPI.getHeight
+        local iconGetWidth = nativeFrameAPI.getWidth
+        local iconGetHeight = nativeFrameAPI.getHeight
+        if not IsOrdinaryValue(parentKey)
+            or not rawequal(parentKey, anchor)
+            or not IsOrdinaryFunction(getParent)
+            or not IsOrdinaryFunction(setUnit)
+            or not rawequal(setUnit, expectedSetUnit)
+            or not IsOrdinaryNumber(auraIndex)
+            or auraIndex ~= index
+            or not IsOrdinaryValue(isAuraAnchor)
+            or type(isAuraAnchor) ~= "boolean"
+            or isAuraAnchor ~= true
+            or not iconAccessMethod
+            or not durationAccessMethod
+            or not IsOrdinaryFunction(iconGetParent)
+            or not IsOrdinaryFunction(durationGetParent)
+            or not IsOrdinaryFunction(durationGetWidth)
+            or not IsOrdinaryFunction(durationGetHeight)
+            or not IsOrdinaryFunction(iconGetWidth)
+            or not IsOrdinaryFunction(iconGetHeight)
+        then
+            return
+        end
+        local parent = getParent(anchor)
+        if not IsOrdinaryValue(parent) or not rawequal(parent, frame) then
+            return
+        end
+        local iconParent = iconGetParent(icon)
+        local durationParent = durationGetParent(duration)
+        local iconWidth = iconGetWidth(icon)
+        local iconHeight = iconGetHeight(icon)
+        local durationWidth = durationGetWidth(duration)
+        local durationHeight = durationGetHeight(duration)
+        if not IsOrdinaryValue(iconParent)
+            or not rawequal(iconParent, anchor)
+            or not IsOrdinaryValue(durationParent)
+            or not rawequal(durationParent, anchor)
+            or not IsOrdinaryNumber(iconWidth)
+            or iconWidth <= 0
+            or not IsOrdinaryNumber(iconHeight)
+            or iconHeight <= 0
+            or not IsOrdinaryNumber(durationWidth)
+            or durationWidth <= 0
+            or not IsOrdinaryNumber(durationHeight)
+            or durationHeight <= 0
+        then
+            return
+        end
+        snapshot.anchorObjects[index] = anchor
+        snapshot.anchorAccessMethods[index] = accessMethod
+        snapshot.anchorGetParents[index] = getParent
+        snapshot.anchorSetUnits[index] = setUnit
+        snapshot.anchorAuraIndexes[index] = auraIndex
+        snapshot.anchorIsAuraAnchors[index] = isAuraAnchor
+        snapshot.anchorIcons[index] = icon
+        snapshot.anchorIconAccessMethods[index] = iconAccessMethod
+        snapshot.anchorIconGetParents[index] = iconGetParent
+        snapshot.anchorIconGetWidths[index] = iconGetWidth
+        snapshot.anchorIconWidths[index] = iconWidth
+        snapshot.anchorIconGetHeights[index] = iconGetHeight
+        snapshot.anchorIconHeights[index] = iconHeight
+        snapshot.anchorDurations[index] = duration
+        snapshot.anchorDurationAccessMethods[index] = durationAccessMethod
+        snapshot.anchorDurationGetParents[index] = durationGetParent
+        snapshot.anchorDurationGetWidths[index] = durationGetWidth
+        snapshot.anchorDurationWidths[index] = durationWidth
+        snapshot.anchorDurationGetHeights[index] = durationGetHeight
+        snapshot.anchorDurationHeights[index] = durationHeight
+    end
+    return snapshot
+end
+
+local function HasExactHarmfulSnapshotIdentity(
+    original,
+    current,
+    includeMutablePresentation
+)
+    if not IsOrdinaryTable(original) or not IsOrdinaryTable(current) then
+        return false
+    end
+    if not rawequal(original.frame, current.frame)
+        or not HasExactNativeFrameAPI(
+            original.nativeFrameAPI,
+            current.nativeFrameAPI
+        )
+        or not rawequal(original.frameAccessMethod, current.frameAccessMethod)
+        or not rawequal(original.debuffMixin, current.debuffMixin)
+        or not rawequal(original.anchorMixin, current.anchorMixin)
+        or not rawequal(original.unitAuras, current.unitAuras)
+        or not rawequal(
+            original.addPrivateAuraAnchor,
+            current.addPrivateAuraAnchor
+        )
+        or not rawequal(
+            original.removePrivateAuraAnchor,
+            current.removePrivateAuraAnchor
+        )
+        or not rawequal(
+            original.updatePrivateAuraAnchors,
+            current.updatePrivateAuraAnchors
+        )
+        or original.maxPrivateAuras ~= current.maxPrivateAuras
+        or not rawequal(original.expectedSetUnit, current.expectedSetUnit)
+        or not rawequal(original.container, current.container)
+        or not rawequal(
+            original.containerAccessMethod,
+            current.containerAccessMethod
+        )
+        or not rawequal(
+            original.containerGetParent,
+            current.containerGetParent
+        )
+        or not rawequal(
+            original.containerSetShown,
+            current.containerSetShown
+        )
+        or not rawequal(original.anchors, current.anchors)
+    then
+        return false
+    end
+    for index = 1, EXPECTED_PRIVATE_ANCHOR_COUNT do
+        if not rawequal(
+            original.anchorObjects[index],
+            current.anchorObjects[index]
+        ) or not rawequal(
+            original.anchorAccessMethods[index],
+            current.anchorAccessMethods[index]
+        ) or not rawequal(
+            original.anchorGetParents[index],
+            current.anchorGetParents[index]
+        ) or not rawequal(
+            original.anchorSetUnits[index],
+            current.anchorSetUnits[index]
+        ) or original.anchorAuraIndexes[index]
+            ~= current.anchorAuraIndexes[index]
+        or original.anchorIsAuraAnchors[index]
+            ~= current.anchorIsAuraAnchors[index]
+        or not rawequal(
+            original.anchorIcons[index],
+            current.anchorIcons[index]
+        ) or not rawequal(
+            original.anchorIconAccessMethods[index],
+            current.anchorIconAccessMethods[index]
+        ) or not rawequal(
+            original.anchorIconGetParents[index],
+            current.anchorIconGetParents[index]
+        ) or not rawequal(
+            original.anchorIconGetWidths[index],
+            current.anchorIconGetWidths[index]
+        )
+        or not rawequal(
+            original.anchorIconGetHeights[index],
+            current.anchorIconGetHeights[index]
+        )
+        or not rawequal(
+            original.anchorDurations[index],
+            current.anchorDurations[index]
+        ) or not rawequal(
+            original.anchorDurationAccessMethods[index],
+            current.anchorDurationAccessMethods[index]
+        ) or not rawequal(
+            original.anchorDurationGetParents[index],
+            current.anchorDurationGetParents[index]
+        ) or not rawequal(
+            original.anchorDurationGetWidths[index],
+            current.anchorDurationGetWidths[index]
+        )
+        or not rawequal(
+            original.anchorDurationGetHeights[index],
+            current.anchorDurationGetHeights[index]
+        )
+        then
+            return false
+        end
+        if includeMutablePresentation
+            and (
+                original.anchorIconWidths[index]
+                    ~= current.anchorIconWidths[index]
+                or original.anchorIconHeights[index]
+                    ~= current.anchorIconHeights[index]
+                or original.anchorDurationWidths[index]
+                    ~= current.anchorDurationWidths[index]
+                or original.anchorDurationHeights[index]
+                    ~= current.anchorDurationHeights[index]
+            )
+        then
+            return false
+        end
+    end
+    return not includeMutablePresentation
+        or original.showDispelType == current.showDispelType
+end
+
+local function HasExactOrdinaryArray(array)
+    if not IsOrdinaryTable(array) then return false end
+    for key in next, array do
+        if not IsOrdinaryValue(key)
+            or type(key) ~= "number"
+            or key ~= math.floor(key)
+            or key < 1
+            or key > EXPECTED_PRIVATE_ANCHOR_COUNT
+        then
+            return false
+        end
+    end
+    for index = 1, EXPECTED_PRIVATE_ANCHOR_COUNT do
+        local value = rawget(array, index)
+        if value == nil or not IsOrdinaryValue(value) then return false end
+    end
+    return true
+end
+
+local function HarmfulSnapshotRemainsOrdinary(snapshot)
+    if not IsOrdinaryTable(snapshot)
+        or not NativeFrameAPIRemainsOrdinary(snapshot.nativeFrameAPI)
+        or not IsOrdinaryValue(snapshot.frame)
+        or not IsOrdinaryFunction(snapshot.frameAccessMethod)
+        or not IsOrdinaryTable(snapshot.debuffMixin)
+        or not IsOrdinaryTable(snapshot.anchorMixin)
+        or not IsOrdinaryTable(snapshot.unitAuras)
+        or not IsOrdinaryFunction(snapshot.updatePrivateAuraAnchors)
+        or not IsOrdinaryFunction(snapshot.expectedSetUnit)
+        or not IsOrdinaryFunction(snapshot.addPrivateAuraAnchor)
+        or not IsOrdinaryFunction(snapshot.removePrivateAuraAnchor)
+        or not IsOrdinaryNumber(snapshot.maxPrivateAuras)
+        or snapshot.maxPrivateAuras ~= EXPECTED_PRIVATE_ANCHOR_COUNT
+        or not IsOrdinaryValue(snapshot.container)
+        or not IsOrdinaryFunction(snapshot.containerAccessMethod)
+        or not IsOrdinaryFunction(snapshot.containerGetParent)
+        or not IsOrdinaryFunction(snapshot.containerSetShown)
+        or not IsOrdinaryValue(snapshot.showDispelType)
+        or type(snapshot.showDispelType) ~= "boolean"
+        or not HasExactOrdinaryArray(snapshot.anchors)
+        or not HasExactOrdinaryArray(snapshot.anchorObjects)
+        or not HasExactOrdinaryArray(snapshot.anchorAccessMethods)
+        or not HasExactOrdinaryArray(snapshot.anchorGetParents)
+        or not HasExactOrdinaryArray(snapshot.anchorSetUnits)
+        or not HasExactOrdinaryArray(snapshot.anchorAuraIndexes)
+        or not HasExactOrdinaryArray(snapshot.anchorIsAuraAnchors)
+        or not HasExactOrdinaryArray(snapshot.anchorIcons)
+        or not HasExactOrdinaryArray(snapshot.anchorIconAccessMethods)
+        or not HasExactOrdinaryArray(snapshot.anchorIconGetParents)
+        or not HasExactOrdinaryArray(snapshot.anchorIconGetWidths)
+        or not HasExactOrdinaryArray(snapshot.anchorIconWidths)
+        or not HasExactOrdinaryArray(snapshot.anchorIconGetHeights)
+        or not HasExactOrdinaryArray(snapshot.anchorIconHeights)
+        or not HasExactOrdinaryArray(snapshot.anchorDurations)
+        or not HasExactOrdinaryArray(
+            snapshot.anchorDurationAccessMethods
+        )
+        or not HasExactOrdinaryArray(snapshot.anchorDurationGetParents)
+        or not HasExactOrdinaryArray(snapshot.anchorDurationGetWidths)
+        or not HasExactOrdinaryArray(snapshot.anchorDurationWidths)
+        or not HasExactOrdinaryArray(snapshot.anchorDurationGetHeights)
+        or not HasExactOrdinaryArray(snapshot.anchorDurationHeights)
+    then
+        return false
+    end
+
+    for index = 1, EXPECTED_PRIVATE_ANCHOR_COUNT do
+        local arrayAnchor = rawget(snapshot.anchors, index)
+        local anchor = rawget(snapshot.anchorObjects, index)
+        local anchorAccessMethod = rawget(
+            snapshot.anchorAccessMethods,
+            index
+        )
+        local anchorGetParent = rawget(snapshot.anchorGetParents, index)
+        local anchorSetUnit = rawget(snapshot.anchorSetUnits, index)
+        local auraIndex = rawget(snapshot.anchorAuraIndexes, index)
+        local isAuraAnchor = rawget(snapshot.anchorIsAuraAnchors, index)
+        local icon = rawget(snapshot.anchorIcons, index)
+        local iconAccessMethod = rawget(
+            snapshot.anchorIconAccessMethods,
+            index
+        )
+        local iconGetParent = rawget(snapshot.anchorIconGetParents, index)
+        local iconGetWidth = rawget(snapshot.anchorIconGetWidths, index)
+        local iconWidth = rawget(snapshot.anchorIconWidths, index)
+        local iconGetHeight = rawget(snapshot.anchorIconGetHeights, index)
+        local iconHeight = rawget(snapshot.anchorIconHeights, index)
+        local duration = rawget(snapshot.anchorDurations, index)
+        local durationAccessMethod = rawget(
+            snapshot.anchorDurationAccessMethods,
+            index
+        )
+        local durationGetParent = rawget(
+            snapshot.anchorDurationGetParents,
+            index
+        )
+        local durationGetWidth = rawget(
+            snapshot.anchorDurationGetWidths,
+            index
+        )
+        local durationWidth = rawget(snapshot.anchorDurationWidths, index)
+        local durationGetHeight = rawget(
+            snapshot.anchorDurationGetHeights,
+            index
+        )
+        local durationHeight = rawget(snapshot.anchorDurationHeights, index)
+        if not IsOrdinaryValue(arrayAnchor)
+            or not IsOrdinaryValue(anchor)
+            or not rawequal(arrayAnchor, anchor)
+            or not IsOrdinaryFunction(anchorAccessMethod)
+            or not IsOrdinaryFunction(anchorGetParent)
+            or not IsOrdinaryFunction(anchorSetUnit)
+            or not IsOrdinaryNumber(auraIndex)
+            or auraIndex ~= index
+            or not IsOrdinaryValue(isAuraAnchor)
+            or type(isAuraAnchor) ~= "boolean"
+            or isAuraAnchor ~= true
+            or not IsOrdinaryValue(icon)
+            or not IsOrdinaryFunction(iconAccessMethod)
+            or not IsOrdinaryFunction(iconGetParent)
+            or not IsOrdinaryFunction(iconGetWidth)
+            or not IsOrdinaryNumber(iconWidth)
+            or iconWidth <= 0
+            or not IsOrdinaryFunction(iconGetHeight)
+            or not IsOrdinaryNumber(iconHeight)
+            or iconHeight <= 0
+            or not IsOrdinaryValue(duration)
+            or not IsOrdinaryFunction(durationAccessMethod)
+            or not IsOrdinaryFunction(durationGetParent)
+            or not IsOrdinaryFunction(durationGetWidth)
+            or not IsOrdinaryNumber(durationWidth)
+            or durationWidth <= 0
+            or not IsOrdinaryFunction(durationGetHeight)
+            or not IsOrdinaryNumber(durationHeight)
+            or durationHeight <= 0
+        then
+            return false
+        end
+    end
+    return true
+end
+
+local function StoredHarmfulSnapshotRemainsAccessible(snapshot)
+    if not HarmfulSnapshotRemainsOrdinary(snapshot) then return false end
+
+    local currentFrameAPI = CaptureNativeFrameAPI()
+    if not HasExactNativeFrameAPI(
+        snapshot.nativeFrameAPI,
+        currentFrameAPI
+    ) then
+        return false
+    end
+    local canAccessMethod = snapshot.nativeFrameAPI.canAccess
+    local frameAccessMethod = CanAccessScriptObject(
+        snapshot.frame,
+        canAccessMethod
+    )
+    local containerAccessMethod = CanAccessScriptObject(
+        snapshot.container,
+        canAccessMethod
+    )
+    if not frameAccessMethod
+        or not containerAccessMethod
+        or not rawequal(frameAccessMethod, snapshot.frameAccessMethod)
+        or not rawequal(
+            containerAccessMethod,
+            snapshot.containerAccessMethod
+        )
+    then
+        return false
+    end
+
+    for index = 1, EXPECTED_PRIVATE_ANCHOR_COUNT do
+        local anchorAccessMethod = CanAccessScriptObject(
+            rawget(snapshot.anchorObjects, index),
+            canAccessMethod
+        )
+        local iconAccessMethod = CanAccessScriptObject(
+            rawget(snapshot.anchorIcons, index),
+            canAccessMethod
+        )
+        local durationAccessMethod = CanAccessScriptObject(
+            rawget(snapshot.anchorDurations, index),
+            canAccessMethod
+        )
+        if not anchorAccessMethod
+            or not iconAccessMethod
+            or not durationAccessMethod
+            or not rawequal(
+                anchorAccessMethod,
+                rawget(snapshot.anchorAccessMethods, index)
+            )
+            or not rawequal(
+                iconAccessMethod,
+                rawget(snapshot.anchorIconAccessMethods, index)
+            )
+            or not rawequal(
+                durationAccessMethod,
+                rawget(snapshot.anchorDurationAccessMethods, index)
+            )
+        then
+            return false
+        end
+    end
+    return true
+end
+
+local function HasExactLiveHarmfulTransaction(snapshot)
+    if not HarmfulSnapshotRemainsOrdinary(snapshot) then return false end
+
+    local nativeFrameAPI = snapshot.nativeFrameAPI
+    local getFrameMetatable = rawget(_G, "GetFrameMetatable")
+    local frame = rawget(_G, "DebuffFrame")
+    local debuffMixin = rawget(_G, "DebuffFrameMixin")
+    local anchorMixin = rawget(_G, "BuffFramePrivateAuraAnchorMixin")
+    local unitAuras = rawget(_G, "C_UnitAuras")
+    if not IsOrdinaryFunction(getFrameMetatable)
+        or not IsOrdinaryTable(frame)
+        or not IsOrdinaryTable(debuffMixin)
+        or not IsOrdinaryTable(anchorMixin)
+        or not IsOrdinaryTable(unitAuras)
+        or not rawequal(
+            getFrameMetatable,
+            nativeFrameAPI.getFrameMetatable
+        )
+        or not rawequal(frame, snapshot.frame)
+        or not rawequal(debuffMixin, snapshot.debuffMixin)
+        or not rawequal(anchorMixin, snapshot.anchorMixin)
+        or not rawequal(unitAuras, snapshot.unitAuras)
+    then
+        return false
+    end
+
+    local frameMetatableIndex = rawget(
+        nativeFrameAPI.frameMetatable,
+        "__index"
+    )
+    if not IsOrdinaryTable(frameMetatableIndex)
+        or not rawequal(frameMetatableIndex, nativeFrameAPI.frameAPI)
+        or not rawequal(
+            rawget(frameMetatableIndex, "CanBeAccessedInContext"),
+            nativeFrameAPI.canAccess
+        )
+        or not rawequal(
+            rawget(frameMetatableIndex, "GetParent"),
+            nativeFrameAPI.getParent
+        )
+        or not rawequal(
+            rawget(frameMetatableIndex, "GetWidth"),
+            nativeFrameAPI.getWidth
+        )
+        or not rawequal(
+            rawget(frameMetatableIndex, "GetHeight"),
+            nativeFrameAPI.getHeight
+        )
+        or not rawequal(
+            rawget(frameMetatableIndex, "SetShown"),
+            nativeFrameAPI.setShown
+        )
+    then
+        return false
+    end
+
+    local updatePrivateAuraAnchors = rawget(
+        frame,
+        "UpdatePrivateAuraAnchors"
+    )
+    local maxPrivateAuras = rawget(frame, "maxPrivateAuras")
+    local container = rawget(frame, "AuraContainer")
+    local anchors = rawget(frame, "PrivateAuraAnchors")
+    local mixinUpdate = rawget(debuffMixin, "UpdatePrivateAuraAnchors")
+    local mixinSetUnit = rawget(anchorMixin, "SetUnit")
+    local addPrivateAuraAnchor = rawget(unitAuras, "AddPrivateAuraAnchor")
+    local removePrivateAuraAnchor = rawget(
+        unitAuras,
+        "RemovePrivateAuraAnchor"
+    )
+    if not IsOrdinaryFunction(updatePrivateAuraAnchors)
+        or not IsOrdinaryNumber(maxPrivateAuras)
+        or maxPrivateAuras ~= EXPECTED_PRIVATE_ANCHOR_COUNT
+        or not IsOrdinaryTable(container)
+        or not HasExactOrdinaryArray(anchors)
+        or not IsOrdinaryFunction(mixinUpdate)
+        or not IsOrdinaryFunction(mixinSetUnit)
+        or not IsOrdinaryFunction(addPrivateAuraAnchor)
+        or not IsOrdinaryFunction(removePrivateAuraAnchor)
+        or not rawequal(
+            snapshot.frameAccessMethod,
+            nativeFrameAPI.canAccess
+        )
+        or not rawequal(
+            updatePrivateAuraAnchors,
+            snapshot.updatePrivateAuraAnchors
+        )
+        or not rawequal(mixinUpdate, snapshot.updatePrivateAuraAnchors)
+        or not rawequal(mixinSetUnit, snapshot.expectedSetUnit)
+        or not rawequal(addPrivateAuraAnchor, snapshot.addPrivateAuraAnchor)
+        or not rawequal(
+            removePrivateAuraAnchor,
+            snapshot.removePrivateAuraAnchor
+        )
+        or not rawequal(container, snapshot.container)
+        or not rawequal(anchors, snapshot.anchors)
+    then
+        return false
+    end
+
+    local showDispelType = rawget(container, "showDispelType")
+    if not IsOrdinaryValue(showDispelType)
+        or type(showDispelType) ~= "boolean"
+        or not rawequal(
+            snapshot.containerAccessMethod,
+            nativeFrameAPI.canAccess
+        )
+        or not rawequal(
+            snapshot.containerGetParent,
+            nativeFrameAPI.getParent
+        )
+        or not rawequal(
+            snapshot.containerSetShown,
+            nativeFrameAPI.setShown
+        )
+        or showDispelType ~= snapshot.showDispelType
+    then
+        return false
+    end
+
+    local seenObjects = {}
+    if not AddDistinctObject(seenObjects, frame)
+        or not AddDistinctObject(seenObjects, container)
+    then
+        return false
+    end
+
+    for index = 1, EXPECTED_PRIVATE_ANCHOR_COUNT do
+        local anchor = rawget(anchors, index)
+        local alias = rawget(frame, "privateAuraAnchor" .. index)
+        local expectedAnchor = rawget(snapshot.anchorObjects, index)
+        if not IsOrdinaryTable(anchor)
+            or not IsOrdinaryValue(alias)
+            or not IsOrdinaryValue(expectedAnchor)
+            or not rawequal(anchor, alias)
+            or not rawequal(anchor, expectedAnchor)
+        then
+            return false
+        end
+        if not AddDistinctObject(seenObjects, anchor) then return false end
+
+        local anchorSetUnit = rawget(anchor, "SetUnit")
+        local auraIndex = rawget(anchor, "auraIndex")
+        local isAuraAnchor = rawget(anchor, "isAuraAnchor")
+        local icon = rawget(anchor, "Icon")
+        local duration = rawget(anchor, "Duration")
+        if not IsOrdinaryFunction(anchorSetUnit)
+            or not IsOrdinaryNumber(auraIndex)
+            or auraIndex ~= index
+            or not IsOrdinaryValue(isAuraAnchor)
+            or type(isAuraAnchor) ~= "boolean"
+            or isAuraAnchor ~= true
+            or not IsOrdinaryTable(icon)
+            or not IsOrdinaryTable(duration)
+            or not rawequal(
+                nativeFrameAPI.canAccess,
+                rawget(snapshot.anchorAccessMethods, index)
+            )
+            or not rawequal(
+                nativeFrameAPI.getParent,
+                rawget(snapshot.anchorGetParents, index)
+            )
+            or not rawequal(
+                anchorSetUnit,
+                rawget(snapshot.anchorSetUnits, index)
+            )
+            or auraIndex ~= rawget(snapshot.anchorAuraIndexes, index)
+            or isAuraAnchor
+                ~= rawget(snapshot.anchorIsAuraAnchors, index)
+            or not rawequal(icon, rawget(snapshot.anchorIcons, index))
+            or not rawequal(
+                duration,
+                rawget(snapshot.anchorDurations, index)
+            )
+        then
+            return false
+        end
+        if not AddDistinctObject(seenObjects, icon)
+            or not AddDistinctObject(seenObjects, duration)
+        then
+            return false
+        end
+
+        if not rawequal(
+                nativeFrameAPI.canAccess,
+                rawget(snapshot.anchorIconAccessMethods, index)
+            )
+            or not rawequal(
+                nativeFrameAPI.getParent,
+                rawget(snapshot.anchorIconGetParents, index)
+            )
+            or not rawequal(
+                nativeFrameAPI.getWidth,
+                rawget(snapshot.anchorIconGetWidths, index)
+            )
+            or not rawequal(
+                nativeFrameAPI.getHeight,
+                rawget(snapshot.anchorIconGetHeights, index)
+            )
+            or not rawequal(
+                nativeFrameAPI.canAccess,
+                rawget(snapshot.anchorDurationAccessMethods, index)
+            )
+            or not rawequal(
+                nativeFrameAPI.getParent,
+                rawget(snapshot.anchorDurationGetParents, index)
+            )
+            or not rawequal(
+                nativeFrameAPI.getWidth,
+                rawget(snapshot.anchorDurationGetWidths, index)
+            )
+            or not rawequal(
+                nativeFrameAPI.getHeight,
+                rawget(snapshot.anchorDurationGetHeights, index)
+            )
+        then
+            return false
+        end
+    end
+    return true
+end
+
+local function CaptureExactHarmfulTransaction(expected)
+    if expected and not StoredHarmfulSnapshotRemainsAccessible(expected) then
+        return
+    end
+    local current = CaptureNativeHarmfulAuraFrame()
+    if not current or not HarmfulSnapshotRemainsOrdinary(current) then
+        return
+    end
+    if expected
+        and (
+            not StoredHarmfulSnapshotRemainsAccessible(expected)
+            or not HarmfulSnapshotRemainsOrdinary(expected)
+            or not HarmfulSnapshotRemainsOrdinary(current)
+            or not HasExactHarmfulSnapshotIdentity(expected, current)
+        )
+    then
+        return
+    end
+
+    -- No object-access or geometry callback may run after this final capture.
+    -- The remaining write-boundary fence uses only raw field/array reads,
+    -- canonical secrecy/type predicates, and identity comparisons.
+    local final = CaptureNativeHarmfulAuraFrame()
+    if not final
+        or not HarmfulSnapshotRemainsOrdinary(current)
+        or not HarmfulSnapshotRemainsOrdinary(final)
+        or (expected and not HarmfulSnapshotRemainsOrdinary(expected))
+        or not HasExactLiveHarmfulTransaction(final)
+        or not HasExactHarmfulSnapshotIdentity(current, final, true)
+        or (expected
+            and not HasExactHarmfulSnapshotIdentity(expected, final))
+    then
+        return
+    end
+    return final
+end
+
+local function IsSanitizedPlayerUnit(unit)
+    return IsOrdinaryValue(unit)
+        and type(unit) == "string"
+        and (unit == "player" or unit == "vehicle")
+end
+
+function BD.CanSuppressNativeHarmfulAuras()
+    if not IsOutOfCombat() then return false end
+    return CaptureExactHarmfulTransaction(
+        harmfulRecoveryState or harmfulSuppressedState
+    ) ~= nil
+end
+
+function BD.AreNativeHarmfulAurasSuppressed()
+    return harmfulSuppressedState ~= nil
+end
+
+function BD.SetNativeHarmfulAurasSuppressed(suppressed, restoreUnit)
+    if not IsOrdinaryValue(suppressed) or type(suppressed) ~= "boolean" then
+        return false
+    end
+    if not IsOutOfCombat() then return false end
+
+    local existing = harmfulRecoveryState or harmfulSuppressedState
+    if not suppressed and not existing then return true end
+    if suppressed and suppressedStates.debuffs then return false end
+    if not suppressed and not IsSanitizedPlayerUnit(restoreUnit) then
+        return false
+    end
+
+    local transaction = CaptureExactHarmfulTransaction(existing)
+    if not transaction then return false end
+    if not IsOutOfCombat() then return false end
+
+    if suppressed then
+        if harmfulRecoveryState then
+            -- A prior non-transactional setter batch did not return. Require
+            -- its explicit restore path before attempting another removal.
+            return false
+        elseif harmfulSuppressedState then
+            -- Completed suppression is idempotent only after full live
+            -- topology revalidation above; do not call the setters again.
+            return true
+        end
+        -- Retail 12.1.0.69273 (wow-ui-source
+        -- eb941aad028d73ddc69e3e8ef4da709f4d3cd744) implements SetUnit(nil)
+        -- by calling RemovePrivateAuraAnchor. The private-aura watcher then
+        -- releases and resets its pooled renderer, whose Reset hides it. This
+        -- deliberately never observes or mutates anchor visibility.
+        -- This recovery-only ledger is published before the non-transactional
+        -- six-call batch. WoW does not offer a rollback primitive and this
+        -- boundary intentionally does not pcall protected/private-aura work;
+        -- a later explicit restore can still find the captured topology after
+        -- an opaque client error. The completed-suppression ledger is not
+        -- published until every removal and the public hide have returned.
+        harmfulRecoveryState = transaction
+        for index = 1, EXPECTED_PRIVATE_ANCHOR_COUNT do
+            transaction.anchorSetUnits[index](
+                transaction.anchorObjects[index],
+                nil
+            )
+        end
+        transaction.containerSetShown(transaction.container, false)
+        harmfulSuppressedState = transaction
+        harmfulRecoveryState = nil
+        return true
+    end
+
+    -- Re-add all six private renderers before showing Blizzard's ordinary row.
+    -- The custom controller hides its own row only after both writes return.
+    transaction.updatePrivateAuraAnchors(
+        transaction.frame,
+        restoreUnit
+    )
+    transaction.containerSetShown(transaction.container, true)
+    harmfulSuppressedState = nil
+    harmfulRecoveryState = nil
+    return true
+end
+
+function BD.ReassertNativeHarmfulAuraSuppression()
+    local existing = harmfulSuppressedState
+    if not existing or harmfulRecoveryState or not IsOutOfCombat() then
+        return false
+    end
+    local transaction = CaptureExactHarmfulTransaction(existing)
+    if not transaction or not IsOutOfCombat() then return false end
+
+    -- Blizzard can re-add its private anchors when the player/vehicle unit or
+    -- Edit Mode setting changes. Reassert only from a completed suppression
+    -- state, after the same two-pass identity fence. As with initial removal,
+    -- the setter batch has no rollback primitive; preserve recovery intent
+    -- before its first direct setter boundary.
+    harmfulRecoveryState = transaction
+    for index = 1, EXPECTED_PRIVATE_ANCHOR_COUNT do
+        transaction.anchorSetUnits[index](
+            transaction.anchorObjects[index],
+            nil
+        )
+    end
+    transaction.containerSetShown(transaction.container, false)
+    harmfulSuppressedState = transaction
+    harmfulRecoveryState = nil
     return true
 end
