@@ -17,8 +17,10 @@ local macroEditor
 local macroEditorBinding
 local GetCursorInfo = _G.GetCursorInfo
 local ClearCursor = _G.ClearCursor
+local C_Spell = _G.C_Spell
 local UpdateConflictNotice
 local optionsStage = "not started"
+local pendingSpellData = {}
 
 -- AF.Fire intentionally isolates callback failures. Options construction is
 -- non-secret UI work, so retain and forward its traceback here instead of
@@ -118,6 +120,74 @@ local function UpdateEnabledState(checked)
     )
 end
 
+local function HideSpellDisplay(row)
+    if not row.spellDisplay then return end
+    row.spellDisplay:Hide()
+    if row.payload:IsEnabled() then
+        row.payload:SetTextColor(1, 1, 1, 1)
+    else
+        row.payload:SetTextColor(AF.GetColorRGB("disabled"))
+    end
+end
+
+local function ResolveSpellDisplay(spellID)
+    local displaySpellID = spellID
+    if C_Spell and type(C_Spell.GetOverrideSpell) == "function" then
+        displaySpellID = C_Spell.GetOverrideSpell(
+            spellID,
+            0,
+            true,
+            0
+        ) or spellID
+    end
+
+    local name, iconID = AF.GetSpellInfo(displaySpellID)
+    return name, iconID, displaySpellID
+end
+
+local function RequestSpellDisplayData(spellID)
+    if pendingSpellData[spellID]
+        or not C_Spell
+        or type(C_Spell.RequestLoadSpellData) ~= "function"
+    then
+        return
+    end
+    pendingSpellData[spellID] = true
+    C_Spell.RequestLoadSpellData(spellID)
+end
+
+local function RefreshSpellDisplay(row)
+    HideSpellDisplay(row)
+    local config = GetConfig()
+    local binding = config and config.bindings[row.index]
+    if not binding
+        or binding[2] ~= "spell"
+        or row.payload:HasFocus()
+    then
+        return
+    end
+
+    local spellID = tonumber(binding[3])
+    if not spellID
+        or spellID <= 0
+        or row.payload:GetText() ~= tostring(binding[3])
+        or not AF.SpellExists(spellID)
+    then
+        return
+    end
+
+    local name, iconID, displaySpellID = ResolveSpellDisplay(spellID)
+    if not name or not iconID then
+        RequestSpellDisplayData(displaySpellID)
+        return
+    end
+
+    row.spellDisplay.icon:SetTexture(iconID)
+    row.spellDisplay.name:SetText(name)
+    row.payload:SetTextColor(1, 1, 1, 0)
+    row.spellDisplay:Show()
+end
+
 local function SetPayload(row, value)
     local binding = GetConfig().bindings[row.index]
     if not binding then return end
@@ -186,6 +256,8 @@ local function SetSuggestedSpell(row, binding, spellID)
     row.payload:SetText(tostring(spellID))
     row.payload.value = row.payload:GetValue()
     row.payload.confirmBtn:Hide()
+    row.payload:ClearFocus()
+    RefreshSpellDisplay(row)
     RefreshRuntime()
     UpdateConflictNotice()
 end
@@ -334,10 +406,37 @@ local function CreateRow(index)
     local payload = AF.CreateEditBox(row, nil, 190, 22, "trim")
     row.payload = payload
     AF.SetPoint(payload, "LEFT", action, "RIGHT", 7, 0)
+
+    local spellDisplay = AF.CreateFrame(payload)
+    row.spellDisplay = spellDisplay
+    spellDisplay:SetAllPoints()
+    spellDisplay:EnableMouse(false)
+    spellDisplay:Hide()
+
+    local spellIcon = AF.CreateTexture(spellDisplay, nil, nil, "OVERLAY")
+    spellDisplay.icon = spellIcon
+    AF.SetPoint(spellIcon, "TOPLEFT", 3, -3)
+    AF.SetPoint(spellIcon, "BOTTOMLEFT", 3, 3)
+    spellIcon:SetWidth(16)
+    spellIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    local spellName = AF.CreateFontString(spellDisplay)
+    spellDisplay.name = spellName
+    AF.SetPoint(spellName, "LEFT", spellIcon, "RIGHT", 4, 0)
+    AF.SetPoint(spellName, "RIGHT", -4, 0)
+    spellName:SetJustifyH("LEFT")
+    spellName:SetWordWrap(false)
+
     payload:SetScript("OnReceiveDrag", function()
         SetPayloadFromCursor(row)
     end)
-    payload:SetOnEditFocusGained(CancelBindingCaptures)
+    payload:SetOnEditFocusGained(function()
+        CancelBindingCaptures()
+        HideSpellDisplay(row)
+    end)
+    payload:SetOnEditFocusLost(function()
+        RefreshSpellDisplay(row)
+    end)
     payload:SetScript("OnMouseDown", function(_, button)
         CancelBindingCaptures()
         payload:SetFocus()
@@ -356,18 +455,19 @@ local function CreateRow(index)
         -- spell IDs cannot become the widget's hidden saved value.
         local submittedBinding = GetConfig().bindings[row.index]
         C_Timer.After(0, function()
-            local isActive
-            for _, current in ipairs(GetConfig().bindings) do
-                if current == submittedBinding then isActive = true break end
-            end
-            if isActive then
+            if GetConfig().bindings[row.index] == submittedBinding then
                 payload:SetText(tostring(submittedBinding[3] or ""))
                 payload.value = payload:GetValue()
+                RefreshSpellDisplay(row)
             end
         end)
     end)
     payload:SetOnEnterPressed(function(value)
         SetPayload(row, value)
+        local binding = GetConfig().bindings[row.index]
+        if binding and binding[2] == "spell" then
+            payload:SetText(tostring(binding[3] or ""))
+        end
         payload.value = payload:GetValue()
         payload.confirmBtn:Hide()
     end)
@@ -651,6 +751,7 @@ local function CreatePanel()
                 row.index < #config.bindings
             )
             row.delete:SetEnabled(true)
+            RefreshSpellDisplay(row)
         end
     end
 
@@ -709,6 +810,25 @@ AF.RegisterCallback("AF_COMBAT_ENTER", function()
         AF.CloseCascadingMenu()
     end
 end)
+
+local function RefreshVisibleSpellDisplays()
+    if not panel or not panel:IsVisible() then return end
+    for _, row in ipairs(rows) do
+        if row:IsShown() then RefreshSpellDisplay(row) end
+    end
+end
+
+local function SpellDataLoaded(_, _, spellID, success)
+    if not pendingSpellData[spellID] then return end
+    pendingSpellData[spellID] = nil
+    if success then RefreshVisibleSpellDisplays() end
+end
+if C_Spell then
+    if type(C_Spell.RequestLoadSpellData) == "function" then
+        CC:RegisterEvent("SPELL_DATA_LOAD_RESULT", SpellDataLoaded)
+    end
+    CC:RegisterEvent("SPELLS_CHANGED", RefreshVisibleSpellDisplays)
+end
 
 AF.RegisterCallback("BFI_ShowOptionsPanel", function(_, id)
     if id == "clickCastings" then

@@ -28,7 +28,15 @@ local function newWidget(kind, parent)
     end
 
     function widget:ClearFocus()
+        local hadFocus = self.focused
         self.focused = false
+        if hadFocus and self.onEditFocusLost then
+            self.onEditFocusLost(self)
+        end
+    end
+
+    function widget:EnableMouse(enabled)
+        self.mouseEnabled = enabled and true or false
     end
 
     function widget:GetParent()
@@ -54,6 +62,17 @@ local function newWidget(kind, parent)
 
     function widget:IsShown()
         return self.shown
+    end
+
+    function widget:IsVisible()
+        return self.shown
+            and (not self.parent
+                or not self.parent.IsVisible
+                or self.parent:IsVisible())
+    end
+
+    function widget:IsEnabled()
+        return self.enabled
     end
 
     function widget:SetAllPoints()
@@ -136,6 +155,10 @@ local function newWidget(kind, parent)
         self.onEditFocusGained = callback
     end
 
+    function widget:SetOnEditFocusLost(callback)
+        self.onEditFocusLost = callback
+    end
+
     function widget:SetOnHide(callback)
         self.onHide = callback
     end
@@ -162,6 +185,14 @@ local function newWidget(kind, parent)
 
     function widget:SetText(text)
         self.text = text
+    end
+
+    function widget:SetTexture(texture)
+        self.texture = texture
+    end
+
+    function widget:SetTexCoord(...)
+        self.texCoord = {...}
     end
 
     function widget:SetTextColor(...)
@@ -198,8 +229,12 @@ local function createHarness()
         combatProtected = {},
         cursor = {},
         dialogs = {},
+        events = {},
         fires = {},
         namedFrames = {},
+        spellDataRequests = {},
+        spellOverrides = {},
+        timers = {},
         wrapColorCalls = {},
     }
     local L = setmetatable({}, {
@@ -290,6 +325,13 @@ local function createHarness()
         function editBox:SetConfirmButton(callback)
             self.onConfirmValue = callback
         end
+        function editBox:Confirm()
+            local value = self:GetValue()
+            self.onConfirmValue(value)
+            self.value = value
+            self.confirmBtn:Hide()
+            self:ClearFocus()
+        end
         function editBox:SimulateUserText(text)
             if self.numeric and text:find("[^%d]", 1) then
                 return
@@ -314,6 +356,12 @@ local function createHarness()
         frame.height = height
         if name then state.namedFrames[name] = frame end
         return frame
+    end
+
+    function AF.CreateTexture(parent, texture)
+        local region = newWidget("texture", parent)
+        region.texture = texture
+        return region
     end
 
     function AF.CreateTitledPane(parent, title, _, height, color)
@@ -371,6 +419,16 @@ local function createHarness()
         return class
     end
 
+    function AF.GetSpellInfo(spellID)
+        local spell = state.spellInfo[tonumber(spellID)]
+        if not spell then return end
+        return spell.name, spell.iconID
+    end
+
+    function AF.SpellExists(spellID)
+        return state.spellExists[tonumber(spellID)] and true or false
+    end
+
     function AF.CloseCascadingMenu()
         state.cascadingMenuCloseCalls =
             (state.cascadingMenuCloseCalls or 0) + 1
@@ -420,7 +478,21 @@ local function createHarness()
             {"type5", "item", "item:19019"},
         },
     }
+    state.spellInfo = {
+        [2061] = {name = "Flash Heal", iconID = 135907},
+        [47540] = {name = "Penance", iconID = 237545},
+        [20484] = {name = "Rebirth", iconID = 136080},
+    }
+    state.spellExists = {
+        [2061] = true,
+        [47540] = true,
+        [20484] = true,
+        [999999] = true,
+    }
     CC.activeConfig = config
+    function CC:RegisterEvent(event, callback)
+        state.events[event] = callback
+    end
     function CC.GetNativeConflicts()
         return state.nativeConflicts or {}
     end
@@ -454,8 +526,19 @@ local function createHarness()
         _G = false,
         AbstractFramework = AF,
         BFIOptionsFrame_ContentPane = root,
+        C_Spell = {
+            GetOverrideSpell = function(spellID)
+                return state.spellOverrides[spellID] or spellID
+            end,
+            RequestLoadSpellData = function(spellID)
+                state.spellDataRequests[#state.spellDataRequests + 1] =
+                    spellID
+            end,
+        },
         C_Timer = {
-            After = function(_, callback) callback() end,
+            After = function(_, callback)
+                state.timers[#state.timers + 1] = callback
+            end,
         },
         ClearCursor = function()
             state.clearCursorCalls = state.clearCursorCalls + 1
@@ -505,6 +588,18 @@ local function createHarness()
         local callback = self.callbacks[event]
         assertTrue(callback, "missing callback: " .. event)
         callback(event, ...)
+    end
+
+    function state:FireEvent(event, ...)
+        local callback = self.events[event]
+        assertTrue(callback, "missing event handler: " .. event)
+        callback(self.CC, event, ...)
+    end
+
+    function state:RunTimers()
+        local timers = self.timers
+        self.timers = {}
+        for _, callback in ipairs(timers) do callback() end
     end
 
     state.AF = AF
@@ -603,11 +698,34 @@ assertEqual(firstRow.payload.width, 239,
 assertEqual(firstRow.payload.label, "Spell ID or click to pick",
     "spell field has an in-field picker prompt")
 assertEqual(firstRow.payload:GetText(), "2061",
-    "saved spell ID is displayed as text")
+    "verified spell display preserves the underlying numeric spell ID")
+assertTrue(firstRow.spellDisplay ~= nil,
+    "spell rows create a separate verified-spell display")
+assertEqual(firstRow.spellDisplay.parent, firstRow.payload,
+    "verified-spell display is contained inside the value field")
+assertTrue(not firstRow.spellDisplay.mouseEnabled,
+    "verified-spell display leaves the value field mouse-interactive")
+assertTrue(firstRow.spellDisplay.shown,
+    "verified saved spells use the friendly display while unfocused")
+assertEqual(firstRow.spellDisplay.icon.texture, 135907,
+    "verified spell display uses the resolved spell icon")
+assertEqual(firstRow.spellDisplay.name:GetText(), "Flash Heal",
+    "verified spell display uses the resolved spell name")
 assertTrue(firstRow.payload.numeric,
     "spell payload enables native numeric input filtering")
 assertEqual(firstRow.payload.mode, "trim",
     "spell payload retains empty-string confirmation semantics")
+
+firstRow.payload:SetFocus()
+assertTrue(not firstRow.spellDisplay.shown,
+    "focusing a verified spell reveals its numeric editor")
+assertEqual(firstRow.payload:GetText(), "2061",
+    "focused spell editing starts from the canonical numeric ID")
+firstRow.payload:ClearFocus()
+assertTrue(firstRow.spellDisplay.shown,
+    "focus loss restores the verified spell display")
+
+firstRow.payload:SetFocus()
 firstRow.payload:SimulateUserText("2061x")
 assertEqual(firstRow.payload:GetText(), "2061",
     "spell payload rejects non-numeric typing")
@@ -615,10 +733,83 @@ firstRow.payload:SimulateUserText("20610")
 firstRow.payload:SimulateBackspace()
 assertEqual(firstRow.payload:GetText(), "2061",
     "spell payload permits ordinary character deletion")
+
+firstRow.payload:SimulateUserText("02061")
+firstRow.payload:ClearFocus()
+assertTrue(not firstRow.spellDisplay.shown,
+    "an unconfirmed leading-zero edit remains visibly numeric")
+assertEqual(firstRow.payload:GetText(), "02061",
+    "an unconfirmed leading-zero edit is not hidden as canonical")
+firstRow.payload:SetFocus()
+
+firstRow.payload:SimulateUserText("47540")
+firstRow.payload:Confirm()
+assertEqual(harness.config.bindings[1][3], 47540,
+    "confirming a verified spell persists its numeric ID")
+assertTrue(firstRow.spellDisplay.shown,
+    "confirming a verified spell returns to the friendly display")
+assertEqual(firstRow.spellDisplay.icon.texture, 237545,
+    "confirmed spell display refreshes its icon")
+assertEqual(firstRow.spellDisplay.name:GetText(), "Penance",
+    "confirmed spell display refreshes its name")
+firstRow.down.onClick()
+local reboundValue = firstRow.payload:GetText()
+harness:RunTimers()
+assertEqual(firstRow.payload:GetText(), reboundValue,
+    "deferred confirmation cannot repaint a row rebound by reordering")
+harness.list.widgets[2].up.onClick()
+assertEqual(harness.config.bindings[1][3], 47540,
+    "binding order is restored after deferred-confirmation coverage")
+
+firstRow.payload:SetFocus()
+firstRow.payload:SimulateUserText("999999")
+firstRow.payload.onEnterPressed("999999")
+firstRow.payload:ClearFocus()
+assertEqual(harness.config.bindings[1][3], 999999,
+    "an unavailable positive spell ID remains persisted for editing")
+assertEqual(firstRow.payload:GetText(), "999999",
+    "an unavailable spell ID remains visible as numeric text")
+assertTrue(not firstRow.spellDisplay.shown,
+    "an unavailable spell ID does not claim a verified display")
+assertTrue(firstRow.payload.numeric and not firstRow.payload.readOnly,
+    "an unavailable spell ID remains a numeric editable field")
+assertEqual(
+    harness.spellDataRequests[#harness.spellDataRequests],
+    999999,
+    "an unavailable spell ID requests asynchronous spell data"
+)
+harness.spellInfo[999999] = {
+    name = "Newly Loaded Spell",
+    iconID = 987654,
+}
+harness:FireEvent("SPELL_DATA_LOAD_RESULT", 999999, true)
+assertTrue(firstRow.spellDisplay.shown,
+    "loaded spell data refreshes an unfocused matching value field")
+assertEqual(firstRow.spellDisplay.icon.texture, 987654,
+    "asynchronously loaded spell data refreshes the icon")
+assertEqual(firstRow.spellDisplay.name:GetText(), "Newly Loaded Spell",
+    "asynchronously loaded spell data refreshes the name")
+assertEqual(firstRow.payload:GetText(), "999999",
+    "asynchronous display refresh preserves the numeric editor value")
+
+firstRow.payload:SetFocus()
+local requestCount = #harness.spellDataRequests
+firstRow.payload:SimulateUserText("888888")
+firstRow.payload.onEnterPressed("888888")
+firstRow.payload:ClearFocus()
+assertTrue(not firstRow.spellDisplay.shown,
+    "a nonexistent spell ID remains visibly numeric")
+assertEqual(#harness.spellDataRequests, requestCount,
+    "a nonexistent spell ID does not start an async load")
+
+firstRow.payload:SetFocus()
 firstRow.payload:SimulateUserText("")
 firstRow.payload.onEnterPressed("")
+firstRow.payload:ClearFocus()
 assertEqual(harness.config.bindings[1][3], "",
     "spell payload can be cleared after numeric input filtering")
+assertTrue(not firstRow.spellDisplay.shown,
+    "an empty spell ID does not show stale verified spell details")
 local otherRowCapture = harness.list.widgets[2].capture
 otherRowCapture:StartCapture()
 assertTrue(otherRowCapture.capturing,
@@ -640,17 +831,55 @@ assertEqual(harness.cascadingMenu.items[1].text, "Class Spells",
 assertEqual(harness.cascadingMenu.items[2].text, "Specialization Spells",
     "spell picker groups current-spec spells")
 local setWidgetsCalls = harness.list.setWidgetsCalls
-harness.cascadingMenu.items[2].children[1].callback()
+local stalePickerCallback = harness.cascadingMenu.items[2].children[1].callback
+stalePickerCallback()
 assertEqual(harness.config.bindings[1][3], 47540,
     "suggested spell selection persists its spell ID")
 assertEqual(harness.list.setWidgetsCalls, setWidgetsCalls,
-    "spell picker repaints its row without hiding the focused editor")
+    "spell picker refreshes its row without rebuilding the list")
 assertEqual(firstRow.payload:GetText(), "47540",
-    "suggested spell selection immediately populates the value field")
+    "suggested spell selection preserves the underlying numeric ID")
 assertEqual(firstRow.payload.value, "47540",
     "suggested spell selection immediately updates AF's saved widget value")
-assertTrue(firstRow.payload:HasFocus(),
-    "spell picker selection preserves value-field keyboard focus")
+assertTrue(not firstRow.payload:HasFocus(),
+    "spell picker selection returns the field to verified display mode")
+assertTrue(firstRow.spellDisplay.shown,
+    "spell picker selection immediately shows verified spell details")
+assertEqual(firstRow.spellDisplay.icon.texture, 237545,
+    "spell picker selection immediately shows the chosen spell icon")
+assertEqual(firstRow.spellDisplay.name:GetText(), "Penance",
+    "spell picker selection immediately shows the chosen spell name")
+
+harness.spellOverrides[47540] = 111111
+harness:FireEvent("SPELLS_CHANGED")
+assertTrue(not firstRow.spellDisplay.shown,
+    "an uncached current override does not show stale base-spell details")
+assertEqual(
+    harness.spellDataRequests[#harness.spellDataRequests],
+    111111,
+    "an uncached current override requests its own spell data"
+)
+assertEqual(firstRow.payload:GetText(), "47540",
+    "override display loading preserves the configured base spell ID")
+firstRow.payload:SetFocus()
+harness.spellInfo[111111] = {
+    name = "Overridden Penance",
+    iconID = 111222,
+}
+harness:FireEvent("SPELL_DATA_LOAD_RESULT", 111111, true)
+assertTrue(not firstRow.spellDisplay.shown,
+    "spell data completion does not cover a focused numeric editor")
+firstRow.payload:ClearFocus()
+assertTrue(firstRow.spellDisplay.shown,
+    "loaded override details appear after numeric editing ends")
+assertEqual(firstRow.spellDisplay.icon.texture, 111222,
+    "loaded override details use the effective spell icon")
+assertEqual(firstRow.spellDisplay.name:GetText(), "Overridden Penance",
+    "loaded override details use the effective spell name")
+harness.spellOverrides[47540] = nil
+harness:FireEvent("SPELLS_CHANGED")
+assertEqual(firstRow.spellDisplay.name:GetText(), "Penance",
+    "same-spec spell changes repaint the current effective spell")
 
 local closeCalls = harness.cascadingMenuCloseCalls or 0
 harness:FireCallback("AF_PLAYER_SPEC_UPDATE")
@@ -806,6 +1035,9 @@ assertEqual(harness.cascadingMenuCloseCalls, closeCalls + 1,
     "profile changes close the visible panel's stale picker")
 assertEqual(harness.enabledCheckButton.label.textColor[1], "firebrick",
     "visible profile changes refresh the disabled title-row color")
+stalePickerCallback()
+assertEqual(newConfig.bindings[1][3], "/say new profile",
+    "a stale spell picker cannot mutate the newly active profile")
 dialog.onConfirm()
 assertEqual(newConfig.bindings[1][3], "/say new profile",
     "stale modal cannot mutate the newly active profile")
