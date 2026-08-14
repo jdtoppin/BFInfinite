@@ -1284,12 +1284,12 @@ local function testGlobalFrameworkRequirement()
     assertTrue(chunk, loadError)
     setfenv(chunk, environment)
     chunk("BFInfinite", BFI)
-    assertEqual(BFI.requiredAFVersion, 42, "published global AF minimum")
+    assertEqual(BFI.requiredAFVersion, 43, "published global AF minimum")
 
     local ok, versionError = pcall(eventHandler.ADDON_LOADED, eventHandler, BFI.name)
     assertEqual(ok, false, "global AF version check stops harness")
     assertEqual(versionError, stopAfterVersionCheck, "global AF version check sentinel")
-    assertEqual(requiredVersion, 42, "global AF minimum")
+    assertEqual(requiredVersion, 43, "global AF minimum")
 end
 
 local function testDispelOverlaySlotContract()
