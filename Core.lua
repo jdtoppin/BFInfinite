@@ -7,7 +7,8 @@ local AF = _G.AbstractFramework
 
 -- AF #39/r42 adds native dispel-color textures on top of r41's native
 -- dispel-overlay slots. Selection and color stay inside Blizzard's container.
-local REQUIRED_AF_VERSION = 42
+-- AF #41/r43 adds click-only mover actions for the Talking Head native-editor handoff.
+local REQUIRED_AF_VERSION = 43
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar

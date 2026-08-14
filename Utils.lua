@@ -510,6 +510,8 @@ function F.PrepareEditModePositions()
     then
         F.LoadPosition(popupParent, position, AF.UIParent)
     end
+
+    AF.Fire("BFI_PrepareEditModePositions")
 end
 
 ---------------------------------------------------------------------
