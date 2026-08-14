@@ -351,6 +351,10 @@ local function makeHarness()
         return true
     end
 
+    function AF.HasCustomAuraDurationBar()
+        return true
+    end
+
     function AF.HasCustomAuraOverlaySlot()
         return true
     end

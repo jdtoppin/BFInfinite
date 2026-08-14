@@ -277,11 +277,18 @@ local function makeHarness(hasNativeBackend, buffDisplayPlan)
         UF.config.party.indicators.buffs = {}
         function UF.GetActiveBuffDisplayReservationPlan()
             local costs = {}
+            local displayMetrics = {}
             for _, display in ipairs(buffDisplayPlan) do
                 costs[display.id] = display.reservationCost or 10
+                displayMetrics[display.id] = {
+                    effectiveSortMode = display.effectiveSortMode
+                        or "blizzard",
+                }
             end
             return buffDisplayPlan, {}, {
+                buttonCapacityCosts = costs,
                 reservationCosts = costs,
+                displayMetrics = displayMetrics,
             }
         end
     end
@@ -321,11 +328,14 @@ local function makeHarness(hasNativeBackend, buffDisplayPlan)
         return true
     end
 
-    function UF.CreateNativeGroupAuraContainerSeed(parent)
+    function UF.CreateNativeGroupAuraContainerSeed(parent, options)
         assertTrue(hasNativeBackend,
             "unavailable backend allocated a native seed")
         local seed = {
             child = parent,
+            clippingViewport = options
+                and options.clippingViewport == true
+                or false,
             index = #harness.nativeSeeds + 1,
             origin = "eager",
         }
@@ -825,11 +835,37 @@ local function testEnabledBuffDisplaySeedsArePreallocated()
             "Party Buff Display seed parent " .. index)
         assertEqual(seed.origin, "eager",
             "Party Buff Display seed origin " .. index)
+        assertEqual(seed.clippingViewport, false,
+            "ordinary Party Buff Display is not clipped " .. index)
         assertEqual(
             button._nativeAuraBuffDisplayReservationCosts
                 .healing_auras,
             10,
             "Party Buff Display reservation cost " .. index
+        )
+    end
+end
+
+local function testPriorityBuffDisplaySeedsUseClippingViewport()
+    local display = {
+        id = "healing_auras",
+        effectiveSortMode = "spell_list_priority",
+        reservationCost = 30,
+    }
+    local harness = makeHarness(true, {display})
+    harness:FireUpdate()
+
+    local header = harness.framesByName.BFI_PartyHeader
+    for index, button in ipairs(header.children) do
+        local seed = button._nativeAuraContainers
+            .buffDisplays.healing_auras
+        assertEqual(seed.clippingViewport, true,
+            "priority Party Buff Display clipping viewport " .. index)
+        assertEqual(
+            button._nativeAuraBuffDisplayReservationCosts
+                .healing_auras,
+            30,
+            "priority Party Buff Display capacity " .. index
         )
     end
 end
@@ -1022,6 +1058,7 @@ end
 
 testNativeHeaderSeedsAndBuilderArguments()
 testEnabledBuffDisplaySeedsArePreallocated()
+testPriorityBuffDisplaySeedsUseClippingViewport()
 testUnavailableBackendIsExactLegacyPath()
 testSkipGuardAndConfigRegistrationSurviveDisable()
 testConfigModeReenableRestoresPreviewState()

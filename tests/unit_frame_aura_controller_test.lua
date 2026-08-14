@@ -156,6 +156,16 @@ local function newHolder(harness, name, parent, frameTemplate)
         record(harness, "holder.size", self, width, height)
     end
 
+    function holder:SetClipsChildren(clipsChildren)
+        self.clipsChildren = clipsChildren == true
+        record(harness, "holder.clips-children", self, clipsChildren)
+    end
+
+    function holder:SetAllPoints(relativeTo)
+        self.allPoints = relativeTo
+        record(harness, "holder.set-all-points", self, relativeTo)
+    end
+
     function holder:ClearAllPoints()
         self.point = nil
         record(harness, "holder.clear-points", self)
@@ -328,6 +338,10 @@ local function makeHarness(options)
 
     function AF.HasCustomAuraIconDurationBar()
         return options.hasIconDurationBar ~= false
+    end
+
+    function AF.HasCustomAuraDurationBar()
+        return options.hasDurationBar ~= false
     end
 
     function AF.HasCustomAuraOverlaySlot()
@@ -1321,6 +1335,24 @@ local function testCapabilityGate()
         unavailableIconDurationBar.UF.HasNativeAuraContainerBackend(),
         false,
         "unavailable icon-duration-bar capability gate"
+    )
+
+    local missingDurationBar = makeHarness({
+        missingMethod = "HasCustomAuraDurationBar",
+    })
+    assertEqual(
+        missingDurationBar.UF.HasNativeAuraContainerBackend(),
+        false,
+        "missing standalone-duration-bar capability gate"
+    )
+
+    local unavailableDurationBar = makeHarness({
+        hasDurationBar = false,
+    })
+    assertEqual(
+        unavailableDurationBar.UF.HasNativeAuraContainerBackend(),
+        false,
+        "unavailable standalone-duration-bar capability gate"
     )
 
     local missingNativeDispelColor = makeHarness({
@@ -3508,6 +3540,38 @@ local function testGroupSeedAdoptionAndOneShotClaim()
     }, "duplicate seed claim stability")
 end
 
+local function testClippedGroupSeedViewport()
+    local harness = makeHarness()
+    local root = {}
+    local seed = harness.UF.CreateNativeGroupAuraContainerSeed(root, {
+        clippingViewport = true,
+    })
+    local viewport = seed.parent
+
+    assertTrue(viewport ~= root, "clipped seed viewport allocation")
+    assertEqual(viewport.parent, root, "clipped seed viewport parent")
+    assertEqual(viewport.clipsChildren, true,
+        "clipped seed viewport clips children")
+
+    local spec = completeSpec("party1", true)
+    spec.clipToHolder = true
+    local controller = harness.UF.CreateNativeGroupAuraContainerController(
+        root,
+        "BFIClippedGroupAuraHolder",
+        seed,
+        spec
+    )
+
+    assertEqual(seed.parent, viewport,
+        "clipped seed remains viewport-owned")
+    assertEqual(viewport.allPoints, controller:GetFrame(),
+        "clipped seed viewport follows public holder")
+    assertEqual(seed.point[2], controller:GetFrame(),
+        "clipped seed positioning remains holder-relative")
+    assertEqual(seed.shown, true, "clipped seed visible after build")
+    assertEqual(seed.enabled, true, "clipped seed enabled after build")
+end
+
 local function testGroupSeedBuildQueuesInCombat()
     local harness = makeHarness()
     local root = {}
@@ -3874,6 +3938,7 @@ testPartitionTopologyShrinkKeepsAbsentChildDormant()
 testPartitionRebuildRefreshAndDestroy()
 testGroupHeaderCapabilityAndSeed()
 testGroupSeedAdoptionAndOneShotClaim()
+testClippedGroupSeedViewport()
 testGroupSeedBuildQueuesInCombat()
 testCombatSeedClaimQueuesInitialization()
 testUnusedSeedDestroyAccounting()

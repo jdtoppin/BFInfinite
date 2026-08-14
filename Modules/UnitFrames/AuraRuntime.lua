@@ -108,6 +108,12 @@ local function ShouldSuppressGroupHarmfulIdentityFeatures(runtime)
         and runtime.auraFilter == "HARMFUL"
 end
 
+local function UsesPriorityExactSpellGroups(config)
+    return type(config) == "table"
+        and config.sortMode == "spell_list_priority"
+        and config.mode == "whitelist"
+end
+
 local function CopyCompilerConfig(runtime, config)
     local copied = AF.Copy(config)
     if not runtime._includePartition then
@@ -116,12 +122,20 @@ local function CopyCompilerConfig(runtime, config)
         -- SavedVariables but compile a single presentation topology.
         copied.subFrame = nil
     end
-    if not runtime._includeSpellColors then
+    local priorityOwnsExactSpellGroups =
+        UsesPriorityExactSpellGroups(copied)
+    if not runtime._includeSpellColors
+        and not priorityOwnsExactSpellGroups
+    then
         -- Callers that opt out own a fixed native group budget. Remove both
         -- suite-global colors and any imported profile-local color buckets so
         -- SavedVariables cannot silently expand that reviewed topology.
         copied.spellColors = nil
     elseif A and type(A.GetNativeSpellColorMap) == "function" then
+        -- Buff Displays normally opt out of spell colors because color-family
+        -- expansion multiplies native groups. Priority mode already owns one
+        -- exact, disjoint group per whitelist entry, so the compiler can apply
+        -- these static colors to Blocks/Bars without adding topology.
         copied.spellColors = A.GetNativeSpellColorMap()
     end
     return copied
@@ -1468,7 +1482,12 @@ function UF.RefreshNativeAuraSpellColors()
     local reloadRequired = false
     for runtime in pairs(providerRuntimes) do
         if not runtime._destroyed
-            and runtime._includeSpellColors
+            and (
+                runtime._includeSpellColors
+                or UsesPriorityExactSpellGroups(
+                    runtime._sourceConfig
+                )
+            )
             and runtime._sourceConfig
         then
             NativeAuras_LoadConfig(

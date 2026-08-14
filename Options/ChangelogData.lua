@@ -13,8 +13,12 @@ BFI.changelog = {
                 zhCN = "小队与团队增益现在支持有数量限制的子增益显示，包括治疗光环、减伤技能、外部减伤和用户自定义显示",
             },
             {
-                enUS = "Buff Displays add secret-safe Icon + Duration Bar and Health Bar highlight presentations through Blizzard's native aura providers",
-                zhCN = "增益显示现可通过暴雪原生光环提供器使用安全处理受限数据的“图标 + 持续时间条”和生命条高亮显示方式",
+                enUS = "Buff Displays add secret-safe Icon + Duration Bar, standalone Bar, and Health Bar highlight presentations through Blizzard's native aura providers",
+                zhCN = "增益显示现可通过暴雪原生光环提供器使用安全处理受限数据的“图标 + 持续时间条”、独立持续时间条和生命条高亮显示方式",
+            },
+            {
+                enUS = "Spell List Priority compacts active whitelist spells in user order and reports its per-unit-frame managed aura button capacity; Blizzard Sort remains the efficient option",
+                zhCN = "“法术列表优先级”可按白名单顺序紧凑显示激活光环，并显示每个单位框体的托管光环按钮容量；“暴雪排序”仍为高效选项",
             },
             {
                 enUS = "Individual Bags view keeps full-size icons and grows from the Combined View baseline height",

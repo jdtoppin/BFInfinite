@@ -50,9 +50,15 @@ local COOLDOWN_STYLES = {
 }
 
 local PRESENTATIONS = {
+    bar = true,
     frame_highlight = true,
     icon_duration_bar = true,
     icons = true,
+}
+
+local SORT_MODES = {
+    blizzard = true,
+    spell_list_priority = true,
 }
 
 local FRAME_HIGHLIGHT_ANCHORS = {
@@ -203,6 +209,14 @@ local function NormalizePresentation(presentation)
     return presentation
 end
 
+local function NormalizeSortMode(sortMode)
+    sortMode = sortMode or "blizzard"
+    if not SORT_MODES[sortMode] then
+        return nil, "INVALID_AURA_SORT_MODE"
+    end
+    return sortMode
+end
+
 local function NormalizeDurationBar(config)
     local source = config.durationBar or {}
     if type(source) ~= "table" then
@@ -257,6 +271,55 @@ local function NormalizeDurationBar(config)
         return nil, "INVALID_DURATION_BAR_GEOMETRY"
     end
     return style
+end
+
+local function NormalizeStandaloneDurationBar(config)
+    local source = config.durationBar or {}
+    if type(source) ~= "table" then
+        return nil, "INVALID_DURATION_BAR"
+    end
+
+    -- height/gap belong to the icon underbar presentation. Accept them as
+    -- latent saved settings when a user switches presentation, but deliberately
+    -- omit them from the standalone bar style passed to AbstractFramework.
+    local supported = {
+        backgroundColor = true,
+        color = true,
+        gap = true,
+        height = true,
+        inset = true,
+    }
+    for key in pairs(source) do
+        if not supported[key] then
+            return nil, "INVALID_DURATION_BAR"
+        end
+    end
+
+    local color = source.color == nil
+        and DEFAULT_DURATION_BAR.color
+        or source.color
+    local backgroundColor = source.backgroundColor == nil
+        and DEFAULT_DURATION_BAR.backgroundColor
+        or source.backgroundColor
+    local inset = source.inset == nil
+        and DEFAULT_DURATION_BAR.inset
+        or source.inset
+    if not IsNormalizedColor(color)
+        or not IsNormalizedColor(backgroundColor)
+        or not IsFiniteNumber(inset)
+        or inset < 0
+    then
+        return nil, "INVALID_DURATION_BAR"
+    end
+    if config.width <= inset * 2 or config.height <= inset * 2 then
+        return nil, "INVALID_DURATION_BAR_GEOMETRY"
+    end
+
+    return {
+        color = CopyColor(color),
+        backgroundColor = CopyColor(backgroundColor),
+        inset = inset,
+    }
 end
 
 local function NormalizeFrameHighlight(config)
@@ -473,11 +536,17 @@ local function NormalizeSpellIDCandidateFilters(config)
         count = count + 1
     end
 
+    local orderedSpellIDs = {}
     local spellIDs = {}
+    local hasDuplicateSpellID = false
     for index = 1, count do
         local spellID = rawget(list, index)
         if not IsPositiveInteger(spellID) then
             return nil, nil, invalidListError
+        end
+        orderedSpellIDs[index] = spellID
+        if spellIDs[spellID] then
+            hasDuplicateSpellID = true
         end
         spellIDs[spellID] = true
     end
@@ -487,14 +556,14 @@ local function NormalizeSpellIDCandidateFilters(config)
         -- must include no aura identities rather than disable filtering.
         return {
             includeSpellIDs = spellIDs,
-        }, true
+        }, true, nil, orderedSpellIDs, hasDuplicateSpellID
     end
     if count > 0 then
         return {
             excludeSpellIDs = spellIDs,
-        }, true
+        }, true, nil, nil, false
     end
-    return nil, false
+    return nil, false, nil, nil, false
 end
 
 local function GetColorKey(color)
@@ -512,7 +581,8 @@ local function NormalizeNativeSpellColorBuckets(config)
     -- assistable unit and harmful rows require a non-assistable unit later;
     -- otherwise Blizzard can bypass every identity map and duplicate auras
     -- across colour groups.
-    if not IsBlockCooldownStyle(config.cooldownStyle)
+    if config.presentation ~= "bar"
+        and not IsBlockCooldownStyle(config.cooldownStyle)
         or config.spellColors == nil
     then
         return nil, nil, false
@@ -779,27 +849,40 @@ local function NewButtonStyle(
     -- Retail 12.1.0.69299 (wow-ui-source 31c7f7b9cc79) lets Blizzard
     -- privately apply typed and None/red colors to AF's square PreserveAsset
     -- border. The compiler supplies only ordinary saved configuration.
+    local standaloneBar = config.presentation == "bar"
     local style = {
         noBorder = true,
         width = appearance.width,
         height = appearance.height,
         desaturated = appearance.desaturated,
-        cooldownStyle = config.cooldownStyle,
-        durationText = NormalizeDurationText(config.durationText),
-        stackText = NormalizeStackText(config.stackText),
+        cooldownStyle = standaloneBar
+            and "duration_bar"
+            or config.cooldownStyle,
+        durationText = not standaloneBar
+            and NormalizeDurationText(config.durationText)
+            or nil,
+        stackText = not standaloneBar
+            and NormalizeStackText(config.stackText)
+            or nil,
         nativeDispelColor = baseFilter == "HARMFUL"
             and config.auraTypeColor ~= nil
             and config.auraTypeColor.debuffType == true,
         tooltip = Copy(tooltip),
     }
 
-    if config.cooldownStyle == "icon_duration_bar" then
+    if standaloneBar then
+        style.durationBar = Copy(config.durationBar)
+        if blockColor then
+            style.durationBar.color = CopyColor(blockColor)
+        end
+    elseif config.cooldownStyle == "icon_duration_bar" then
         style.durationBar = Copy(config.durationBar)
     end
 
     -- This is ordinary saved configuration, never aura-derived data. Omit it
     -- for icon styles so an inactive setting cannot affect native construction.
-    if IsBlockCooldownStyle(config.cooldownStyle)
+    if not standaloneBar
+        and IsBlockCooldownStyle(config.cooldownStyle)
         and blockColor ~= nil
     then
         style.blockColor = CopyColor(blockColor)
@@ -875,9 +958,60 @@ local function ExpandGroupDefinitions(
     return definitions
 end
 
-local function GetContainerGeometry(config, flow, schema, groupCount, appearance)
-    local capacity = groupCount * config.numTotal
-    local perLine = min(config.numPerLine, config.numTotal)
+local function ExpandSpellListPriorityDefinitions(
+    policyGroups,
+    candidateFilters,
+    orderedSpellIDs,
+    blockColors
+)
+    local definitions = {}
+    local policyGroup = policyGroups[1]
+    if not policyGroup then return definitions end
+
+    local nonIdentityFilters =
+        CopyNonIdentityCandidateFilters(candidateFilters)
+    for index, spellID in ipairs(orderedSpellIDs) do
+        local exactFilters = Copy(nonIdentityFilters)
+        exactFilters.includeSpellIDs = {
+            [spellID] = true,
+        }
+        definitions[index] = {
+            -- Position keys deliberately remain stable when a user reorders a
+            -- list without changing its length. Candidate maps can then tune
+            -- live while the native group topology stays fixed.
+            key = policyGroup.key .. "_priority_" .. index,
+            filterString = policyGroup.filterString,
+            playerScope = policyGroup.playerScope,
+            candidateFilters = exactFilters,
+            blockColor = blockColors and blockColors[spellID]
+                and CopyColor(blockColors[spellID])
+                or nil,
+            maxFrameCount = 1,
+            layoutIndex = index,
+        }
+    end
+    return definitions
+end
+
+local function GetContainerGeometry(
+    config,
+    flow,
+    schema,
+    groupCount,
+    appearance,
+    options
+)
+    options = options or {}
+    local maxDisplayed = options.maxDisplayed
+    local capacity = maxDisplayed
+        and min(groupCount, maxDisplayed)
+        or groupCount * config.numTotal
+    -- Priority groups compact in user order. A single native line exactly as
+    -- long as Max Displayed makes the next active group wrap wholly outside
+    -- the fixed clipping holder, including when Max Displayed would otherwise
+    -- leave unused cells on a legacy numPerLine row.
+    local perLine = maxDisplayed
+        or min(config.numPerLine, config.numTotal)
     local lineSlots = min(capacity, perLine)
     local lines = ceil(capacity / perLine)
     local primarySize = flow.horizontal
@@ -889,6 +1023,12 @@ local function GetContainerGeometry(config, flow, schema, groupCount, appearance
     local crossSpacing = flow.horizontal
         and config.spacingY
         or config.spacingX
+    if maxDisplayed then
+        -- Overflow must begin wholly outside the clipped holder. Negative
+        -- cross-axis spacing would otherwise pull the first hidden row/column
+        -- one or more pixels back into the viewport.
+        crossSpacing = max(0, crossSpacing)
+    end
     local crossSize = flow.horizontal
         and appearance.height
         or appearance.width
@@ -933,17 +1073,32 @@ local function GetContainerGeometry(config, flow, schema, groupCount, appearance
     }
 end
 
-local function NewVariantMetrics(groupCount, config, geometry)
-    return {
+local function NewVariantMetrics(groups, config, geometry, options)
+    local groupCount = #groups
+    local ceiling = 0
+    local registeredCapacity = 0
+    for _, group in ipairs(groups) do
+        local maxFrameCount = group.maxFrameCount or config.numTotal
+        registeredCapacity = registeredCapacity + maxFrameCount
+        ceiling = ceiling
+            + ceil(maxFrameCount / NATIVE_BUTTON_BATCH_SIZE)
+                * NATIVE_BUTTON_BATCH_SIZE
+    end
+
+    local metrics = {
         groupCount = groupCount,
         nativeVisibleCapacity = geometry.capacity,
         initialRestrictedButtonCount =
             groupCount * NATIVE_BUTTON_BATCH_SIZE,
-        freshContainerRestrictedButtonCountCeiling = groupCount
-            * ceil(config.numTotal / NATIVE_BUTTON_BATCH_SIZE)
-            * NATIVE_BUTTON_BATCH_SIZE,
+        freshContainerRestrictedButtonCountCeiling = ceiling,
         holder = Copy(geometry.holder),
     }
+    if options and options.maxDisplayed then
+        metrics.nativeRegisteredCapacity = registeredCapacity
+        metrics.maxDisplayed = options.maxDisplayed
+        metrics.clipToHolder = true
+    end
+    return metrics
 end
 
 local function CompileContainerVariant(
@@ -955,8 +1110,10 @@ local function CompileContainerVariant(
     tooltip,
     groups,
     appearance,
-    reserveTrailingCrossSpacing
+    reserveTrailingCrossSpacing,
+    options
 )
+    options = options or {}
     local groupCount = #groups
     if groupCount == 0 then return nil end
 
@@ -965,7 +1122,8 @@ local function CompileContainerVariant(
         flow,
         schema,
         groupCount,
-        appearance
+        appearance,
+        options
     )
     local completeGroups = {}
     local tuningGroups = {}
@@ -974,10 +1132,14 @@ local function CompileContainerVariant(
         groups = {},
         slots = {},
     }
+    if options.maxDisplayed then
+        constructionKey.sortMode = "spell_list_priority"
+        constructionKey.clipToHolder = true
+    end
 
     for index, policyGroup in ipairs(groups) do
         local layout = NewLayout(
-            index,
+            policyGroup.layoutIndex or index,
             appearance.width,
             appearance.height,
             geometry.primarySpacing,
@@ -995,7 +1157,8 @@ local function CompileContainerVariant(
         completeGroups[index] = {
             key = policyGroup.key,
             filterString = policyGroup.filterString,
-            maxFrameCount = config.numTotal,
+            maxFrameCount = policyGroup.maxFrameCount
+                or config.numTotal,
             candidateFilters = Copy(policyGroup.candidateFilters),
             sortMethod = schema.defaultSort,
             sortDirection = schema.normalSort,
@@ -1005,7 +1168,8 @@ local function CompileContainerVariant(
         tuningGroups[index] = {
             key = policyGroup.key,
             filterString = policyGroup.filterString,
-            maxFrameCount = config.numTotal,
+            maxFrameCount = policyGroup.maxFrameCount
+                or config.numTotal,
             candidateFilters = Copy(policyGroup.candidateFilters),
             sortMethod = schema.defaultSort,
             sortDirection = schema.normalSort,
@@ -1017,8 +1181,7 @@ local function CompileContainerVariant(
         }
     end
 
-    return {
-        completeSpec = {
+    local completeSpec = {
             unit = unit,
             enabled = config.enabled,
             shown = false,
@@ -1030,8 +1193,8 @@ local function CompileContainerVariant(
             },
             groups = completeGroups,
             slots = {},
-        },
-        tuningSpec = {
+        }
+    local tuningSpec = {
             holder = Copy(geometry.holder),
             containerPoint = Copy(geometry.containerPoint),
             flowLayout = Copy(geometry.flowLayout),
@@ -1040,9 +1203,17 @@ local function CompileContainerVariant(
             },
             groups = tuningGroups,
             slots = {},
-        },
+        }
+    if options.maxDisplayed then
+        completeSpec.clipToHolder = true
+        tuningSpec.clipToHolder = true
+    end
+
+    return {
+        completeSpec = completeSpec,
+        tuningSpec = tuningSpec,
         constructionKey = constructionKey,
-        metrics = NewVariantMetrics(groupCount, config, geometry),
+        metrics = NewVariantMetrics(groups, config, geometry, options),
     }, geometry
 end
 
@@ -1335,15 +1506,44 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         return nil, presentationError
     end
 
+    local sortMode, sortModeError =
+        NormalizeSortMode(config.sortMode)
+    if not sortMode then
+        return nil, sortModeError
+    end
+    -- Keep the saved priority preference latent outside whitelist mode. The
+    -- settings UI deliberately preserves it so returning to a whitelist can
+    -- restore the user's ordered display without profile churn.
+    local spellListPriority = sortMode == "spell_list_priority"
+        and config.mode == "whitelist"
+
     local policy, policyError = UF.CompileNativeAuraPolicy(baseFilter, config.filters)
     if not policy then
         return nil, policyError
     end
 
-    local candidateFilters, identityFilterActive, identityFilterError =
+    local candidateFilters, identityFilterActive, identityFilterError,
+        orderedSpellIDs, hasDuplicateSpellID =
         NormalizeSpellIDCandidateFilters(config)
     if identityFilterError then
         return nil, identityFilterError
+    end
+
+    if spellListPriority then
+        if baseFilter ~= "HELPFUL" then
+            return nil, "SPELL_LIST_PRIORITY_REQUIRES_HELPFUL_FILTER"
+        end
+        if presentation == "frame_highlight" then
+            return nil, "SPELL_LIST_PRIORITY_UNSUPPORTED_PRESENTATION"
+        end
+        if hasDuplicateSpellID then
+            return nil,
+                "SPELL_LIST_PRIORITY_REQUIRES_UNIQUE_WHITELIST"
+        end
+        if not policy.empty and #policy.groups ~= 1 then
+            return nil,
+                "SPELL_LIST_PRIORITY_REQUIRES_SINGLE_FILTER_GROUP"
+        end
     end
 
     if not IsPosition(config.position) or not IsNonEmptyString(config.anchorTo) then
@@ -1405,6 +1605,15 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         config.presentation = presentation
         config.cooldownStyle = "icon_duration_bar"
         config.durationBar = durationBar
+    elseif presentation == "bar" then
+        local durationBar, durationBarError =
+            NormalizeStandaloneDurationBar(config)
+        if not durationBar then
+            return nil, durationBarError
+        end
+        config = Copy(config)
+        config.presentation = presentation
+        config.durationBar = durationBar
     end
     local spellColorBuckets, coloredSpellIDs, spellColorsRequested,
         spellColorError =
@@ -1430,10 +1639,20 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     if not tooltip then
         return nil, tooltipError
     end
+    if spellListPriority then
+        -- Restricted AuraButtons can outlive the visible viewport while their
+        -- exact groups compact. Until pointer clipping is certified in-client,
+        -- do not leave a native tooltip hit region behind the clipped holder.
+        tooltip = {enabled = false}
+        tooltipApproximate = false
+    end
 
     local partition, partitionError = NormalizePartition(config.subFrame)
     if partitionError then
         return nil, partitionError
+    end
+    if spellListPriority and partition then
+        return nil, "SPELL_LIST_PRIORITY_UNSUPPORTED_PARTITION"
     end
     if partition
         and (
@@ -1445,9 +1664,13 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     end
 
     local empty = policy.empty
+        or (spellListPriority and #orderedSpellIDs == 0)
     local partitionActive = not empty and partition ~= nil
     local requestedColorBucketCount =
-        spellColorsRequested and #spellColorBuckets or 0
+        not spellListPriority
+        and spellColorsRequested
+        and #spellColorBuckets
+        or 0
     local requestedColorMultiplier =
         requestedColorBucketCount + 1
     local requestedFriendlyColorGroupCount =
@@ -1479,6 +1702,7 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         requestedColorExpandedGroupCount
             > MAX_NATIVE_COLOR_EXPANDED_GROUPS
     local spellColorsActive = not empty
+        and not spellListPriority
         and spellColorsRequested
         and not colorGroupBudgetExceeded
     -- 12.1 evaluates these maps inside the restricted aura container. For
@@ -1507,6 +1731,11 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
     degradations.tooltipPlacementApproximate = not empty and tooltipApproximate
     degradations.partitionDeferred = false
     degradations.partitionSecretFallback = partitionActive
+    if spellListPriority then
+        degradations.spellListPriorityUsesExactGroups = not empty
+        degradations.spellListPriorityNativeTooltipsDisabled = not empty
+        degradations.spellListPriorityIgnoresNumPerLine = not empty
+    end
 
     local descriptor = {
         completeSpec = nil,
@@ -1552,6 +1781,10 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         degradations = degradations,
         metrics = EmptyMetrics(),
     }
+    if spellListPriority then
+        descriptor.sortMode = sortMode
+        descriptor.clipToHolder = not empty
+    end
 
     if empty then
         return descriptor
@@ -1559,6 +1792,20 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
 
     AddDiagnostic(descriptor.diagnostics, "NATIVE_DEFAULT_SORT_ADDS_PRIORITY")
     AddDiagnostic(descriptor.diagnostics, "NATIVE_HOLDER_USES_MAXIMUM_EXTENT")
+    if spellListPriority then
+        AddDiagnostic(
+            descriptor.diagnostics,
+            "NATIVE_SPELL_LIST_PRIORITY_USES_EXACT_GROUPS"
+        )
+        AddDiagnostic(
+            descriptor.diagnostics,
+            "NATIVE_SPELL_LIST_PRIORITY_TOOLTIPS_DISABLED"
+        )
+        AddDiagnostic(
+            descriptor.diagnostics,
+            "NATIVE_SPELL_LIST_PRIORITY_USES_CLIPPED_MAX_DISPLAYED"
+        )
+    end
     if spellIDFiltersRestricted then
         AddDiagnostic(
             descriptor.diagnostics,
@@ -1596,16 +1843,28 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         )
     end
 
-    local groupDefinitions = ExpandGroupDefinitions(
-        policy.groups,
-        candidateFilters,
-        spellColorsActive,
-        spellColorBuckets,
-        coloredSpellIDs
-    )
+    local groupDefinitions
+    if spellListPriority then
+        groupDefinitions = ExpandSpellListPriorityDefinitions(
+            policy.groups,
+            candidateFilters,
+            orderedSpellIDs,
+            spellColorsRequested and config.spellColors or nil
+        )
+    else
+        groupDefinitions = ExpandGroupDefinitions(
+            policy.groups,
+            candidateFilters,
+            spellColorsActive,
+            spellColorBuckets,
+            coloredSpellIDs
+        )
+    end
     local groupCount = #groupDefinitions
-    descriptor.degradations.perGroupLimit = groupCount > 1
-    descriptor.degradations.perGroupSort = groupCount > 1
+    descriptor.degradations.perGroupLimit = not spellListPriority
+        and groupCount > 1
+    descriptor.degradations.perGroupSort = not spellListPriority
+        and groupCount > 1
     local flow = GetFlow(config, schema)
     local mainAppearance = {
         width = config.width,
@@ -1621,7 +1880,10 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         tooltip,
         groupDefinitions,
         mainAppearance,
-        false
+        false,
+        spellListPriority and {
+            maxDisplayed = config.numTotal,
+        } or nil
     )
     descriptor.completeSpec = friendly.completeSpec
     descriptor.tuningSpec = friendly.tuningSpec
@@ -1646,6 +1908,15 @@ function UF.CompileNativeAuraSpec(unit, baseFilter, config)
         colorGroupBudgetExceeded =
             colorGroupBudgetExceeded,
     }
+    if spellListPriority then
+        descriptor.metrics.nativeRegisteredCapacity =
+            friendly.metrics.nativeRegisteredCapacity
+        descriptor.metrics.maxDisplayed = config.numTotal
+        descriptor.metrics.prioritySpellCount = #orderedSpellIDs
+        descriptor.metrics.clipToHolder = true
+        descriptor.metrics.reservationRestrictedButtonCount =
+            friendly.metrics.freshContainerRestrictedButtonCountCeiling
+    end
 
     if partitionActive then
         local mainGroups, complementGroups =

@@ -72,17 +72,28 @@ local function CreateRaid()
 
     local reservedBuffDisplays = {}
     local reservedBuffDisplayCosts = {}
+    local reservedBuffDisplayClipping = {}
     if hasNativeGroupAuras
         and type(UF.GetActiveBuffDisplayReservationPlan) == "function"
     then
         local buffs = UF.config.raid.indicators.buffs
         local plan, _, metrics =
             UF.GetActiveBuffDisplayReservationPlan(buffs)
-        local costs = metrics and metrics.reservationCosts or {}
+        local costs = metrics
+            and (
+                metrics.buttonCapacityCosts
+                or metrics.reservationCosts
+            )
+            or {}
+        local displayMetrics = metrics and metrics.displayMetrics or {}
         for index = 1, #(plan or {}) do
             local id = plan[index].id
             reservedBuffDisplays[#reservedBuffDisplays + 1] = id
             reservedBuffDisplayCosts[id] = costs[id]
+            reservedBuffDisplayClipping[id] =
+                displayMetrics[id]
+                and displayMetrics[id].effectiveSortMode
+                    == "spell_list_priority"
         end
     end
 
@@ -95,7 +106,10 @@ local function CreateRaid()
             for index = 1, #reservedBuffDisplays do
                 local id = reservedBuffDisplays[index]
                 buffDisplaySeeds[id] =
-                    UF.CreateNativeGroupAuraContainerSeed(button)
+                    UF.CreateNativeGroupAuraContainerSeed(button, {
+                        clippingViewport =
+                            reservedBuffDisplayClipping[id] == true,
+                    })
             end
             button._nativeAuraContainers = {
                 -- Blizzard supplies one header-born shell. Raid's displays

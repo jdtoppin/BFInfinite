@@ -51,7 +51,11 @@ local function GetReservationPlan(config)
             }
         end
     end
-    return reserved, {}, {reservationCosts = {}}
+    return reserved, {}, {
+        buttonCapacityCosts = {},
+        reservationCosts = {},
+        displayMetrics = {},
+    }
 end
 
 local function IndexDisplays(displays)
@@ -154,8 +158,12 @@ local function RequiresStructuralReload(
     -- when an admitted display has no shell or asks for more native
     -- construction capacity than that shell was initially allocated for.
     local costs = type(metrics) == "table"
-        and type(metrics.reservationCosts) == "table"
-        and metrics.reservationCosts
+        and (
+            type(metrics.buttonCapacityCosts) == "table"
+                and metrics.buttonCapacityCosts
+            or type(metrics.reservationCosts) == "table"
+                and metrics.reservationCosts
+        )
         or {}
     local allocatedCosts = manager._buffDisplayAllocationCosts or {}
     for _, display in ipairs(reserved or {}) do
@@ -404,6 +412,7 @@ local function BuffDisplays_GetState(self)
             base = {state = STATE_DESTROYED},
             displays = {},
             order = {},
+            reservationMetrics = {},
         }
     end
 
@@ -424,6 +433,12 @@ local function BuffDisplays_GetState(self)
     local hasLimitExceeded = false
     local reservedIDs = self._buffDisplayReservedIDs or {}
     local overflowIDs = self._buffDisplayOverflowIDs or {}
+    local reservationMetrics =
+        self._buffDisplayReservationMetrics or {}
+    local displayReservationMetrics =
+        type(reservationMetrics.displayMetrics) == "table"
+        and reservationMetrics.displayMetrics
+        or {}
 
     for _, id in ipairs(order) do
         local runtime = self._buffDisplayRuntimes[id]
@@ -437,6 +452,28 @@ local function BuffDisplays_GetState(self)
                 reservedIDs[id] == true,
                 runtime ~= nil
             )
+        end
+        local reservation = displayReservationMetrics[id]
+        if type(reservation) == "table" then
+            state.reservation = AF.Copy(reservation)
+            state.buttonCapacityCost =
+                reservation.buttonCapacityCost
+            state.buttonCapacityLimit =
+                reservation.buttonCapacityLimit
+            state.reservationCost = reservation.reservationCost
+            state.capacityExceeded =
+                reservation.capacityExceeded == true
+            state.buttonCapacityExceeded =
+                reservation.buttonCapacityExceeded == true
+            state.sortMode = reservation.sortMode
+            state.effectiveSortMode =
+                reservation.effectiveSortMode
+            state.priorityPreferenceLatent =
+                reservation.priorityPreferenceLatent == true
+            state.prioritySpellCount =
+                reservation.prioritySpellCount
+            state.maxDisplayed = reservation.maxDisplayed
+            state.reservationErrorCode = reservation.errorCode
         end
         states[id] = state
         active = state.active == true or active
@@ -470,6 +507,7 @@ local function BuffDisplays_GetState(self)
     result.base = baseState
     result.displays = states
     result.order = order
+    result.reservationMetrics = AF.Copy(reservationMetrics)
     return result
 end
 

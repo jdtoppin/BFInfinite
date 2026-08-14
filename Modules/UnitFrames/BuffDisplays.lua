@@ -3,7 +3,7 @@ local BFI = select(2, ...)
 ---@class UnitFrames
 local UF = BFI.modules.UnitFrames
 
-local floor = math.floor
+local ceil, floor = math.ceil, math.floor
 local ipairs, pairs, sort, type =
     ipairs, pairs, table.sort, type
 local insert, remove = table.insert, table.remove
@@ -20,8 +20,14 @@ local SCHEMA_VERSION = 1
 -- units can therefore add 400 restricted buttons, so keep the concurrently
 -- reserved child topology deliberately small and deterministic.
 local MAX_ACTIVE_CHILD_DISPLAYS = 4
-local MAX_CHILD_INITIAL_RESERVATIONS = 40
-local NATIVE_GROUP_INITIAL_RESERVATIONS = 10
+local MAX_CHILD_BUTTON_CAPACITY = 40
+local NATIVE_GROUP_BUTTON_BATCH_SIZE = 10
+
+local SORT_MODES = {
+    blizzard = true,
+    spell_list_priority = true,
+}
+local DEFAULT_SORT_MODE = "blizzard"
 
 local BUILT_IN_ORDER = {
     "healing_auras",
@@ -45,11 +51,17 @@ local COLLECTION_KEYS = {
 UF.BUFF_DISPLAY_SCHEMA_VERSION = SCHEMA_VERSION
 UF.MAX_ACTIVE_CHILD_BUFF_DISPLAYS = MAX_ACTIVE_CHILD_DISPLAYS
 UF.MAX_CHILD_BUFF_DISPLAY_INITIAL_RESERVATIONS =
-    MAX_CHILD_INITIAL_RESERVATIONS
+    MAX_CHILD_BUTTON_CAPACITY
+UF.MAX_CHILD_BUFF_DISPLAY_BUTTON_CAPACITY =
+    MAX_CHILD_BUTTON_CAPACITY
 UF.BUILT_IN_BUFF_DISPLAY_IDS = {
     BUILT_IN_ORDER[1],
     BUILT_IN_ORDER[2],
     BUILT_IN_ORDER[3],
+}
+UF.BUFF_DISPLAY_SORT_MODES = {
+    blizzard = "blizzard",
+    spell_list_priority = "spell_list_priority",
 }
 
 local function Copy(value, seen)
@@ -80,6 +92,12 @@ local function IsPositiveInteger(value)
     return type(value) == "number"
         and value > 0
         and value == floor(value)
+end
+
+local function NormalizeSortMode(record)
+    if not SORT_MODES[record.sortMode] then
+        record.sortMode = DEFAULT_SORT_MODE
+    end
 end
 
 local function NormalizeName(value)
@@ -234,6 +252,7 @@ local function NormalizeRecords(buffConfig, templates)
         record.builtIn = true
         record.name = BUILT_IN_NAMES[id]
         record.presentation = record.presentation or "icons"
+        NormalizeSortMode(record)
         if type(record.enabled) ~= "boolean" then
             record.enabled = false
         end
@@ -246,6 +265,7 @@ local function NormalizeRecords(buffConfig, templates)
             record.name = NormalizeName(record.name)
                 or ("Buff Display " .. id)
             record.presentation = record.presentation or "icons"
+            NormalizeSortMode(record)
             if type(record.enabled) ~= "boolean" then
                 record.enabled = false
             end
@@ -313,8 +333,88 @@ function UF.GetOrderedBuffDisplays(buffConfig)
     return ordered
 end
 
-local function GetInitialReservationCost(record)
+local function GetOrderedUniqueWhitelist(record)
+    if record.mode ~= "whitelist"
+        or type(record.whitelist) ~= "table"
+    then
+        return nil, "SPELL_LIST_PRIORITY_REQUIRES_WHITELIST"
+    end
+
+    local count = 0
+    for index, spellID in pairs(record.whitelist) do
+        if not IsPositiveInteger(index)
+            or not IsPositiveInteger(spellID)
+        then
+            return nil, "INVALID_SPELL_ID_WHITELIST"
+        end
+        count = count + 1
+    end
+
+    local ordered, seen = {}, {}
+    for index = 1, count do
+        local spellID = record.whitelist[index]
+        if not IsPositiveInteger(spellID) then
+            return nil, "INVALID_SPELL_ID_WHITELIST"
+        end
+        if seen[spellID] then
+            return nil,
+                "SPELL_LIST_PRIORITY_REQUIRES_UNIQUE_WHITELIST"
+        end
+        seen[spellID] = true
+        ordered[index] = spellID
+    end
+    return ordered
+end
+
+local function GetNormalGroupReservationCost(record, groupCount)
+    local numTotal = record.numTotal
+    if numTotal == nil then
+        -- Focused/legacy model callers can normalize before the complete
+        -- indicator preset has been materialized. The compiler still rejects
+        -- a missing count before native construction; one batch keeps this
+        -- configuration-only phase deterministic.
+        numTotal = NATIVE_GROUP_BUTTON_BATCH_SIZE
+    elseif not IsPositiveInteger(numTotal) then
+        return nil, "INVALID_COUNTS"
+    end
+
+    return groupCount
+        * ceil(numTotal / NATIVE_GROUP_BUTTON_BATCH_SIZE)
+        * NATIVE_GROUP_BUTTON_BATCH_SIZE
+end
+
+local function NewDisplayReservationMetrics(record)
+    return {
+        sortMode = record.sortMode or DEFAULT_SORT_MODE,
+        effectiveSortMode = DEFAULT_SORT_MODE,
+        priorityPreferenceLatent = false,
+        buttonCapacityCost = 0,
+        buttonCapacityLimit = MAX_CHILD_BUTTON_CAPACITY,
+        policyGroupCount = 0,
+        compiledGroupCount = 0,
+        prioritySpellCount = 0,
+        maxDisplayed = IsPositiveInteger(record.numTotal)
+            and record.numTotal
+            or nil,
+        clipToHolder = false,
+        buttonCapacityExceeded = false,
+        capacityExceeded = false,
+        errorCode = nil,
+    }
+end
+
+local function GetDisplayReservationMetrics(record)
+    local metrics = NewDisplayReservationMetrics(record)
     local isFrameHighlight = record.presentation == "frame_highlight"
+    local priorityRequested =
+        metrics.sortMode == "spell_list_priority"
+    local isPriority = priorityRequested
+        and record.mode == "whitelist"
+    metrics.effectiveSortMode = isPriority
+        and "spell_list_priority"
+        or DEFAULT_SORT_MODE
+    metrics.priorityPreferenceLatent = priorityRequested
+        and not isPriority
 
     -- BuffDisplayRuntime compiles children with spell-color expansion and the
     -- Separate Own subFrame partition disabled. The policy group count is
@@ -325,27 +425,108 @@ local function GetInitialReservationCost(record)
             record.filters
         )
         if type(policy) ~= "table" then
-            return MAX_CHILD_INITIAL_RESERVATIONS + 1
+            metrics.errorCode = "INVALID_FILTER_SCHEMA"
+            metrics.buttonCapacityCost =
+                MAX_CHILD_BUTTON_CAPACITY + 1
+            metrics.capacityExceeded = true
+            metrics.buttonCapacityExceeded = true
+            return metrics
         end
         local groupCount = type(policy.groups) == "table"
             and #policy.groups
             or 0
+        metrics.policyGroupCount = groupCount
+        if isPriority then
+            if isFrameHighlight then
+                metrics.errorCode =
+                    "SPELL_LIST_PRIORITY_UNSUPPORTED_PRESENTATION"
+            elseif groupCount > 1 then
+                metrics.errorCode =
+                    "SPELL_LIST_PRIORITY_REQUIRES_SINGLE_FILTER_GROUP"
+            end
+
+            local spellIDs, listError =
+                GetOrderedUniqueWhitelist(record)
+            if not metrics.errorCode and listError then
+                metrics.errorCode = listError
+            end
+            if metrics.errorCode then
+                metrics.buttonCapacityCost =
+                    MAX_CHILD_BUTTON_CAPACITY + 1
+                metrics.capacityExceeded = true
+                metrics.buttonCapacityExceeded = true
+                return metrics
+            end
+
+            local spellCount = groupCount == 0 and 0 or #spellIDs
+            metrics.prioritySpellCount = spellCount
+            metrics.compiledGroupCount = spellCount
+            metrics.clipToHolder = spellCount > 0
+            metrics.buttonCapacityCost = spellCount
+                * NATIVE_GROUP_BUTTON_BATCH_SIZE
+            metrics.capacityExceeded = metrics.buttonCapacityCost
+                > MAX_CHILD_BUTTON_CAPACITY
+            metrics.buttonCapacityExceeded =
+                metrics.capacityExceeded
+            return metrics
+        end
+
         if isFrameHighlight then
             -- One AuraSlot drives one managed overlay. A filter that compiles
             -- to multiple native groups cannot preserve those semantics with
             -- a single frame highlight, so reject it instead of widening it.
-            if groupCount == 0 then return 0 end
-            return groupCount == 1
-                and 1
-                or MAX_CHILD_INITIAL_RESERVATIONS + 1
+            metrics.compiledGroupCount = 0
+            if groupCount == 0 then return metrics end
+            if groupCount == 1 then
+                metrics.buttonCapacityCost = 1
+            else
+                metrics.errorCode =
+                    "FRAME_HIGHLIGHT_REQUIRES_SINGLE_FILTER_GROUP"
+                metrics.buttonCapacityCost =
+                    MAX_CHILD_BUTTON_CAPACITY + 1
+                metrics.capacityExceeded = true
+                metrics.buttonCapacityExceeded = true
+            end
+            return metrics
         end
-        return groupCount * NATIVE_GROUP_INITIAL_RESERVATIONS
+
+        metrics.compiledGroupCount = groupCount
+        local cost, costError =
+            GetNormalGroupReservationCost(record, groupCount)
+        if not cost then
+            metrics.errorCode = costError
+            metrics.buttonCapacityCost =
+                MAX_CHILD_BUTTON_CAPACITY + 1
+            metrics.capacityExceeded = true
+            metrics.buttonCapacityExceeded = true
+            return metrics
+        end
+        metrics.buttonCapacityCost = cost
+        metrics.capacityExceeded = cost
+            > MAX_CHILD_BUTTON_CAPACITY
+        metrics.buttonCapacityExceeded = metrics.capacityExceeded
+        return metrics
     end
 
     -- The standalone schema can load before AuraPolicy. Reserve one native
     -- batch conservatively until the policy compiler is available; a frame
     -- highlight always consumes exactly one native slot.
-    return isFrameHighlight and 1 or NATIVE_GROUP_INITIAL_RESERVATIONS
+    metrics.compiledGroupCount = isFrameHighlight and 0 or 1
+    metrics.buttonCapacityCost = isFrameHighlight
+        and 1
+        or NATIVE_GROUP_BUTTON_BATCH_SIZE
+    return metrics
+end
+
+function UF.GetBuffDisplayReservationMetrics(record)
+    if type(record) ~= "table" then
+        return nil, "INVALID_DISPLAY"
+    end
+    local metrics = Copy(GetDisplayReservationMetrics(record))
+    -- Compatibility aliases for the first Buff Display implementation.
+    metrics.reservationCost = metrics.buttonCapacityCost
+    metrics.reservationLimit = metrics.buttonCapacityLimit
+    return metrics
 end
 
 -- Runtime construction must consume this bounded plan instead of walking the
@@ -359,13 +540,19 @@ function UF.GetActiveBuffDisplayReservationPlan(buffConfig)
     local overflow = {}
     local reservations = 0
     local reservationCosts = {}
+    local displayMetrics = {}
     for _, record in ipairs(ordered) do
         if record.enabled == true then
-            local cost = GetInitialReservationCost(record)
+            local perDisplay = GetDisplayReservationMetrics(record)
+            local cost = perDisplay.buttonCapacityCost
+            perDisplay.reservationCost = cost
+            perDisplay.reservationLimit =
+                perDisplay.buttonCapacityLimit
             reservationCosts[record.id] = cost
+            displayMetrics[record.id] = Copy(perDisplay)
             if #reserved < MAX_ACTIVE_CHILD_DISPLAYS
                 and reservations + cost
-                    <= MAX_CHILD_INITIAL_RESERVATIONS
+                    <= MAX_CHILD_BUTTON_CAPACITY
             then
                 reserved[#reserved + 1] = record
                 reservations = reservations + cost
@@ -375,9 +562,15 @@ function UF.GetActiveBuffDisplayReservationPlan(buffConfig)
         end
     end
     return reserved, overflow, {
+        buttonCapacityUsed = reservations,
+        buttonCapacityLimit = MAX_CHILD_BUTTON_CAPACITY,
+        buttonCapacityCosts = reservationCosts,
+        -- Compatibility aliases for construction callers which shipped with
+        -- the original reservation terminology.
         initialReservations = reservations,
-        initialReservationLimit = MAX_CHILD_INITIAL_RESERVATIONS,
+        initialReservationLimit = MAX_CHILD_BUTTON_CAPACITY,
         reservationCosts = reservationCosts,
+        displayMetrics = displayMetrics,
     }
 end
 
@@ -447,6 +640,9 @@ function UF.CreateBuffDisplay(buffConfig, name, templateConfig)
     record.name = name
     record.enabled = false
     record.presentation = record.presentation or "icons"
+    record.sortMode = SORT_MODES[record.sortMode]
+        and record.sortMode
+        or DEFAULT_SORT_MODE
     buffConfig.displays[id] = record
     buffConfig.order[#buffConfig.order + 1] = id
     return record
