@@ -232,6 +232,7 @@ local function assertDefaults(config, message)
     assertEqual(config.headerHeight, 20, message .. " header height")
     assertEqual(config.barHeight, 18, message .. " bar height")
     assertEqual(config.rowTextSize, 11, message .. " row text size")
+    assertEqual(config.headerTextSize, 11, message .. " header text size")
     assertEqual(config.spacing, 2, message .. " spacing")
     assertEqual(config.padding, 3, message .. " padding")
     assertEqual(config.texture, "AF", message .. " texture")
@@ -260,6 +261,7 @@ defaultsCopy.mythicPlusWindowTypes[1] = "Deaths"
 defaultsCopy.windowHeights[1] = 500
 defaultsCopy.windowAnchors[1].x = 500
 defaultsCopy.rowTextSize = 14
+defaultsCopy.headerTextSize = 14
 assertDefaults(DM.GetDefaults(), "independent defaults copy")
 
 local missingProfile = {}
@@ -362,6 +364,8 @@ assertEqual(partialConfig.windowHeights[1], 124, "partial first height default")
 assertEqual(partialConfig.windowHeights[2], 84, "partial second height default")
 assertEqual(partialConfig.windowHeights[3], 84, "partial third height default")
 assertEqual(partialConfig.rowTextSize, 11, "partial row text size default")
+assertEqual(partialConfig.headerTextSize, 11,
+    "partial header text size default")
 assertEqual(partialConfig.extra, "preserved", "unknown config preserved")
 
 local disabledConfig = {
@@ -801,6 +805,7 @@ local invalidConfig = {
     classColor = "yes",
     enabled = "yes",
     headerHeight = 1,
+    headerTextSize = 100,
     height = 410,
     locked = "yes",
     nativeEnabledBeforeBFI = true,
@@ -1020,6 +1025,7 @@ assertEqual(
 assertEqual(invalidConfig.headerHeight, 18, "header height clamp")
 assertEqual(invalidConfig.barHeight, 36, "bar height clamp")
 assertEqual(invalidConfig.rowTextSize, 14, "row text size clamp")
+assertEqual(invalidConfig.headerTextSize, 12, "header text size clamp")
 assertEqual(invalidConfig.spacing, 0, "spacing clamp")
 assertEqual(invalidConfig.padding, 12, "padding clamp")
 assertEqual(invalidConfig.texture, "AF", "texture normalization")
@@ -1047,6 +1053,25 @@ updateProfile(nil, {
 })
 assertEqual(malformedTextConfig.rowTextSize, 11,
     "malformed row text size uses the default")
+
+local tallHeaderTextConfig = {
+    headerHeight = 36,
+    headerTextSize = 100,
+}
+updateProfile(nil, {
+    damageMeter = tallHeaderTextConfig,
+})
+assertEqual(tallHeaderTextConfig.headerTextSize, 14,
+    "tall headers retain the header text size maximum")
+
+local malformedHeaderTextConfig = {
+    headerTextSize = "bad",
+}
+updateProfile(nil, {
+    damageMeter = malformedHeaderTextConfig,
+})
+assertEqual(malformedHeaderTextConfig.headerTextSize, 11,
+    "malformed header text size uses the default")
 
 local denseWindowConfig = {
     headerHeight = 36,

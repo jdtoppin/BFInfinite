@@ -252,6 +252,7 @@ local function createHarness()
         classColor = true,
         enabled = false,
         headerHeight = 25,
+        headerTextSize = 12,
         locked = true,
         numberMode = "perSecond",
         padding = 6,
@@ -463,7 +464,8 @@ local width = state.controls["Frame Width"]
 local headerHeight = state.controls["Header Height"]
 local barHeight = state.controls["Bar Height"]
 local padding = state.controls.Padding
-local meterTextSize = state.controls["Meter Text Size"]
+local barTextSize = state.controls["Bar Text Size"]
+local headerTextSize = state.controls["Header Text Size"]
 local windowCount = state.controls["Window Count"]
 local firstMeterType = state.controls["Meter 1 Type"]
 local secondMeterType = state.controls["Meter 2 Type"]
@@ -497,6 +499,8 @@ local secondAutoOverallOnMythicPlusComplete =
 local texture = state.controls["Bar Texture"]
 local enabled = state.controls["Enable BFI Damage Meter"]
 assertTrue(width and width:IsShown(), "Frame Width control visible")
+assertEqual(state.controls["Meter Text Size"], nil,
+    "single combined meter text size control removed")
 assertEqual(width.value, 333, "Frame Width loaded value")
 assertEqual(windowCount.selectedValue, 3, "Window Count loaded value")
 assertEqual(windowCount.selectedText, "3", "Window Count visible text")
@@ -532,9 +536,10 @@ assertEqual(secondMeterHeight.value, 288, "second meter height loaded")
 assertEqual(thirdMeterHeight.value, 299, "third meter height loaded")
 assertEqual(firstMeterHeight.low, 84, "meter height minimum is compact")
 assertEqual(firstMeterHeight.high, 520, "meter height maximum remains available")
-assertEqual(meterTextSize.value, 12, "meter text size loaded value")
-assertEqual(meterTextSize.low, 8, "meter text size minimum")
-assertEqual(meterTextSize.high, 14, "meter text size maximum")
+assertEqual(barTextSize.low, 8, "bar text size minimum")
+assertEqual(barTextSize.high, 14, "bar text size maximum")
+assertEqual(headerTextSize.low, 8, "header text size minimum")
+assertEqual(headerTextSize.high, 14, "header text size maximum")
 assertEqual(lockMeters.checked, true, "lock state loaded")
 assertEqual(alwaysShowPlayer.checked, false, "player pin state loaded")
 assertEqual(
@@ -601,6 +606,8 @@ assertEqual(
 )
 assertEqual(texture.selectedValue, "TestTexture", "texture loaded value")
 assertEqual(texture.selectedText, "Test Texture", "texture visible text")
+assertEqual(barTextSize.value, 12, "bar text size loaded")
+assertEqual(headerTextSize.value, 12, "header text size loaded")
 assertEqual(enabled.checked, false, "enabled state loaded")
 assertTrue(enabled.enabled, "enabled control remains writable")
 
@@ -613,19 +620,26 @@ assertEqual(
     "per-window height writes live"
 )
 DM.config.windowHeights[3] = 84
-meterTextSize.afterValueChanged(14)
-assertEqual(DM.config.rowTextSize, 14, "meter text size writes live")
+barTextSize.afterValueChanged(14)
+assertEqual(DM.config.rowTextSize, 14, "bar text size writes live")
 barHeight.afterValueChanged(14)
 assertEqual(
-    meterTextSize.high,
+    barTextSize.high,
     10,
-    "compact bar height lowers the meter text size maximum"
+    "compact bar height lowers the bar text size maximum"
 )
 assertEqual(
     DM.config.rowTextSize,
     10,
-    "compact bar height clamps the configured meter text size"
+    "compact bar height clamps the configured bar text size"
 )
+headerTextSize.afterValueChanged(14)
+assertEqual(DM.config.headerTextSize, 14, "header text size writes live")
+headerHeight.afterValueChanged(18)
+assertEqual(headerTextSize.high, 12,
+    "compact header height lowers the header text size maximum")
+assertEqual(DM.config.headerTextSize, 12,
+    "compact header height clamps the configured header text size")
 headerHeight.afterValueChanged(36)
 barHeight.afterValueChanged(36)
 padding.afterValueChanged(12)
@@ -635,11 +649,13 @@ assertEqual(thirdMeterHeight.low, 96,
     "every meter uses the dense appearance minimum")
 assertEqual(DM.config.windowHeights[3], 96,
     "dense appearance preserves one complete meter row")
-assertEqual(meterTextSize.high, 14,
-    "larger bars restore the meter text size maximum")
-meterTextSize.afterValueChanged(12)
+assertEqual(barTextSize.high, 14,
+    "larger bars restore the bar text size maximum")
+assertEqual(headerTextSize.high, 14,
+    "larger headers restore the header text size maximum")
+barTextSize.afterValueChanged(12)
 assertEqual(DM.config.rowTextSize, 12,
-    "restored meter text size writes live")
+    "restored bar text size writes live")
 DM.config.windowHeights[1] = 301
 DM.config.windowHeights[2] = 302
 DM.config.windowHeights[3] = 303

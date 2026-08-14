@@ -11,6 +11,9 @@ local MIN_WINDOW_HEIGHT = 84
 local MIN_ROW_TEXT_SIZE = 8
 local MAX_ROW_TEXT_SIZE = 14
 local ROW_TEXT_VERTICAL_PADDING = 4
+local MIN_HEADER_TEXT_SIZE = 8
+local MAX_HEADER_TEXT_SIZE = 14
+local HEADER_TEXT_VERTICAL_PADDING = 6
 local LEGACY_DEFAULT_WIDTH = 300
 local LEGACY_DEFAULT_HEIGHT = 220
 local LEGACY_DEFAULT_WINDOW_HEIGHTS = {
@@ -119,6 +122,7 @@ local defaults = {
     headerHeight = 20,
     barHeight = 18,
     rowTextSize = 11,
+    headerTextSize = 11,
     spacing = 2,
     padding = 3,
     texture = "AF",
@@ -354,6 +358,16 @@ local function GetMaximumRowTextSize(config)
     )
 end
 
+local function GetMaximumHeaderTextSize(config)
+    return math.max(
+        MIN_HEADER_TEXT_SIZE,
+        math.min(
+            MAX_HEADER_TEXT_SIZE,
+            config.headerHeight - HEADER_TEXT_VERTICAL_PADDING
+        )
+    )
+end
+
 local function NormalizeNumber(value, default, minimum, maximum, integer)
     if type(value) ~= "number" or value ~= value then
         return default
@@ -548,6 +562,13 @@ local function NormalizeConfig(config)
         defaults.rowTextSize,
         MIN_ROW_TEXT_SIZE,
         GetMaximumRowTextSize(config),
+        true
+    )
+    config.headerTextSize = NormalizeNumber(
+        config.headerTextSize,
+        defaults.headerTextSize,
+        MIN_HEADER_TEXT_SIZE,
+        GetMaximumHeaderTextSize(config),
         true
     )
     config.spacing = NormalizeNumber(

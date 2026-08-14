@@ -40,6 +40,10 @@ local MIN_ROW_TEXT_SIZE = 8
 local MAX_ROW_TEXT_SIZE = 14
 local ROW_TEXT_VERTICAL_PADDING = 4
 local BASE_ROW_TEXT_SIZE = 13
+local DEFAULT_HEADER_TEXT_SIZE = 11
+local MIN_HEADER_TEXT_SIZE = 8
+local MAX_HEADER_TEXT_SIZE = 14
+local HEADER_TEXT_VERTICAL_PADDING = 6
 local DEFAULT_SESSION_KEY = "current"
 local SESSION_MODE_CURRENT = "current"
 local SESSION_MODE_OVERALL = "overall"
@@ -220,6 +224,26 @@ local function GetValueColumnWidth(config, baseWidth, minimumWidth)
     return Clamp(scaledWidth, minimumWidth, baseWidth)
 end
 
+local function GetHeaderTextSize(config)
+    local headerHeight = config.headerHeight
+    if type(headerHeight) ~= "number" or headerHeight ~= headerHeight then
+        headerHeight = 20
+    end
+
+    local maximum = math.max(
+        MIN_HEADER_TEXT_SIZE,
+        math.min(
+            MAX_HEADER_TEXT_SIZE,
+            headerHeight - HEADER_TEXT_VERTICAL_PADDING
+        )
+    )
+    local textSize = config.headerTextSize
+    if type(textSize) ~= "number" or textSize ~= textSize then
+        textSize = DEFAULT_HEADER_TEXT_SIZE
+    end
+    return Clamp(math.floor(textSize + 0.5), MIN_HEADER_TEXT_SIZE, maximum)
+end
+
 local function ApplyRowTextSize(row, config)
     -- SetFontHeight is allowed for untainted scalar settings in Retail 12.1.
     -- These font strings are BFI-owned and never carry secret measurements.
@@ -235,6 +259,13 @@ local function ApplyDetailRowTextSize(row, config)
     row.rank:SetFontHeight(textSize)
     row.label:SetFontHeight(textSize)
     row.value:SetFontHeight(textSize)
+end
+
+local function SetHeaderDropdownSelectedValue(dropdown, value, config)
+    -- Dropdown selection restores the normal font, so reapply BFI's header
+    -- presentation setting after every selected value update.
+    dropdown:SetSelectedValue(value)
+    dropdown.text:SetFontHeight(GetHeaderTextSize(config))
 end
 
 local function GetDefaultAnchor(index)
@@ -528,7 +559,11 @@ local function RefreshSessionDropdownItems()
             GetWindowSessionSelection(config, window.index)
         window.sessionKey = GetSessionKey(mode, sessionID)
         window.sessionDropdown:SetItems(sessionItems)
-        window.sessionDropdown:SetSelectedValue(window.sessionKey)
+        SetHeaderDropdownSelectedValue(
+            window.sessionDropdown,
+            window.sessionKey,
+            config
+        )
     end
     if rendererEnabled then
         Renderer.Refresh()
@@ -2306,8 +2341,10 @@ function Renderer.SetWindowSession(
             if windows[targetIndex] then
                 windows[targetIndex].sessionKey =
                     GetSessionKey(mode, sessionID)
-                windows[targetIndex].sessionDropdown:SetSelectedValue(
-                    windows[targetIndex].sessionKey
+                SetHeaderDropdownSelectedValue(
+                    windows[targetIndex].sessionDropdown,
+                    windows[targetIndex].sessionKey,
+                    config
                 )
             end
         end
@@ -2861,7 +2898,11 @@ local function ApplyWindowLayout(window, config, runtime)
         0
     )
     window.sessionDropdown:SetHeight(controlSize)
-    window.sessionDropdown:SetSelectedValue(window.sessionKey)
+    SetHeaderDropdownSelectedValue(
+        window.sessionDropdown,
+        window.sessionKey,
+        config
+    )
 
     window.typeDropdown:ClearAllPoints()
     window.typeDropdown:SetPoint(
@@ -2879,7 +2920,11 @@ local function ApplyWindowLayout(window, config, runtime)
         0
     )
     window.typeDropdown:SetHeight(controlSize)
-    window.typeDropdown:SetSelectedValue(definition.enumName)
+    SetHeaderDropdownSelectedValue(
+        window.typeDropdown,
+        definition.enumName,
+        config
+    )
 
     window.resize:SetShown(
         not config.locked
@@ -3108,7 +3153,11 @@ local function UpdateWindow(window, config)
     local sessionMode, sessionID =
         GetWindowSessionSelection(config, window.index)
     window.sessionKey = GetSessionKey(sessionMode, sessionID)
-    window.sessionDropdown:SetSelectedValue(window.sessionKey)
+    SetHeaderDropdownSelectedValue(
+        window.sessionDropdown,
+        window.sessionKey,
+        config
+    )
     local session = GetSessionData(sessionMode, sessionID, meterType)
     if (not session or not session.combatSources)
         and sessionMode == SESSION_MODE_HISTORY
@@ -3119,7 +3168,11 @@ local function UpdateWindow(window, config)
             window.index
         )
         window.sessionKey = GetSessionKey(sessionMode, sessionID)
-        window.sessionDropdown:SetSelectedValue(window.sessionKey)
+        SetHeaderDropdownSelectedValue(
+            window.sessionDropdown,
+            window.sessionKey,
+            config
+        )
         session = GetSessionData(sessionMode, sessionID, meterType)
     end
     if not session or not session.combatSources then

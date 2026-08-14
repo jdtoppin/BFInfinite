@@ -507,6 +507,7 @@ local function loadRenderer(
         local dropdown = newFrame("Dropdown", parent, nil, width, 20)
         dropdown.button = newFrame("Button", dropdown)
         dropdown.button.bg = newFrame("Texture", dropdown.button)
+        dropdown.text = newFrame("FontString", dropdown)
 
         function dropdown:SetItems(items)
             self.items = items
@@ -514,6 +515,7 @@ local function loadRenderer(
 
         function dropdown:SetSelectedValue(value)
             self.selectedValue = value
+            self.text.fontHeight = 13
         end
 
         function dropdown:SetOnSelect(callback)
@@ -521,7 +523,7 @@ local function loadRenderer(
         end
 
         function dropdown:Select(value)
-            self.selectedValue = value
+            self:SetSelectedValue(value)
             self.onSelect(value)
         end
 
@@ -649,6 +651,7 @@ local function loadRenderer(
         classColor = true,
         enabled = true,
         headerHeight = 22,
+        headerTextSize = 12,
         height = 220,
         dockToObjectiveTracker = true,
         locked = false,
@@ -1265,6 +1268,10 @@ assertEqual(firstRow.rank.fontHeight, 11, "row rank uses compact text")
 assertEqual(firstRow.name.fontHeight, 11, "row name uses compact text")
 assertEqual(firstRow.total.fontHeight, 11, "row total uses compact text")
 assertEqual(firstRow.perSecond.fontHeight, 11, "row rate uses compact text")
+assertEqual(first.typeDropdown.text.fontHeight, 12,
+    "type header uses its configured text size")
+assertEqual(first.sessionDropdown.text.fontHeight, 12,
+    "session header uses its configured text size")
 assertEqual(firstRow.total.width, 52, "compact text shrinks the total column")
 assertEqual(firstRow.perSecond.width, 52,
     "compact text shrinks the per-second column")
@@ -1496,6 +1503,8 @@ first.sessionDropdown:Select("overall")
 assertEqual(DM.config.windowSessions[1].mode, "overall", "first overall")
 assertEqual(DM.config.windowSessions[2].mode, "overall", "syncs second")
 assertEqual(DM.config.windowSessions[3].mode, "overall", "syncs third")
+assertEqual(first.sessionDropdown.text.fontHeight, 12,
+    "session selection retains its configured header text size")
 DM.config.windowSyncSessions[2] = false
 first.sessionDropdown:Select("history:91")
 local firstSessionMode, firstHistoricalSessionID =
@@ -1592,6 +1601,8 @@ assertEqual(
     "Dps",
     "filter selection stays visible"
 )
+assertEqual(first.typeDropdown.text.fontHeight, 12,
+    "type selection retains its configured header text size")
 assertSame(
     firstRow.perSecond.points[1].relativeTo,
     firstRow,
@@ -1753,7 +1764,19 @@ first.body:RunScript("OnMouseWheel", -1)
 first.body:RunScript("OnMouseWheel", -1)
 assertEqual(firstRow.rank.text, 3, "current scroll state rebuilt after clear")
 
-Renderer.SetWindowSession(1, "overall", nil, {sync = false})
+assertEqual(
+    Renderer.SetWindowSession(
+        1,
+        "overall",
+        nil,
+        {sync = false, refresh = false}
+    ),
+    true,
+    "session selection can defer a meter refresh"
+)
+assertEqual(first.sessionDropdown.text.fontHeight, 12,
+    "deferred session selection retains header text size")
+Renderer.Refresh()
 assertEqual(firstRow.rank.text, 1, "new session key starts at the top")
 first.body:RunScript("OnMouseWheel", -1)
 assertEqual(firstRow.rank.text, 2, "new session key scrolls independently")
@@ -2401,6 +2424,7 @@ DM.config.width = 360
 DM.config.windowHeights[1] = 260
 DM.config.windowHeights[2] = 240
 DM.config.headerHeight = 26
+DM.config.headerTextSize = 8
 DM.config.barHeight = 24
 DM.config.spacing = 4
 DM.config.texture = "LiveTexture"
@@ -2423,6 +2447,10 @@ assertEqual(first.width, 360, "live width")
 assertEqual(first.height, 260, "live height")
 assertEqual(second.height, 240, "second window keeps its own height")
 assertEqual(first.header.height, 26, "live header height")
+assertEqual(first.typeDropdown.text.fontHeight, 8,
+    "live type header text size")
+assertEqual(first.sessionDropdown.text.fontHeight, 8,
+    "live session header text size")
 assertEqual(
     first.backdropColor.r,
     0.04,

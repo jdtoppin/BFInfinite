@@ -27,7 +27,7 @@ local autoOverallOnMythicPlusCompleteChecks = {}
 local CreateSlider
 
 local CONTENT_WIDTH = 530
-local CONTENT_HEIGHT = 1180
+local CONTENT_HEIGHT = 1235
 local SECTION_GAP = 12
 local GENERAL_HEIGHT = 60
 local GENERAL_STATUS_HEIGHT = 80
@@ -39,6 +39,9 @@ local MAX_WINDOW_HEIGHT = 520
 local MIN_ROW_TEXT_SIZE = 8
 local MAX_ROW_TEXT_SIZE = 14
 local ROW_TEXT_VERTICAL_PADDING = 4
+local MIN_HEADER_TEXT_SIZE = 8
+local MAX_HEADER_TEXT_SIZE = 14
+local HEADER_TEXT_VERTICAL_PADDING = 6
 
 local function GetMeterTypeText(globalName, fallback)
     return _G[globalName] or L[fallback]
@@ -156,6 +159,16 @@ local function GetMaximumRowTextSize(config)
         math.min(
             MAX_ROW_TEXT_SIZE,
             config.barHeight - ROW_TEXT_VERTICAL_PADDING
+        )
+    )
+end
+
+local function GetMaximumHeaderTextSize(config)
+    return math.max(
+        MIN_HEADER_TEXT_SIZE,
+        math.min(
+            MAX_HEADER_TEXT_SIZE,
+            config.headerHeight - HEADER_TEXT_VERTICAL_PADDING
         )
     )
 end
@@ -562,7 +575,7 @@ local function CreateAppearancePane()
         scroll.scrollContent,
         L["Appearance"],
         CONTENT_WIDTH,
-        285
+        340
     )
     AF.SetPoint(
         appearancePane,
@@ -578,16 +591,28 @@ local function CreateAppearancePane()
         L["BFI Damage Meter Appearance Tip"]
     )
 
-    local rowTextSize
-    local function RefreshRowTextSizeBounds()
-        if not rowTextSize then return end
+    local barTextSize
+    local headerTextSize
+    local function RefreshBarTextSizeBounds()
+        if not barTextSize then return end
 
         local maximum = GetMaximumRowTextSize(DM.config)
         if DM.config.rowTextSize > maximum then
             DM.config.rowTextSize = maximum
         end
-        rowTextSize:SetMinMaxValues(MIN_ROW_TEXT_SIZE, maximum)
-        rowTextSize:SetValue(DM.config.rowTextSize)
+        barTextSize:SetMinMaxValues(MIN_ROW_TEXT_SIZE, maximum)
+        barTextSize:SetValue(DM.config.rowTextSize)
+    end
+
+    local function RefreshHeaderTextSizeBounds()
+        if not headerTextSize then return end
+
+        local maximum = GetMaximumHeaderTextSize(DM.config)
+        if DM.config.headerTextSize > maximum then
+            DM.config.headerTextSize = maximum
+        end
+        headerTextSize:SetMinMaxValues(MIN_HEADER_TEXT_SIZE, maximum)
+        headerTextSize:SetValue(DM.config.headerTextSize)
     end
 
     local width = CreateSlider(
@@ -603,6 +628,7 @@ local function CreateAppearancePane()
     )
     headerHeight:SetAfterValueChanged(function(value)
         DM.config.headerHeight = value
+        RefreshHeaderTextSizeBounds()
         RefreshWindowHeightBounds()
         RefreshDamageMeter()
     end)
@@ -612,7 +638,7 @@ local function CreateAppearancePane()
     )
     barHeight:SetAfterValueChanged(function(value)
         DM.config.barHeight = value
-        RefreshRowTextSizeBounds()
+        RefreshBarTextSizeBounds()
         RefreshWindowHeightBounds()
         RefreshDamageMeter()
     end)
@@ -708,17 +734,31 @@ local function CreateAppearancePane()
         RefreshDamageMeter()
     end)
 
-    rowTextSize = CreateSlider(
+    barTextSize = CreateSlider(
         appearancePane,
-        L["Meter Text Size"],
-        365,
-        -250,
+        L["Bar Text Size"],
+        15,
+        -305,
         MIN_ROW_TEXT_SIZE,
         GetMaximumRowTextSize(DM.config),
         1
     )
-    rowTextSize:SetAfterValueChanged(function(value)
+    barTextSize:SetAfterValueChanged(function(value)
         DM.config.rowTextSize = value
+        RefreshDamageMeter()
+    end)
+
+    headerTextSize = CreateSlider(
+        appearancePane,
+        L["Header Text Size"],
+        190,
+        -305,
+        MIN_HEADER_TEXT_SIZE,
+        GetMaximumHeaderTextSize(DM.config),
+        1
+    )
+    headerTextSize:SetAfterValueChanged(function(value)
+        DM.config.headerTextSize = value
         RefreshDamageMeter()
     end)
 
@@ -727,7 +767,8 @@ local function CreateAppearancePane()
         width:SetValue(config.width)
         headerHeight:SetValue(config.headerHeight)
         barHeight:SetValue(config.barHeight)
-        RefreshRowTextSizeBounds()
+        RefreshBarTextSizeBounds()
+        RefreshHeaderTextSizeBounds()
         spacing:SetValue(config.spacing)
         padding:SetValue(config.padding)
         backgroundAlpha:SetValue(config.backgroundAlpha)
