@@ -5,6 +5,50 @@ local S = BFI.modules.Style
 local AF = _G.AbstractFramework
 
 ---------------------------------------------------------------------
+-- native aura button tooltip
+---------------------------------------------------------------------
+local auraButtonTooltipStyled
+
+local function StyleAuraButtonTooltip()
+    if auraButtonTooltipStyled then return end
+
+    local inbound = _G.AuraContainerInbound
+    if type(inbound) ~= "table" or type(inbound.SetTooltipBackdrop) ~= "function" then return end
+
+    -- Retail 12.1.0.69273 / wow-ui-source eb941aad028d73dd:
+    -- AuraButtonTooltip is hidden and forbidden. Use Blizzard's global inbound
+    -- styling surface instead of reading or mutating the object.
+    local pixel = AF.GetOnePixelForRegion(_G.UIParent)
+    local backgroundR, backgroundG, backgroundB, backgroundA = AF.GetColorRGB("background")
+    local borderR, borderG, borderB, borderA = AF.GetColorRGB("border")
+    local texture = AF.GetPlainTexture()
+
+    inbound.SetTooltipBackdrop({
+        backdropInfo = {
+            bgFile = texture,
+            edgeFile = texture,
+            edgeSize = pixel,
+            insets = {
+                left = pixel,
+                right = pixel,
+                top = pixel,
+                bottom = pixel,
+            },
+        },
+        borderColor = CreateColor(borderR, borderG, borderB, borderA),
+        centerColor = CreateColor(backgroundR, backgroundG, backgroundB, backgroundA),
+        anchorOffsets = {
+            left = pixel,
+            right = -pixel,
+            top = -pixel,
+            bottom = pixel,
+        },
+    })
+
+    auraButtonTooltipStyled = true
+end
+
+---------------------------------------------------------------------
 -- style
 ---------------------------------------------------------------------
 -- Retail 12.1.0.68914 (wow-ui-source d3915c78aba7) defines CompareHeader's
@@ -69,6 +113,8 @@ end
 -- init
 ---------------------------------------------------------------------
 local function StyleBlizzard()
+    StyleAuraButtonTooltip()
+
     -- init
     for _, tooltip in next, {
         _G.EmbeddedItemTooltip,
@@ -109,3 +155,9 @@ local function StyleBlizzard()
     hooksecurefunc("GameTooltip_ShowProgressBar", GameTooltip_ShowProgressBar)
 end
 AF.RegisterCallback("BFI_StyleBlizzard", StyleBlizzard)
+if type(AF.RegisterAddonLoaded) == "function" then
+    AF.RegisterAddonLoaded(
+        "Blizzard_AuraContainer",
+        StyleAuraButtonTooltip
+    )
+end
