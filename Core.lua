@@ -148,7 +148,7 @@ local function UpdateUIParentScale(skipPixelsUpdate)
     BFI.vars.resolution = res
 
     if type(BFIConfig.general.scale[res]) ~= "number" then
-        BFIConfig.general.scale[res] = AF.GetBestScale() -- AF.RoundToDecimal(UIParent:GetScale(), 2)
+        BFIConfig.general.scale[res] = F.GetAutoUIScale()
     end
 
     if InCombatLockdown() then
