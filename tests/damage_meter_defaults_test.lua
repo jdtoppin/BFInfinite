@@ -54,6 +54,32 @@ local function previousDefaultAnchors()
     }
 end
 
+local function trackerDockAnchors()
+    return {
+        {
+            relativeTo = 0,
+            point = "TOPRIGHT",
+            relativePoint = "TOPRIGHT",
+            x = -4,
+            y = -4,
+        },
+        {
+            relativeTo = 1,
+            point = "TOPRIGHT",
+            relativePoint = "BOTTOMRIGHT",
+            x = 0,
+            y = -4,
+        },
+        {
+            relativeTo = 2,
+            point = "TOPRIGHT",
+            relativePoint = "BOTTOMRIGHT",
+            x = 0,
+            y = -4,
+        },
+    }
+end
+
 local function loadDefaults()
     local callbacks = {}
     local state = {
@@ -174,34 +200,34 @@ local function assertDefaults(config, message)
     assertEqual(config.alwaysShowPlayer, true, message .. " always show player")
     assertAnchor(config.windowAnchors[1], {
         relativeTo = 0,
-        point = "TOPRIGHT",
-        relativePoint = "TOPRIGHT",
+        point = "BOTTOMRIGHT",
+        relativePoint = "BOTTOMRIGHT",
         x = -4,
-        y = -4,
+        y = 4,
     }, message .. " first anchor")
     assertAnchor(config.windowAnchors[2], {
         relativeTo = 1,
-        point = "TOPRIGHT",
-        relativePoint = "BOTTOMRIGHT",
+        point = "BOTTOMRIGHT",
+        relativePoint = "TOPRIGHT",
         x = 0,
-        y = -4,
+        y = 4,
     }, message .. " second anchor")
     assertAnchor(config.windowAnchors[3], {
         relativeTo = 2,
-        point = "TOPRIGHT",
-        relativePoint = "BOTTOMRIGHT",
+        point = "BOTTOMRIGHT",
+        relativePoint = "TOPRIGHT",
         x = 0,
-        y = -4,
+        y = 4,
     }, message .. " third anchor")
     assertEqual(
         config.dockToObjectiveTracker,
-        true,
-        message .. " Objective Tracker docking"
+        false,
+        message .. " independent screen placement"
     )
     assertEqual(config.locked, false, message .. " locked")
     assertEqual(config.width, 240, message .. " width")
     assertEqual(config.sizeDefaultsVersion, 2, message .. " size defaults version")
-    assertEqual(config.dockDefaultsVersion, 1, message .. " dock defaults version")
+    assertEqual(config.dockDefaultsVersion, 2, message .. " dock defaults version")
     assertEqual(config.height, nil, message .. " legacy height removed")
     assertEqual(config.headerHeight, 20, message .. " header height")
     assertEqual(config.barHeight, 18, message .. " bar height")
@@ -326,8 +352,8 @@ assertEqual(
 assertEqual(partialConfig.alwaysShowPlayer, true, "partial player pin default")
 assertEqual(
     partialConfig.dockToObjectiveTracker,
-    true,
-    "untouched anchors dock below the Objective Tracker"
+    false,
+    "untouched anchors stay in the independent bottom-right stack"
 )
 assertEqual(partialConfig.width, 240, "partial width default")
 assertEqual(partialConfig.windowHeights[1], 124, "partial first height default")
@@ -594,19 +620,19 @@ local historicalDockConfig = {
 updateProfile(nil, {
     damageMeter = historicalDockConfig,
 })
-assertEqual(historicalDockConfig.dockToObjectiveTracker, true,
-    "historical default stack migrates below the Objective Tracker")
+assertEqual(historicalDockConfig.dockToObjectiveTracker, false,
+    "historical independent stack stays screen-relative")
 for index = 1, 3 do
     assertAnchor(
         historicalDockConfig.windowAnchors[index],
-        DM.GetDefaults().windowAnchors[index],
-        "historical default dock anchor " .. index
+        previousDefaultAnchors()[index],
+        "historical independent anchor " .. index
     )
 end
 
 local previousBranchDockConfig = {
     dockToObjectiveTracker = true,
-    windowAnchors = previousDefaultAnchors(),
+    windowAnchors = trackerDockAnchors(),
 }
 updateProfile(nil, {
     damageMeter = previousBranchDockConfig,
@@ -616,7 +642,7 @@ assertEqual(previousBranchDockConfig.dockToObjectiveTracker, true,
 for index = 1, 3 do
     assertAnchor(
         previousBranchDockConfig.windowAnchors[index],
-        DM.GetDefaults().windowAnchors[index],
+        trackerDockAnchors()[index],
         "previous branch dock anchor " .. index
     )
 end
@@ -641,16 +667,22 @@ end
 local versionedHistoricalDockConfig = {
     dockDefaultsVersion = 1,
     dockToObjectiveTracker = true,
-    windowAnchors = previousDefaultAnchors(),
+    windowAnchors = trackerDockAnchors(),
 }
 updateProfile(nil, {
     damageMeter = versionedHistoricalDockConfig,
 })
-assertAnchor(
-    versionedHistoricalDockConfig.windowAnchors[1],
-    previousDefaultAnchors()[1],
-    "versioned user-selected dock anchor is preserved"
-)
+assertEqual(versionedHistoricalDockConfig.dockToObjectiveTracker, true,
+    "versioned tracker docking remains enabled")
+assertEqual(versionedHistoricalDockConfig.dockDefaultsVersion, 2,
+    "versioned tracker docking advances without changing the choice")
+for index = 1, 3 do
+    assertAnchor(
+        versionedHistoricalDockConfig.windowAnchors[index],
+        trackerDockAnchors()[index],
+        "versioned user-selected dock anchor " .. index
+    )
+end
 
 local customAnchorConfig = {
     windowAnchors = {
@@ -909,8 +941,8 @@ assertEqual(invalidConfig.windowHeights[3], 520, "window three height clamp")
 assertEqual(invalidConfig.locked, false, "lock normalization")
 assertAnchor(invalidConfig.windowAnchors[1], {
     relativeTo = 0,
-    point = "TOPRIGHT",
-    relativePoint = "TOPRIGHT",
+    point = "BOTTOMRIGHT",
+    relativePoint = "BOTTOMRIGHT",
     x = -4096,
     y = 4096,
 }, "invalid first anchor normalization")
@@ -1004,8 +1036,8 @@ assertAnchor(
 )
 assertEqual(
     cyclicAnchorsConfig.dockToObjectiveTracker,
-    true,
-    "repaired default stack docks below the Objective Tracker"
+    false,
+    "repaired default stack remains screen-relative"
 )
 
 local validWindowTypes = {

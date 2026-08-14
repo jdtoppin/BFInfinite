@@ -66,6 +66,12 @@ local savedLayouts
 local saveCalls
 local inCombat
 local editModeActive
+local layoutNameValid
+local onLayoutAddedCalls
+local addedLayoutIndex
+local addedLayoutActivated
+local addedLayoutImported
+local presetLayoutsReversed
 
 local function resetLayouts()
     sourceLayouts = {
@@ -107,9 +113,75 @@ local function resetLayouts()
     saveCalls = 0
     inCombat = false
     editModeActive = false
+    layoutNameValid = true
+    onLayoutAddedCalls = 0
+    addedLayoutIndex = nil
+    addedLayoutActivated = nil
+    addedLayoutImported = nil
+    presetLayoutsReversed = false
 end
 
 resetLayouts()
+
+local presetLayouts = {
+    {
+        layoutIndex = 1,
+        layoutName = "Modern",
+        layoutType = Enum.EditModeLayoutType.Preset,
+        systems = {
+            {
+                anchorInfo = {
+                    point = "TOPRIGHT",
+                    relativeTo = "UIParent",
+                    relativePoint = "TOPRIGHT",
+                    offsetX = -110,
+                    offsetY = -275,
+                },
+                isInDefaultPosition = true,
+                settings = {
+                    {setting = Enum.EditModeObjectiveTrackerSetting.Height, value = 40},
+                    {setting = Enum.EditModeObjectiveTrackerSetting.Opacity, value = 13},
+                },
+                system = Enum.EditModeSystem.ObjectiveTracker,
+            },
+            {
+                isInDefaultPosition = false,
+                settings = {
+                    {setting = 99, value = 17},
+                },
+                system = 99,
+            },
+        },
+    },
+    {
+        layoutIndex = 2,
+        layoutName = "Classic",
+        layoutType = Enum.EditModeLayoutType.Preset,
+        systems = {
+            {
+                anchorInfo = {
+                    point = "TOPRIGHT",
+                    relativeTo = "UIParent",
+                    relativePoint = "TOPRIGHT",
+                    offsetX = -110,
+                    offsetY = -275,
+                },
+                isInDefaultPosition = true,
+                settings = {
+                    {setting = Enum.EditModeObjectiveTrackerSetting.Height, value = 40},
+                    {setting = Enum.EditModeObjectiveTrackerSetting.Opacity, value = 0},
+                },
+                system = Enum.EditModeSystem.ObjectiveTracker,
+            },
+        },
+    },
+}
+
+local function resetFreshPresetLayouts()
+    resetLayouts()
+    sourceLayouts.activeLayout = 1
+    sourceLayouts.layouts = {}
+end
 
 local editMode = {
     GetLayouts = function()
@@ -119,6 +191,16 @@ local editMode = {
         saveCalls = saveCalls + 1
         savedLayouts = layouts
         sourceLayouts = layouts
+    end,
+    IsValidLayoutName = function()
+        return layoutNameValid
+    end,
+    OnLayoutAdded = function(index, activateNewLayout, isLayoutImported)
+        onLayoutAddedCalls = onLayoutAddedCalls + 1
+        addedLayoutIndex = index
+        addedLayoutActivated = activateNewLayout
+        addedLayoutImported = isLayoutImported
+        if activateNewLayout then sourceLayouts.activeLayout = index end
     end,
 }
 local BFI = {
@@ -134,6 +216,17 @@ local environment = {
     EditModeManagerFrame = {
         IsEditModeActive = function()
             return editModeActive
+        end,
+    },
+    EditModePresetLayoutManager = {
+        GetCopyOfPresetLayouts = function()
+            if presetLayoutsReversed then
+                return {
+                    copy(presetLayouts[2]),
+                    copy(presetLayouts[1]),
+                }
+            end
+            return copy(presetLayouts)
         end,
     },
     Enum = Enum,
@@ -155,6 +248,10 @@ assertContains(source, "EditModePresetLayoutsMeta",
     "native height adapter maps the global active layout index")
 assertContains(source, "SetObjectiveTrackerBFIRightStackPlacement",
     "native placement adapter is exported")
+assertContains(source, "ApplyObjectiveTrackerFreshInstallLayout",
+    "fresh BFI installs can create a native tracker layout")
+assertContains(source, "OnLayoutAdded",
+    "fresh BFI layout creation uses Blizzard's documented notification")
 assertContains(source, "offsetY = -200",
     "BFI right stack moves the tracker higher than Blizzard's preset")
 assertContains(source, "BFI_TRACKER_DEFAULT_HEIGHT = 640",
@@ -179,6 +276,12 @@ assertContains(optionsSource, 'builder["objectiveTrackerNativeHeight"]',
 assertContains(optionsSource, "W.SetObjectiveTrackerNativeHeight(value)",
     "native height proxy delegates to the Edit Mode adapter")
 
+local coreSource = readFile("Core.lua")
+assertContains(coreSource, "configCreatedThisSession",
+    "Core records whether BFIConfig was created during this load")
+assertContains(coreSource, "ApplyObjectiveTrackerFreshInstallLayout()",
+    "Core invokes the fresh-install tracker layout bootstrap")
+
 local chunk, loadError =
     loadfile("Modules/UIWidgets/ObjectiveTrackerEditMode.lua")
 assertEqual(type(chunk), "function", loadError or "adapter load")
@@ -194,6 +297,8 @@ assertEqual(type(W.GetObjectiveTrackerNativePlacement), "function",
     "native placement getter is exported")
 assertEqual(type(W.SetObjectiveTrackerBFIRightStackPlacement), "function",
     "native placement setter is exported")
+assertEqual(type(W.ApplyObjectiveTrackerFreshInstallLayout), "function",
+    "fresh-install layout bootstrap is exported")
 
 local height, reason = W.GetObjectiveTrackerNativeHeight()
 assertEqual(height, 800, "raw default height converts to pixels")
@@ -454,6 +559,103 @@ resetLayouts()
 assertEqual(W.SetObjectiveTrackerNativeHeight("500"), false,
     "non-numeric native height is rejected")
 assertEqual(saveCalls, 0, "invalid native height does not save")
+
+resetFreshPresetLayouts()
+assertTrue(W.ApplyObjectiveTrackerFreshInstallLayout(),
+    "fresh BFI install creates an Account layout from the active preset")
+assertEqual(saveCalls, 1,
+    "fresh BFI install persists exactly one native layout")
+assertEqual(onLayoutAddedCalls, 1,
+    "fresh BFI install notifies Blizzard about its new layout")
+assertEqual(addedLayoutIndex, 3,
+    "fresh BFI layout follows Blizzard's preset layout indices")
+assertEqual(addedLayoutActivated, true,
+    "fresh BFI layout becomes the active layout")
+assertEqual(addedLayoutImported, false,
+    "fresh BFI layout is created locally rather than imported")
+assertEqual(sourceLayouts.activeLayout, 3,
+    "Blizzard switches to the newly created BFI layout")
+assertEqual(#savedLayouts.layouts, 1,
+    "fresh BFI install adds one saved layout")
+
+local freshLayout = savedLayouts.layouts[1]
+assertEqual(freshLayout.layoutName, "BFI",
+    "fresh native layout has a clear BFI-owned name")
+assertEqual(freshLayout.layoutType, Enum.EditModeLayoutType.Account,
+    "fresh native layout is account-wide")
+assertEqual(freshLayout.systems[1].isInDefaultPosition, false,
+    "fresh layout takes the tracker out of Blizzard's managed column")
+assertEqual(freshLayout.systems[1].anchorInfo.offsetX, -10,
+    "fresh layout puts the tracker near the right edge")
+assertEqual(freshLayout.systems[1].anchorInfo.offsetY, -200,
+    "fresh layout uses BFI's higher tracker position")
+assertEqual(freshLayout.systems[1].settings[1].value, 24,
+    "fresh layout saves BFI's 640 native tracker height")
+assertEqual(freshLayout.systems[2].settings[1].value, 17,
+    "fresh layout preserves unrelated systems from the active preset")
+assertEqual(presetLayouts[1].systems[1].isInDefaultPosition, true,
+    "fresh layout never mutates Blizzard's preset data")
+assertEqual(presetLayouts[1].systems[1].anchorInfo.offsetX, -110,
+    "fresh layout never changes Blizzard's preset anchor")
+assertEqual(W.ApplyObjectiveTrackerFreshInstallLayout(), false,
+    "an existing BFI layout is not recreated")
+assertEqual(saveCalls, 1,
+    "an existing BFI layout is not rewritten")
+
+resetFreshPresetLayouts()
+presetLayoutsReversed = true
+assertTrue(W.ApplyObjectiveTrackerFreshInstallLayout(),
+    "fresh bootstrap selects the active preset by its layout index")
+assertEqual(savedLayouts.layouts[1].systems[2].settings[1].value, 17,
+    "fresh bootstrap copies the active Modern preset when presets are reordered")
+
+resetFreshPresetLayouts()
+sourceLayouts.layouts[1] = copy(presetLayouts[2])
+assertEqual(W.ApplyObjectiveTrackerFreshInstallLayout(), false,
+    "fresh bootstrap leaves existing saved layouts alone")
+assertEqual(saveCalls, 0,
+    "existing saved layouts are never rewritten by the bootstrap")
+assertEqual(onLayoutAddedCalls, 0,
+    "existing saved layouts do not receive a new BFI layout")
+
+resetFreshPresetLayouts()
+sourceLayouts.activeLayout = 3
+assertEqual(W.ApplyObjectiveTrackerFreshInstallLayout(), false,
+    "fresh bootstrap does not alter an active custom layout")
+assertEqual(saveCalls, 0,
+    "active custom layout is not rewritten")
+
+resetFreshPresetLayouts()
+inCombat = true
+assertEqual(W.ApplyObjectiveTrackerFreshInstallLayout(), false,
+    "combat blocks fresh native layout creation")
+assertEqual(saveCalls, 0,
+    "combat never saves a native layout")
+assertEqual(onLayoutAddedCalls, 0,
+    "combat never activates a native layout")
+
+resetFreshPresetLayouts()
+editModeActive = true
+assertEqual(W.ApplyObjectiveTrackerFreshInstallLayout(), false,
+    "active Edit Mode blocks fresh native layout creation")
+assertEqual(saveCalls, 0,
+    "active Edit Mode never saves a native layout")
+
+resetFreshPresetLayouts()
+layoutNameValid = false
+assertEqual(W.ApplyObjectiveTrackerFreshInstallLayout(), false,
+    "invalid BFI layout name leaves Blizzard layouts unchanged")
+assertEqual(saveCalls, 0,
+    "invalid BFI layout name never saves a native layout")
+
+resetFreshPresetLayouts()
+local originalPresetLayoutManager = environment.EditModePresetLayoutManager
+environment.EditModePresetLayoutManager = nil
+assertEqual(W.ApplyObjectiveTrackerFreshInstallLayout(), false,
+    "missing preset copy capability leaves Blizzard layouts unchanged")
+assertEqual(saveCalls, 0,
+    "missing preset copy capability never saves a native layout")
+environment.EditModePresetLayoutManager = originalPresetLayoutManager
 
 local originalEditMode = environment.C_EditMode
 environment.C_EditMode = nil

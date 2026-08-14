@@ -6,8 +6,8 @@ local W = BFI.modules.UIWidgets
 local AF = _G.AbstractFramework
 
 -- Retail 12.1.0.68914, wow-ui-source d3915c78aba77a7a9be76acbfa35c674bbb6abe9:
--- Blizzard exposes only C_EditMode.GetLayouts and SaveLayouts for persistent
--- system settings. Objective Tracker Height is stored as a raw 0-60 value and
+-- C_EditMode.GetLayouts and SaveLayouts provide the persistent layout
+-- snapshot. Objective Tracker Height is stored as a raw 0-60 value and
 -- displayed as 400-1000 pixels in 10-pixel steps. Blizzard applies it only
 -- after the tracker leaves its default/right-managed position; required
 -- objective content may still expand past the requested height.
@@ -22,6 +22,7 @@ local NATIVE_HEIGHT_MAX = 1000
 local NATIVE_HEIGHT_STEP = 10
 local NATIVE_HEIGHT_DEFAULT_RAW = 40
 local BFI_TRACKER_DEFAULT_HEIGHT = 640
+local BFI_FRESH_LAYOUT_NAME = "BFI"
 local BFI_RIGHT_STACK_ANCHOR = {
     point = "TOPRIGHT",
     relativeTo = "UIParent",
@@ -131,6 +132,89 @@ local function GetObjectiveTrackerEditModeContext(
     return nil, "unavailable"
 end
 
+local function FindPresetLayout(presetLayouts, layoutIndex)
+    if type(presetLayouts) ~= "table" then return end
+
+    for _, presetLayout in ipairs(presetLayouts) do
+        if type(presetLayout) == "table"
+            and presetLayout.layoutIndex == layoutIndex
+        then
+            return presetLayout
+        end
+    end
+end
+
+local function GetFreshInstallPresetContext()
+    local editMode = _G.C_EditMode
+    local enums = _G.Enum
+    local systems = enums and enums.EditModeSystem
+    local layoutTypes = enums and enums.EditModeLayoutType
+    local presetLayoutsMeta = enums and enums.EditModePresetLayoutsMeta
+    local presetLayoutManager = _G.EditModePresetLayoutManager
+    if type(editMode) ~= "table"
+        or type(editMode.GetLayouts) ~= "function"
+        or type(editMode.SaveLayouts) ~= "function"
+        or type(editMode.OnLayoutAdded) ~= "function"
+        or type(editMode.IsValidLayoutName) ~= "function"
+        or type(systems) ~= "table"
+        or type(layoutTypes) ~= "table"
+        or type(presetLayoutsMeta) ~= "table"
+        or systems.ObjectiveTracker == nil
+        or layoutTypes.Preset == nil
+        or layoutTypes.Account == nil
+        or type(presetLayoutsMeta.NumValues) ~= "number"
+        or type(presetLayoutManager) ~= "table"
+        or type(presetLayoutManager.GetCopyOfPresetLayouts) ~= "function"
+    then
+        return nil, "unavailable"
+    end
+
+    local layouts = editMode.GetLayouts()
+    if type(layouts) ~= "table"
+        or type(layouts.layouts) ~= "table"
+        or type(layouts.activeLayout) ~= "number"
+    then
+        return nil, "unavailable"
+    end
+
+    local presetLayoutCount = presetLayoutsMeta.NumValues
+    if layouts.activeLayout < 1
+        or layouts.activeLayout > presetLayoutCount
+    then
+        return nil, "customLayout"
+    end
+
+    -- A fresh BFI install may seed one BFI-owned Account layout, but never
+    -- adds a layout beside an existing Blizzard user layout.
+    if next(layouts.layouts) ~= nil then return nil, "customLayout" end
+
+    -- Retail 12.1.0.68914, wow-ui-source d3915c78aba77a7a9be76acbfa35c674bbb6abe9:
+    -- Blizzard's EditModeManagerFrameMixin:MakeNewLayout starts from this
+    -- read-only preset copy, saves the new Account layout, then calls the
+    -- documented C_EditMode.OnLayoutAdded. Do the same only for the narrow
+    -- empty-layout first-install case above.
+    local presetLayouts = presetLayoutManager:GetCopyOfPresetLayouts()
+    local presetLayout = FindPresetLayout(
+        presetLayouts,
+        layouts.activeLayout
+    )
+    if type(presetLayout) ~= "table"
+        or presetLayout.layoutType ~= layoutTypes.Preset
+        or type(presetLayout.systems) ~= "table"
+    then
+        return nil, "unavailable"
+    end
+
+    return {
+        accountLayoutType = layoutTypes.Account,
+        editMode = editMode,
+        layouts = layouts,
+        presetLayout = presetLayout,
+        presetLayoutCount = presetLayoutCount,
+        trackerSystem = systems.ObjectiveTracker,
+    }
+end
+
 local function GetHeightSettingInfo(settings, heightSetting)
     if type(settings) ~= "table" then return end
 
@@ -201,6 +285,27 @@ local function SetHeightSettingValue(systemInfo, heightSetting, height)
     return true
 end
 
+local function ApplyBFIRightStackPlacement(systemInfo, heightSetting)
+    systemInfo.isInDefaultPosition = false
+    systemInfo.anchorInfo = AF.Copy(BFI_RIGHT_STACK_ANCHOR)
+    systemInfo.anchorInfo2 = nil
+    SetHeightSettingValue(
+        systemInfo,
+        heightSetting,
+        BFI_TRACKER_DEFAULT_HEIGHT
+    )
+end
+
+local function FindSystemInfo(systems, system)
+    if type(systems) ~= "table" then return end
+
+    for _, systemInfo in ipairs(systems) do
+        if type(systemInfo) == "table" and systemInfo.system == system then
+            return systemInfo
+        end
+    end
+end
+
 function W.GetObjectiveTrackerNativeHeight()
     local context, reason = GetObjectiveTrackerEditModeContext(true, true)
     if not context then return nil, reason end
@@ -252,6 +357,39 @@ function W.SetObjectiveTrackerNativeHeight(height)
 
     nativeLayoutSaveInProgress = true
     context.editMode.SaveLayouts(layouts)
+    nativeLayoutSaveInProgress = nil
+    return true
+end
+
+function W.ApplyObjectiveTrackerFreshInstallLayout()
+    if nativeLayoutSaveInProgress then return false, "busy" end
+    if IsInCombat() then return false, "combat" end
+    if IsEditModeActive() then return false, "editMode" end
+    if type(AF.Copy) ~= "function" then return false, "unavailable" end
+
+    local context, reason = GetFreshInstallPresetContext()
+    if not context then return false, reason end
+    if context.editMode.IsValidLayoutName(BFI_FRESH_LAYOUT_NAME) ~= true then
+        return false, "layoutName"
+    end
+
+    local layouts = AF.Copy(context.layouts)
+    local layout = AF.Copy(context.presetLayout)
+    local systemInfo = FindSystemInfo(layout.systems, context.trackerSystem)
+    if not systemInfo then return false, "unavailable" end
+
+    layout.layoutType = context.accountLayoutType
+    layout.layoutName = BFI_FRESH_LAYOUT_NAME
+    ApplyBFIRightStackPlacement(systemInfo, GetNativeHeightSetting())
+    table.insert(layouts.layouts, layout)
+
+    nativeLayoutSaveInProgress = true
+    context.editMode.SaveLayouts(layouts)
+    context.editMode.OnLayoutAdded(
+        context.presetLayoutCount + 1,
+        true,
+        false
+    )
     nativeLayoutSaveInProgress = nil
     return true
 end
@@ -314,14 +452,7 @@ function W.SetObjectiveTrackerBFIRightStackPlacement()
     local heightSetting = GetNativeHeightSetting()
     if HasBFIRightStackPlacement(systemInfo, heightSetting) then return true end
 
-    systemInfo.isInDefaultPosition = false
-    systemInfo.anchorInfo = AF.Copy(BFI_RIGHT_STACK_ANCHOR)
-    systemInfo.anchorInfo2 = nil
-    SetHeightSettingValue(
-        systemInfo,
-        heightSetting,
-        BFI_TRACKER_DEFAULT_HEIGHT
-    )
+    ApplyBFIRightStackPlacement(systemInfo, heightSetting)
 
     nativeLayoutSaveInProgress = true
     context.editMode.SaveLayouts(layouts)

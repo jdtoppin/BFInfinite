@@ -6,7 +6,7 @@ local DM = BFI.modules.DamageMeter
 local AF = _G.AbstractFramework
 
 local CURRENT_SIZE_DEFAULTS_VERSION = 2
-local CURRENT_DOCK_DEFAULTS_VERSION = 1
+local CURRENT_DOCK_DEFAULTS_VERSION = 2
 local LEGACY_DEFAULT_WIDTH = 300
 local LEGACY_DEFAULT_HEIGHT = 220
 local LEGACY_DEFAULT_WINDOW_HEIGHTS = {
@@ -29,30 +29,6 @@ local VERSION_ONE_DEFAULT_HEADER_HEIGHT = 22
 local VERSION_ONE_DEFAULT_BAR_HEIGHT = 20
 local VERSION_ONE_DEFAULT_SPACING = 2
 local VERSION_ONE_DEFAULT_PADDING = 4
-local PREVIOUS_DEFAULT_WINDOW_ANCHORS = {
-    {
-        relativeTo = 0,
-        point = "BOTTOMRIGHT",
-        relativePoint = "BOTTOMRIGHT",
-        x = -4,
-        y = 4,
-    },
-    {
-        relativeTo = 1,
-        point = "BOTTOMRIGHT",
-        relativePoint = "TOPRIGHT",
-        x = 0,
-        y = 4,
-    },
-    {
-        relativeTo = 2,
-        point = "BOTTOMRIGHT",
-        relativePoint = "TOPRIGHT",
-        x = 0,
-        y = 4,
-    },
-}
-
 local defaults = {
     enabled = true,
     windowCount = 3,
@@ -101,27 +77,27 @@ local defaults = {
     windowAnchors = {
         {
             relativeTo = 0,
-            point = "TOPRIGHT",
-            relativePoint = "TOPRIGHT",
+            point = "BOTTOMRIGHT",
+            relativePoint = "BOTTOMRIGHT",
             x = -4,
-            y = -4,
+            y = 4,
         },
         {
             relativeTo = 1,
-            point = "TOPRIGHT",
-            relativePoint = "BOTTOMRIGHT",
+            point = "BOTTOMRIGHT",
+            relativePoint = "TOPRIGHT",
             x = 0,
-            y = -4,
+            y = 4,
         },
         {
             relativeTo = 2,
-            point = "TOPRIGHT",
-            relativePoint = "BOTTOMRIGHT",
+            point = "BOTTOMRIGHT",
+            relativePoint = "TOPRIGHT",
             x = 0,
-            y = -4,
+            y = 4,
         },
     },
-    dockToObjectiveTracker = true,
+    dockToObjectiveTracker = false,
     dockDefaultsVersion = CURRENT_DOCK_DEFAULTS_VERSION,
     locked = false,
     width = 240,
@@ -381,29 +357,6 @@ local function NormalizeWindowAnchors(config)
     end
 end
 
-local function WindowAnchorsMatch(anchors, expected)
-    if type(anchors) ~= "table" then return false end
-
-    for index = 1, 3 do
-        local anchor = anchors[index]
-        local default = expected[index]
-        if type(anchor) ~= "table" then return false end
-        if anchor.relativeTo ~= default.relativeTo
-            or anchor.point ~= default.point
-            or anchor.relativePoint ~= default.relativePoint
-            or anchor.x ~= default.x
-            or anchor.y ~= default.y
-        then
-            return false
-        end
-    end
-    return true
-end
-
-local function WindowAnchorsMatchDefaults(anchors)
-    return WindowAnchorsMatch(anchors, defaults.windowAnchors)
-end
-
 local function MigrateDefaultDock(config)
     local version = config.dockDefaultsVersion
     if type(version) == "number"
@@ -412,17 +365,9 @@ local function MigrateDefaultDock(config)
         return
     end
 
-    -- Move only an untouched upward stack into the new tracker-first lane.
-    -- Explicit opt-outs and every custom anchor chain remain user-owned.
-    if config.dockToObjectiveTracker ~= false
-        and WindowAnchorsMatch(
-            config.windowAnchors,
-            PREVIOUS_DEFAULT_WINDOW_ANCHORS
-        )
-    then
-        config.windowAnchors = CopyWindowAnchors(defaults.windowAnchors)
-        config.dockToObjectiveTracker = true
-    end
+    -- Version one made tracker docking the default. Keep every existing
+    -- anchor chain and explicit docking choice intact; the independent
+    -- bottom-right stack is a new-install/reset default only.
     config.dockDefaultsVersion = CURRENT_DOCK_DEFAULTS_VERSION
 end
 
@@ -549,11 +494,9 @@ local function NormalizeConfig(config)
         type(config.dockToObjectiveTracker) == "boolean"
     NormalizeWindowAnchors(config)
     if not hadTrackerDockSetting then
-        -- Only migrate the untouched historical stack. Any user-positioned
-        -- anchor chain remains screen-relative until explicitly reset.
-        config.dockToObjectiveTracker = WindowAnchorsMatchDefaults(
-            config.windowAnchors
-        )
+        -- Profiles created before this setting had only screen-relative
+        -- anchors, so retain that behavior rather than assuming docking.
+        config.dockToObjectiveTracker = defaults.dockToObjectiveTracker
     end
     if type(config.locked) ~= "boolean" then
         config.locked = defaults.locked
