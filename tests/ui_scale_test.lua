@@ -11,10 +11,17 @@ local function readFile(path)
     return contents
 end
 
-local recommendedScale
+local physicalWidth, physicalHeight
 local AF = {
-    GetBestScale = function()
-        return recommendedScale
+    GetPixelFactor = function()
+        return 768 / physicalHeight
+    end,
+    RoundToDecimal = function(value, places)
+        local multiplier = 10 ^ places
+        return math.floor(value * multiplier + 0.5) / multiplier
+    end,
+    Clamp = function(value, minimum, maximum)
+        return math.max(minimum, math.min(value, maximum))
     end,
 }
 local BFI = {
@@ -25,6 +32,9 @@ local BFI = {
 local environment = {
     _G = false,
     AbstractFramework = AF,
+    GetPhysicalScreenSize = function()
+        return physicalWidth, physicalHeight
+    end,
 }
 environment._G = environment
 setmetatable(environment, {__index = _G})
@@ -34,15 +44,19 @@ setfenv(chunk, environment)
 chunk("BFInfinite", BFI)
 
 local cases = {
-    {label = "1080p", recommended = 0.71, expected = 0.71},
-    {label = "1440p", recommended = 0.61, expected = 0.71},
-    {label = "4K", recommended = 0.60, expected = 0.71},
-    {label = "5K", recommended = 0.50, expected = 0.71},
-    {label = "720p", recommended = 1.07, expected = 1.07},
+    {label = "1080p reference", width = 1920, height = 1080, expected = 0.71},
+    {label = "1440p", width = 2560, height = 1440, expected = 0.71},
+    {label = "4K", width = 3840, height = 2160, expected = 0.71},
+    {label = "5K", width = 5120, height = 2880, expected = 0.71},
+    {label = "MacBook Air Retina backing", width = 2560, height = 1664, expected = 0.63},
+    {label = "true 1280x832 display", width = 1280, height = 832, expected = 0.92},
+    {label = "1440p ultrawide", width = 3440, height = 1440, expected = 0.71},
+    {label = "high-density 4:3 comfort floor", width = 2048, height = 1536, expected = 0.63},
+    {label = "720p pixel floor", width = 1280, height = 720, expected = 1.07},
 }
 
 for _, case in ipairs(cases) do
-    recommendedScale = case.recommended
+    physicalWidth, physicalHeight = case.width, case.height
     assertEqual(BFI.funcs.GetAutoUIScale(), case.expected, case.label .. " automatic scale")
 end
 
