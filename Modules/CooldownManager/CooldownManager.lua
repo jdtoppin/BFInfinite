@@ -22,9 +22,10 @@ local tonumber = tonumber
 local type = type
 local unpack = unpack
 
--- Retail 12.1 compatibility checked against the current PTR on 2026-07-31,
--- build 12.1.0.68914, Gethe/wow-ui-source commit d3915c78aba7:
--- https://github.com/Gethe/wow-ui-source/tree/d3915c78aba77a7a9be76acbfa35c674bbb6abe9/Interface/AddOns/Blizzard_CooldownViewer
+-- Retail 12.1 compatibility checked against live on 2026-08-13,
+-- build 12.1.0.69299, Gethe/wow-ui-source commit 31c7f7b9cc79:
+-- https://github.com/Gethe/wow-ui-source/tree/31c7f7b9cc79e56c986b365c06a6afbcf3c9177b/Interface/AddOns/Blizzard_CooldownViewer
+-- All 27 files in that directory are byte-identical to the prior 68914 pin.
 --
 -- The client processes secret aura and totem values in the viewer/item Lua
 -- mixins. Calling those mixins from addon execution (including RefreshLayout,
@@ -1860,7 +1861,7 @@ local function CaptureNativeGeometry(item, itemState)
     return true
 end
 
--- Retail 12.1.0.68914 (wow-ui-source d3915c78aba7) uses the native
+-- Retail 12.1.0.69299 (wow-ui-source 31c7f7b9cc79) uses the native
 -- Cooldown Viewer itself as its GridLayout item container. RefreshLayout
 -- clears and rebuilds item anchors but leaves this root anchor alone. Keep
 -- the root centered on BFI's holder so a native rebuild lands at the desired
@@ -4197,7 +4198,7 @@ end
 for event in next, hotkeyRefreshEvents do
     presentationController:RegisterEvent(event)
 end
--- Retail 12.1.0.68914 (d3915c78aba7) drives Cooldown Viewer pool
+-- Retail 12.1.0.69299 (31c7f7b9cc79) drives Cooldown Viewer pool
 -- membership and item visibility from these events. Their payloads,
 -- including secret UNIT_AURA data, are intentionally ignored; BFI only
 -- coalesces a later read of the supported pool proxy and captured widget
