@@ -25,6 +25,9 @@ local NATIVE_GROUP_INITIAL_RESERVATIONS = 10
 local ALLOWED_NATIVE_FOLLOWER_GLOBALS = {
     DebuffFrame = true,
 }
+local ALLOWED_HOLDER_ANCHOR_GLOBALS = {
+    DebuffFrame = true,
+}
 local ALLOWED_RESTORE_RELATIVE_GLOBALS = {
     BuffFrame = true,
     UIParent = true,
@@ -176,6 +179,42 @@ local function QueueController(controller)
     end
 end
 
+local function UsesHolderAnchor(controller)
+    local pendingDescriptor = controller.pendingDescriptor
+    local descriptor = controller.descriptor
+    return (pendingDescriptor and pendingDescriptor.holderAnchor ~= nil)
+        or (descriptor and descriptor.holderAnchor ~= nil)
+end
+
+local function DeferControllerForEditMode(controller)
+    local wasPending = pendingControllers[controller] == true
+    pendingControllers[controller] = true
+    if not wasPending then
+        NotifyControllerState(controller)
+    end
+end
+
+local function QueueCompletedDispatcherHandoff(controller)
+    if controller.dispatcherHandoffQueued then return end
+    controller.dispatcherHandoffQueued = true
+    C_Timer.After(0, function()
+        controller.dispatcherHandoffQueued = nil
+        if controller.dispatcherHandoffPending
+            and controller.pendingOperation == nil
+            and pendingControllers[controller] ~= true
+        then
+            -- The dispatcher stopped at a custom-controller ownership boundary.
+            -- Resume only after the controller has drained its exact pending
+            -- operation; the dispatcher re-reads desired and actual ownership
+            -- against its current generation before any downstream write.
+            controller.dispatcherHandoffPending = nil
+            if type(BD.ContinueBuffsDebuffsBackendTransition) == "function" then
+                BD.ContinueBuffsDebuffsBackendTransition(controller.which)
+            end
+        end
+    end)
+end
+
 local function AssertDescriptor(descriptor)
     assert(type(descriptor) == "table",
         "custom aura pane compiler must return a descriptor")
@@ -218,11 +257,33 @@ local function AssertDescriptor(descriptor)
             and descriptor.nativeFollower.y == -5
         ),
         "custom aura descriptor requires an allowed native follower")
+    assert(descriptor.holderAnchor == nil
+        or (
+            type(descriptor.holderAnchor) == "table"
+            and descriptor.holderAnchor.globalName == "DebuffFrame"
+            and descriptor.holderAnchor.point == "TOPRIGHT"
+            and descriptor.holderAnchor.relativePoint == "TOPRIGHT"
+            and descriptor.holderAnchor.x == 0
+            and descriptor.holderAnchor.y == 0
+        ),
+        "custom aura descriptor requires an allowed holder anchor")
+    assert(descriptor.nativeSuppression == nil
+        or descriptor.nativeSuppression == "harmful",
+        "custom aura descriptor requires an allowed native suppression")
     assert(descriptor.holderRolesets == nil
         or descriptor.holderRolesets == "buffs",
         "custom aura descriptor holderRolesets must be literal buffs or nil")
     assert(descriptor.nativeFollower == nil or descriptor.position ~= nil,
         "custom aura native follower requires a holder position")
+    assert((descriptor.position ~= nil)
+        ~= (descriptor.holderAnchor ~= nil),
+        "custom aura descriptor requires one holder position source")
+    assert(descriptor.nativeSuppression ~= "harmful"
+        or (
+            descriptor.holderAnchor ~= nil
+            and descriptor.nativeFollower == nil
+        ),
+        "harmful native suppression requires the DebuffFrame holder anchor")
     assert(descriptor.position ~= nil or descriptor.positionSave == nil,
         "custom aura descriptor cannot save a missing holder position")
 end
@@ -826,20 +887,197 @@ local function ApplyNativeFollower(controller, descriptor, refreshRestore)
     return true
 end
 
+local function CaptureExactHolderAnchorPayload(descriptor)
+    if not IsOrdinaryTable(descriptor) then return end
+    local anchor = descriptor.holderAnchor
+    if not IsOrdinaryTable(anchor) then return end
+    local globalName = anchor.globalName
+    local point = anchor.point
+    local relativePoint = anchor.relativePoint
+    local x = anchor.x
+    local y = anchor.y
+    if not IsOrdinaryString(globalName)
+        or globalName ~= "DebuffFrame"
+        or not IsOrdinaryString(point)
+        or point ~= "TOPRIGHT"
+        or not IsOrdinaryString(relativePoint)
+        or relativePoint ~= "TOPRIGHT"
+        or not IsOrdinaryNumber(x)
+        or x ~= 0
+        or not IsOrdinaryNumber(y)
+        or y ~= 0
+    then
+        return
+    end
+    return {
+        source = anchor,
+        globalName = globalName,
+        point = point,
+        relativePoint = relativePoint,
+        x = x,
+        y = y,
+    }
+end
+
+local function CaptureHolderAnchorBoundary(controller, payload)
+    if not IsOrdinaryTable(payload) then return end
+    local target, targetAccessMethod = ResolveAccessibleGlobal(
+        payload.globalName,
+        ALLOWED_HOLDER_ANCHOR_GLOBALS
+    )
+    local holder = controller.holder
+    local holderAccessMethod = CanAccessScriptObject(holder)
+    if not target or not targetAccessMethod or not holderAccessMethod then
+        return
+    end
+    local clearAllPoints = holder.ClearAllPoints
+    local setPoint = holder.SetPoint
+    if not IsOrdinaryFunction(clearAllPoints)
+        or not IsOrdinaryFunction(setPoint)
+    then
+        return
+    end
+    return {
+        target = target,
+        targetAccessMethod = targetAccessMethod,
+        holder = holder,
+        holderAccessMethod = holderAccessMethod,
+        clearAllPoints = clearAllPoints,
+        setPoint = setPoint,
+    }
+end
+
+local function HasExactHolderAnchorTransaction(
+    controller,
+    descriptor,
+    payload,
+    first,
+    current
+)
+    if not IsOrdinaryTable(descriptor)
+        or not IsOrdinaryTable(payload)
+        or not IsOrdinaryTable(first)
+        or not IsOrdinaryTable(current)
+    then
+        return false
+    end
+    local liveAnchor = descriptor.holderAnchor
+    if not IsOrdinaryTable(liveAnchor)
+        or not rawequal(liveAnchor, payload.source)
+    then
+        return false
+    end
+    local globalName = liveAnchor.globalName
+    local point = liveAnchor.point
+    local relativePoint = liveAnchor.relativePoint
+    local x = liveAnchor.x
+    local y = liveAnchor.y
+    if not IsOrdinaryString(globalName)
+        or not IsOrdinaryString(point)
+        or not IsOrdinaryString(relativePoint)
+        or not IsOrdinaryNumber(x)
+        or not IsOrdinaryNumber(y)
+        or globalName ~= payload.globalName
+        or point ~= payload.point
+        or relativePoint ~= payload.relativePoint
+        or x ~= payload.x
+        or y ~= payload.y
+    then
+        return false
+    end
+
+    local holder = controller.holder
+    if not IsOrdinaryValue(holder) then return false end
+    local holderType = type(holder)
+    if holderType ~= "table" and holderType ~= "userdata" then return false end
+    local holderAccessMethod = holder.CanBeAccessedInContext
+    local clearAllPoints = holder.ClearAllPoints
+    local setPoint = holder.SetPoint
+    if not IsOrdinaryFunction(holderAccessMethod)
+        or not IsOrdinaryFunction(clearAllPoints)
+        or not IsOrdinaryFunction(setPoint)
+    then
+        return false
+    end
+
+    local target = rawget(_G, globalName)
+    if not IsOrdinaryValue(target) then return false end
+    local targetType = type(target)
+    if targetType ~= "table" and targetType ~= "userdata" then return false end
+    local targetAccessMethod = target.CanBeAccessedInContext
+    if not IsOrdinaryFunction(targetAccessMethod) then return false end
+
+    return rawequal(holder, first.holder)
+        and rawequal(holder, current.holder)
+        and rawequal(holderAccessMethod, first.holderAccessMethod)
+        and rawequal(holderAccessMethod, current.holderAccessMethod)
+        and rawequal(clearAllPoints, first.clearAllPoints)
+        and rawequal(clearAllPoints, current.clearAllPoints)
+        and rawequal(setPoint, first.setPoint)
+        and rawequal(setPoint, current.setPoint)
+        and rawequal(target, first.target)
+        and rawequal(target, current.target)
+        and rawequal(targetAccessMethod, first.targetAccessMethod)
+        and rawequal(targetAccessMethod, current.targetAccessMethod)
+end
+
 local function ApplyHolder(controller, descriptor)
     local holder = controller.holder
-    AF.SetSize(holder, descriptor.holder.width, descriptor.holder.height)
 
-    if holder.mover then
-        AF.UpdateMoverSave(
+    if descriptor.holderAnchor then
+        if not nativeFollowerLifecycleRegistered
+            or nativeFollowerEditModeActive
+        then
+            return false
+        end
+        local payload = CaptureExactHolderAnchorPayload(descriptor)
+        local first = payload
+            and CaptureHolderAnchorBoundary(controller, payload)
+        local currentPayload = CaptureExactHolderAnchorPayload(descriptor)
+        local current = currentPayload
+            and CaptureHolderAnchorBoundary(controller, currentPayload)
+        if not payload
+            or not first
+            or not currentPayload
+            or not current
+            or not rawequal(payload.source, currentPayload.source)
+            or payload.globalName ~= currentPayload.globalName
+            or payload.point ~= currentPayload.point
+            or payload.relativePoint ~= currentPayload.relativePoint
+            or payload.x ~= currentPayload.x
+            or payload.y ~= currentPayload.y
+            or not HasExactHolderAnchorTransaction(
+                controller,
+                descriptor,
+                payload,
+                first,
+                current
+            )
+            or nativeFollowerEditModeActive
+            or not IsOutOfCombat()
+        then
+            return false
+        end
+        first.clearAllPoints(holder)
+        first.setPoint(
             holder,
-            descriptor.positionSave or descriptor.position
+            payload.point,
+            first.target,
+            payload.relativePoint,
+            payload.x,
+            payload.y
         )
-    end
-    if descriptor.position then
+    else
+        if holder.mover then
+            AF.UpdateMoverSave(
+                holder,
+                descriptor.positionSave or descriptor.position
+            )
+        end
         BFI.funcs.LoadPosition(holder, descriptor.position)
     end
 
+    AF.SetSize(holder, descriptor.holder.width, descriptor.holder.height)
     holder.enabled = descriptor.enabled
     return true
 end
@@ -915,8 +1153,36 @@ local function ApplyNativeTuning(controller, descriptor)
     return true
 end
 
-local function RestoreNative(controller)
+local function UsesHarmfulSuppression(controller, descriptor)
+    descriptor = descriptor or controller.descriptor
+    return descriptor and descriptor.nativeSuppression == "harmful"
+end
+
+local function RestoreNative(controller, descriptor)
+    if UsesHarmfulSuppression(controller, descriptor) then
+        return type(BD.SetNativeHarmfulAurasSuppressed) == "function"
+            and BD.SetNativeHarmfulAurasSuppressed(
+                false,
+                ResolvePlayerUnit()
+            ) == true
+    end
     return BD.SetNativePublicAurasSuppressed(controller.which, false) == true
+end
+
+local function SuppressNative(controller)
+    if UsesHarmfulSuppression(controller) then
+        return type(BD.SetNativeHarmfulAurasSuppressed) == "function"
+            and BD.SetNativeHarmfulAurasSuppressed(true) == true
+    end
+    return BD.SetNativePublicAurasSuppressed(controller.which, true) == true
+end
+
+local function ReassertNative(controller)
+    if UsesHarmfulSuppression(controller) then
+        return type(BD.ReassertNativeHarmfulAuraSuppression) == "function"
+            and BD.ReassertNativeHarmfulAuraSuppression() == true
+    end
+    return true
 end
 
 local function HideCustom(controller)
@@ -944,11 +1210,17 @@ local function Deactivate(controller, state)
         return false
     end
     if not RestoreNative(controller) then
+        if controller.active and UsesHarmfulSuppression(controller) then
+            controller.state = "ACTIVE_REFRESH_FAILED"
+            controller.diagnostic = "NATIVE_RESTORE_FAILED"
+        end
         return false
     end
 
     HideCustom(controller)
     SetNativeFollowerRefreshPending(controller, false)
+    controller.editModeSuspended = nil
+    controller.harmfulReassertPending = nil
     controller.state = state or (controller.buildCompleted and "INACTIVE" or "NEW")
     return true
 end
@@ -981,10 +1253,35 @@ local function Activate(controller)
 
     -- Fail native: do not hide Blizzard until the replacement has completed
     -- its one-shot construction and final enable transition.
-    if not BD.SetNativePublicAurasSuppressed(controller.which, true) then
+    if not SuppressNative(controller) then
+        local wasActive = controller.active == true
         local nativeRestored = RestoreNative(controller)
         local followerRestored = RestoreNativeFollower(controller)
-        if nativeRestored then
+        if UsesHarmfulSuppression(controller) then
+            SetNativeFollowerRefreshPending(controller, false)
+            if nativeRestored then
+                HideCustom(controller)
+                controller.harmfulReassertPending = nil
+                controller.state = "SUPPRESSION_FAILED"
+                controller.diagnostic = "NATIVE_SUPPRESSION_FAILED"
+            elseif wasActive then
+                -- An existing replacement remains the truthful presentation
+                -- owner until a later explicit restore or reassert succeeds.
+                ShowCustom(controller)
+                controller.harmfulReassertPending = true
+                controller.state = "ACTIVE_REFRESH_FAILED"
+                controller.diagnostic = "NATIVE_HARMFUL_REASSERT_FAILED"
+                QueueController(controller)
+            else
+                -- Initial activation has not established ownership. The
+                -- pre-build restore left Blizzard visible, so never expose an
+                -- unsuppressed duplicate custom row.
+                HideCustom(controller)
+                controller.harmfulReassertPending = nil
+                controller.state = "SUPPRESSION_FAILED"
+                controller.diagnostic = "NATIVE_SUPPRESSION_FAILED"
+            end
+        elseif nativeRestored then
             HideCustom(controller)
             if followerRestored then
                 controller.state = "SUPPRESSION_FAILED"
@@ -1001,6 +1298,8 @@ local function Activate(controller)
 
     ShowCustom(controller)
     SetNativeFollowerRefreshPending(controller, false)
+    controller.editModeSuspended = nil
+    controller.harmfulReassertPending = nil
     controller.state = "ACTIVE"
     controller.diagnostic = nil
     return true
@@ -1041,7 +1340,9 @@ local function CreateHolder(controller, descriptor)
     elseif controller.holderRolesetsApplied ~= nil then
         return false
     end
-    AF.SetSize(holder, descriptor.holder.width, descriptor.holder.height)
+    if not descriptor.holderAnchor then
+        AF.SetSize(holder, descriptor.holder.width, descriptor.holder.height)
+    end
 
     if descriptor.moverText and descriptor.position then
         AF.CreateMover(
@@ -1075,7 +1376,7 @@ end
 local function Build(controller, descriptor)
     assert(not controller.buildAttempted and not controller.container,
         "custom aura controller permits only one native build attempt")
-    if not RestoreNative(controller) then
+    if not RestoreNative(controller, descriptor) then
         controller.state = "NATIVE_UNAVAILABLE"
         controller.diagnostic = "NATIVE_RESTORE_FAILED"
         return false
@@ -1086,7 +1387,11 @@ local function Build(controller, descriptor)
         controller.diagnostic = "HOLDER_ROLESET_UNAVAILABLE"
         return false
     end
-    ApplyHolder(controller, descriptor)
+    if not ApplyHolder(controller, descriptor) then
+        controller.state = "NATIVE_UNAVAILABLE"
+        controller.diagnostic = "HOLDER_ANCHOR_UNAVAILABLE"
+        return false
+    end
 
     controller.buildAttempted = true
     controller.state = "BUILDING"
@@ -1178,15 +1483,42 @@ function ControllerMixin:_ApplyRetarget()
     AF.UpdateCustomAuraContainer(self.container)
     self.unit = self.pendingUnit
     self.pendingUnit = nil
+    if self.active
+        and UsesHarmfulSuppression(self)
+        and not self.editModeSuspended
+    then
+        self.harmfulReassertPending = true
+    end
     return true
 end
 
 function ControllerMixin:_ApplyPending()
-    -- Retargeting is a supported live native write in combat. Apply the
-    -- sanitized unit first while any latest tuning operation remains queued
-    -- for its protected out-of-combat pass.
+    -- Retargeting is a supported live native write in combat and while Edit
+    -- Mode owns the surrounding root. Apply the sanitized player/vehicle unit
+    -- before protected holder/config work is deferred.
     if self.pendingUnit then
         self:_ApplyRetarget()
+    end
+
+    if (self.pendingOperation
+        or self.harmfulReassertPending)
+        and nativeFollowerEditModeActive
+        and UsesHolderAnchor(self)
+    then
+        DeferControllerForEditMode(self)
+        return
+    end
+
+    if self.harmfulReassertPending and not self.pendingOperation then
+        if not IsOutOfCombat() or not ReassertNative(self) then
+            self.state = "ACTIVE_REFRESH_FAILED"
+            self.diagnostic = "NATIVE_HARMFUL_REASSERT_FAILED"
+            QueueController(self)
+            return
+        end
+        self.harmfulReassertPending = nil
+        self.state = "ACTIVE"
+        self.diagnostic = nil
     end
 
     if not self.pendingOperation then
@@ -1208,6 +1540,7 @@ function ControllerMixin:_ApplyPending()
     self.pendingDiagnostic = nil
     pendingControllers[self] = nil
 
+    local completedDisable
     if operation == "disable" then
         if not Deactivate(self) then
             self.pendingOperation = operation
@@ -1216,6 +1549,7 @@ function ControllerMixin:_ApplyPending()
         end
         self.reloadRequired = nil
         self.diagnostic = nil
+        completedDisable = true
     elseif operation == "unsupported" then
         if not Deactivate(self, "UNSUPPORTED") then
             self.pendingOperation = operation
@@ -1262,10 +1596,53 @@ function ControllerMixin:_ApplyPending()
     else
         self.reloadRequired = nil
         self.descriptor = descriptor
-        if not ApplyNativeTuning(self, descriptor)
-            or not Activate(self)
-        then
-            if not self.nativeFollowerRefreshPending then
+        local reassertAfterTuning = self.active == true
+            and self.harmfulReassertPending == true
+            and UsesHarmfulSuppression(self, descriptor)
+        if not ApplyNativeTuning(self, descriptor) then
+            local wasActive = self.active == true
+            local nativeRestored = RestoreNative(self)
+            if nativeRestored then
+                HideCustom(self)
+                self.harmfulReassertPending = nil
+            elseif wasActive and UsesHarmfulSuppression(self, descriptor) then
+                -- Keep the last safe replacement visible and retain this
+                -- latest-only tuning payload. A transient holder boundary and
+                -- a failed native restore must not silently discard the user
+                -- update or claim that Blizzard has taken presentation back.
+                self.pendingOperation = operation
+                self.pendingDescriptor = descriptor
+                self.state = "ACTIVE_REFRESH_FAILED"
+                self.diagnostic = descriptor.holderAnchor
+                    and "HOLDER_ANCHOR_UNAVAILABLE"
+                    or "NATIVE_FOLLOWER_UNAVAILABLE"
+                QueueController(self)
+                UnregisterRegenIfIdle()
+                NotifyControllerState(self)
+                return
+            end
+            self.state = "NATIVE_UNAVAILABLE"
+            self.diagnostic = descriptor.holderAnchor
+                and "HOLDER_ANCHOR_UNAVAILABLE"
+                or "NATIVE_FOLLOWER_UNAVAILABLE"
+        elseif reassertAfterTuning then
+            -- A completed harmful suppression ledger makes Activate's normal
+            -- SetNative(true) path intentionally idempotent. Do not let that
+            -- erase a lifecycle invalidation that arrived alongside this
+            -- latest tuning update: consume it with one explicit reassert.
+            if ReassertNative(self) then
+                self.harmfulReassertPending = nil
+                self.state = "ACTIVE"
+                self.diagnostic = nil
+            else
+                self.state = "ACTIVE_REFRESH_FAILED"
+                self.diagnostic = "NATIVE_HARMFUL_REASSERT_FAILED"
+                QueueController(self)
+            end
+        elseif not Activate(self) then
+            if descriptor.nativeFollower
+                and not self.nativeFollowerRefreshPending
+            then
                 MarkNativeFollowerRefreshPending(self)
             end
         end
@@ -1273,9 +1650,17 @@ function ControllerMixin:_ApplyPending()
 
     UnregisterRegenIfIdle()
     NotifyControllerState(self)
+    if (completedDisable or self.pendingOperation == nil)
+        and self.which == "debuffs"
+        and self.dispatcherHandoffPending
+    then
+        QueueCompletedDispatcherHandoff(self)
+    end
 end
 
 function ControllerMixin:Update(config)
+    -- A fresh custom update supersedes any earlier deferred dispatcher handoff.
+    self.dispatcherHandoffPending = nil
     local descriptor, diagnostic = self.compiler(config)
     if descriptor == nil then
         self.pendingOperation = "unsupported"
@@ -1294,6 +1679,9 @@ function ControllerMixin:Disable()
     self.pendingDescriptor = nil
     self.pendingDiagnostic = nil
     self:_ApplyPending()
+    return self.active ~= true
+        and pendingControllers[self] ~= true
+        and self.pendingOperation == nil
 end
 
 function ControllerMixin:GetState()
@@ -1312,6 +1700,8 @@ function ControllerMixin:GetState()
         buildAttempted = self.buildAttempted == true,
         buildCompleted = self.buildCompleted == true,
         nativeFollowerActive = self.nativeFollowerActive == true,
+        editModeSuspended = self.editModeSuspended == true,
+        harmfulReassertPending = self.harmfulReassertPending == true,
         reloadRequired = self.reloadRequired == true,
         diagnostic = self.diagnostic,
         unit = self.unit,
@@ -1366,6 +1756,43 @@ local function RefreshNativeAuraFollowers()
             NotifyControllerState(controller)
         end
     end
+
+    -- Edit Mode exit first restores #127's native DebuffFrame follower above,
+    -- then drains any holder-anchored Debuffs request, then resumes a row that
+    -- was explicitly restored/suspended on Edit Mode entry.
+    local deferredHolderControllers = {}
+    for controller in pairs(pendingControllers) do
+        if UsesHolderAnchor(controller) then
+            deferredHolderControllers[#deferredHolderControllers + 1] =
+                controller
+        end
+    end
+    for _, controller in ipairs(deferredHolderControllers) do
+        controller:_ApplyPending()
+    end
+
+    for _, controller in pairs(registrations) do
+        local descriptor = controller.descriptor
+        if controller.editModeSuspended
+            and not controller.active
+            and not controller.pendingOperation
+            and controller.buildCompleted
+            and descriptor
+            and descriptor.enabled
+            and descriptor.holderAnchor
+        then
+            if ApplyNativeTuning(controller, descriptor)
+                and Activate(controller)
+            then
+                controller.editModeSuspended = nil
+            else
+                controller.state = "NATIVE_UNAVAILABLE"
+                controller.diagnostic = "EDIT_MODE_RESUME_FAILED"
+            end
+            NotifyControllerState(controller)
+        end
+    end
+
 end
 
 local function QueueNativeAuraFollowerRefresh()
@@ -1374,16 +1801,55 @@ local function QueueNativeAuraFollowerRefresh()
     C_Timer.After(0, RefreshNativeAuraFollowers)
 end
 
-local function OnNativeAuraFollowerEvent()
+local function OnNativeAuraFollowerInvalidation()
+    for _, controller in pairs(registrations) do
+        if controller.active and UsesHarmfulSuppression(controller) then
+            controller.harmfulReassertPending = true
+            QueueController(controller)
+        end
+    end
     QueueNativeAuraFollowerRefresh()
+end
+
+local function OnNativeAuraFollowerRegen()
+    -- Regen drains work that an earlier event explicitly queued; it never
+    -- invents a six-anchor reassert on its own.
+    for _, controller in pairs(registrations) do
+        if controller.nativeFollowerRefreshPending then
+            QueueNativeAuraFollowerRefresh()
+            return
+        end
+    end
 end
 
 local function OnEditModeEnter()
     nativeFollowerEditModeActive = true
+    -- First yield the Blizzard root that #127 follows back to Edit Mode.
     for _, controller in pairs(registrations) do
         if controller.nativeFollowerActive then
             if not RestoreNativeFollower(controller) then
                 MarkNativeFollowerRefreshPending(controller)
+            end
+            NotifyControllerState(controller)
+        end
+    end
+    -- Then restore the complete Blizzard harmful presentation before hiding
+    -- the custom row. If restore fails, keep the replacement visible.
+    for _, controller in pairs(registrations) do
+        local descriptor = controller.descriptor
+        if controller.active
+            and descriptor
+            and descriptor.holderAnchor
+        then
+            if Deactivate(controller, "EDIT_MODE_SUSPENDED") then
+                controller.editModeSuspended = true
+                controller.diagnostic = nil
+            else
+                if UsesHarmfulSuppression(controller) then
+                    controller.harmfulReassertPending = true
+                    DeferControllerForEditMode(controller)
+                end
+                controller.diagnostic = "EDIT_MODE_SUSPEND_FAILED"
             end
             NotifyControllerState(controller)
         end
@@ -1419,16 +1885,19 @@ local function RegisterNativeFollowerLifecycle()
         OnEditModeExit,
         BD
     )
-    BD:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED", OnNativeAuraFollowerEvent)
-    BD:RegisterEvent("PLAYER_ENTERING_WORLD", OnNativeAuraFollowerEvent)
-    BD:RegisterEvent("PLAYER_REGEN_ENABLED", OnNativeAuraFollowerEvent)
+    BD:RegisterEvent(
+        "EDIT_MODE_LAYOUTS_UPDATED",
+        OnNativeAuraFollowerInvalidation
+    )
+    BD:RegisterEvent("PLAYER_ENTERING_WORLD", OnNativeAuraFollowerInvalidation)
+    BD:RegisterEvent("PLAYER_REGEN_ENABLED", OnNativeAuraFollowerRegen)
     BD:RegisterEvent(
         "PLAYER_SPECIALIZATION_CHANGED",
-        OnNativeAuraFollowerEvent
+        OnNativeAuraFollowerInvalidation
     )
     BD:RegisterEvent(
         "ACTIVE_PLAYER_SPECIALIZATION_CHANGED",
-        OnNativeAuraFollowerEvent
+        OnNativeAuraFollowerInvalidation
     )
     nativeFollowerLifecycleRegistered = true
     return true
@@ -1467,25 +1936,40 @@ function BD.IsCustomAuraContainerAvailable(which)
     return IsPane(which)
         and registrations[which] ~= nil
         and BD.HasCustomAuraContainerCapability() == true
-        and BD.CanSuppressNativePublicAuras(which) == true
+        and (
+            which ~= "debuffs"
+            and BD.CanSuppressNativePublicAuras(which) == true
+            or which == "debuffs"
+            and type(BD.CanSuppressNativeHarmfulAuras) == "function"
+            and BD.CanSuppressNativeHarmfulAuras() == true
+        )
 end
 
-function BD.UpdateCustomAuraContainer(which, config)
+function BD.UpdateCustomAuraContainer(which, config, resumeDispatcher)
     local controller = registrations[which]
     if not controller or not BD.HasCustomAuraContainerCapability() then
         return false
     end
 
     controller:Update(config)
+    if resumeDispatcher == true and which == "debuffs" then
+        local state = controller:GetState()
+        controller.dispatcherHandoffPending =
+            (state.pending == true or state.operationPending == true) and true
+            or nil
+    end
     return true
 end
 
-function BD.DisableCustomAuraContainer(which)
+function BD.DisableCustomAuraContainer(which, resumeDispatcher)
     local controller = registrations[which]
     if not controller then return false end
 
-    controller:Disable()
-    return true
+    local completed = controller:Disable() == true
+    if resumeDispatcher == true and which == "debuffs" then
+        controller.dispatcherHandoffPending = not completed and true or nil
+    end
+    return completed
 end
 
 function BD.GetCustomAuraContainerState(which)
@@ -1529,12 +2013,27 @@ function BD.FlushCustomAuraContainerUpdates()
     end
 end
 
-function BD.RefreshCustomAuraContainerUnits()
+function BD.RefreshCustomAuraContainerUnits(event)
     local unit = ResolvePlayerUnit()
     for _, controller in pairs(registrations) do
         if controller.buildCompleted and controller.unit ~= unit then
             controller.pendingUnit = unit
-            controller:_ApplyPending()
+            if event == "PLAYER_ENTERING_WORLD" then
+                -- PEW also has a separate native-layout invalidation callback,
+                -- and callback-table order is intentionally unspecified. Keep
+                -- the sanitized custom-container retarget immediate, but drain
+                -- its private-anchor reassert through the shared next-tick
+                -- refresh so either callback order produces one setter batch.
+                controller:_ApplyRetarget()
+                if controller.harmfulReassertPending then
+                    DeferControllerForEditMode(controller)
+                    QueueNativeAuraFollowerRefresh()
+                else
+                    controller:_ApplyPending()
+                end
+            else
+                controller:_ApplyPending()
+            end
         end
     end
 end

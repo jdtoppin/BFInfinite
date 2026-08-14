@@ -46,6 +46,7 @@ done < <(
 
 ./scripts/check-policy.sh
 bash ./scripts/check-cooldown-manager-boundary.sh
+bash ./scripts/check-cooldown-manager-presentation.sh
 
 changed=()
 for file in "$@"; do

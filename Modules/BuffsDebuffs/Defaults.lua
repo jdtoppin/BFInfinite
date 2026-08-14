@@ -300,6 +300,9 @@ local function NormalizePane(config, fallback)
     FillMissing(config, fallback)
 
     config.enabled = NormalizeBoolean(config.enabled, fallback.enabled)
+    -- This retired second enable switch must not survive profile hydration or
+    -- override the pane's canonical enabled value.
+    config.customHarmfulEnabled = nil
     config.position = NormalizeHolderPosition(config.position, fallback.position)
     config.width = NormalizeNumber(config.width, fallback.width, 10, 100, true)
     config.height = NormalizeNumber(

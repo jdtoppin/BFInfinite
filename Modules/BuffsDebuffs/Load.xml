@@ -7,4 +7,5 @@
     <Script file="BuffsDebuffs.lua"/>
     <Script file="CustomAuraContainer.lua"/>
     <Script file="CustomBuffs.lua"/>
+    <Script file="CustomDebuffs.lua"/>
 </Ui>
