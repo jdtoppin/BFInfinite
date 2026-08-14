@@ -638,7 +638,7 @@ builder["objectiveTrackerPlacement"] = function(parent)
     AF.SetPoint(placement, "TOPLEFT", 15, -12)
     placement:SetTooltip(
         L["Objective Tracker Position & Height"],
-        L["Sets the Blizzard Objective Tracker to BFI's default position, 75 pixels higher than Blizzard's preset, and its default height to 640 where Blizzard supports it. This uses the active custom Blizzard Edit Mode layout and does not save a position or height in your BFI profile."]
+        L["Sets the Blizzard Objective Tracker to BFI's default position, 75 pixels higher than Blizzard's preset, and its default height to 640 where Blizzard supports it. On a fresh Blizzard preset, this creates and activates BFI's own layout. It does not save a position or height in your BFI profile."]
     )
 
     local openEditMode = AF.CreateButton(
@@ -660,12 +660,14 @@ builder["objectiveTrackerPlacement"] = function(parent)
     status:SetJustifyH("LEFT")
     status:SetWordWrap(true)
     local placementSaved
+    local placementReason
 
     local unavailableStatus = {
         busy = L["Saving Objective Tracker position and height..."],
         combat = L["Unavailable in combat."],
         customLayout = L["Use a custom Blizzard Edit Mode layout first."],
         editMode = L["Finish editing in Blizzard Edit Mode first."],
+        layoutName = L["Unable to create the BFI Blizzard layout."],
         unavailable = L["Unavailable on this client."],
     }
 
@@ -687,15 +689,30 @@ builder["objectiveTrackerPlacement"] = function(parent)
             reason = "unavailable"
         end
 
-        placement:SetEnabled(reason == nil
-            and type(W.SetObjectiveTrackerBFIRightStackPlacement) == "function")
+        local canSet, availabilityReason
+        if type(W.CanSetObjectiveTrackerBFIRightStackPlacement) == "function" then
+            canSet, availabilityReason =
+                W.CanSetObjectiveTrackerBFIRightStackPlacement()
+        else
+            canSet = reason == nil
+                and type(W.SetObjectiveTrackerBFIRightStackPlacement)
+                    == "function"
+            availabilityReason = reason
+        end
+
+        placement:SetEnabled(canSet == true)
         openEditMode:SetEnabled(CanOpenBlizzardEditMode() == true)
 
-        local statusText = reason and (
-            unavailableStatus[reason] or unavailableStatus.unavailable
-        ) or placementSaved and L[
+        local statusText = placementSaved and L[
             "Saved default position and 640 height where supported. Open and close Blizzard Edit Mode to apply it; temporary Blizzard layouts take precedence."
-        ] or isDefaultPosition and L[
+        ] or placementReason and (
+            unavailableStatus[placementReason] or unavailableStatus.unavailable
+        ) or availabilityReason == "createsLayout" and L[
+            "Click Set Default Position & Height to create and activate BFI's Blizzard layout."
+        ] or reason and (
+            unavailableStatus[availabilityReason or reason]
+                or unavailableStatus.unavailable
+        ) or isDefaultPosition and L[
             "Using Blizzard's right-managed position."
         ] or L["Using a custom Blizzard Edit Mode position."]
         status:SetText(statusText)
@@ -704,8 +721,10 @@ builder["objectiveTrackerPlacement"] = function(parent)
 
     placement:SetOnClick(function()
         if type(W.SetObjectiveTrackerBFIRightStackPlacement) == "function" then
-            placementSaved = W.SetObjectiveTrackerBFIRightStackPlacement()
-                == true
+            local saved, actionReason =
+                W.SetObjectiveTrackerBFIRightStackPlacement()
+            placementSaved = saved == true
+            placementReason = placementSaved and nil or actionReason
         end
         Refresh()
     end)
@@ -721,6 +740,7 @@ builder["objectiveTrackerPlacement"] = function(parent)
     function pane.Load(t)
         pane.t = t
         placementSaved = nil
+        placementReason = nil
         Refresh()
     end
 
@@ -765,8 +785,8 @@ builder["objectiveTrackerNativeHeight"] = function(parent)
     local unavailableTips = {
         busy = L["Objective Tracker height is temporarily busy."],
         combat = L["Leave combat before changing the Objective Tracker height."],
-        customLayout = L["Select an Account or Character Blizzard Edit Mode layout before changing the Objective Tracker height."],
-        customPosition = L["Move the Objective Tracker out of its default position in Blizzard Edit Mode before changing its height."],
+        customLayout = L["Use Set Default Position & Height above to create BFI's layout, or select an Account or Character Blizzard Edit Mode layout."],
+        customPosition = L["Use Set Default Position & Height above, or move the Objective Tracker in Blizzard Edit Mode before changing its height."],
         editMode = L["Close Blizzard Edit Mode before changing the Objective Tracker height."],
         invalid = L["Objective Tracker height is unavailable on this client."],
         unavailable = L["Objective Tracker height is unavailable on this client."],
@@ -774,8 +794,8 @@ builder["objectiveTrackerNativeHeight"] = function(parent)
     local unavailableStatus = {
         busy = L["Saving Objective Tracker height..."],
         combat = L["Unavailable in combat."],
-        customLayout = L["Use a custom Blizzard Edit Mode layout first."],
-        customPosition = L["Move it in Blizzard Edit Mode first."],
+        customLayout = L["Use Set Default Position & Height above."],
+        customPosition = L["Use Set Default Position & Height above."],
         editMode = L["Finish editing in Blizzard Edit Mode first."],
         invalid = L["Unavailable on this client."],
         unavailable = L["Unavailable on this client."],

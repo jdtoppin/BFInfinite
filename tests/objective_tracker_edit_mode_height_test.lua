@@ -297,6 +297,8 @@ assertEqual(type(W.GetObjectiveTrackerNativePlacement), "function",
     "native placement getter is exported")
 assertEqual(type(W.SetObjectiveTrackerBFIRightStackPlacement), "function",
     "native placement setter is exported")
+assertEqual(type(W.CanSetObjectiveTrackerBFIRightStackPlacement), "function",
+    "native placement preflight is exported")
 assertEqual(type(W.ApplyObjectiveTrackerFreshInstallLayout), "function",
     "fresh-install layout bootstrap is exported")
 
@@ -522,8 +524,18 @@ assertEqual(reason, "customLayout",
     "preset layout requires a user-created layout")
 assertEqual(W.SetObjectiveTrackerNativeHeight(500), false,
     "preset layout is not overwritten")
-assertEqual(W.SetObjectiveTrackerBFIRightStackPlacement(), false,
-    "preset layout is not overwritten by BFI placement")
+local canSet, canSetReason =
+    W.CanSetObjectiveTrackerBFIRightStackPlacement()
+assertEqual(canSet, false,
+    "a preset alongside existing layouts cannot silently add a BFI layout")
+assertEqual(canSetReason, "customLayout",
+    "existing saved layouts keep the explicit custom-layout boundary")
+local placementSaved, placementActionReason =
+    W.SetObjectiveTrackerBFIRightStackPlacement()
+assertEqual(placementSaved, false,
+    "preset layout with saved layouts is not overwritten by BFI placement")
+assertEqual(placementActionReason, "customLayout",
+    "preset layout with saved layouts explains its protected boundary")
 assertEqual(saveCalls, 0, "preset layout does not save")
 
 resetLayouts()
@@ -559,6 +571,36 @@ resetLayouts()
 assertEqual(W.SetObjectiveTrackerNativeHeight("500"), false,
     "non-numeric native height is rejected")
 assertEqual(saveCalls, 0, "invalid native height does not save")
+
+resetFreshPresetLayouts()
+canSet, canSetReason = W.CanSetObjectiveTrackerBFIRightStackPlacement()
+assertTrue(canSet,
+    "fresh preset enables BFI's explicit placement action")
+assertEqual(canSetReason, "createsLayout",
+    "fresh preset explains that BFI will create its native layout")
+assertTrue(W.SetObjectiveTrackerBFIRightStackPlacement(),
+    "fresh preset placement creates BFI's native layout without Edit Mode")
+assertEqual(saveCalls, 1,
+    "explicit fresh preset placement persists once")
+assertEqual(onLayoutAddedCalls, 1,
+    "explicit fresh preset placement activates the BFI layout")
+assertEqual(sourceLayouts.activeLayout, 3,
+    "explicit fresh preset placement selects the BFI layout")
+assertEqual(savedLayouts.layouts[1].systems[1].isInDefaultPosition, false,
+    "explicit fresh preset placement leaves Blizzard's managed column")
+assertEqual(savedLayouts.layouts[1].systems[1].settings[1].value, 24,
+    "explicit fresh preset placement writes BFI's 640 height")
+height, reason = W.GetObjectiveTrackerNativeHeight()
+assertEqual(height, 640,
+    "new BFI layout exposes its height without a manual Edit Mode move")
+assertEqual(reason, nil,
+    "new BFI layout height is immediately writable")
+assertTrue(W.SetObjectiveTrackerBFIRightStackPlacement(),
+    "existing BFI layout accepts a repeated explicit placement action")
+assertEqual(saveCalls, 1,
+    "repeated explicit placement does not duplicate or rewrite the BFI layout")
+assertEqual(onLayoutAddedCalls, 1,
+    "repeated explicit placement does not activate another layout")
 
 resetFreshPresetLayouts()
 assertTrue(W.ApplyObjectiveTrackerFreshInstallLayout(),

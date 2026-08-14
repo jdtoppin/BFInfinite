@@ -47,6 +47,8 @@ local nativeObjectiveTrackerHeightWrites = 0
 local nativeObjectiveTrackerPlacementIsDefault = true
 local nativeObjectiveTrackerPlacementReason
 local nativeObjectiveTrackerPlacementWrites = 0
+local nativeObjectiveTrackerPlacementCanSet = true
+local nativeObjectiveTrackerPlacementCanSetReason
 local nativeEditModeShown
 local optionsHidden = false
 
@@ -263,6 +265,10 @@ local W = {
     GetObjectiveTrackerNativePlacement = function()
         return nativeObjectiveTrackerPlacementIsDefault,
             nativeObjectiveTrackerPlacementReason
+    end,
+    CanSetObjectiveTrackerBFIRightStackPlacement = function()
+        return nativeObjectiveTrackerPlacementCanSet,
+            nativeObjectiveTrackerPlacementCanSetReason
     end,
     MythicPlus = {
         SetPreview = function(shown)
@@ -515,6 +521,28 @@ assertEqual(optionsHidden, true,
     "native Edit Mode launcher closes BFI options first")
 
 nativeObjectiveTrackerPlacementReason = "customLayout"
+nativeObjectiveTrackerPlacementCanSet = true
+nativeObjectiveTrackerPlacementCanSetReason = "createsLayout"
+for _, pane in ipairs(objectiveOptionPanes) do
+    if pane.name == "BFI_UIWidgetOption_ObjectiveTrackerPlacement" then
+        pane.Load(objectiveInfo)
+        break
+    end
+end
+assertEqual(nativePlacement.enabled, true,
+    "fresh preset enables BFI native placement to create its layout")
+local createLayoutStatus = findByText(fontStrings,
+    "Click Set Default Position & Height to create and activate BFI's Blizzard layout.")
+assertTrue(createLayoutStatus,
+    "fresh preset placement explains that BFI will create a native layout")
+local placementWritesBeforeCreate = nativeObjectiveTrackerPlacementWrites
+nativePlacement.onClick()
+assertEqual(nativeObjectiveTrackerPlacementWrites,
+    placementWritesBeforeCreate + 1,
+    "fresh preset placement delegates to the BFI layout creator")
+
+nativeObjectiveTrackerPlacementCanSet = false
+nativeObjectiveTrackerPlacementCanSetReason = "customLayout"
 for _, pane in ipairs(objectiveOptionPanes) do
     if pane.name == "BFI_UIWidgetOption_ObjectiveTrackerPlacement" then
         pane.Load(objectiveInfo)
@@ -522,8 +550,10 @@ for _, pane in ipairs(objectiveOptionPanes) do
     end
 end
 assertEqual(nativePlacement.enabled, false,
-    "preset tracker layout disables BFI native placement")
+    "saved custom layouts retain the explicit BFI placement boundary")
 nativeObjectiveTrackerPlacementReason = nil
+nativeObjectiveTrackerPlacementCanSet = true
+nativeObjectiveTrackerPlacementCanSetReason = nil
 
 local nativeHeight = findByLabel(sliders, "Objective Tracker Height")
 assertTrue(nativeHeight, "Objective Tracker native height slider")

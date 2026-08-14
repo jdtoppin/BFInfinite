@@ -394,6 +394,27 @@ function W.ApplyObjectiveTrackerFreshInstallLayout()
     return true
 end
 
+function W.CanSetObjectiveTrackerBFIRightStackPlacement()
+    if nativeLayoutSaveInProgress then return false, "busy" end
+    if IsInCombat() then return false, "combat" end
+    if IsEditModeActive() then return false, "editMode" end
+    if type(AF.Copy) ~= "function" then return false, "unavailable" end
+
+    local context, reason = GetObjectiveTrackerEditModeContext(false, false)
+    if context then return true end
+    if reason ~= "customLayout" then return false, reason end
+
+    -- A preset has no writable tracker record. When there are no saved
+    -- Blizzard layouts, the explicit BFI action can create its own layout
+    -- instead of making the user enter Edit Mode just to move the tracker.
+    local presetContext, presetReason = GetFreshInstallPresetContext()
+    if not presetContext then return false, presetReason end
+    if presetContext.editMode.IsValidLayoutName(BFI_FRESH_LAYOUT_NAME) ~= true then
+        return false, "layoutName"
+    end
+    return true, "createsLayout"
+end
+
 local function HasBFIRightStackPlacement(systemInfo, heightSetting)
     local anchorInfo = systemInfo.anchorInfo
     local hasPosition = systemInfo.isInDefaultPosition == false
@@ -441,7 +462,12 @@ function W.SetObjectiveTrackerBFIRightStackPlacement()
     if nativeLayoutSaveInProgress then return false, "busy" end
 
     local context, reason = GetObjectiveTrackerEditModeContext(false, false)
-    if not context then return false, reason end
+    if not context then
+        if reason == "customLayout" then
+            return W.ApplyObjectiveTrackerFreshInstallLayout()
+        end
+        return false, reason
+    end
     if IsInCombat() then return false, "combat" end
     if IsEditModeActive() then return false, "editMode" end
     if type(AF.Copy) ~= "function" then return false, "unavailable" end
