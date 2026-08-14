@@ -37,12 +37,14 @@ local dataChunk = assert(loadfile("Options/ChangelogData.lua"))
 setfenv(dataChunk, environment)
 dataChunk("BFInfinite", BFI)
 
-assertEqual(#BFI.changelog, 3, "known release count")
-assertEqual(BFI.changelog[1].version, "r5-alpha", "latest release")
-assertEqual(BFI.changelog[2].version, "r2-alpha", "middle preserved release")
-assertEqual(BFI.changelog[3].version, "r1-alpha", "oldest preserved release")
-assertEqual(#BFI.changelog[1].notes, 6, "all known r5 notes")
-assertEqual(#BFI.changelog[2].notes, 7, "all known r2 notes")
+assertEqual(#BFI.changelog, 4, "known release count")
+assertEqual(BFI.changelog[1].version, "r6-alpha", "latest release")
+assertEqual(BFI.changelog[2].version, "r5-alpha", "middle preserved release")
+assertEqual(BFI.changelog[3].version, "r2-alpha", "older preserved release")
+assertEqual(BFI.changelog[4].version, "r1-alpha", "oldest preserved release")
+assertEqual(#BFI.changelog[1].notes, 6, "all known r6 notes")
+assertEqual(#BFI.changelog[2].notes, 6, "all known r5 notes")
+assertEqual(#BFI.changelog[3].notes, 7, "all known r2 notes")
 for _, release in ipairs(BFI.changelog) do
     for noteIndex, note in ipairs(release.notes) do
         assertEqual(type(note.enUS), "string",
