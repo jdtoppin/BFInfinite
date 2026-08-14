@@ -3,6 +3,7 @@
     <Script file="OptionsFrame.lua"/>
     <Script file="ModuleResetFrame.lua"/>
     <Script file="General.lua"/>
+    <Script file="ClickCastings.lua"/>
     <Script file="Enhancements_Options.lua"/>
     <Script file="Enhancements.lua"/>
     <Script file="Colors.lua"/>

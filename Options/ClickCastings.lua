@@ -1,0 +1,954 @@
+---@type BFI
+local BFI = select(2, ...)
+local L = BFI.L
+---@class ClickCastings
+local CC = BFI.modules.ClickCastings
+---@type AbstractFramework
+local AF = _G.AbstractFramework
+
+local panel
+local list
+local enabled
+local smartResurrection
+local preferMassResurrection
+local conflictText
+local rows = {}
+local macroEditor
+local macroEditorBinding
+local GetCursorInfo = _G.GetCursorInfo
+local ClearCursor = _G.ClearCursor
+local C_Spell = _G.C_Spell
+local UpdateConflictNotice
+local optionsStage = "not started"
+local pendingSpellData = {}
+
+-- AF.Fire intentionally isolates callback failures. Options construction is
+-- non-secret UI work, so retain and forward its traceback here instead of
+-- leaving users with a silently cached, partially constructed blank panel.
+local function CaptureOptionsError(message)
+    local trace = type(_G.debugstack) == "function"
+        and _G.debugstack(2, 20, 20) or ""
+    return ("Click Casting options failed during %s: %s\n%s"):format(
+        optionsStage,
+        tostring(message),
+        trace
+    )
+end
+
+local function ReportOptionsError(message)
+    BFI.vars.clickCastingOptionsError = message
+    AF.Print(message)
+    if type(_G.geterrorhandler) == "function" then
+        local handler = _G.geterrorhandler()
+        if type(handler) == "function" then handler(message) end
+    end
+end
+
+local actionItems = {
+    {text = L["Target"], value = "target"},
+    {text = L["Menu"], value = "togglemenu"},
+    {text = L["Focus"], value = "focus"},
+    {text = L["Assist"], value = "assist"},
+    {text = L["Spell"], value = "spell"},
+    {text = L["Saved Macro"], value = "macro"},
+    {text = L["Custom Macro"], value = "custom"},
+    {text = L["Item or Equipment Slot"], value = "item"},
+}
+
+local payloadActions = {
+    spell = true,
+    macro = true,
+    custom = true,
+    item = true,
+}
+
+local function GetConfig()
+    return CC.activeConfig
+end
+
+local function RefreshRuntime()
+    AF.Fire("BFI_UpdateModule", "clickCastings")
+end
+
+local function CancelBindingCaptures()
+    for _, row in ipairs(rows) do
+        if row.capture then row.capture:CancelCapture() end
+    end
+end
+
+local function ReleaseKeyboardInput()
+    CancelBindingCaptures()
+    for _, row in ipairs(rows) do
+        if row.payload then row.payload:ClearFocus() end
+    end
+end
+
+local function MoveBinding(from, to)
+    local bindings = GetConfig().bindings
+    if from == to or not bindings[from] then return end
+    local binding = tremove(bindings, from)
+    tinsert(bindings, to, binding)
+    list.Load()
+    RefreshRuntime()
+end
+
+local function DeleteBinding(index)
+    tremove(GetConfig().bindings, index)
+    list.Load()
+    RefreshRuntime()
+    UpdateConflictNotice()
+end
+
+UpdateConflictNotice = function()
+    local conflicts = CC.GetNativeConflicts()
+    if #conflicts > 0 then
+        conflictText:SetText((
+            L["%d overlapping Blizzard click binding(s) may override or remap BFI actions. Open Blizzard Click Casting to review them."]
+        ):format(#conflicts))
+        conflictText:SetColor("firebrick")
+    else
+        conflictText:SetText(
+            L["Blizzard Click Casting continues to run first. Non-overlapping BFI bindings coexist with it."]
+        )
+        conflictText:SetColor("tip")
+    end
+end
+
+local function UpdateEnabledState(checked)
+    enabled.label:SetTextColor(
+        AF.GetColorRGB(checked and "softlime" or "firebrick")
+    )
+end
+
+local function UpdateRowControlLayout(row)
+    local config = GetConfig()
+    local binding = config.bindings[row.index]
+    local confirming = binding
+        and row.pendingDeleteConfig == config
+        and row.pendingDeleteBinding == binding
+    local controlsStart = confirming and row.confirmDelete or row.up
+    local hasCustomEditor = binding and binding[2] == "custom"
+
+    row.up:SetShown(not confirming)
+    row.down:SetShown(not confirming)
+    row.delete:SetShown(not confirming)
+    row.cancelDelete:SetShown(confirming)
+    row.confirmDelete:SetShown(confirming)
+
+    AF.ClearPoints(row.editPayload)
+    AF.SetPoint(
+        row.editPayload,
+        "RIGHT",
+        controlsStart,
+        "LEFT",
+        -7,
+        0
+    )
+
+    AF.ClearPoints(row.payload)
+    AF.SetPoint(row.payload, "LEFT", row.action, "RIGHT", 7, 0)
+    AF.SetPoint(
+        row.payload,
+        "RIGHT",
+        hasCustomEditor and row.editPayload or controlsStart,
+        "LEFT",
+        -7,
+        0
+    )
+end
+
+local function CancelDeleteConfirmation(row)
+    row.pendingDeleteConfig = nil
+    row.pendingDeleteBinding = nil
+    UpdateRowControlLayout(row)
+end
+
+local function CancelDeleteConfirmations(except)
+    for _, row in ipairs(rows) do
+        if row ~= except and row.pendingDeleteBinding then
+            CancelDeleteConfirmation(row)
+        end
+    end
+end
+
+local function RequestDeleteConfirmation(row)
+    local config = GetConfig()
+    local binding = config.bindings[row.index]
+    if not binding then return end
+
+    CancelDeleteConfirmations(row)
+    ReleaseKeyboardInput()
+    AF.CloseCascadingMenu()
+    row.pendingDeleteConfig = config
+    row.pendingDeleteBinding = binding
+    UpdateRowControlLayout(row)
+end
+
+local function HideSpellDisplay(row)
+    if not row.spellDisplay then return end
+    row.spellDisplay:Hide()
+    if row.payload:IsEnabled() then
+        row.payload:SetTextColor(1, 1, 1, 1)
+    else
+        row.payload:SetTextColor(AF.GetColorRGB("disabled"))
+    end
+end
+
+local function ResolveSpellDisplay(spellID)
+    local displaySpellID = spellID
+    if C_Spell and type(C_Spell.GetOverrideSpell) == "function" then
+        displaySpellID = C_Spell.GetOverrideSpell(
+            spellID,
+            0,
+            true,
+            0
+        ) or spellID
+    end
+
+    local name, iconID = AF.GetSpellInfo(displaySpellID)
+    return name, iconID, displaySpellID
+end
+
+local function RequestSpellDisplayData(spellID)
+    if pendingSpellData[spellID]
+        or not C_Spell
+        or type(C_Spell.RequestLoadSpellData) ~= "function"
+    then
+        return
+    end
+    pendingSpellData[spellID] = true
+    C_Spell.RequestLoadSpellData(spellID)
+end
+
+local function RefreshSpellDisplay(row)
+    HideSpellDisplay(row)
+    local config = GetConfig()
+    local binding = config and config.bindings[row.index]
+    if not binding
+        or binding[2] ~= "spell"
+        or row.payload:HasFocus()
+    then
+        return
+    end
+
+    local spellID = tonumber(binding[3])
+    if not spellID
+        or spellID <= 0
+        or row.payload:GetText() ~= tostring(binding[3])
+        or not AF.SpellExists(spellID)
+    then
+        return
+    end
+
+    local name, iconID, displaySpellID = ResolveSpellDisplay(spellID)
+    if not name or not iconID then
+        RequestSpellDisplayData(displaySpellID)
+        return
+    end
+
+    row.spellDisplay.icon:SetTexture(iconID)
+    row.spellDisplay.name:SetText(name)
+    row.payload:SetTextColor(1, 1, 1, 0)
+    row.spellDisplay:Show()
+end
+
+local function SetPayload(row, value)
+    local binding = GetConfig().bindings[row.index]
+    if not binding then return end
+    if value == "" then
+        binding[3] = ""
+        RefreshRuntime()
+        UpdateConflictNotice()
+        return
+    end
+    if binding[2] == "spell" then
+        value = tonumber(value)
+        if not value or value <= 0 then
+            row.payload:SetText(tostring(binding[3] or ""))
+            return
+        end
+    elseif binding[2] == "macro" or binding[2] == "item" then
+        value = tonumber(value) or value
+    end
+    binding[3] = value
+    RefreshRuntime()
+    UpdateConflictNotice()
+end
+
+-- Cursor tuple positions are pinned to Retail 12.1.0.68914 and Blizzard UI
+-- source d3915c78aba77a7a9be76acbfa35c674bbb6abe9. This mirrors the public
+-- spell/macro cursor contract without importing Cell's curated spell data.
+local function SetPayloadFromCursor(row)
+    if not GetCursorInfo then return end
+    local cursorType, cursorInfo1, _, cursorInfo3 = GetCursorInfo()
+    local actionType, payload
+    if cursorType == "spell" and cursorInfo3 then
+        actionType, payload = "spell", cursorInfo3
+    elseif cursorType == "macro" and cursorInfo1 then
+        actionType, payload = "macro", cursorInfo1
+    elseif cursorType == "item" and cursorInfo1 then
+        actionType, payload = "item", "item:" .. cursorInfo1
+    else
+        return
+    end
+
+    local binding = GetConfig().bindings[row.index]
+    if not binding then return end
+    binding[2], binding[3] = actionType, payload
+    if ClearCursor then ClearCursor() end
+    list.Load()
+    RefreshRuntime()
+    UpdateConflictNotice()
+end
+
+local spellCategoryLabels = {
+    class = "Class Spells",
+    spec = "Specialization Spells",
+    pet = "Pet Spells",
+    talent = "Talents",
+    hero = "Hero Talents",
+    pvp = "PvP Talents",
+    resurrection = "Resurrection",
+}
+
+local function SetSuggestedSpell(row, binding, spellID)
+    if GetConfig().bindings[row.index] ~= binding then return end
+
+    binding[2], binding[3] = "spell", spellID
+    -- Rebuilding the scroll list hides this EditBox. Its OnHide handler then
+    -- restores the previously cached value, so repaint only the selected row.
+    row.payload:SetText(tostring(spellID))
+    row.payload.value = row.payload:GetValue()
+    row.payload.confirmBtn:Hide()
+    row.payload:ClearFocus()
+    RefreshSpellDisplay(row)
+    RefreshRuntime()
+    UpdateConflictNotice()
+end
+
+local function ShowSpellPicker(row)
+    local binding = GetConfig().bindings[row.index]
+    if not binding or binding[2] ~= "spell" then return end
+
+    local groups = {}
+    local groupOrder = {}
+    for _, spell in ipairs(CC.GetSuggestedSpells()) do
+        local category = spell.category or "talent"
+        if not groups[category] then
+            groups[category] = {}
+            groupOrder[#groupOrder + 1] = category
+        end
+        groups[category][#groups[category] + 1] = {
+            text = spell.name,
+            icon = spell.iconID,
+            value = spell.spellID,
+            callback = function()
+                SetSuggestedSpell(row, binding, spell.spellID)
+            end,
+        }
+    end
+
+    local items = {}
+    for _, category in ipairs(groupOrder) do
+        items[#items + 1] = {
+            text = L[spellCategoryLabels[category] or "Talents"],
+            notClickable = true,
+            children = groups[category],
+        }
+    end
+    if #items == 0 then
+        items[1] = {
+            text = L["No suggested spells available"],
+            disabled = true,
+        }
+    end
+    AF.ShowCascadingMenu(row.payload, items, 15)
+end
+
+local function ShowMacroEditor(row)
+    local binding = GetConfig().bindings[row.index]
+    if not binding or binding[2] ~= "custom" then return end
+
+    if not macroEditor then
+        macroEditor = AF.CreateFrame(panel, nil, nil, 190)
+        local box = AF.CreateScrollEditBox(
+            macroEditor,
+            nil,
+            L["Macro Text"],
+            nil,
+            190
+        )
+        macroEditor.box = box
+        box:SetPoint("TOPLEFT")
+        box:SetPoint("BOTTOMRIGHT")
+    end
+
+    macroEditorBinding = binding
+    macroEditor.box:SetText(binding[3] or "")
+    local dialog = AF.GetDialog(
+        panel,
+        AF.WrapTextInColor(L["Custom Macro"], "BFI"),
+        500
+    )
+    dialog:SetToOkayCancel()
+    dialog:SetContent(macroEditor, 190)
+    AF.SetPoint(dialog, "CENTER", panel)
+    dialog:SetOnConfirm(function()
+        if macroEditorBinding[2] ~= "custom" then return end
+        local isActive
+        for _, current in ipairs(GetConfig().bindings) do
+            if current == macroEditorBinding then isActive = true break end
+        end
+        if not isActive then return end
+        macroEditorBinding[3] = macroEditor.box:GetText()
+        list.Load()
+        RefreshRuntime()
+        UpdateConflictNotice()
+    end)
+end
+
+local function CreateRow(index)
+    optionsStage = "binding row " .. index .. " frame"
+    local row = AF.CreateFrame(list, nil, nil, 26)
+    row.index = index
+
+    local order = AF.CreateFontString(row)
+    row.order = order
+    AF.SetPoint(order, "LEFT", 3, 0)
+    order:SetWidth(20)
+    order:SetJustifyH("CENTER")
+
+    optionsStage = "binding row " .. index .. " capture"
+    local capture = AF.CreateBindingCapture(
+        row,
+        145,
+        22,
+        L["Set Binding"],
+        L["Press a key or mouse button"]
+    )
+    row.capture = capture
+    AF.SetPoint(capture, "LEFT", order, "RIGHT", 5, 0)
+    capture:SetOnBindingChanged(function(binding)
+        local current = GetConfig().bindings[row.index]
+        if not current then return end
+        if not binding then
+            capture:SetBinding(CC.DecodeBinding(current[1]))
+            RequestDeleteConfirmation(row)
+            return
+        end
+        local attribute = CC.EncodeBinding(binding)
+        if not attribute then return end
+        for i, other in ipairs(GetConfig().bindings) do
+            if i ~= row.index and other[1] == attribute then
+                capture:SetBinding(CC.DecodeBinding(current[1]))
+                return
+            end
+        end
+        current[1] = attribute
+        RefreshRuntime()
+        UpdateConflictNotice()
+    end)
+
+    optionsStage = "binding row " .. index .. " action"
+    local action = AF.CreateDropdown(row, 125)
+    row.action = action
+    AF.SetPoint(action, "LEFT", capture, "RIGHT", 7, 0)
+    action:SetItems(actionItems)
+    action:SetOnSelect(function(value)
+        local binding = GetConfig().bindings[row.index]
+        if not binding then return end
+        if binding[2] == value then return end
+        binding[2] = value
+        -- Payloads are action-specific. Carrying a spell ID into a custom
+        -- macro (or vice versa) can create invalid persisted rows.
+        binding[3] = payloadActions[value] and "" or nil
+        list.Load()
+        RefreshRuntime()
+        UpdateConflictNotice()
+    end)
+
+    optionsStage = "binding row " .. index .. " value"
+    local payload = AF.CreateEditBox(row, nil, 190, 22, "trim")
+    row.payload = payload
+    AF.SetPoint(payload, "LEFT", action, "RIGHT", 7, 0)
+
+    local spellDisplay = AF.CreateFrame(payload)
+    row.spellDisplay = spellDisplay
+    spellDisplay:SetAllPoints()
+    spellDisplay:EnableMouse(false)
+    spellDisplay:Hide()
+
+    local spellIcon = AF.CreateTexture(spellDisplay, nil, nil, "OVERLAY")
+    spellDisplay.icon = spellIcon
+    AF.SetPoint(spellIcon, "TOPLEFT", 3, -3)
+    AF.SetPoint(spellIcon, "BOTTOMLEFT", 3, 3)
+    spellIcon:SetWidth(16)
+    spellIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    local spellName = AF.CreateFontString(spellDisplay)
+    spellDisplay.name = spellName
+    AF.SetPoint(spellName, "LEFT", spellIcon, "RIGHT", 4, 0)
+    AF.SetPoint(spellName, "RIGHT", -4, 0)
+    spellName:SetJustifyH("LEFT")
+    spellName:SetWordWrap(false)
+
+    payload:SetScript("OnReceiveDrag", function()
+        SetPayloadFromCursor(row)
+    end)
+    payload:SetOnEditFocusGained(function()
+        CancelBindingCaptures()
+        HideSpellDisplay(row)
+    end)
+    payload:SetOnEditFocusLost(function()
+        RefreshSpellDisplay(row)
+    end)
+    payload:SetScript("OnMouseDown", function(_, button)
+        CancelBindingCaptures()
+        payload:SetFocus()
+        local binding = GetConfig().bindings[row.index]
+        if button == "LeftButton"
+            and binding
+            and binding[2] == "spell"
+        then
+            ShowSpellPicker(row)
+        end
+    end)
+    payload:SetConfirmButton(function(value)
+        SetPayload(row, value)
+        -- AF's confirm wrapper records the submitted text after this callback.
+        -- Restore the persisted canonical value on the next frame so rejected
+        -- spell IDs cannot become the widget's hidden saved value.
+        local submittedBinding = GetConfig().bindings[row.index]
+        C_Timer.After(0, function()
+            if GetConfig().bindings[row.index] == submittedBinding then
+                payload:SetText(tostring(submittedBinding[3] or ""))
+                payload.value = payload:GetValue()
+                RefreshSpellDisplay(row)
+            end
+        end)
+    end)
+    payload:SetOnEnterPressed(function(value)
+        SetPayload(row, value)
+        local binding = GetConfig().bindings[row.index]
+        if binding and binding[2] == "spell" then
+            payload:SetText(tostring(binding[3] or ""))
+        end
+        payload.value = payload:GetValue()
+        payload.confirmBtn:Hide()
+    end)
+
+    optionsStage = "binding row " .. index .. " controls"
+    local editPayload = AF.CreateButton(
+        row,
+        L["Edit"],
+        "BFI_hover",
+        42,
+        22
+    )
+    row.editPayload = editPayload
+    editPayload:SetOnClick(function()
+        local binding = GetConfig().bindings[row.index]
+        if not binding then return end
+        if binding[2] == "custom" then
+            ShowMacroEditor(row)
+        end
+    end)
+
+    local up = AF.CreateButton(row, "↑", "BFI_hover", 22, 22)
+    row.up = up
+    up:SetOnClick(function()
+        if row.index > 1 then MoveBinding(row.index, row.index - 1) end
+    end)
+
+    local down = AF.CreateButton(row, "↓", "BFI_hover", 22, 22)
+    row.down = down
+    down:SetOnClick(function()
+        if row.index < #GetConfig().bindings then
+            MoveBinding(row.index, row.index + 1)
+        end
+    end)
+
+    local delete = AF.CreateButton(row, "×", "red_hover", 22, 22)
+    row.delete = delete
+    AF.SetPoint(delete, "RIGHT", row, "RIGHT", -3, 0)
+    AF.SetPoint(down, "RIGHT", delete, "LEFT", -3, 0)
+    AF.SetPoint(up, "RIGHT", down, "LEFT", -3, 0)
+    AF.SetPoint(editPayload, "RIGHT", up, "LEFT", -7, 0)
+    delete:SetOnClick(function() RequestDeleteConfirmation(row) end)
+
+    local confirmDelete = AF.CreateButton(
+        row,
+        L["Delete"],
+        "red_hover",
+        72,
+        22
+    )
+    row.confirmDelete = confirmDelete
+    confirmDelete:Hide()
+    confirmDelete:SetOnClick(function()
+        local config = GetConfig()
+        local binding = row.pendingDeleteBinding
+        if config == row.pendingDeleteConfig
+            and binding
+            and config.bindings[row.index] == binding
+        then
+            row.pendingDeleteConfig = nil
+            row.pendingDeleteBinding = nil
+            DeleteBinding(row.index)
+        else
+            CancelDeleteConfirmation(row)
+        end
+    end)
+
+    local cancelDelete = AF.CreateButton(
+        row,
+        L["Cancel"],
+        "BFI_hover",
+        72,
+        22
+    )
+    row.cancelDelete = cancelDelete
+    AF.SetPoint(cancelDelete, "RIGHT", row, "RIGHT", -3, 0)
+    AF.SetPoint(confirmDelete, "RIGHT", cancelDelete, "LEFT", -3, 0)
+    cancelDelete:Hide()
+    cancelDelete:SetOnClick(function()
+        CancelDeleteConfirmation(row)
+    end)
+
+    rows[index] = row
+    return row
+end
+
+local function LoadRow(row, index, binding)
+    optionsStage = "binding row " .. index .. " data"
+    row.index = index
+    row.order:SetText(index)
+    row.capture:SetBinding(CC.DecodeBinding(binding[1]))
+    row.action:SetSelectedValue(binding[2])
+
+    local hasPayload = payloadActions[binding[2]]
+    local hasCustomEditor = binding[2] == "custom"
+    row.pendingDeleteConfig = nil
+    row.pendingDeleteBinding = nil
+    row.editPayload:SetEnabled(hasCustomEditor)
+    row.editPayload:SetShown(hasCustomEditor)
+    row.editPayload:SetText(L["Edit"])
+    UpdateRowControlLayout(row)
+    row.payload:SetEnabled(hasPayload)
+    row.payload:SetNotUserChangable(binding[2] == "custom")
+    -- Spell IDs are positive integers. Keep trim/string value semantics so an
+    -- empty field can still be saved, while native EditBox input rejects text.
+    row.payload:SetNumeric(binding[2] == "spell")
+    if hasPayload then
+        local displayValue = binding[3] or ""
+        if binding[2] == "custom" then
+            displayValue = tostring(displayValue):gsub("[\r\n]+", "  /  ")
+        end
+        row.payload:SetText(tostring(displayValue))
+        if binding[2] == "spell" then
+            row.payload:SetLabel(L["Spell ID or click to pick"])
+        elseif binding[2] == "macro" then
+            row.payload:SetLabel(L["Macro Name or Index"])
+        elseif binding[2] == "custom" then
+            row.payload:SetLabel(L["Macro Text"])
+        else
+            row.payload:SetLabel(L["Item or Slot"])
+        end
+    else
+        row.payload:SetText("")
+        row.payload:SetLabel("")
+    end
+    row.up:SetEnabled(index > 1)
+    row.down:SetEnabled(index < #GetConfig().bindings)
+    row:Show()
+end
+
+local function CreatePanel()
+    optionsStage = "panel frame"
+    panel = AF.CreateFrame(
+        BFIOptionsFrame_ContentPane,
+        "BFIOptionsFrame_ClickCastingsPanel"
+    )
+    panel:SetAllPoints()
+    AF.ApplyCombatProtectionToFrame(panel)
+
+    optionsStage = "panel header"
+    local header = AF.CreateTitledPane(
+        panel,
+        AF.GetGradientText(L["Click Casting"], "BFI", "white"),
+        nil,
+        18,
+        "BFI"
+    )
+    panel.header = header
+    AF.SetPoint(header, "TOPLEFT", 15, -15)
+    AF.SetPoint(header, "TOPRIGHT", -15, -15)
+    header:SetTips(
+        L["Click Casting"],
+        L["Click Casting bindings apply to every BFI unit frame. They use the active BFI profile; class-specific binding sets remain separate inside profiles shared by multiple classes. Drop a spell, macro, or item onto the Value field to add its ID."]
+    )
+
+    local profile = AF.CreateFontString(header)
+    panel.profile = profile
+    AF.SetPoint(profile, "BOTTOMRIGHT", header.tips, "BOTTOMLEFT", -5, 2)
+    profile:SetColor("tip")
+
+    optionsStage = "panel controls"
+    enabled = AF.CreateCheckButton(header, L["Enable"])
+    AF.SetPoint(enabled, "LEFT", header.title, "RIGHT", 15, 0)
+    enabled:SetOnCheck(function(checked)
+        GetConfig().enabled = checked
+        list.Load()
+        RefreshRuntime()
+        UpdateConflictNotice()
+    end)
+
+    smartResurrection = AF.CreateDropdown(panel, 180)
+    AF.SetPoint(
+        smartResurrection,
+        "TOPLEFT",
+        header,
+        "BOTTOMLEFT",
+        0,
+        -30
+    )
+    smartResurrection:SetLabel(L["Smart Resurrection"], "gray")
+    smartResurrection:SetOnSelect(function(value)
+        GetConfig().smartResurrection = value
+        list.Load()
+        RefreshRuntime()
+    end)
+    smartResurrection:SetTooltip(
+        L["Smart Resurrection"],
+        L["On a dead unit, ordinary Spell bindings cast an available resurrection instead. The original spell still casts on living units."]
+    )
+
+    preferMassResurrection = AF.CreateCheckButton(
+        panel,
+        L["Prefer Mass Resurrection"]
+    )
+    AF.SetPoint(
+        preferMassResurrection,
+        "LEFT",
+        smartResurrection,
+        "RIGHT",
+        15,
+        0
+    )
+    preferMassResurrection:SetOnCheck(function(checked)
+        GetConfig().preferMassResurrection = checked
+        RefreshRuntime()
+    end)
+    AF.SetTooltip(
+        preferMassResurrection,
+        "TOPLEFT",
+        0,
+        2,
+        L["Prefer Mass Resurrection"],
+        L["When the active specialization knows both versions, use its mass resurrection on dead units. Otherwise use the normal single-target spell."]
+    )
+
+    local add = AF.CreateButton(panel, L["Add Binding"], "BFI_hover", 110, 22)
+    AF.SetPoint(add, "TOPRIGHT", header, "BOTTOMRIGHT", 0, -30)
+    add:SetOnClick(function()
+        GetConfig().bindings[#GetConfig().bindings + 1] = {
+            "notBound",
+            "target",
+        }
+        list.Load()
+        UpdateConflictNotice()
+    end)
+
+    local openBlizzard = AF.CreateButton(
+        panel,
+        L["Blizzard Click Casting"],
+        "BFI_hover",
+        150,
+        22
+    )
+    AF.SetPoint(openBlizzard, "RIGHT", add, "LEFT", -7, 0)
+    openBlizzard:SetOnClick(function()
+        panel:GetParent():GetParent():Hide()
+        if _G.ToggleClickBindingFrame then
+            _G.ToggleClickBindingFrame()
+        end
+    end)
+
+    optionsStage = "binding list"
+    local bindingHeader = AF.CreateFontString(panel, L["Binding"], "gray")
+    AF.SetPoint(
+        bindingHeader,
+        "TOPLEFT",
+        smartResurrection,
+        "BOTTOMLEFT",
+        30,
+        -16
+    )
+    local actionHeader = AF.CreateFontString(panel, L["Action"], "gray")
+    AF.SetPoint(actionHeader, "LEFT", bindingHeader, 152, 0)
+    local valueHeader = AF.CreateFontString(panel, L["Value"], "gray")
+    AF.SetPoint(valueHeader, "LEFT", actionHeader, 132, 0)
+
+    list = AF.CreateScrollList(panel, nil, 3, 3, 13, 26, 4)
+    AF.SetPoint(list, "TOPLEFT", bindingHeader, "BOTTOMLEFT", -30, -5)
+    AF.SetPoint(list, "BOTTOMRIGHT", -15, 55)
+
+    function list.Load()
+        local config = GetConfig()
+        local capabilities = type(
+            CC.GetSmartResurrectionCapabilities
+        ) == "function"
+            and CC.GetSmartResurrectionCapabilities()
+            or {normal = true, mass = true, combat = true}
+        enabled:SetChecked(config.enabled)
+        UpdateEnabledState(config.enabled)
+        smartResurrection:SetItems({
+            {text = L["Disabled"], value = "disabled"},
+            {
+                text = L["Normal Resurrection"],
+                value = "normal",
+                disabled = not capabilities.normal,
+            },
+            {
+                text = L["Normal + Combat Resurrection"],
+                value = "normal+combat",
+                disabled = not capabilities.normal
+                    and not capabilities.combat,
+            },
+        })
+        smartResurrection:SetEnabled(
+            capabilities.normal or capabilities.combat
+        )
+        smartResurrection:SetSelectedValue(config.smartResurrection)
+        preferMassResurrection:SetChecked(config.preferMassResurrection)
+        preferMassResurrection:SetEnabled(
+            config.smartResurrection ~= "disabled"
+                and capabilities.mass
+        )
+        local widgets = {}
+        for index, binding in ipairs(config.bindings) do
+            local row = rows[index] or CreateRow(index)
+            LoadRow(row, index, binding)
+            widgets[#widgets + 1] = row
+        end
+        for index = #widgets + 1, #rows do
+            local row = rows[index]
+            if row.pendingDeleteBinding then
+                CancelDeleteConfirmation(row)
+            end
+            row:Hide()
+        end
+        list:SetWidgets(widgets)
+        add:SetEnabled(true)
+        for _, row in ipairs(widgets) do
+            row.capture:SetEnabled(true)
+            row.action:SetEnabled(true)
+            row.payload:SetEnabled(payloadActions[
+                config.bindings[row.index][2]
+            ])
+            row.editPayload:SetEnabled(
+                config.bindings[row.index][2] == "custom"
+            )
+            row.up:SetEnabled(row.index > 1)
+            row.down:SetEnabled(
+                row.index < #config.bindings
+            )
+            row.delete:SetEnabled(true)
+            RefreshSpellDisplay(row)
+        end
+    end
+
+    optionsStage = "panel footer"
+    conflictText = AF.CreateFontString(panel)
+    AF.SetPoint(conflictText, "BOTTOMLEFT", 15, 17)
+    AF.SetPoint(conflictText, "BOTTOMRIGHT", -15, 17)
+    conflictText:SetJustifyH("LEFT")
+    conflictText:SetWordWrap(true)
+
+    panel:SetOnHide(function()
+        ReleaseKeyboardInput()
+        CancelDeleteConfirmations()
+        AF.CloseCascadingMenu()
+    end)
+end
+
+local function LoadPanel()
+    optionsStage = "profile metadata"
+    local localizedClass = AF.GetLocalizedClassName(AF.player.class)
+    local classText = AF.WrapTextInColor(localizedClass, AF.player.class)
+    panel.profile:SetText(
+        L["Profile: %s  •  Class: %s  •  Spec: %s"]:format(
+            BFI.vars.profileName == "default"
+                and L["Default"] or BFI.vars.profileName,
+            classText,
+            AF.player.localizedSpec or L["Unknown"]
+        )
+    )
+    optionsStage = "binding list data"
+    list.Load()
+    optionsStage = "native binding conflicts"
+    UpdateConflictNotice()
+end
+
+AF.RegisterCallback("BFI_RefreshOptions", function(_, which)
+    if which == "clickCastings" and panel then LoadPanel() end
+end)
+
+AF.RegisterCallback("BFI_UpdateProfile", function()
+    if panel and panel:IsShown() then
+        AF.CloseCascadingMenu()
+        LoadPanel()
+    end
+end, "low")
+
+AF.RegisterCallback("AF_PLAYER_SPEC_UPDATE", function()
+    if panel and panel:IsShown() then
+        AF.CloseCascadingMenu()
+        LoadPanel()
+    end
+end, "low")
+
+AF.RegisterCallback("AF_COMBAT_ENTER", function()
+    if panel and panel:IsShown() then
+        ReleaseKeyboardInput()
+        CancelDeleteConfirmations()
+        AF.CloseCascadingMenu()
+    end
+end)
+
+local function RefreshVisibleSpellDisplays()
+    if not panel or not panel:IsVisible() then return end
+    for _, row in ipairs(rows) do
+        if row:IsShown() then RefreshSpellDisplay(row) end
+    end
+end
+
+local function SpellDataLoaded(_, _, spellID, success)
+    if not pendingSpellData[spellID] then return end
+    pendingSpellData[spellID] = nil
+    if success then RefreshVisibleSpellDisplays() end
+end
+if C_Spell then
+    if type(C_Spell.RequestLoadSpellData) == "function" then
+        CC:RegisterEvent("SPELL_DATA_LOAD_RESULT", SpellDataLoaded)
+    end
+    CC:RegisterEvent("SPELLS_CHANGED", RefreshVisibleSpellDisplays)
+end
+
+AF.RegisterCallback("BFI_ShowOptionsPanel", function(_, id)
+    if id == "clickCastings" then
+        local success, message = _G.xpcall(function()
+            if not panel then CreatePanel() end
+            LoadPanel()
+            optionsStage = "panel show"
+            panel:Show()
+        end, CaptureOptionsError)
+        if success then
+            BFI.vars.clickCastingOptionsError = nil
+        else
+            ReportOptionsError(message)
+        end
+    elseif panel then
+        panel:Hide()
+    end
+end)

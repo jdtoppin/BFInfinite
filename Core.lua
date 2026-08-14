@@ -5,9 +5,9 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF #39/r42 adds native dispel-color textures on top of r41's native
--- dispel-overlay slots. Selection and color stay inside Blizzard's container.
-local REQUIRED_AF_VERSION = 42
+-- AF r43 adds the reusable keyboard/mouse/wheel binding capture used by the
+-- Click Casting editor on top of r42's native aura color support.
+local REQUIRED_AF_VERSION = 43
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar

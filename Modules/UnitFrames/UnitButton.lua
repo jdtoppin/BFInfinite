@@ -427,10 +427,19 @@ function BFIUnitButton_OnLoad(self)
     self:SetScript("OnAttributeChanged", UnitButton_OnAttributeChanged) -- init
     self:HookScript("OnShow", UnitButton_OnShow)
     self:HookScript("OnHide", UnitButton_OnHide) -- use _onhide for click-castings
-    self:SetScript("OnEnter", UnitButton_OnEnter)
-    self:SetScript("OnLeave", UnitButton_OnLeave)
+    self:HookScript("OnEnter", UnitButton_OnEnter)
+    self:HookScript("OnLeave", UnitButton_OnLeave)
     self:SetScript("OnUpdate", UnitButton_OnUpdate)
     self:SetScript("OnEvent", UnitButton_OnEvent)
+
+    -- Secure click casting wraps the completed OnEnter chain. The template's
+    -- intrinsic Enter/Leave scripts must remain installed for _onenter and
+    -- _onleave snippets to run.
+    if BFI.modules.ClickCastings
+        and BFI.modules.ClickCastings.RegisterFrame
+    then
+        BFI.modules.ClickCastings.RegisterFrame(self)
+    end
 
     -- pixel perfect
     AF.AddToPixelUpdater_Auto(self, nil, true)
