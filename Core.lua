@@ -5,9 +5,9 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF #39/r42 adds native dispel-color textures on top of r41's native
--- dispel-overlay slots. Selection and color stay inside Blizzard's container.
-local REQUIRED_AF_VERSION = 42
+-- AF r43 adds the native icon underbar and scriptless aura-overlay slot used
+-- by Unit Frame Buff Displays on top of r42's dispel-color presentation.
+local REQUIRED_AF_VERSION = 43
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar

@@ -690,7 +690,7 @@ end
 local function ListItem_LoadOptions(self)
     -- button carries frame/indicator/config data
 
-    lastIndicator = self.id
+    lastIndicator = self.selectionKey or self.id
     optionLoadGeneration = optionLoadGeneration + 1
     local generation = optionLoadGeneration
 
@@ -768,25 +768,91 @@ LoadList = function(main, sub)
     end
 
     local cfg = BFI.vars.profile.unitFrames[lowerSub]
+    local buffDisplayOverflow = {}
+    local buffDisplayHasActive
+    if lowerSub == "party" or lowerSub == "raid" then
+        local reserved, overflow = UF.GetActiveBuffDisplayReservationPlan(
+            cfg.indicators.buffs
+        )
+        buffDisplayHasActive = cfg.indicators.buffs.enabled == true
+            or #(reserved or {}) > 0
+        for _, display in ipairs(overflow or {}) do
+            buffDisplayOverflow[display.id] = true
+        end
+    end
 
-    for i, setting in next, settings[main][lowerSub] do
+    local function AddListItem(setting, display)
         local button = itemPool:Acquire()
         tinsert(listItems, button)
+        button.id = nil
+        button.selectionKey = nil
+        button.displayID = nil
+        button.optionKind = nil
+        button.runtimeCfg = nil
+        button.cfg = nil
 
-        if setting:find("^general") then
+        if display then
+            local displayName = display.name or L["Buff Display"]
+            if display.builtIn then
+                displayName = L[displayName]
+            end
+            local overBudget = buffDisplayOverflow[display.id] == true
+            button:SetText("  " .. displayName .. (overBudget
+                and (" — " .. L["Over Budget"])
+                or ""))
+            button.cfg = display
+            button.runtimeCfg = cfg.indicators.buffs
+            button.displayID = display.id
+            button.optionKind = "buffDisplay"
+            button.id = "buffs"
+            button.selectionKey = "buffDisplay:" .. display.id
+            button:SetTextColor(overBudget and "firebrick"
+                or display.enabled and "white"
+                or "disabled")
+        elseif setting:find("^general") then
             button:SetText(L["General"])
             button.cfg = cfg.general
             button:SetTextColor("white")
         else
             button:SetText(L[setting])
             button.cfg = cfg.indicators[setting]
+            button.id = setting
+            button.selectionKey = setting
+            if setting == "buffs"
+                and (lowerSub == "party" or lowerSub == "raid")
+            then
+                button:SetTextColor(
+                    buffDisplayHasActive
+                    and "white"
+                    or "disabled"
+                )
+            else
+                button:SetTextColor(
+                    button.cfg.enabled and "white" or "disabled"
+                )
+            end
         end
-        button:SetTextColor(button.cfg.enabled and "white" or "disabled")
 
-        button.id = setting
+        button.id = button.id or setting
         button.ownerName = L[owner]
         button.owner = lowerSub
         button.target = _G["BFI_" .. sub]
+        return button
+    end
+
+    for _, setting in ipairs(settings[main][lowerSub]) do
+        AddListItem(setting)
+
+        if setting == "buffs"
+            and (lowerSub == "party" or lowerSub == "raid")
+        then
+            local displays = UF.GetOrderedBuffDisplays(
+                cfg.indicators.buffs
+            ) or {}
+            for _, display in ipairs(displays) do
+                AddListItem("buffs", display)
+            end
+        end
     end
 
     list:SetWidgets(listItems)
@@ -794,7 +860,7 @@ LoadList = function(main, sub)
 
     if lastIndicator then
         for i, item in next, listItems do
-            if item.id == lastIndicator then
+            if (item.selectionKey or item.id) == lastIndicator then
                 item:SilentClick()
                 if lastScroll then
                     frameOptionsPane.indicatorList:SetScroll(lastScroll)

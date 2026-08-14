@@ -101,6 +101,10 @@ local function makeHarness(withNativeSchema)
     local UF = {}
     local AF = {
         Copy = copy,
+        GetTexture = function(texture)
+            return "Interface\\AddOns\\AbstractFramework\\Media\\Textures\\"
+                .. texture
+        end,
     }
     setmetatable(AF, {
         __index = function(_, key)
@@ -861,6 +865,224 @@ local function testStyleProjection()
         fractionalDescriptor.completeSpec.groups[1].buttonStyle
     assertEqual(fractionalStyle.width, 10.5, "fractional width")
     assertEqual(fractionalStyle.height, 6.25, "fractional height")
+end
+
+local function testIconDurationBarPresentation()
+    local config = baseConfig()
+    config.presentation = "icon_duration_bar"
+    config.cooldownStyle = "block_clock"
+    config.width = 18
+    config.height = 16
+    config.filters.isBossAura = false
+    config.durationBar = {
+        height = 4,
+        gap = 2,
+        inset = 1,
+        color = {0.2, 0.4, 0.8, 0.9},
+        backgroundColor = {0.05, 0.06, 0.07, 0.8},
+    }
+
+    local descriptor = compile("party1", "HELPFUL", config)
+    local complete = descriptor.completeSpec
+    local style = complete.groups[1].buttonStyle
+    assertEqual(descriptor.presentation, "icon_duration_bar",
+        "underbar descriptor presentation")
+    assertEqual(descriptor.constructionKey.presentation,
+        "icon_duration_bar", "underbar construction presentation")
+    assertEqual(style.cooldownStyle, "icon_duration_bar",
+        "underbar AF cooldown style")
+    assertDeepEqual(style.durationBar, config.durationBar,
+        "underbar style projection")
+    assertTrue(style.durationBar ~= config.durationBar,
+        "underbar style input alias")
+    assertEqual(complete.groups[1].layout.elementWidth, 18,
+        "underbar total layout width")
+    assertEqual(complete.groups[1].layout.elementHeight, 16,
+        "underbar total layout height")
+    assertEqual(complete.holder.height, 16,
+        "underbar total holder height")
+    assertDeepEqual(
+        descriptor.constructionKey.groups[1].buttonStyle.durationBar,
+        config.durationBar,
+        "underbar construction style"
+    )
+
+    local defaults = baseConfig()
+    defaults.presentation = "icon_duration_bar"
+    defaults.width = 12
+    defaults.height = 12
+    defaults.filters.isBossAura = false
+    local defaultStyle = compile("party1", "HELPFUL", defaults)
+        .completeSpec.groups[1].buttonStyle
+    assertDeepEqual(defaultStyle.durationBar, {
+        height = 3,
+        gap = 1,
+        inset = 0,
+        color = {1, 1, 1, 1},
+        backgroundColor = {0, 0, 0, 0.75},
+    }, "underbar defaults")
+
+    local iconConfig = baseConfig()
+    iconConfig.filters.isBossAura = false
+    local iconDescriptor = compile("party1", "HELPFUL", iconConfig)
+    assertEqual(iconDescriptor.presentation, "icons",
+        "legacy default presentation")
+    assertEqual(iconDescriptor.constructionKey.presentation, "icons",
+        "legacy construction presentation")
+    assertEqual(
+        iconDescriptor.completeSpec.groups[1].buttonStyle.durationBar,
+        nil,
+        "legacy icon has no underbar style"
+    )
+
+    local invalid = baseConfig()
+    invalid.presentation = "icon_duration_bar"
+    invalid.height = 4
+    assertCompileError(
+        "party1",
+        "HELPFUL",
+        invalid,
+        "INVALID_DURATION_BAR_GEOMETRY",
+        "underbar icon geometry"
+    )
+
+    invalid = baseConfig()
+    invalid.presentation = "icon_duration_bar"
+    invalid.durationBar = {
+        color = {2, 1, 1, 1},
+    }
+    assertCompileError(
+        "party1",
+        "HELPFUL",
+        invalid,
+        "INVALID_DURATION_BAR",
+        "underbar normalized color"
+    )
+
+    invalid = baseConfig()
+    invalid.presentation = "icon_duration_bar"
+    invalid.durationBar = {
+        color = true,
+    }
+    assertCompileError(
+        "party1",
+        "HELPFUL",
+        invalid,
+        "INVALID_DURATION_BAR",
+        "underbar malformed imported color"
+    )
+end
+
+local function testFrameHighlightPresentation()
+    local config = baseConfig()
+    config.presentation = "frame_highlight"
+    config.filters = {
+        bigDefensive = true,
+    }
+    config.mode = "whitelist"
+    config.whitelist = {17, 33206}
+    config.frameHighlight = {
+        anchorTo = "healthBar",
+        color = {0.1, 0.6, 1, 0.75},
+        blendMode = "ADD",
+        inset = 2,
+        frameLevelOffset = 3,
+    }
+
+    local descriptor = compile("raid1", "HELPFUL", config)
+    local complete = descriptor.completeSpec
+    local slot = complete.slots[1]
+    assertEqual(descriptor.presentation, "frame_highlight",
+        "highlight descriptor presentation")
+    assertEqual(#complete.groups, 0, "highlight group count")
+    assertEqual(#complete.slots, 1, "highlight slot count")
+    assertEqual(slot.kind, "auraOverlay", "highlight slot kind")
+    assertEqual(slot.key, "frameHighlight", "highlight slot key")
+    assertEqual(slot.filterString, "HELPFUL|BIG_DEFENSIVE",
+        "highlight native filter")
+    assertDeepEqual(slot.candidateFilters, {
+        includeSpellIDs = {
+            [17] = true,
+            [33206] = true,
+        },
+    }, "highlight native candidate map")
+    assertEqual(slot.anchorTo, "healthBar", "highlight symbolic anchor")
+    assertDeepEqual(slot.overlayStyle, {
+        texture = "Interface\\AddOns\\AbstractFramework\\Media\\Textures\\Border",
+        vertexColor = {0.1, 0.6, 1, 0.75},
+        alpha = 1,
+        blendMode = "ADD",
+        inset = 2,
+        frameLevelOffset = 3,
+    }, "highlight static overlay style")
+    assertEqual(descriptor.visibility.requiresAssist, true,
+        "highlight assist requirement")
+    assertEqual(
+        descriptor.visibility.spellIDFilterRequiresPublicAssist,
+        true,
+        "highlight identity reaction gate"
+    )
+    assertDeepEqual(descriptor.constructionKey.slots[1], {
+        kind = "auraOverlay",
+        key = "frameHighlight",
+        anchorTo = "healthBar",
+        overlayStyle = slot.overlayStyle,
+    }, "highlight construction key")
+    assertEqual(descriptor.tuningSpec.slots[1].kind, nil,
+        "highlight tuning omits construction kind")
+    assertEqual(descriptor.tuningSpec.slots[1].overlayStyle, nil,
+        "highlight tuning omits static style")
+    assertDeepEqual(descriptor.metrics, {
+        groupCount = 0,
+        legacyMaxFrameCount = 1,
+        nativeVisibleCapacity = 1,
+        nativeBatchSize = 1,
+        initialRestrictedButtonCount = 1,
+        freshContainerRestrictedButtonCountCeiling = 1,
+        requestedColorBucketCount = 0,
+        requestedColorExpandedGroupCount = 0,
+        requestedColorExpandedCapacity = 0,
+        colorGroupBudgetExceeded = false,
+    }, "highlight metrics")
+
+    local invalid = copy(config)
+    assertCompileError(
+        "raid1",
+        "HARMFUL",
+        invalid,
+        "FRAME_HIGHLIGHT_REQUIRES_HELPFUL_FILTER",
+        "harmful frame highlight"
+    )
+
+    invalid = copy(config)
+    invalid.filters.externalDefensive = true
+    assertCompileError(
+        "raid1",
+        "HELPFUL",
+        invalid,
+        "FRAME_HIGHLIGHT_REQUIRES_SINGLE_FILTER_GROUP",
+        "multi-category frame highlight"
+    )
+
+    invalid = copy(config)
+    invalid.frameHighlight.anchorTo = "portrait"
+    assertCompileError(
+        "raid1",
+        "HELPFUL",
+        invalid,
+        "INVALID_FRAME_HIGHLIGHT",
+        "invalid frame highlight anchor"
+    )
+
+    invalid = copy(config)
+    invalid.frameHighlight.color = true
+    assertCompileError(
+        "raid1",
+        "HELPFUL",
+        invalid,
+        "INVALID_FRAME_HIGHLIGHT",
+        "malformed imported frame highlight color"
+    )
 end
 
 local function testDurationTextThresholdProjection()
@@ -2991,6 +3213,15 @@ local function testInvalidInputs()
     assertCompileError("target", "PLAYER", config, "INVALID_BASE_FILTER")
     assertCompileError("target", "HARMFUL", nil, "INVALID_AURA_CONFIG")
 
+    local invalidPresentation = baseConfig()
+    invalidPresentation.presentation = "glow_everything"
+    assertCompileError(
+        "target",
+        "HARMFUL",
+        invalidPresentation,
+        "INVALID_PRESENTATION"
+    )
+
     local invalid = baseConfig()
     invalid.enabled = 1
     assertCompileError(
@@ -3767,6 +3998,8 @@ testLegacyLoadAndSchemaGate()
 testCompleteSpecContract()
 testOrientationAndGeometry()
 testStyleProjection()
+testIconDurationBarPresentation()
+testFrameHighlightPresentation()
 testDurationTextThresholdProjection()
 testTooltipProjection()
 testEmptyPolicies()

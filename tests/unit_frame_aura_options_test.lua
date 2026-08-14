@@ -63,7 +63,8 @@ local function makeWidget(kind, harness)
     return widget
 end
 
-local function makeHarness()
+local function makeHarness(options)
+    options = options or {}
     local harness = {
         checkButtons = {},
         callbacks = {},
@@ -203,7 +204,9 @@ local function makeHarness()
             UnitFrames = UF,
         },
     }
-    local unitFramesPanel = {}
+    local unitFramesPanel = not options.omitUnitFramesPanel and {} or nil
+    local optionsFrame = not options.omitOptionsFrame and {} or nil
+    local uiParent = {}
     local function ReloadUI()
         harness.reloadCalls = harness.reloadCalls + 1
     end
@@ -211,6 +214,8 @@ local function makeHarness()
         _G = false,
         AbstractFramework = AF,
         BFIOptionsFrame_UnitFramesPanel = unitFramesPanel,
+        BFIOptionsFrame = optionsFrame,
+        UIParent = uiParent,
         error = error,
         ipairs = ipairs,
         next = next,
@@ -259,6 +264,8 @@ local function makeHarness()
     harness.reloadUI = ReloadUI
     harness.UF = UF
     harness.unitFramesPanel = unitFramesPanel
+    harness.optionsFrame = optionsFrame
+    harness.uiParent = uiParent
 
     function harness:ConfirmDialog(dialog)
         local callback = dialog.onConfirm
@@ -620,6 +627,19 @@ assertEqual(
     #globalReloadHarness.dialogs,
     2,
     "Global Colors reload callback can reopen"
+)
+
+local earlyProfileReloadHarness = makeHarness({
+    omitUnitFramesPanel = true,
+    omitOptionsFrame = true,
+})
+earlyProfileReloadHarness:FireCallback(
+    "BFI_NativeAuraReloadRequired"
+)
+assertEqual(
+    earlyProfileReloadHarness.dialogs[1].owner,
+    earlyProfileReloadHarness.uiParent,
+    "profile reload prompt falls back to UIParent before options exist"
 )
 
 local tuningHarness = makeHarness()

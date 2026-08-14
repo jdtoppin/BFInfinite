@@ -10,25 +10,28 @@ local InCombatLockdown = InCombatLockdown
 local floor, huge = math.floor, math.huge
 local ipairs, next, pairs, type = ipairs, next, pairs, type
 
--- Retail 12.1.0.69273 (wow-ui-source eb941aad) makes native aura
+-- Retail 12.1.0.69299 (wow-ui-source 31c7f7b9cc79) makes native aura
 -- groups/slots add-only and restricts their buttons after initialization.
 -- This controller owns only configuration-derived state and never reads aura
 -- data, live buttons, native container geometry, or native visibility.
--- AF #39/r42 adds native dispel-color textures on top of r41's native
--- dispel-overlay slots, static Block colors, construction ledgers, and the
--- duration carrier consumed here.
-local REQUIRED_AF_VERSION = 42
+-- AF r43 adds the scriptless aura-overlay slot and remaining-time icon
+-- underbar capabilities on top of r42's native dispel-color presentation.
+local REQUIRED_AF_VERSION = 43
 local NATIVE_GROUP_AURA_TEMPLATE = "CustomAuraContainerTemplate"
 -- CustomAuraContainerConstants.FrameCreationBatchSize in the pinned build.
 local NATIVE_INITIAL_GROUP_RESERVATIONS = 10
 local REQUIRED_AF_METHODS = {
     "AddCustomAuraGroup",
     "AddCustomAuraDispelOverlaySlot",
+    "AddCustomAuraOverlaySlot",
     "AddCustomAuraSlot",
     "CreateCustomAuraContainer",
     "GetCustomAuraContainerConstructionStats",
     "GetCustomAuraContainerConstructionTotals",
     "HasCustomAuraContainer",
+    "HasCustomAuraDurationBar",
+    "HasCustomAuraIconDurationBar",
+    "HasCustomAuraOverlaySlot",
     "HasNativeDispelColorTexture",
     "SetCustomAuraContainerEnabled",
     "SetCustomAuraContainerFlowLayout",
@@ -63,6 +66,14 @@ local constructionStats = {
     strandedNativeShells = 0,
     strandedInitialReservations = 0,
 }
+
+-- A seeded group AuraContainer normally remains parented to its secure unit
+-- button. Spell-list-priority displays need a fixed BFI-owned viewport so
+-- Blizzard's native flow can compact every active priority group while the
+-- configured Max Displayed bounds the rendered region. Keep this ownership
+-- relationship outside the native object; the weak-key ledger is
+-- construction-only and is never used to observe aura state.
+local clippingViewportBySeed = setmetatable({}, {__mode = "k"})
 
 local AF_CONSTRUCTION_TOTAL_FIELDS = {
     containerCreateAttempts = "afContainerCreateAttempts",
@@ -128,6 +139,9 @@ function UF.HasNativeAuraContainerBackend()
     end
 
     return AF.HasCustomAuraContainer()
+        and AF.HasCustomAuraDurationBar()
+        and AF.HasCustomAuraIconDurationBar()
+        and AF.HasCustomAuraOverlaySlot()
         and AF.HasNativeDispelColorTexture()
 end
 
@@ -147,12 +161,24 @@ end
 -- Group frames can need more than Blizzard's single header-born container
 -- when displays have independent anchors and flow layouts. Create those
 -- bounded extra shells eagerly, before combat and before indicator setup.
-function UF.CreateNativeGroupAuraContainerSeed(parent)
+function UF.CreateNativeGroupAuraContainerSeed(parent, options)
     if not UF.HasNativeAuraContainerBackend() then
         return nil
     end
 
-    local container = AF.CreateCustomAuraContainer(parent)
+    options = options or {}
+    local containerParent = parent
+    local clippingViewport
+    if options.clippingViewport == true then
+        clippingViewport = CreateFrame("Frame", nil, parent)
+        clippingViewport:SetClipsChildren(true)
+        containerParent = clippingViewport
+    end
+
+    local container = AF.CreateCustomAuraContainer(containerParent)
+    if clippingViewport then
+        clippingViewportBySeed[container] = clippingViewport
+    end
     constructionStats.seedsAllocated = constructionStats.seedsAllocated + 1
     -- A newly allocated/header-adjacent shell must be visually inert even if
     -- it is created while protected visibility writes are unavailable.
@@ -271,6 +297,12 @@ local function NormalizeSlot(slot, seenKeys, includeStyle)
             -- identity rather than copying a script object as configuration.
             normalized.anchorTarget = slot.anchorTarget
             normalized.overlayStyle = CopyTable(slot.overlayStyle or {})
+        elseif slot.kind == "auraOverlay" then
+            assert(slot.anchorTo == "healthBar" or slot.anchorTo == "root",
+                "aura overlay slot anchorTo must be healthBar or root")
+            normalized.kind = "auraOverlay"
+            normalized.anchorTo = slot.anchorTo
+            normalized.overlayStyle = CopyTable(slot.overlayStyle or {})
         else
             assert(slot.kind == nil or slot.kind == "aura",
                 "unsupported aura slot kind")
@@ -283,6 +315,17 @@ local function NormalizeSlot(slot, seenKeys, includeStyle)
         end
     end
     return normalized
+end
+
+local function ResolveAuraOverlayAnchorTarget(controller, anchorTo)
+    local root = controller._parent
+    assert(root ~= nil, "aura overlay controller root is required")
+    if anchorTo == "healthBar" then
+        local indicators = root.indicators
+        return indicators and indicators.healthBar or root
+    end
+    assert(anchorTo == "root", "unsupported aura overlay anchor")
+    return root
 end
 
 local function NormalizeSources(groups, slots, includeStyle)
@@ -315,6 +358,7 @@ local function NormalizeCompleteSpec(spec)
         unit = spec.unit,
         enabled = spec.enabled ~= false,
         shown = spec.shown ~= false,
+        clipToHolder = spec.clipToHolder == true,
         holder = NormalizeHolder(spec.holder),
         containerPoint = NormalizePoint(spec.containerPoint, {
             point = "TOPLEFT",
@@ -331,6 +375,7 @@ local function NormalizeTuning(tuning)
     assert(type(tuning) == "table", "aura container tuning must be a table")
     local groups, slots = NormalizeSources(tuning.groups, tuning.slots, false)
     return {
+        clipToHolder = tuning.clipToHolder == true,
         holder = NormalizeHolder(tuning.holder),
         containerPoint = NormalizePoint(tuning.containerPoint, {
             point = "TOPLEFT",
@@ -344,6 +389,8 @@ local function NormalizeTuning(tuning)
 end
 
 local function AssertMatchingTopology(spec, tuning)
+    assert(spec.clipToHolder == tuning.clipToHolder,
+        "aura clipping viewport changes require Rebuild")
     assert(#spec.groups == #tuning.groups, "aura group topology requires Rebuild")
     assert(#spec.slots == #tuning.slots, "aura slot topology requires Rebuild")
     for index, group in ipairs(spec.groups) do
@@ -457,7 +504,7 @@ local function SetExternalContainerCurtained(controller, curtained)
     if controller._containerAlpha == alpha then return end
 
     -- A seeded container is not parented to the plain holder, so curtain its
-    -- inherited Frame alpha separately. The 12.1.0.69273/eb941aad
+    -- inherited Frame alpha separately. The 12.1.0.69299/31c7f7b9cc79
     -- SimpleRegion contract permits this constant SetAlpha write. This
     -- remains a write-only gate: BFI never reads native visibility, children,
     -- or aura state.
@@ -489,7 +536,7 @@ local function SetHolderShownSafe(controller, shown)
         return false
     end
 
-    -- Retail 12.1.0.69273 can make visibility and hover accessors secret when
+    -- Retail 12.1.0.69299 can make visibility and hover accessors secret when
     -- a holder is anchored to a native aura container. Keep an ordinary
     -- write-only ledger instead of inspecting frame state.
     controller.frame:SetShown(shown)
@@ -691,8 +738,26 @@ function ControllerMixin:_Build()
 
     AF.SetSize(holder, spec.holder.width, spec.holder.height)
 
+    local clippingViewport = self._clippingViewport
+    if spec.clipToHolder then
+        assert(clippingViewport ~= nil or not containerIsExternal,
+            "external clipped aura container requires a construction-time viewport")
+        if not clippingViewport then
+            clippingViewport = CreateFrame("Frame", nil, holder)
+            clippingViewport:SetClipsChildren(true)
+            clippingViewport:SetAllPoints(holder)
+            self._clippingViewport = clippingViewport
+        else
+            clippingViewport:ClearAllPoints()
+            clippingViewport:SetAllPoints(holder)
+        end
+    else
+        assert(clippingViewport == nil,
+            "unclipped aura container cannot claim a clipping viewport")
+    end
+
     if not container then
-        container = AF.CreateCustomAuraContainer(holder)
+        container = AF.CreateCustomAuraContainer(clippingViewport or holder)
         -- Claim a newly created shell immediately, before its first native
         -- mutation, for the same one-shot and cleanup guarantees as a seed.
         self._container = container
@@ -746,6 +811,25 @@ function ControllerMixin:_Build()
                 },
                 slot.overlayStyle
             )
+        elseif slot.kind == "auraOverlay" then
+            AF.AddCustomAuraOverlaySlot(
+                container,
+                slot.key,
+                slot.filterString,
+                {
+                    candidateFilters = slot.candidateFilters,
+                    sortMethod = slot.sortMethod,
+                    sortDirection = slot.sortDirection,
+                    anchor = {
+                        matchAnchorBounds = true,
+                        relativeTo = ResolveAuraOverlayAnchorTarget(
+                            self,
+                            slot.anchorTo
+                        ),
+                    },
+                },
+                slot.overlayStyle
+            )
         else
             AF.AddCustomAuraSlot(container, slot.key, slot.filterString, {
                 candidateFilters = slot.candidateFilters,
@@ -768,7 +852,7 @@ function ControllerMixin:_Build()
     AF.SetCustomAuraContainerUnit(container, spec.unit)
     AF.UpdateCustomAuraContainer(container)
     -- SetEnabled is a secure-delegated inbound AuraContainer method in the
-    -- pinned 12.1.0.69273 build. Submit the final configured state explicitly
+    -- pinned 12.1.0.69299 build. Submit the final configured state explicitly
     -- even for a combat-created container so event registration never
     -- depends on template initialization details.
     AF.SetCustomAuraContainerEnabled(container, spec.enabled)
@@ -801,7 +885,7 @@ local function ApplyLiveUnitRetarget(controller)
         return false
     end
 
-    -- 12.1.0.69273 exposes SetUnit and UpdateAllAuras as inbound,
+    -- 12.1.0.69299 exposes SetUnit and UpdateAllAuras as inbound,
     -- combat-live operations on an already-built container. This is the
     -- only native mutation group controllers may perform before regen.
     AF.SetCustomAuraContainerUnit(controller._container, controller._spec.unit)
@@ -1140,7 +1224,7 @@ function ControllerMixin:Refresh()
         return
     end
 
-    -- 69273's inbound UpdateAllAuras only marks a full native dirty rebuild.
+    -- 69299's inbound UpdateAllAuras only marks a full native dirty rebuild.
     -- It does not expose aura values and is safe for stable-token refreshes.
     AF.UpdateCustomAuraContainer(self._container)
 end
@@ -1178,6 +1262,7 @@ local function CreateController(parent, name, completeSpec, options)
         options.alphaOnlyVisibility == true
     controller._allowCombatInitialBuild =
         options.allowCombatInitialBuild == true
+    controller._parent = parent
     controller.frame = CreateFrame(
         "Frame",
         name,
@@ -1196,6 +1281,9 @@ local function CreateController(parent, name, completeSpec, options)
         controller._holderShown = false
     end
     controller._seedContainer = options.seedContainer
+    controller._clippingViewport = options.seedContainer
+        and clippingViewportBySeed[options.seedContainer]
+        or nil
     controller._liveUnitChanges = options.liveUnitChanges == true
     constructionStats.controllersCreated = constructionStats.controllersCreated + 1
     if InCombatLockdown() and not controller._allowCombatInitialBuild then

@@ -312,7 +312,7 @@ local function makeHarness()
     }
     local AF = {
         isRetail = true,
-        versionNum = 42,
+        versionNum = 43,
     }
     local UF = {}
     local F = {}
@@ -344,6 +344,18 @@ local function makeHarness()
     end
 
     function AF.HasNativeDispelColorTexture()
+        return true
+    end
+
+    function AF.HasCustomAuraIconDurationBar()
+        return true
+    end
+
+    function AF.HasCustomAuraDurationBar()
+        return true
+    end
+
+    function AF.HasCustomAuraOverlaySlot()
         return true
     end
 
@@ -494,6 +506,10 @@ local function makeHarness()
 
     function AF.AddCustomAuraSlot()
         error("Raid aura scale test did not expect native slots", 2)
+    end
+
+    function AF.AddCustomAuraOverlaySlot()
+        error("Raid aura scale test did not expect aura overlay slots", 2)
     end
 
     function AF.AddCustomAuraDispelOverlaySlot(

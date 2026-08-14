@@ -10,6 +10,7 @@
          Global blacklist and priority lists remain retired. -->
     <Script file="Auras.lua"/>
     <Script file="UnitFrames_Options.lua"/>
+    <Script file="UnitFrameBuffDisplays.lua"/>
     <Script file="UnitFrames.lua"/>
     <Script file="NameplatesPreview.lua"/>
     <Script file="Nameplates.lua"/>

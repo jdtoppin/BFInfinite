@@ -477,7 +477,7 @@ local function makeHarness(
         if hasNativeBackend then
             assertTrue(containers,
                 "Raid native map must precede indicator construction")
-            assertEqual(countKeys(containers), 3,
+            assertEqual(countKeys(containers), 4,
                 "Raid native map size at indicator construction")
             assertTrue(containers.buffs,
                 "Raid buff seed before indicator construction")
@@ -485,6 +485,8 @@ local function makeHarness(
                 "Raid debuff seed before indicator construction")
             assertTrue(containers.dispels,
                 "Raid dispel seed before indicator construction")
+            assertTrue(containers.buffDisplays,
+                "Raid Buff Display seed map before indicator construction")
         else
             assertEqual(containers, nil,
                 "legacy Raid gained native map before construction")
@@ -505,7 +507,9 @@ local function makeHarness(
             if type(descriptor) == "table" then
                 local builder = descriptor[1]
                 local name = descriptor[2]
-                if builder == "groupNativeAuras" then
+                if builder == "groupNativeAuras"
+                    or builder == "groupBuffDisplays"
+                then
                     frame.indicators[name] = UF.CreateGroupNativeAuras(
                         frame,
                         frame:GetName() .. "_"
@@ -940,7 +944,7 @@ local function testNativeHeaderSeedsAndBuilderArguments()
     local dispelsTuple = findAuraTuple(descriptors, "dispels")
     assertTrue(buffsTuple, "Raid buffs tuple")
     assertEqual(#buffsTuple, 4, "Raid buffs tuple size")
-    assertEqual(buffsTuple[1], "groupNativeAuras",
+    assertEqual(buffsTuple[1], "groupBuffDisplays",
         "Raid buffs builder")
     assertEqual(buffsTuple[2], "buffs", "Raid buffs name")
     assertEqual(buffsTuple[3], "HELPFUL",
@@ -974,8 +978,10 @@ local function testNativeHeaderSeedsAndBuilderArguments()
             rawget(button, "_nativeAuraContainers")
         assertTrue(containers,
             "Raid child native container map " .. index)
-        assertEqual(countKeys(containers), 3,
+        assertEqual(countKeys(containers), 4,
             "Raid child explicit seed count " .. index)
+        assertEqual(countKeys(containers.buffDisplays), 0,
+            "Raid child disabled Buff Display seed count " .. index)
         assertEqual(containers.debuffs, button.AuraContainer,
             "Raid header-born harmful seed " .. index)
         assertEqual(containers.debuffs.origin, "header",

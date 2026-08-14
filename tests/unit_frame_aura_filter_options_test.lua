@@ -878,13 +878,13 @@ local function testRetailCanonicalFilters(hasNativeBackend)
         pane,
         "checkButton",
         "text",
-        "Big Defensive"
+        "Defensives"
     )
     local externalDefensive = findWidget(
         pane,
         "checkButton",
         "text",
-        "External Defensive"
+        "Externals"
     )
     local raidInCombat = findWidget(
         pane,

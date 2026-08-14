@@ -5,6 +5,9 @@
 
 ### English (enUS)
 
+- Party and Raid Buffs now support bounded child Buff Displays, including Healing Auras, Defensives, Externals, and user-created displays
+- Buff Displays add secret-safe Icon + Duration Bar, standalone Bar, and Health Bar highlight presentations through Blizzard's native aura providers
+- Spell List Priority compacts active whitelist spells in user order and reports its per-unit-frame managed aura button capacity; Blizzard Sort remains the efficient option
 - Individual Bags view keeps full-size icons and grows from the Combined View baseline height
 - Sidebar category expansion now persists when the sidebar collapses
 - Sidebar category icons across every category (equipment, consumables, trade goods, recipes, reagents, quest items, and housing) now render as larger, full-color native in-game art on plated backgrounds
@@ -14,6 +17,9 @@
 
 ### 简体中文 (zhCN)
 
+- 小队与团队增益现在支持有数量限制的子增益显示，包括治疗光环、减伤技能、外部减伤和用户自定义显示
+- 增益显示现可通过暴雪原生光环提供器使用安全处理受限数据的“图标 + 持续时间条”、独立持续时间条和生命条高亮显示方式
+- “法术列表优先级”可按白名单顺序紧凑显示激活光环，并显示每个单位框体的托管光环按钮容量；“暴雪排序”仍为高效选项
 - 独立背包视图保留完整大小的图标，并以合并视图的基准高度为起点向上增长
 - 侧栏收起时，侧栏分类的展开状态现在会保留
 - 侧栏所有分类（装备、消耗品、贸易物品、配方、材料、任务物品和房屋）的图标现在都以更大尺寸的全彩游戏内原生素材呈现，并带有底板背景

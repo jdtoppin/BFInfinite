@@ -190,6 +190,9 @@ local settings = {
         "numericFormat",
     },
     buffs = {
+        "buffDisplayManager",
+        "buffDisplayPresentation",
+        "buffDisplayPresentationStyle",
         "enabled",
         "cooldownStyle",
         "auraBaseFilters",
@@ -415,6 +418,13 @@ local function IsGroupManagedHarmfulNative(t)
         and UsesNativeAuraContainer(t)
 end
 
+local function UsesChildBuffSpellListPriority(t)
+    return t.displayID ~= nil
+        and t.id == "buffs"
+        and t.cfg.mode == "whitelist"
+        and t.cfg.sortMode == "spell_list_priority"
+end
+
 local function RequiresNativeAuraReload(t, count)
     if not IsAuraIndicator(t) then return false end
 
@@ -426,7 +436,10 @@ local function RequiresNativeAuraReload(t, count)
         local requiresReload = indicator
             and indicator.RequiresReloadForConfig
         if type(requiresReload) == "function"
-            and requiresReload(indicator, t.cfg) == true
+            and requiresReload(
+                indicator,
+                t.runtimeCfg or t.cfg
+            ) == true
         then
             return true
         end
@@ -446,8 +459,12 @@ local function ShowNativeAuraReloadDialog()
         return
     end
 
+    local dialogOwner = rawget(
+        _G,
+        "BFIOptionsFrame_UnitFramesPanel"
+    ) or rawget(_G, "BFIOptionsFrame") or _G.UIParent
     local dialog = AF.GetDialog(
-        BFIOptionsFrame_UnitFramesPanel,
+        dialogOwner,
         L["Native aura layout changes require a UI reload\nDo it now?"],
         300
     )
@@ -484,12 +501,16 @@ LoadIndicatorConfig = function(t)
         UF.LoadIndicatorConfig(
             GetIndicatorFrame(t, i),
             t.id,
-            t.cfg
+            t.runtimeCfg or t.cfg
         )
     end
 
     if reloadRequired then
         ShowNativeAuraReloadDialog()
+    end
+
+    if t.displayID then
+        AF.Fire("BFI_RefreshOptions", "unitFrames")
     end
 
     -- The native dispel overlay receives the saved Health Bar level only
@@ -849,7 +870,20 @@ builder["enabled"] = function(parent)
     end
 
     enabled:SetOnCheck(function(checked)
-        pane.t.cfg.enabled = checked
+        if pane.t.displayID then
+            local record = UF.SetBuffDisplayEnabled(
+                pane.t.runtimeCfg,
+                pane.t.displayID,
+                checked
+            )
+            if not record then
+                checked = false
+                pane.t.cfg.enabled = false
+                enabled:SetChecked(false)
+            end
+        else
+            pane.t.cfg.enabled = checked
+        end
         UpdateColor(checked)
         -- pane.t is list button that carries info
         pane.t:SetTextColor(checked and "white" or "disabled")
@@ -3946,8 +3980,8 @@ builder["auraBaseFilters"] = function(parent)
             notPlayer:Show()
             castByMe:SetText(L["Player, Pet, or Vehicle"])
             notPlayer:SetText(L["Not Player, Pet, or Vehicle"])
-            castByOthers:SetText(L["Big Defensive"])
-            castByUnit:SetText(L["External Defensive"])
+            castByOthers:SetText(L["Defensives"])
+            castByUnit:SetText(L["Externals"])
             castByNPC:SetText(L["Raid In Combat"])
             castByBoss:SetText(L["Raid Player-Dispellable"])
             dispellable:SetText(L["Any Dispel Type"])
@@ -4358,12 +4392,63 @@ builder["auraBlackListWhitelist"] = function(parent)
 
     importButton:SetOnClick(ImportHealerSpells)
 
+    local function MoveSpell(button, offset)
+        if not pane.canEdit
+            or not UsesChildBuffSpellListPriority(pane.t)
+        then
+            return
+        end
+
+        local fromIndex = button.index
+        local toIndex = fromIndex and fromIndex + offset
+        if not toIndex
+            or toIndex < 1
+            or toIndex > #pane.list
+        then
+            return
+        end
+
+        pane.list[fromIndex], pane.list[toIndex] =
+            pane.list[toIndex], pane.list[fromIndex]
+        pane.Load(pane.t)
+        LoadIndicatorConfig(pane.t)
+    end
+
     local pool = AF.CreateObjectPool(function()
         local b = AF.CreateButton(pane, nil, "BFI_hover", 150, 20)
         b:SetTexture(AF.GetIcon("QuestionMark"), nil, {"LEFT", 2, 0}, nil, "black")
         b:EnablePushEffect(false)
         b:SetTextJustifyH("LEFT")
         b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
+        local moveUp = AF.CreateButton(
+            pane,
+            L["Move Up"],
+            "BFI_hover",
+            75,
+            20
+        )
+        moveUp:EnablePushEffect(false)
+        moveUp:SetTooltip(L["Move Up"])
+        moveUp:SetOnClick(function()
+            MoveSpell(b, -1)
+        end)
+
+        local moveDown = AF.CreateButton(
+            pane,
+            L["Move Down"],
+            "BFI_hover",
+            75,
+            20
+        )
+        moveDown:EnablePushEffect(false)
+        moveDown:SetTooltip(L["Move Down"])
+        moveDown:SetOnClick(function()
+            MoveSpell(b, 1)
+        end)
+
+        b.moveUp = moveUp
+        b.moveDown = moveDown
 
         b:SetOnClick(function(_, click)
             if click == "LeftButton" then
@@ -4391,7 +4476,11 @@ builder["auraBlackListWhitelist"] = function(parent)
         return b
     end, function(_, b)
         b:Hide()
+        b.moveUp:Hide()
+        b.moveDown:Hide()
         AF.ClearPoints(b)
+        AF.ClearPoints(b.moveUp)
+        AF.ClearPoints(b.moveDown)
     end)
 
 
@@ -4433,6 +4522,7 @@ builder["auraBlackListWhitelist"] = function(parent)
         mode:SetSelectedValue(t.cfg.mode)
         mode:SetEnabled(canEdit)
         addButton:SetEnabled(canEdit)
+        pane.canEdit = canEdit
 
         local canImport = canEdit
             and usesNative
@@ -4456,6 +4546,8 @@ builder["auraBlackListWhitelist"] = function(parent)
         wipe(buttons)
 
         local num = #pane.list
+        local usesPriorityOrder =
+            UsesChildBuffSpellListPriority(t)
 
         for i = 1, num do
             local spell = pane.list[i]
@@ -4470,6 +4562,29 @@ builder["auraBlackListWhitelist"] = function(parent)
             buttons[i] = b
             b:SetEnabled(canEdit)
             b:Show()
+
+            AF.ClearPoints(b.moveUp)
+            AF.ClearPoints(b.moveDown)
+            if usesPriorityOrder then
+                b.moveUp:Show()
+                b.moveDown:Show()
+            else
+                b.moveUp:Hide()
+                b.moveDown:Hide()
+            end
+            b.moveUp:SetEnabled(canEdit and i > 1)
+            b.moveDown:SetEnabled(canEdit and i < num)
+            if usesPriorityOrder then
+                AF.SetPoint(b.moveUp, "TOPLEFT", b, "TOPRIGHT", 5, 0)
+                AF.SetPoint(
+                    b.moveDown,
+                    "TOPLEFT",
+                    b.moveUp,
+                    "TOPRIGHT",
+                    5,
+                    0
+                )
+            end
 
             if i == 1 then
                 if AF.isRetail then
@@ -4491,6 +4606,15 @@ builder["auraBlackListWhitelist"] = function(parent)
                         -8
                     )
                 end
+            elseif usesPriorityOrder then
+                AF.SetPoint(
+                    b,
+                    "TOPLEFT",
+                    buttons[i - 1],
+                    "BOTTOMLEFT",
+                    0,
+                    -5
+                )
             elseif i % 2 == 1 then
                 AF.SetPoint(b, "TOPLEFT", buttons[i - 2], "BOTTOMLEFT", 0, -5)
             else
@@ -4509,6 +4633,15 @@ builder["auraBlackListWhitelist"] = function(parent)
                 "BOTTOMLEFT",
                 0,
                 -8
+            )
+        elseif usesPriorityOrder then
+            AF.SetPoint(
+                addButton,
+                "TOPLEFT",
+                buttons[num],
+                "BOTTOMLEFT",
+                0,
+                -5
             )
         elseif canImport then
             local leftButton = buttons[num % 2 == 0 and num - 1 or num]
@@ -4549,9 +4682,14 @@ builder["auraBlackListWhitelist"] = function(parent)
             0
         )
 
-        local rows = canImport
-            and ceil(num / 2) + 1
-            or ceil((num + 1) / 2)
+        local rows
+        if usesPriorityOrder then
+            rows = num + 1
+        elseif canImport then
+            rows = ceil(num / 2) + 1
+        else
+            rows = ceil((num + 1) / 2)
+        end
         if AF.isRetail then
             RunNextFrame(function()
                 AF.SetListHeight(
@@ -4808,7 +4946,48 @@ builder["auraArrangement"] = function(parent)
 
     function pane.Load(t)
         pane.t = t
-        if UsesNativeAuraContainer(t) then
+        local isStandaloneBar = t.cfg.presentation == "bar"
+        local usesPriorityOrder =
+            UsesChildBuffSpellListPriority(t)
+        if type(width.SetMinMaxValues) == "function" then
+            width:SetMinMaxValues(isStandaloneBar and 4 or 10, 100)
+            height:SetMinMaxValues(isStandaloneBar and 1 or 10, 100)
+        end
+
+        AF.ClearPoints(numPerLine)
+        AF.ClearPoints(numTotal)
+        AF.SetPoint(
+            numPerLine,
+            "TOPLEFT",
+            spacingX,
+            "BOTTOMLEFT",
+            0,
+            -40
+        )
+        if usesPriorityOrder then
+            numPerLine:Hide()
+            AF.SetPoint(
+                numTotal,
+                "TOPLEFT",
+                spacingX,
+                "BOTTOMLEFT",
+                0,
+                -40
+            )
+        else
+            numPerLine:Show()
+            AF.SetPoint(numTotal, "TOPLEFT", numPerLine, 185, 0)
+        end
+
+        if usesPriorityOrder then
+            numTotal:SetLabel(L["Max Displayed"])
+            numTotal:SetTooltip(
+                L["Max Displayed"],
+                L[
+                    "Priority follows the whitelist from top to bottom. Max Displayed limits the visible top results, but does not reduce the managed aura button cost"
+                ]
+            )
+        elseif UsesNativeAuraContainer(t) then
             numTotal:SetLabel(L["Max Per Aura Group"])
             if IsGroupManagedHarmfulNative(t) then
                 numTotal:SetTooltip(
@@ -5499,6 +5678,22 @@ end
 ---------------------------------------------------------------------
 -- get
 ---------------------------------------------------------------------
+function F.RegisterUnitFrameOptionBuilder(name, optionBuilder)
+    assert(type(name) == "string" and name ~= "",
+        "unit-frame option builder name is required")
+    assert(type(optionBuilder) == "function",
+        "unit-frame option builder must be a function")
+    assert(builder[name] == nil,
+        "unit-frame option builder is already registered: " .. name)
+    builder[name] = function(parent)
+        local pane = optionBuilder(parent)
+        created[name] = pane
+        return pane
+    end
+end
+
+F.LoadUnitFrameIndicatorConfig = LoadIndicatorConfig
+
 function F.GetUnitFrameOptions(parent, info)
     for _, pane in pairs(created) do
         pane:Hide()
@@ -5506,16 +5701,42 @@ function F.GetUnitFrameOptions(parent, info)
     end
 
     wipe(options)
-    tinsert(options, builder["copy,paste,reset"](parent))
-    created["copy,paste,reset"]:Show()
+    if info.displayID == nil then
+        tinsert(options, builder["copy,paste,reset"](parent))
+        created["copy,paste,reset"]:Show()
+    end
 
     local id = info.id
     if not settings[id] then return options end
 
-    for _, option in pairs(settings[id]) do
+    local presentation = info.displayID
+        and info.cfg.presentation
+        or nil
+    local frameHighlightOptions = {
+        buffDisplayManager = true,
+        buffDisplayPresentation = true,
+        buffDisplayPresentationStyle = true,
+        enabled = true,
+        auraBaseFilters = true,
+        auraBlackListWhitelist = true,
+    }
+
+    for _, option in ipairs(settings[id]) do
+        local applicable = true
+        if presentation == "frame_highlight" then
+            applicable = frameHighlightOptions[option] == true
+        elseif (presentation == "icon_duration_bar"
+            or presentation == "bar")
+            and option == "cooldownStyle"
+        then
+            applicable = false
+        end
+
         if builder[option] then
             local pane = builder[option](parent)
-            if not pane.IsApplicable or pane.IsApplicable(info) then
+            if applicable
+                and (not pane.IsApplicable or pane.IsApplicable(info))
+            then
                 tinsert(options, pane)
                 pane:Show()
             end
