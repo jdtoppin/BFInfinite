@@ -104,8 +104,9 @@ do
     assertEqual(config.buffs.separateOwn, 0, "new Buffs Separate Own default")
     assertEqual(config.debuffs.separateOwn, 0,
         "new Debuffs Separate Own default")
-    assertFalse(config.debuffs.enabled,
-        "new Debuffs profile defaults the combined row off")
+    assertTrue(config.buffs.enabled, "new Buffs profile defaults on")
+    assertTrue(config.debuffs.enabled,
+        "new Debuffs profile defaults the combined row on")
     assertNil(config.debuffs.customHarmfulEnabled,
         "new Debuffs profile has no second harmful switch")
     assertNil(config.buffs.customHarmfulEnabled,
@@ -168,6 +169,20 @@ do
     profileCallback(nil, staleOptIn)
     assertNil(staleOptIn.buffsDebuffs.debuffs.customHarmfulEnabled,
         "repeated normalization keeps removed flag absent")
+end
+
+do
+    local optedOutProfile = {
+        buffsDebuffs = {
+            buffs = {enabled = false},
+            debuffs = {enabled = false},
+        },
+    }
+    profileCallback(nil, optedOutProfile)
+    assertFalse(optedOutProfile.buffsDebuffs.buffs.enabled,
+        "existing Buffs opt-out is preserved")
+    assertFalse(optedOutProfile.buffsDebuffs.debuffs.enabled,
+        "existing Debuffs opt-out is preserved")
 end
 
 for _, staleOptIn in ipairs({false, "true", 1, {}, function() end}) do
@@ -398,7 +413,7 @@ do
     profileCallback(nil, profile)
 
     local buffs = profile.buffsDebuffs.buffs
-    assertEqual(buffs.enabled, false, "malformed enabled normalizes")
+    assertEqual(buffs.enabled, true, "malformed enabled normalizes")
     assertEqual(buffs.width, 26, "infinite width uses default")
     assertEqual(buffs.height, 10, "height clamps")
     assertEqual(buffs.orientation, "right_to_left_then_down",
@@ -419,8 +434,8 @@ do
     assertEqual(buffs.stack.color[3], 1, "invalid color uses fallback")
     assertTrue(type(profile.buffsDebuffs.debuffs) == "table",
         "malformed Debuffs pane is rebuilt")
-    assertFalse(profile.buffsDebuffs.debuffs.enabled,
-        "rebuilt Debuffs pane keeps the combined row off")
+    assertTrue(profile.buffsDebuffs.debuffs.enabled,
+        "rebuilt Debuffs pane defaults on")
     assertNil(profile.buffsDebuffs.debuffs.customHarmfulEnabled,
         "rebuilt Debuffs pane has no second switch")
 end
@@ -587,16 +602,16 @@ do
         "all reset restores Debuffs Seconds default")
     assertFalse(profile.buffsDebuffs.debuffs.duration.color.percent.enabled,
         "all reset restores Debuffs Percent inactive")
-    assertFalse(profile.buffsDebuffs.debuffs.enabled,
-        "all reset disables the combined Debuffs row")
+    assertTrue(profile.buffsDebuffs.debuffs.enabled,
+        "all reset enables the combined Debuffs row")
     assertNil(profile.buffsDebuffs.debuffs.customHarmfulEnabled,
         "all reset strips the removed harmful switch")
 
     profile.buffsDebuffs.debuffs.customHarmfulEnabled = true
     profile.buffsDebuffs.debuffs.enabled = true
     BD.ResetToDefaults("debuffs")
-    assertFalse(profile.buffsDebuffs.debuffs.enabled,
-        "Debuffs pane reset disables the combined row")
+    assertTrue(profile.buffsDebuffs.debuffs.enabled,
+        "Debuffs pane reset enables the combined row")
     assertNil(profile.buffsDebuffs.debuffs.customHarmfulEnabled,
         "Debuffs pane reset strips the removed harmful switch")
 end

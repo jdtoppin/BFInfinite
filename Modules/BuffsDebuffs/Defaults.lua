@@ -7,7 +7,7 @@ local AF = _G.AbstractFramework
 
 local defaults = {
     buffs = {
-        enabled = false,
+        enabled = true,
         position = {"TOPRIGHT", -4, -4},
         width = 26,
         height = 26,
@@ -46,7 +46,7 @@ local defaults = {
 
     },
     debuffs = {
-        enabled = false,
+        enabled = true,
         position = {"TOPRIGHT", -4, -40},
         width = 26,
         height = 26,

@@ -355,7 +355,7 @@ assertEqual(type(updateProfile), "function", "profile callback")
 local freshProfile = {}
 updateProfile(nil, freshProfile)
 local defaults = freshProfile.uiWidgets.mythicPlus
-assertEqual(defaults.enabled, false, "Mythic+ defaults are opt-in")
+assertEqual(defaults.enabled, true, "Mythic+ defaults are enabled")
 assertEqual(defaults.width, 320, "default timer width")
 assertEqual(defaults.extendedRunMultiplier, 1.5,
     "default extended-run cutoff")
@@ -381,7 +381,7 @@ local existingProfile = {
     },
 }
 updateProfile(nil, existingProfile)
-assertEqual(existingProfile.uiWidgets.mythicPlus.enabled, false,
+assertEqual(existingProfile.uiWidgets.mythicPlus.enabled, true,
     "existing profile receives new module defaults")
 assertEqual(existingProfile.uiWidgets.objectiveTracker.backgroundAlpha, 0.85,
     "existing profile receives Objective Tracker background defaults")
@@ -431,6 +431,17 @@ assertEqual(
     false,
     "missing Objective Tracker auto-turn-in choice is filled"
 )
+
+local optedOutProfile = {
+    uiWidgets = {
+        mythicPlus = {
+            enabled = false,
+        },
+    },
+}
+updateProfile(nil, optedOutProfile)
+assertEqual(optedOutProfile.uiWidgets.mythicPlus.enabled, false,
+    "existing Mythic+ opt-out is preserved")
 
 local optionsChunk, optionsLoadError =
     loadfile("Options/UIWidgets_Options.lua")
