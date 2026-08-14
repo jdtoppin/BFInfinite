@@ -25,7 +25,8 @@ function eventHandler:ADDON_LOADED(arg)
 
         BFI.version, BFI.versionNum = AF.GetAddOnVersion(BFI.name)
 
-        if type(BFIConfig) ~= "table" then BFIConfig = {} end
+        BFI.vars.configCreatedThisSession = type(BFIConfig) ~= "table"
+        if BFI.vars.configCreatedThisSession then BFIConfig = {} end
 
         --------------------------------------------------
         -- general
@@ -75,7 +76,7 @@ function eventHandler:ADDON_LOADED(arg)
                 common = {
                     font = "Noto_AP",
                     overrideAF = true,
-                    overrideBlizzard = false,
+                    overrideBlizzard = true,
                     blizzardFontSizeDelta = 0,
                 },
                 combatText = {
@@ -322,6 +323,15 @@ local function AF_PLAYER_LOGIN_DELAYED()
     -- profile
     PreloadProfile()
     AF.RegisterCallback("AF_PLAYER_SPEC_UPDATE", AF_PLAYER_SPEC_UPDATE)
+
+    -- Only a genuinely new BFI configuration may bootstrap its own Account
+    -- layout. Existing Blizzard Edit Mode layouts remain wholly user-owned.
+    if BFI.vars.configCreatedThisSession
+        and type(BFI.modules.UIWidgets.ApplyObjectiveTrackerFreshInstallLayout)
+            == "function"
+    then
+        BFI.modules.UIWidgets.ApplyObjectiveTrackerFreshInstallLayout()
+    end
 
     -- disable blizzard frames
     AF.Fire("BFI_DisableBlizzard")

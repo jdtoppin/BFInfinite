@@ -7,7 +7,7 @@ local AF = _G.AbstractFramework
 
 local defaults = {
     buffs = {
-        enabled = false,
+        enabled = true,
         position = {"TOPRIGHT", -4, -4},
         width = 26,
         height = 26,
@@ -46,7 +46,7 @@ local defaults = {
 
     },
     debuffs = {
-        enabled = false,
+        enabled = true,
         position = {"TOPRIGHT", -4, -40},
         width = 26,
         height = 26,
@@ -300,6 +300,9 @@ local function NormalizePane(config, fallback)
     FillMissing(config, fallback)
 
     config.enabled = NormalizeBoolean(config.enabled, fallback.enabled)
+    -- This retired second enable switch must not survive profile hydration or
+    -- override the pane's canonical enabled value.
+    config.customHarmfulEnabled = nil
     config.position = NormalizeHolderPosition(config.position, fallback.position)
     config.width = NormalizeNumber(config.width, fallback.width, 10, 100, true)
     config.height = NormalizeNumber(

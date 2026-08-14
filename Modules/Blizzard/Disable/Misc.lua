@@ -29,9 +29,9 @@ local function DisableBlizzard()
         F.DisableFrame(_G.PetCastingBarFrame)
     end
 
-    -- BuffsDebuffs keeps these roots active and suppresses only verified public
-    -- visuals after a replacement exists. DebuffFrame continues to own
-    -- private-aura anchors and deadly-debuff warnings.
+    -- BuffsDebuffs keeps these roots active. Its enabled harmful replacement can
+    -- temporarily deregister DebuffFrame's exact six private anchors only
+    -- after a replacement exists; DeadlyDebuffFrame remains Blizzard-owned.
 
     F.DisableEditMode(_G.EncounterBar)
 

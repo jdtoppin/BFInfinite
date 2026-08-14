@@ -88,7 +88,7 @@ local defaults = {
         showIfSolo = false,
     },
     mythicPlus = {
-        enabled = false,
+        enabled = true,
         position = {"TOPRIGHT", -1, -200},
         width = 320,
         font = {"BFI", 12, "none", true},
@@ -105,6 +105,9 @@ local defaults = {
     },
     objectiveTracker = {
         enabled = true,
+        backgroundAlpha = 0.85,
+        autoAcceptQuests = false,
+        autoTurnInQuests = false,
         font = {"BFI", 12, "none", true},
     },
 }
@@ -118,6 +121,15 @@ AF.RegisterCallback("BFI_UpdateProfile", function(_, t)
         AF.MergeMissingKeys(
             t["uiWidgets"]["mythicPlus"],
             defaults.mythicPlus
+        )
+    end
+    if not t["uiWidgets"]["objectiveTracker"] then
+        t["uiWidgets"]["objectiveTracker"] =
+            AF.Copy(defaults.objectiveTracker)
+    else
+        AF.MergeMissingKeys(
+            t["uiWidgets"]["objectiveTracker"],
+            defaults.objectiveTracker
         )
     end
     W.config = t["uiWidgets"]

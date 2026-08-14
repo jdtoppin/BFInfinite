@@ -221,6 +221,12 @@ end
 
 local renderer = readFile("Modules/DamageMeter/Renderer.lua")
 local rendererCode = stripLineComments(renderer)
+local trackerGeometry = extractSection(
+    rendererCode,
+    "local function GetObjectiveTrackerLaneHeight(config)",
+    "local function GetRuntimeWindowLayout(config)",
+    "unable to isolate reviewed Objective Tracker geometry"
+)
 local aggregateRenderer = removeSection(
     rendererCode,
     "local function FormatDetailNumber(value)",
@@ -231,7 +237,6 @@ local aggregateRenderer = removeSection(
 local forbiddenEverywhere = {
     "hooksecurefunc",
     "issecret" .. "value",
-    "F.isValueNonSecret",
     "_G.C_DamageMeter",
     "C_DamageMeter.",
     "GetCombatSessionSource",
@@ -247,6 +252,43 @@ for _, text in ipairs(forbiddenEverywhere) do
         "renderer must use only the reviewed public data adapter"
     )
 end
+
+assertCount(
+    trackerGeometry,
+    "F.isValueNonSecret",
+    4,
+    "tracker geometry must sanitize every fallible numeric return"
+)
+assertBefore(
+    trackerGeometry,
+    "F.isValueNonSecret(bottom)",
+    'type(bottom) ~= "number"',
+    "tracker bottom must be sanitized before type inspection"
+)
+assertBefore(
+    trackerGeometry,
+    "F.isValueNonSecret(uiScale)",
+    'type(uiScale) ~= "number"',
+    "UI scale must be sanitized before type inspection"
+)
+assertBefore(
+    trackerGeometry,
+    "F.isValueNonSecret(targetScale)",
+    'type(targetScale) ~= "number"',
+    "tracker scale must be sanitized before type inspection"
+)
+assertBefore(
+    trackerGeometry,
+    "F.isValueNonSecret(uiBottom)",
+    'type(uiBottom) ~= "number"',
+    "UI bottom must be sanitized before type inspection"
+)
+assertOnlyInSections(
+    rendererCode,
+    "F.isValueNonSecret",
+    {trackerGeometry},
+    "secret inspection is isolated to tracker geometry"
+)
 
 local forbiddenAggregatePatterns = {
     "sourceGUID",
@@ -285,26 +327,14 @@ assertNoRetainedPayloadAssignments(rendererCode)
 local detailSourceData = extractSection(
     rendererCode,
     "local function GetDetailSourceData(",
-    "local function SortDetailTotals(",
-    "unable to isolate the detail source adapter"
-)
-local damageTargetDetails = extractSection(
-    rendererCode,
-    "local function BuildDamageTargetEntries(",
     "local function BuildStandardDetailEntries(",
-    "unable to isolate damage target detail construction"
+    "unable to isolate the detail source adapter"
 )
 local standardDetails = extractSection(
     rendererCode,
     "local function BuildStandardDetailEntries(",
-    "local function BuildEnemyPlayerEntries(",
-    "unable to isolate standard detail construction"
-)
-local enemyPlayerDetails = extractSection(
-    rendererCode,
-    "local function BuildEnemyPlayerEntries(",
     "local function GetDeathEventName(",
-    "unable to isolate enemy-player detail construction"
+    "unable to isolate standard detail construction"
 )
 local deathDetails = extractSection(
     rendererCode,
@@ -374,53 +404,49 @@ assertOnlyInSections(
     "source creature ID is allowed only in the reviewed detail adapter"
 )
 assertCount(
-    damageTargetDetails,
-    "combatSpells",
-    2,
-    "damage target spell traversal changed"
-)
-assertCount(
     standardDetails,
     "combatSpells",
     1,
     "standard spell traversal changed"
 )
-assertCount(
-    enemyPlayerDetails,
-    "combatSpells",
-    1,
-    "enemy-player spell traversal changed"
-)
 assertOnlyInSections(
     rendererCode,
     "combatSpells",
-    {damageTargetDetails, standardDetails, enemyPlayerDetails},
+    {standardDetails},
     "combat spell tables are allowed only in reviewed detail builders"
+)
+assertNotContains(
+    rendererCode,
+    "BuildDamageTargetEntries(",
+    "damage details must not join conditional-secret source names"
+)
+assertNotContains(
+    rendererCode,
+    "BuildEnemyPlayerEntries(",
+    "enemy details must not group secret-capable player names"
+)
+assertNotContains(
+    standardDetails,
+    "combatSpellDetails",
+    "spell details must not inspect secret-capable unit identities"
+)
+assertNotContains(
+    rendererCode,
+    ".unitName",
+    "damage details must not inspect secret-capable unit names"
 )
 
 assertCount(
     rendererCode,
     "GetDetailSourceData(",
-    3,
-    "detail source adapter call graph changed"
-)
-assertCount(
-    rendererCode,
-    "BuildDamageTargetEntries(",
     2,
-    "damage target builder call graph changed"
+    "detail source adapter call graph changed"
 )
 assertCount(
     rendererCode,
     "BuildStandardDetailEntries(",
     2,
     "standard detail builder call graph changed"
-)
-assertCount(
-    rendererCode,
-    "BuildEnemyPlayerEntries(",
-    2,
-    "enemy-player detail builder call graph changed"
 )
 assertCount(
     rendererCode,
@@ -539,19 +565,19 @@ assertIdentifierLineAllowlist(aggregateRenderer, "source", {
     ["local function UpdateRow(row, source, index, session, config)"] = 1,
     ["local source = session.combatSources[sourceIndex]"] = 1,
     ["r, g, b = AF.GetClassColor(source.classFilename)"] = 1,
+    ["UpdateSourceIcon(row, source.specIconID, source.classFilename)"] = 1,
     ["row.bar:SetValue(source.totalAmount)"] = 1,
     ["row.deathRecapID = source.deathRecapID"] = 1,
     ["row.hoverCard.playerBadge:SetShown(source.isLocalPlayer == true)"] = 1,
     ["row.hoverCard.shareBar:SetValue(source.totalAmount)"] = 1,
     ['row.hoverCard.title:SetText(_G.Ambiguate(source.name, "short"))'] = 1,
-    ["row.icon:SetTexture(source.specIconID)"] = 1,
     ['row.name:SetText(_G.Ambiguate(source.name, "short"))'] = 1,
     ["row.total:SetText(AF.FormatSecretNumber(source.totalAmount))"] = 1,
 }, "every whole combat-source use must stay on the reviewed safe path")
 
 local sourceFieldCounts = {
     amountPerSecond = 3,
-    classFilename = 1,
+    classFilename = 2,
     deathRecapID = 1,
     isLocalPlayer = 2,
     name = 2,
@@ -633,8 +659,13 @@ assertContains(
 )
 assertContains(
     aggregateRenderer,
-    "row.icon:SetTexture(source.specIconID)",
-    "addon-owned rows must support specialization icons"
+    "UpdateSourceIcon(row, source.specIconID, source.classFilename)",
+    "addon-owned rows must support specialization and class icons"
+)
+assertContains(
+    aggregateRenderer,
+    "row.icon:SetAtlas(classAtlas, false, nil, true)",
+    "followers without a specialization icon must use their class atlas"
 )
 assertContains(
     rendererCode,
@@ -660,6 +691,21 @@ assertNotContains(
     rendererCode,
     "config.nativeEnabledBeforeBFI",
     "renderer must never serialize native CVar state into a profile"
+)
+assertContains(
+    rendererCode,
+    "local tracker = _G.ObjectiveTrackerFrame",
+    "default meters must use the Objective Tracker as a read-only boundary"
+)
+assertNotContains(
+    rendererCode,
+    "_G.ObjectiveTrackerFrame:",
+    "Damage Meter coexistence must not call Objective Tracker methods"
+)
+assertNotContains(
+    rendererCode,
+    "SetParent(_G.ObjectiveTrackerFrame",
+    "Damage Meter windows must not become Objective Tracker children"
 )
 
 assertNotContains(

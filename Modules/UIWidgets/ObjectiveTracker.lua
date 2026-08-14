@@ -13,8 +13,168 @@ local scenarioTracker = _G.ScenarioObjectiveTracker
 local rewardsFrame = _G.ScenarioRewardsFrame
 
 local trackerStyled
+local trackerLayoutObserved
+local trackerBackgroundStyled
+local trackerBackground
+local trackerDockFrame
+local trackerBackgroundLayoutQueued
+
+local TRACKER_NATIVE_BOTTOM_PADDING = 10
+local TRACKER_BACKGROUND_PADDING = 6
 
 local GenerateClosure = GenerateClosure
+local RunNextFrame = RunNextFrame
+
+---------------------------------------------------------------------
+-- background
+---------------------------------------------------------------------
+local function LayoutTrackerBackground()
+    if not trackerBackground or not tracker.Header then return end
+
+    local bottomRegion = tracker.Header
+    if not tracker:IsCollapsed() then
+        for _, module in ipairs(tracker.modules) do
+            -- Retail collapse leaves GetContentsHeight() populated while
+            -- hiding the modules. IsShown() reflects the regions Blizzard
+            -- actually laid out without reading or taking ownership of their
+            -- protected geometry.
+            if module:IsShown() then
+                bottomRegion = module
+            end
+        end
+    end
+
+    trackerBackground:ClearAllPoints()
+    trackerBackground:SetPoint(
+        "TOPLEFT",
+        tracker.Header,
+        "TOPLEFT",
+        -TRACKER_BACKGROUND_PADDING,
+        TRACKER_BACKGROUND_PADDING
+    )
+    trackerBackground:SetPoint(
+        "TOPRIGHT",
+        tracker.Header,
+        "TOPRIGHT",
+        TRACKER_BACKGROUND_PADDING,
+        TRACKER_BACKGROUND_PADDING
+    )
+    trackerBackground:SetPoint(
+        "BOTTOM",
+        bottomRegion,
+        "BOTTOM",
+        0,
+        bottomRegion == tracker.Header
+            and -TRACKER_BACKGROUND_PADDING
+            or -TRACKER_NATIVE_BOTTOM_PADDING
+                - TRACKER_BACKGROUND_PADDING
+    )
+end
+
+local function LayoutTrackerDockFrame()
+    if not trackerDockFrame or not trackerBackground then return end
+
+    trackerDockFrame:ClearAllPoints()
+    local isCustomPosition = type(tracker.IsInDefaultPosition) == "function"
+        and tracker:IsInDefaultPosition() == false
+    if isCustomPosition and not tracker:IsCollapsed() then
+        -- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit d3915c78:
+        -- ObjectiveTrackerContainerMixin:UpdateHeight() owns the custom
+        -- tracker height and applies max(editModeHeight, mustFitContent).
+        -- Reserve that native extent for docked meters without changing any
+        -- Blizzard frame geometry. The visible BFI surface remains bounded by
+        -- current content below, while default-positioned or collapsed
+        -- trackers keep the compact content-bound dock target.
+        -- Match the horizontal bounds of the padded BFI surface so meters
+        -- align with its visible edge, while the native tracker continues to
+        -- own its own geometry and vertical extent.
+        trackerDockFrame:SetPoint(
+            "TOPLEFT",
+            tracker,
+            "TOPLEFT",
+            -TRACKER_BACKGROUND_PADDING,
+            0
+        )
+        trackerDockFrame:SetPoint(
+            "BOTTOMRIGHT",
+            tracker,
+            "BOTTOMRIGHT",
+            TRACKER_BACKGROUND_PADDING,
+            0
+        )
+    else
+        trackerDockFrame:SetPoint("TOPLEFT", trackerBackground, "TOPLEFT")
+        trackerDockFrame:SetPoint(
+            "BOTTOMRIGHT",
+            trackerBackground,
+            "BOTTOMRIGHT"
+        )
+    end
+end
+
+local function UpdateTrackerBackgroundLayout()
+    LayoutTrackerBackground()
+    LayoutTrackerDockFrame()
+    -- Meter windows follow the BFI-owned dock reservation, which observes
+    -- Blizzard's custom height without taking ownership of it.
+    AF.Fire("BFI_ObjectiveTrackerDockFrameChanged")
+end
+
+local function QueueTrackerBackgroundLayout()
+    if trackerBackgroundLayoutQueued then return end
+
+    trackerBackgroundLayoutQueued = true
+    RunNextFrame(function()
+        trackerBackgroundLayoutQueued = nil
+        if trackerBackground then
+            UpdateTrackerBackgroundLayout()
+        end
+    end)
+end
+
+local function SetupTrackerLayoutObserver()
+    if trackerLayoutObserved then return end
+
+    trackerLayoutObserved = true
+    hooksecurefunc(tracker, "Update", UpdateTrackerBackgroundLayout)
+    hooksecurefunc(tracker, "UpdateHeight", UpdateTrackerBackgroundLayout)
+    -- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit d3915c78:
+    -- module collapse calls MarkDirty(), whose stored dirty callback retains
+    -- the original Update method and runs on the next frame. Queue our own
+    -- BFI-only reflow from the post-hook so it runs after Blizzard has laid
+    -- out modules newly exposed below a collapsed header.
+    hooksecurefunc(tracker, "MarkDirty", QueueTrackerBackgroundLayout)
+end
+
+local function SetupTrackerBackground()
+    if trackerBackgroundStyled or not tracker.NineSlice then return end
+
+    -- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit d3915c78:
+    -- Blizzard_ObjectiveTrackerContainer.xml gives NineSlice a 30-pixel empty
+    -- left overhang and 10 pixels below the last module. Container collapse
+    -- hides modules but deliberately leaves their content heights (and
+    -- NineSlice's expanded bottom anchor) intact. Follow the last shown module
+    -- instead, falling back to the resized header. Module left margins are
+    -- internal layout canvas (Scenario reserves -20 pixels for its decoration),
+    -- not persistent content bounds, so the BFI surface stays compact against
+    -- the header while retaining its own symmetric padding.
+    -- Blizzard_ObjectiveTrackerManager.lua still owns the tracker and defaults
+    -- the native background opacity to zero.
+    trackerBackgroundStyled = true
+    S.RemoveTextures(tracker.NineSlice, true)
+    trackerDockFrame = AF.CreateFrame(tracker)
+    W.objectiveTrackerDockFrame = trackerDockFrame
+    trackerBackground = AF.CreateBorderedFrame(
+        tracker,
+        nil,
+        nil,
+        nil,
+        "background",
+        "border"
+    )
+    AF.SetFrameLevel(trackerBackground, -1)
+    UpdateTrackerBackgroundLayout()
+end
 
 ---------------------------------------------------------------------
 -- setup
@@ -62,7 +222,7 @@ local function SetupTracker()
 
         if module == tracker then
             local originalWidth = header:GetWidth()
-            hooksecurefunc(module, "SetCollapsed", function(_, collapsed)
+            local function UpdateMainHeaderLayout(collapsed)
                 header:ClearAllPoints()
                 if collapsed then
                     header:SetPoint("TOPRIGHT")
@@ -71,7 +231,12 @@ local function SetupTracker()
                     header:SetPoint("TOPLEFT")
                     header:SetWidth(originalWidth)
                 end
+                UpdateTrackerBackgroundLayout()
+            end
+            hooksecurefunc(module, "SetCollapsed", function(_, collapsed)
+                UpdateMainHeaderLayout(collapsed)
             end)
+            UpdateMainHeaderLayout(module:IsCollapsed())
         else
             hooksecurefunc(module, "SetCollapsed", function(_, collapsed)
                 if collapsed then
@@ -371,10 +536,21 @@ local function UpdateObjectiveTracker(_, module, which)
     if module and module ~= "uiWidgets" then return end
     if which and which ~= "objectiveTracker" then return end
 
+    SetupTrackerLayoutObserver()
     local config = W.config.objectiveTracker
     if not config.enabled then
         -- do nothing here, since this requires a reload
         return
+    end
+
+    SetupTrackerBackground()
+    if trackerBackground then
+        trackerBackground:SetBackdropColor(
+            AF.GetColorRGB("background", config.backgroundAlpha)
+        )
+        trackerBackground:SetBackdropBorderColor(
+            AF.GetColorRGB("border", config.backgroundAlpha)
+        )
     end
 
     if not trackerStyled then

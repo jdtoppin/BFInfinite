@@ -20,6 +20,15 @@ end
 local SOURCE_DISCLOSURE = L[
     "WoW 12.1's PublicAndPrivate source list combines public and private authorized Buffs in this native row; the sources cannot be separated."
 ]
+local HARMFUL_SOURCE_DISCLOSURE = L[
+    "When Debuffs are enabled, BFInfinite replaces Blizzard's ordinary and private Debuffs with one PublicAndPrivate native row. Its finite icon cap is shared; at the cap, either source can displace auras from the other. Deadly Debuffs remain Blizzard controlled."
+]
+local BUFF_LAYOUT_CAP_DISCLOSURE = L[
+    "Temporary Main-Hand and Off-Hand enchants share this layout and may add up to two icons beyond the aura cap."
+]
+local HARMFUL_LAYOUT_CAP_DISCLOSURE = L[
+    "Public and private Debuffs share this finite icon cap; at the cap, either source can displace auras from the other."
+]
 
 local function GetDurationColorMode(config)
     if type(BD.GetDurationColorMode) == "function" then
@@ -89,9 +98,23 @@ local function IsSharedAuraMoverActive()
 end
 
 function BD.GetBuffsDebuffsOptionsPolicy(which)
-    local backend = BD.GetAuraBackend(which)
-    local custom = which == "buffs"
-        and backend == BD.CUSTOM_AURA_CONTAINER_BACKEND
+    local desiredBackend = BD.GetAuraBackend(which)
+    local controllerState = which == "debuffs"
+        and type(BD.GetCustomAuraContainerState) == "function"
+        and BD.GetCustomAuraContainerState(which)
+        or nil
+    local transition = which == "debuffs"
+        and type(BD.GetBuffsDebuffsBackendTransitionState) == "function"
+        and BD.GetBuffsDebuffsBackendTransitionState(which)
+        or nil
+    local backend = transition and transition.actualBackend
+        or controllerState and controllerState.active == true
+            and BD.CUSTOM_AURA_CONTAINER_BACKEND
+        or desiredBackend
+    if backend == BD.BLIZZARD_DEFAULT_BACKEND then
+        backend = nil
+    end
+    local custom = backend == BD.CUSTOM_AURA_CONTAINER_BACKEND
     local blizzardDebuffStyle = which == "debuffs"
         and backend == BD.BLIZZARD_DEBUFF_STYLE_BACKEND
     local customBuffsAvailable = false
@@ -99,14 +122,29 @@ function BD.GetBuffsDebuffsOptionsPolicy(which)
         customBuffsAvailable =
             BD.GetAuraBackend("buffs") == BD.CUSTOM_AURA_CONTAINER_BACKEND
     end
+    local harmfulNativeAvailable = which == "debuffs"
+        and type(BD.HasCustomHarmfulAuraDescriptorCapability) == "function"
+        and BD.HasCustomHarmfulAuraDescriptorCapability() == true
+        and type(BD.GetCustomAuraContainerState) == "function"
+        and BD.GetCustomAuraContainerState("debuffs") ~= nil
+    local harmfulNativeRequested = which == "debuffs"
+        and type(BD.config) == "table"
+        and type(BD.config.debuffs) == "table"
+        and BD.config.debuffs.enabled == true
     return {
-        available = backend ~= nil,
+        available = backend ~= nil or harmfulNativeAvailable,
         backend = backend,
+        desiredBackend = desiredBackend,
+        backendTransition = transition,
         blizzardDebuffStyle = blizzardDebuffStyle,
         custom = custom,
+        harmfulNativeAvailable = harmfulNativeAvailable,
+        harmfulNativeRequested = harmfulNativeRequested,
         label = blizzardDebuffStyle
             and L["Debuffs (appearance only)"]
-            or custom and L["Buffs (Public + Private)"]
+            or custom and L[which == "buffs"
+                and "Buffs (Public + Private)"
+                or "Debuffs (Public + Private)"]
             or (which == "debuffs" and customBuffsAvailable
                 and L["Debuffs (Blizzard controlled)"]
                 or L[which == "buffs" and "Buffs" or "Debuffs"]),
@@ -130,11 +168,16 @@ function BD.GetBuffsDebuffsOptionsPolicy(which)
         durationEnabledControl = true,
         iconSizeControls = true,
         layoutControls = not blizzardDebuffStyle,
-        fixedArrangement = custom and "right_to_left_then_up" or nil,
+        fixedArrangement = custom and (which == "buffs"
+            and "right_to_left_then_up"
+            or "right_to_left_then_down") or nil,
         maximumIconSize = blizzardDebuffStyle and 30 or 100,
         separateOwnControl = not blizzardDebuffStyle,
         stackAppearanceControls = true,
-        sourceDisclosure = custom and SOURCE_DISCLOSURE or nil,
+        sourceDisclosure = which == "debuffs" and harmfulNativeAvailable
+            and HARMFUL_SOURCE_DISCLOSURE
+            or custom and SOURCE_DISCLOSURE
+            or nil,
     }
 end
 
@@ -144,6 +187,68 @@ function BD.GetBuffsDebuffsOptionsStatus(which)
     local dispatcherPending =
         type(BD.IsBuffsDebuffsUpdatePending) == "function"
         and BD.IsBuffsDebuffsUpdatePending(which)
+    local state = type(BD.GetCustomAuraContainerState) == "function"
+        and BD.GetCustomAuraContainerState(which)
+        or nil
+    local transition = policy.backendTransition
+    local controllerPending = state
+        and (state.pending == true or state.operationPending == true)
+    local config = BD.config and BD.config[which]
+    if which == "debuffs"
+        and state
+        and state.active == true
+        and (
+            policy.desiredBackend ~= BD.CUSTOM_AURA_CONTAINER_BACKEND
+            or not config
+            or config.enabled ~= true
+            or config.separateOwn ~= 0
+            or controllerPending
+            or transition ~= nil
+            or state.reloadRequired == true
+            or state.state == "ACTIVE_REFRESH_FAILED"
+            or (
+                state.diagnostic ~= nil
+                and state.diagnostic
+                    ~= "CONSTRUCTION_CHANGE_REQUIRES_RELOAD"
+            )
+        )
+    then
+        -- The combined row remains the actual presentation owner until its
+        -- restore-first transition completes, irrespective of the newly saved
+        -- desired backend or an unsupported/disabled pending descriptor.
+        return {code = "HARMFUL_ACTIVE_RECOVERY_FAILED"}
+    end
+    if which == "debuffs" and transition then
+        if transition.actualBackend == BD.CUSTOM_AURA_CONTAINER_BACKEND then
+            return {code = "HARMFUL_ACTIVE_RECOVERY_FAILED"}
+        elseif transition.actualBackend == BD.BLIZZARD_DEBUFF_STYLE_BACKEND then
+            return {code = "HARMFUL_STYLE_HANDOFF_PENDING"}
+        elseif transition.desiredBackend == BD.BLIZZARD_DEBUFF_STYLE_BACKEND then
+            return {code = "BLIZZARD_DEBUFF_STYLE_PENDING"}
+        elseif transition.desiredBackend == BD.CUSTOM_AURA_CONTAINER_BACKEND then
+            return {code = "HARMFUL_NATIVE_FALLBACK"}
+        end
+    end
+    if which == "debuffs"
+        and policy.custom ~= true
+        and policy.harmfulNativeRequested ~= true
+        and state
+    then
+        if state.active == true and controllerPending then
+            -- Backend policy can already select #103 after an explicit
+            -- opt-out, while restore-first deactivation still leaves the
+            -- combined row as the actual presentation owner.
+            return {code = "HARMFUL_ACTIVE_RECOVERY_FAILED"}
+        elseif controllerPending then
+            return {code = "PENDING_SAFE_UPDATE"}
+        end
+    end
+    if policy.harmfulNativeRequested
+        and policy.custom ~= true
+        and not dispatcherPending
+    then
+        return {code = "HARMFUL_NATIVE_FALLBACK"}
+    end
     if policy.blizzardDebuffStyle then
         local moverState = GetSharedAuraMoverState()
         if dispatcherPending
@@ -170,10 +275,6 @@ function BD.GetBuffsDebuffsOptionsStatus(which)
     end
     if not policy.custom then return nil end
 
-    local config = BD.config and BD.config[which]
-    local state = type(BD.GetCustomAuraContainerState) == "function"
-        and BD.GetCustomAuraContainerState(which)
-        or nil
     local diagnostic = state and state.diagnostic
     local operationPending = dispatcherPending
         or (state and state.operationPending)
@@ -193,6 +294,15 @@ function BD.GetBuffsDebuffsOptionsStatus(which)
     elseif diagnostic == "NATIVE_FOLLOWER_REFRESH_FAILED" then
         return {
             code = "NATIVE_FOLLOWER_REFRESH_FAILED",
+        }
+    elseif which == "debuffs"
+        and state
+        and state.active == true
+        and diagnostic
+        and diagnostic ~= "CONSTRUCTION_CHANGE_REQUIRES_RELOAD"
+    then
+        return {
+            code = "HARMFUL_ACTIVE_RECOVERY_FAILED",
         }
     elseif diagnostic
         and diagnostic ~= "CONSTRUCTION_CHANGE_REQUIRES_RELOAD"
@@ -248,6 +358,9 @@ local function CreateBuffsDebuffsPanel()
     })
     if buffsPolicy.sourceDisclosure then
         switch.buttons[1]:SetTooltip(buffsPolicy.sourceDisclosure)
+    end
+    if debuffsPolicy.sourceDisclosure then
+        switch.buttons[2]:SetTooltip(debuffsPolicy.sourceDisclosure)
     end
     switch:SetOnSelect(LoadOptions)
 
@@ -397,11 +510,6 @@ local function CreateNormalPane()
         currentConfig.wrapAfter = value
         AF.Fire("BFI_UpdateModule", "buffsDebuffs", selected)
     end)
-    local enchantmentCapHelp = L[
-        "Temporary Main-Hand and Off-Hand enchants share this layout and may add up to two icons beyond the aura cap."
-    ]
-    maxWraps:SetTooltip(enchantmentCapHelp)
-    wrapAfter:SetTooltip(enchantmentCapHelp)
 
     local statusText = AF.CreateFontString(
         iconsPane,
@@ -771,6 +879,13 @@ local function CreateNormalPane()
         currentConfig = BD.config[selected]
         local policy = currentPolicy
 
+        local layoutCapDisclosure = selected == "buffs"
+            and BUFF_LAYOUT_CAP_DISCLOSURE
+            or policy.custom and HARMFUL_LAYOUT_CAP_DISCLOSURE
+            or nil
+        maxWraps:SetTooltip(layoutCapDisclosure)
+        wrapAfter:SetTooltip(layoutCapDisclosure)
+
         -- icons
         local layoutEnabled = currentConfig.enabled
             and policy.layoutControls
@@ -846,9 +961,13 @@ UpdateStatus = function()
     end
 
     if status.code == "UNSUPPORTED_SEPARATE_OWN" then
-        statusText:SetText(L[
-            "Separate Own is unavailable in 12.1. Blizzard Buffs remain active."
-        ])
+        statusText:SetText(selected == "debuffs"
+            and L[
+                "Separate Own is unavailable in 12.1. Blizzard Debuffs remain active."
+            ]
+            or L[
+                "Separate Own is unavailable in 12.1. Blizzard Buffs remain active."
+            ])
         statusButton:SetText(L["Use supported sorting"])
         statusButton:SetOnClick(function()
             local config = BD.config and BD.config[selected]
@@ -859,9 +978,13 @@ UpdateStatus = function()
         end)
         statusButton:Show()
     elseif status.code == "RELOAD_REQUIRED" then
-        statusText:SetText(L[
-            "Reload UI to apply Buffs styling. Blizzard Buffs remain active."
-        ])
+        statusText:SetText(selected == "debuffs"
+            and L[
+                "Reload UI to apply Debuffs styling. Blizzard Debuffs remain active."
+            ]
+            or L[
+                "Reload UI to apply Buffs styling. Blizzard Buffs remain active."
+            ])
         statusButton:SetText(L["Reload UI"])
         statusButton:SetOnClick(_G.ReloadUI)
         statusButton:Show()
@@ -896,11 +1019,43 @@ UpdateStatus = function()
             "BFInfinite styles ordinary Debuffs only. Blizzard controls their layout and duration text; private and deadly debuffs are unchanged."
         ])
         statusButton:Hide()
+    elseif status.code == "HARMFUL_NATIVE_FALLBACK" then
+        AF.SetWidth(statusText, 530)
+        statusText:SetWordWrap(true)
+        statusText:SetText(L[
+            "Debuffs are enabled, but the combined row's native private-aura boundary is not currently available. Blizzard Debuffs remain active."
+        ])
+        statusButton:Hide()
+    elseif status.code == "HARMFUL_ACTIVE_RECOVERY_FAILED" then
+        AF.SetWidth(statusText, 530)
+        statusText:SetWordWrap(true)
+        statusText:SetText(L[
+            "The combined Debuffs row remains active while native suppression recovery is pending."
+        ])
+        statusButton:Hide()
+    elseif status.code == "HARMFUL_STYLE_HANDOFF_PENDING" then
+        AF.SetWidth(statusText, 530)
+        statusText:SetWordWrap(true)
+        statusText:SetText(L[
+            "Debuffs remain enabled, but Blizzard Debuffs styling remains active until the combined-row backend handoff can complete."
+        ])
+        statusButton:Hide()
+    elseif status.code == "BLIZZARD_DEBUFF_STYLE_PENDING" then
+        AF.SetWidth(statusText, 530)
+        statusText:SetWordWrap(true)
+        statusText:SetText(L[
+            "Blizzard Debuffs are active while BFInfinite waits to apply Debuffs styling."
+        ])
+        statusButton:Hide()
     else
         AF.SetWidth(statusText, 530)
-        statusText:SetText(L[
-            "Blizzard Buffs remain active because the native replacement could not be applied."
-        ])
+        statusText:SetText(selected == "debuffs"
+            and L[
+                "Blizzard Debuffs remain active because the combined native replacement could not be applied."
+            ]
+            or L[
+                "Blizzard Buffs remain active because the native replacement could not be applied."
+            ])
         statusButton:Hide()
     end
     if statusButton:IsShown() then
@@ -917,16 +1072,28 @@ LoadOptions = function()
     if not selected then return end
     currentPolicy = BD.GetBuffsDebuffsOptionsPolicy(selected)
     if not currentPolicy.available then return end
+    local selectedIndex = selected == "buffs" and 1 or 2
+    local switchLabels = buffsDebuffsPanel.switch.labels
+    if switchLabels then
+        switchLabels[selectedIndex].text = currentPolicy.label
+    end
+    local switchButtons = buffsDebuffsPanel.switch.buttons
+    if switchButtons then
+        switchButtons[selectedIndex]:SetText(currentPolicy.label)
+        switchButtons[selectedIndex]:SetTooltip(currentPolicy.sourceDisclosure)
+    end
+    local selectedButton = buffsDebuffsPanel.switch:GetSelectedButton()
 
     normalPane:Show()
     normalPane.Load()
 
     AF.ClearPoints(buffsDebuffsPanel.enabled)
-    AF.SetPoint(buffsDebuffsPanel.enabled, "LEFT", buffsDebuffsPanel.switch:GetSelectedButton(), "LEFT", 3, 0)
+    AF.SetPoint(buffsDebuffsPanel.enabled, "LEFT", selectedButton, "LEFT", 3, 0)
     buffsDebuffsPanel.enabled:SetChecked(BD.config[selected].enabled)
+    buffsDebuffsPanel.enabled:SetTooltip(currentPolicy.sourceDisclosure)
 
     AF.ClearPoints(buffsDebuffsPanel.reset)
-    AF.SetPoint(buffsDebuffsPanel.reset, "RIGHT", buffsDebuffsPanel.switch:GetSelectedButton(), "RIGHT", -3, 0)
+    AF.SetPoint(buffsDebuffsPanel.reset, "RIGHT", selectedButton, "RIGHT", -3, 0)
 
     for _, b in next, buffsDebuffsPanel.switch.buttons do
         if b:IsEnabled() then

@@ -243,7 +243,10 @@ local function CreateOptionsFrame()
     headerPane.editModeButton = editModeButton
     AF.SetPoint(editModeButton, "BOTTOMRIGHT", keybindModeButton, "BOTTOMLEFT", -7, 0)
     editModeButton:SetTexture(AF.GetIcon("Layers"))
-    editModeButton:SetTooltip(_G.HUD_EDIT_MODE_MENU)
+    editModeButton:SetTooltip(
+        L["BFI Edit Mode"],
+        L["Moves BFI-owned frames. Position the Blizzard Objective Tracker from its BFI settings in Blizzard Edit Mode."]
+    )
     AF.ApplyCombatProtectionToWidget(editModeButton)
     editModeButton:SetOnClick(function()
         optionsFrame:Hide()

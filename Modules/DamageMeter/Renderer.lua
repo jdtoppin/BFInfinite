@@ -28,12 +28,22 @@ local Renderer = DM.Renderer
 local MAX_WINDOWS = 3
 local WINDOW_INSET = 4
 local WINDOW_GAP = 4
+local OBJECTIVE_TRACKER_GAP = 8
 local REFRESH_DELAY = 0.1
 local NATIVE_RESTORE_KEY = "damageMeterNativeEnabledBeforeBFI"
 local MIN_WINDOW_WIDTH = 220
 local MAX_WINDOW_WIDTH = 520
-local MIN_WINDOW_HEIGHT = 120
+local MIN_WINDOW_HEIGHT = 84
 local MAX_WINDOW_HEIGHT = 520
+local DEFAULT_ROW_TEXT_SIZE = 11
+local MIN_ROW_TEXT_SIZE = 8
+local MAX_ROW_TEXT_SIZE = 14
+local ROW_TEXT_VERTICAL_PADDING = 4
+local BASE_ROW_TEXT_SIZE = 13
+local DEFAULT_HEADER_TEXT_SIZE = 11
+local MIN_HEADER_TEXT_SIZE = 8
+local MAX_HEADER_TEXT_SIZE = 14
+local HEADER_TEXT_VERTICAL_PADDING = 6
 local DEFAULT_SESSION_KEY = "current"
 local SESSION_MODE_CURRENT = "current"
 local SESSION_MODE_OVERALL = "overall"
@@ -41,8 +51,6 @@ local SESSION_MODE_HISTORY = "history"
 local SESSION_DROPDOWN_WIDTH = 120
 local MIN_SESSION_DROPDOWN_WIDTH = 60
 local MIN_TYPE_DROPDOWN_WIDTH = 60
-local MAX_DETAIL_TARGETS = 3
-
 local TYPE_DEFINITIONS = {
     DamageDone = {
         title = _G.DAMAGE_METER_TYPE_DAMAGE_DONE or _G.DAMAGE or "Damage",
@@ -152,6 +160,8 @@ local nativeRestoreEnabled
 local resetPositionPending
 local activeDockTarget
 local activeDockDirection
+local lastObjectiveTrackerLaneBudget
+local lastObjectiveTrackerLaneTarget
 local ScrollWindow
 local ScrollWindowDetails
 local OpenWindowDetails
@@ -170,23 +180,111 @@ local function Clamp(value, minimum, maximum)
     return math.max(minimum, math.min(maximum, value))
 end
 
+local function GetMinimumWindowHeight(config)
+    local function GetDimension(key, default)
+        local value = config[key]
+        if type(value) ~= "number" or value ~= value then
+            return default
+        end
+        return value
+    end
+
+    return math.max(
+        MIN_WINDOW_HEIGHT,
+        GetDimension("headerHeight", 20)
+            + (GetDimension("padding", 3) * 2)
+            + GetDimension("barHeight", 18)
+    )
+end
+
+local function GetRowTextSize(config)
+    local barHeight = config.barHeight
+    if type(barHeight) ~= "number" or barHeight ~= barHeight then
+        barHeight = 18
+    end
+
+    local maximum = math.max(
+        MIN_ROW_TEXT_SIZE,
+        math.min(
+            MAX_ROW_TEXT_SIZE,
+            barHeight - ROW_TEXT_VERTICAL_PADDING
+        )
+    )
+    local textSize = config.rowTextSize
+    if type(textSize) ~= "number" or textSize ~= textSize then
+        textSize = DEFAULT_ROW_TEXT_SIZE
+    end
+    return Clamp(math.floor(textSize + 0.5), MIN_ROW_TEXT_SIZE, maximum)
+end
+
+local function GetValueColumnWidth(config, baseWidth, minimumWidth)
+    local scaledWidth = math.floor(
+        baseWidth * (GetRowTextSize(config) / BASE_ROW_TEXT_SIZE) + 0.5
+    )
+    return Clamp(scaledWidth, minimumWidth, baseWidth)
+end
+
+local function GetHeaderTextSize(config)
+    local headerHeight = config.headerHeight
+    if type(headerHeight) ~= "number" or headerHeight ~= headerHeight then
+        headerHeight = 20
+    end
+
+    local maximum = math.max(
+        MIN_HEADER_TEXT_SIZE,
+        math.min(
+            MAX_HEADER_TEXT_SIZE,
+            headerHeight - HEADER_TEXT_VERTICAL_PADDING
+        )
+    )
+    local textSize = config.headerTextSize
+    if type(textSize) ~= "number" or textSize ~= textSize then
+        textSize = DEFAULT_HEADER_TEXT_SIZE
+    end
+    return Clamp(math.floor(textSize + 0.5), MIN_HEADER_TEXT_SIZE, maximum)
+end
+
+local function ApplyRowTextSize(row, config)
+    -- SetFontHeight is allowed for untainted scalar settings in Retail 12.1.
+    -- These font strings are BFI-owned and never carry secret measurements.
+    local textSize = GetRowTextSize(config)
+    row.rank:SetFontHeight(textSize)
+    row.name:SetFontHeight(textSize)
+    row.perSecond:SetFontHeight(textSize)
+    row.total:SetFontHeight(textSize)
+end
+
+local function ApplyDetailRowTextSize(row, config)
+    local textSize = GetRowTextSize(config)
+    row.rank:SetFontHeight(textSize)
+    row.label:SetFontHeight(textSize)
+    row.value:SetFontHeight(textSize)
+end
+
+local function SetHeaderDropdownSelectedValue(dropdown, value, config)
+    -- Dropdown selection restores the normal font, so reapply BFI's header
+    -- presentation setting after every selected value update.
+    dropdown:SetSelectedValue(value)
+    dropdown.text:SetFontHeight(GetHeaderTextSize(config))
+end
+
 local function GetDefaultAnchor(index)
     if index == 1 then
         return {
             relativeTo = 0,
-            point = "BOTTOMRIGHT",
-            relativePoint = "BOTTOMRIGHT",
+            point = "TOPRIGHT",
+            relativePoint = "TOPRIGHT",
             x = -WINDOW_INSET,
-            y = WINDOW_INSET,
+            y = -WINDOW_INSET,
         }
     end
 
     return {
         relativeTo = index - 1,
-        point = "BOTTOMRIGHT",
-        relativePoint = "TOPRIGHT",
+        point = "TOPRIGHT",
+        relativePoint = "BOTTOMRIGHT",
         x = 0,
-        y = WINDOW_GAP,
+        y = -WINDOW_GAP,
     }
 end
 
@@ -198,6 +296,19 @@ local function GetFallbackAnchor()
         x = 0,
         y = 0,
     }
+end
+
+local function IsDefaultAnchor(anchor, index)
+    local default = GetDefaultAnchor(index)
+    return anchor.relativeTo == default.relativeTo
+        and anchor.point == default.point
+        and anchor.relativePoint == default.relativePoint
+        and anchor.x == default.x
+        and anchor.y == default.y
+end
+
+local function IsDefaultRootAnchor(anchor)
+    return IsDefaultAnchor(anchor, 1)
 end
 
 local function SetAnchorRecord(config, index, anchor)
@@ -217,6 +328,9 @@ end
 local function EnsureInteractionConfig(config)
     if type(config.locked) ~= "boolean" then
         config.locked = false
+    end
+    if type(config.dockToObjectiveTracker) ~= "boolean" then
+        config.dockToObjectiveTracker = false
     end
     if type(config.windowHeights) ~= "table" then
         config.windowHeights = {}
@@ -241,7 +355,7 @@ local function GetWindowHeight(config, index)
     EnsureInteractionConfig(config)
     return Clamp(
         config.windowHeights[index],
-        MIN_WINDOW_HEIGHT,
+        GetMinimumWindowHeight(config),
         MAX_WINDOW_HEIGHT
     )
 end
@@ -445,7 +559,11 @@ local function RefreshSessionDropdownItems()
             GetWindowSessionSelection(config, window.index)
         window.sessionKey = GetSessionKey(mode, sessionID)
         window.sessionDropdown:SetItems(sessionItems)
-        window.sessionDropdown:SetSelectedValue(window.sessionKey)
+        SetHeaderDropdownSelectedValue(
+            window.sessionDropdown,
+            window.sessionKey,
+            config
+        )
     end
     if rendererEnabled then
         Renderer.Refresh()
@@ -900,11 +1018,14 @@ local function ApplyRowLayout(row, index, config, texture, definition)
     local showTotal, showPerSecond =
         GetNumberVisibility(config, definition)
     local showIcon = config.showSpecIcon and not definition.suppressIcon
+    row.showIcon = showIcon
 
     row:ClearAllPoints()
     row:SetPoint("TOPLEFT", row:GetParent(), "TOPLEFT", config.padding, y)
     row:SetPoint("TOPRIGHT", row:GetParent(), "TOPRIGHT", -config.padding, y)
     row:SetHeight(barHeight)
+
+    ApplyRowTextSize(row, config)
 
     row.bar:SetStatusBarTexture(texture)
 
@@ -927,10 +1048,12 @@ local function ApplyRowLayout(row, index, config, texture, definition)
 
     row.total:ClearAllPoints()
     row.perSecond:ClearAllPoints()
+    local dualValueWidth = GetValueColumnWidth(config, 62, 48)
+    local singleValueWidth = GetValueColumnWidth(config, 72, 52)
     if showTotal and showPerSecond then
         if definition.valuePerSecondAsPrimary then
             row.perSecond:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-            row.perSecond:SetWidth(62)
+            row.perSecond:SetWidth(dualValueWidth)
             row.total:SetPoint(
                 "RIGHT",
                 row.perSecond,
@@ -938,11 +1061,11 @@ local function ApplyRowLayout(row, index, config, texture, definition)
                 -5,
                 0
             )
-            row.total:SetWidth(62)
+            row.total:SetWidth(dualValueWidth)
             row.name:SetPoint("RIGHT", row.total, "LEFT", -5, 0)
         else
             row.total:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-            row.total:SetWidth(62)
+            row.total:SetWidth(dualValueWidth)
             row.perSecond:SetPoint(
                 "RIGHT",
                 row.total,
@@ -950,7 +1073,7 @@ local function ApplyRowLayout(row, index, config, texture, definition)
                 -5,
                 0
             )
-            row.perSecond:SetWidth(62)
+            row.perSecond:SetWidth(dualValueWidth)
             row.name:SetPoint(
                 "RIGHT",
                 row.perSecond,
@@ -961,11 +1084,11 @@ local function ApplyRowLayout(row, index, config, texture, definition)
         end
     elseif showPerSecond then
         row.perSecond:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-        row.perSecond:SetWidth(72)
+        row.perSecond:SetWidth(singleValueWidth)
         row.name:SetPoint("RIGHT", row.perSecond, "LEFT", -5, 0)
     else
         row.total:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-        row.total:SetWidth(72)
+        row.total:SetWidth(singleValueWidth)
         row.name:SetPoint("RIGHT", row.total, "LEFT", -5, 0)
     end
     row.total:SetShown(showTotal)
@@ -998,18 +1121,6 @@ local function FormatDetailPercent(value, total)
         return ("%s  %.1f%%"):format(
             amount,
             value / total * 100
-        )
-    end
-
-    return amount
-end
-
-local function FormatDetailRate(value, duration)
-    local amount = FormatDetailNumber(value)
-    if duration and duration > 0 then
-        return ("%s  %s/s"):format(
-            amount,
-            FormatDetailNumber(value / duration)
         )
     end
 
@@ -1102,83 +1213,14 @@ local function GetDetailSourceData(
     )
 end
 
-local function SortDetailTotals(left, right)
-    return left.total > right.total
-end
-
-local function BuildDamageTargetEntries(
-    sessionMode,
-    sessionID,
-    sourceName,
-    duration
-)
-    local enemyType = _G.Enum.DamageMeterType.EnemyDamageTaken
-    if enemyType == nil then return {} end
-
-    local enemySession = GetSessionData(
-        sessionMode,
-        sessionID,
-        enemyType
-    )
-    if not enemySession or not enemySession.combatSources then
-        return {}
-    end
-
-    local targets = {}
-    for _, enemy in ipairs(enemySession.combatSources) do
-        local enemyDetail = GetDetailSourceData(
-            sessionMode,
-            sessionID,
-            enemyType,
-            enemy
-        )
-        local total = 0
-        if enemyDetail and enemyDetail.combatSpells then
-            for _, spell in ipairs(enemyDetail.combatSpells) do
-                local details = spell.combatSpellDetails
-                if details and details.unitName == sourceName then
-                    total = total + spell.totalAmount
-                end
-            end
-        end
-
-        if total > 0 then
-            targets[#targets + 1] = {
-                name = _G.Ambiguate(enemy.name, "short"),
-                total = total,
-            }
-        end
-    end
-
-    table.sort(targets, SortDetailTotals)
-    local entries = {}
-    local count = math.min(#targets, MAX_DETAIL_TARGETS)
-    if count > 0 then
-        entries[1] = {
-            kind = "section",
-            label = L["Targets"],
-        }
-    end
-    for index = 1, count do
-        local target = targets[index]
-        entries[#entries + 1] = {
-            kind = "target",
-            label = target.name,
-            maxValue = targets[1].total,
-            total = target.total,
-            valueText = FormatDetailRate(target.total, duration),
-        }
-    end
-
-    return entries
-end
-
+-- Retail PTR 12.1.0.68914 / wow-ui-source d3915c78: source names can be
+-- ConditionalSecret, and spell details do not expose a NeverSecret source ID.
+-- Keep this in Blizzard's spell-by-spell shape instead of joining or grouping
+-- names in Lua.
 local function BuildStandardDetailEntries(
     sourceDetail,
-    source,
+    classFilename,
     definition,
-    sessionMode,
-    sessionID,
     duration
 )
     local entries = {}
@@ -1203,7 +1245,7 @@ local function BuildStandardDetailEntries(
         end
 
         entries[#entries + 1] = {
-            classFilename = source.classFilename,
+            classFilename = classFilename,
             icon = GetDetailSpellTexture(spellID),
             kind = "spell",
             label = spellName,
@@ -1211,60 +1253,6 @@ local function BuildStandardDetailEntries(
             spellID = spellID,
             total = barValue,
             valueText = valueText,
-        }
-    end
-
-    if definition.enumName == "DamageDone" then
-        local targets = BuildDamageTargetEntries(
-            sessionMode,
-            sessionID,
-            source.name,
-            duration
-        )
-        for _, entry in ipairs(targets) do
-            entries[#entries + 1] = entry
-        end
-    end
-
-    return entries
-end
-
-local function BuildEnemyPlayerEntries(sourceDetail, duration)
-    local playersByName = {}
-    local players = {}
-    for _, spell in ipairs(sourceDetail.combatSpells or {}) do
-        local details = spell.combatSpellDetails
-        local name = details and details.unitName
-        if name and name ~= "" then
-            local player = playersByName[name]
-            if not player then
-                player = {
-                    classFilename = details.unitClassFilename,
-                    icon = details.specIconID,
-                    name = name,
-                    total = 0,
-                }
-                playersByName[name] = player
-                players[#players + 1] = player
-            end
-            player.total = player.total + spell.totalAmount
-        end
-    end
-
-    table.sort(players, SortDetailTotals)
-    local entries = {}
-    local count = #players
-    local maximum = count > 0 and players[1].total or 1
-    for index = 1, count do
-        local player = players[index]
-        entries[index] = {
-            classFilename = player.classFilename,
-            icon = player.icon,
-            kind = "player",
-            label = _G.Ambiguate(player.name, "short"),
-            maxValue = maximum,
-            total = player.total,
-            valueText = FormatDetailRate(player.total, duration),
         }
     end
 
@@ -1537,6 +1525,8 @@ local function ApplyDetailRowLayout(
     row:SetHeight(config.barHeight)
     row.bar:SetStatusBarTexture(texture)
 
+    ApplyDetailRowTextSize(row, config)
+
     row.rank:ClearAllPoints()
     row.rank:SetPoint("LEFT", row, "LEFT", 3, 0)
     row.rank:SetWidth(16)
@@ -1548,7 +1538,7 @@ local function ApplyDetailRowLayout(
 
     row.value:ClearAllPoints()
     row.value:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-    row.value:SetWidth(104)
+    row.value:SetWidth(GetValueColumnWidth(config, 104, 72))
 
     row.label:ClearAllPoints()
     row.label:SetPoint("LEFT", row.iconHolder, "RIGHT", 3, 0)
@@ -1564,6 +1554,11 @@ local function ApplyDetailLayout(window, config, texture)
     window.visibleDetailRowCount = visibleRows
     window.detailTitleRowCount = titleRowCount
     EnsureDetailRows(window, visibleRows)
+
+    local textSize = GetRowTextSize(config)
+    window.detailTitle:SetFontHeight(textSize)
+    window.detailHint:SetFontHeight(textSize)
+    window.detailEmpty:SetFontHeight(textSize)
 
     window.detailPanel:ClearAllPoints()
     window.detailPanel:SetAllPoints(window.body)
@@ -1721,21 +1716,12 @@ RefreshWindowDetails = function(window)
         )
         if not sourceDetail then return false end
 
-        if definition.enumName == "EnemyDamageTaken" then
-            entries = BuildEnemyPlayerEntries(
-                sourceDetail,
-                session.durationSeconds
-            )
-        else
-            entries = BuildStandardDetailEntries(
-                sourceDetail,
-                source,
-                definition,
-                sessionMode,
-                sessionID,
-                session.durationSeconds
-            )
-        end
+        entries = BuildStandardDetailEntries(
+            sourceDetail,
+            source.classFilename,
+            definition,
+            session.durationSeconds
+        )
     end
 
     RenderDetailEntries(window, entries, source, config)
@@ -1829,6 +1815,10 @@ ScrollWindowDetails = function(window, delta)
 end
 
 local function ToggleMinimized(window)
+    -- A space-constrained body expands automatically when objectives release
+    -- room. Do not turn that temporary state into a user collapse.
+    if window.runtimeMinimized and not window.minimized then return end
+
     window.minimized = not window.minimized
     Renderer.ApplySettings()
 end
@@ -1874,6 +1864,13 @@ local function AnchorChainReaches(config, startIndex, targetIndex)
     return false
 end
 
+local function GetObjectiveTrackerDockTarget(tracker)
+    local widgets = BFI.modules.UIWidgets
+    return widgets and widgets.objectiveTrackerDockFrame
+        or tracker.NineSlice
+        or tracker
+end
+
 local function ApplyAllAnchors(config)
     EnsureInteractionConfig(config)
     for index = 1, MAX_WINDOWS do
@@ -1887,17 +1884,38 @@ local function ApplyAllAnchors(config)
 
     for index = 1, MAX_WINDOWS do
         local anchor = config.windowAnchors[index]
+        local point = anchor.point
         local relativeTo = anchor.relativeTo == 0
             and _G.UIParent
             or windows[anchor.relativeTo]
+        local relativePoint = anchor.relativePoint
+        local x = anchor.x
+        local y = anchor.y
+        if config.dockToObjectiveTracker
+            and IsDefaultRootAnchor(anchor)
+            and _G.ObjectiveTrackerFrame
+        then
+            local tracker = _G.ObjectiveTrackerFrame
+            -- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit
+            -- d3915c78: ObjectiveTrackerContainerMixin owns native custom
+            -- height. BFI's owned dock frame observes that extent while the
+            -- tracker is expanded/custom-positioned, and otherwise follows
+            -- its compact content surface. A declarative anchor keeps one
+            -- right-side lane without taking ownership of native geometry.
+            relativeTo = GetObjectiveTrackerDockTarget(tracker)
+            point = "TOPRIGHT"
+            relativePoint = "BOTTOMRIGHT"
+            x = 0
+            y = -OBJECTIVE_TRACKER_GAP
+        end
         local window = windows[index]
         window:ClearAllPoints()
         window:SetPoint(
-            anchor.point,
+            point,
             relativeTo,
-            anchor.relativePoint,
-            anchor.x,
-            anchor.y
+            relativePoint,
+            x,
+            y
         )
     end
 end
@@ -2133,7 +2151,11 @@ local function FinishWindowDrag(window)
     window.dragOriginAnchor = nil
 
     ClearDockPreview()
-    ApplyAllAnchors(config)
+    if rendererEnabled then
+        Renderer.ApplySettings()
+    else
+        ApplyAllAnchors(config)
+    end
 end
 
 local function BeginWindowDrag(window)
@@ -2180,20 +2202,32 @@ local function ApplySharedWidth(sourceWindow, width)
 end
 
 local function OnWindowSizeChanged(window, width, height)
-    if window.applyingLayout or window.minimized then return end
+    if window.applyingLayout
+        or window.minimized
+        or window.runtimeConstrained
+        or window.runtimeHidden
+    then
+        return
+    end
 
     local config = GetConfig()
     EnsureInteractionConfig(config)
     ApplySharedWidth(window, width)
     config.windowHeights[window.index] = Clamp(
         math.floor(height + 0.5),
-        MIN_WINDOW_HEIGHT,
+        GetMinimumWindowHeight(config),
         MAX_WINDOW_HEIGHT
     )
 end
 
 local function FinishWindowResize(window)
-    if GetConfig().locked or window.minimized then return end
+    if GetConfig().locked
+        or window.minimized
+        or window.runtimeConstrained
+        or window.runtimeHidden
+    then
+        return
+    end
     OnWindowSizeChanged(window, window:GetWidth(), window:GetHeight())
     Renderer.ApplySettings()
     AF.Fire("BFI_RefreshOptions", "damageMeter")
@@ -2307,8 +2341,10 @@ function Renderer.SetWindowSession(
             if windows[targetIndex] then
                 windows[targetIndex].sessionKey =
                     GetSessionKey(mode, sessionID)
-                windows[targetIndex].sessionDropdown:SetSelectedValue(
-                    windows[targetIndex].sessionKey
+                SetHeaderDropdownSelectedValue(
+                    windows[targetIndex].sessionDropdown,
+                    windows[targetIndex].sessionKey,
+                    config
                 )
             end
         end
@@ -2542,7 +2578,11 @@ local function CreateWindow(index)
             "Drag to resize this meter. Width is shared; height is saved per window."
         ]
     )
+    resize:HookScript("OnMouseDown", function()
+        window.isResizing = true
+    end)
     resize:HookScript("OnMouseUp", function()
+        window.isResizing = nil
         FinishWindowResize(window)
     end)
 
@@ -2584,26 +2624,207 @@ local function GetVisibleRowCount(config, windowHeight)
     )
 end
 
-local function ApplyWindowLayout(window, config)
+local function GetHeightForRowCount(config, rowCount)
+    if rowCount <= 0 then
+        return config.headerHeight
+    end
+
+    return config.headerHeight
+        + (config.padding * 2)
+        + (rowCount * config.barHeight)
+        + ((rowCount - 1) * config.spacing)
+end
+
+local function GetObjectiveTrackerLaneHeight(config)
+    if not config.dockToObjectiveTracker
+        or not _G.ObjectiveTrackerFrame
+    then
+        return false
+    end
+
+    for index = 1, config.windowCount do
+        if not IsDefaultAnchor(config.windowAnchors[index], index) then
+            return false
+        end
+    end
+
+    local target = GetObjectiveTrackerDockTarget(
+        _G.ObjectiveTrackerFrame
+    )
+    local uiParent = _G.UIParent
+    if not target
+        or type(target.GetBottom) ~= "function"
+        or not uiParent
+        or type(uiParent.GetEffectiveScale) ~= "function"
+    then
+        return true, nil, target
+    end
+
+    local bottom = target:GetBottom()
+    local uiScale = uiParent:GetEffectiveScale()
+    local targetScale
+    if type(target.GetEffectiveScale) == "function" then
+        targetScale = target:GetEffectiveScale()
+    else
+        targetScale = uiScale
+    end
+    if not F.isValueNonSecret(bottom)
+        or not F.isValueNonSecret(uiScale)
+        or not F.isValueNonSecret(targetScale)
+        or type(bottom) ~= "number"
+        or type(uiScale) ~= "number"
+        or uiScale <= 0
+        or type(targetScale) ~= "number"
+        or targetScale <= 0
+    then
+        return true, nil, target
+    end
+
+    local uiBottom = 0
+    if type(uiParent.GetBottom) == "function" then
+        uiBottom = uiParent:GetBottom()
+    end
+    if not F.isValueNonSecret(uiBottom)
+        or type(uiBottom) ~= "number"
+    then
+        return true, nil, target
+    end
+
+    return true, math.max(
+        0,
+        math.floor(
+            (bottom * targetScale / uiScale)
+                - uiBottom
+                - OBJECTIVE_TRACKER_GAP
+        )
+    ), target
+end
+
+local function GetRuntimeWindowLayout(config)
+    local usesTrackerLane, availableHeight, target =
+        GetObjectiveTrackerLaneHeight(config)
+    local layout = {
+        availableHeight = availableHeight,
+        target = target,
+        usesTrackerLane = usesTrackerLane
+            and type(availableHeight) == "number",
+        windows = {},
+    }
+    local desiredTotal = math.max(0, config.windowCount - 1)
+        * WINDOW_GAP
+
+    for index = 1, MAX_WINDOWS do
+        local window = windows[index]
+        local savedHeight = GetWindowHeight(config, index)
+        local minimized = window.minimized == true
+        local height = minimized and config.headerHeight or savedHeight
+        local rows = minimized and 0
+            or GetVisibleRowCount(config, savedHeight)
+        layout.windows[index] = {
+            height = height,
+            hidden = false,
+            rows = rows,
+        }
+        if index <= config.windowCount then
+            desiredTotal = desiredTotal + height
+        end
+    end
+
+    if type(availableHeight) ~= "number"
+        or desiredTotal <= availableHeight
+    then
+        return layout
+    end
+
+    -- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit
+    -- d3915c78: a default-position Objective Tracker owns nearly the full
+    -- right-managed column and ignores its Edit Mode height value. Fit only
+    -- BFI-owned meter rows into the remaining lane; saved dimensions and
+    -- Blizzard's protected tracker geometry remain untouched.
+    local activeCount = config.windowCount
+    local baseHeight = activeCount * config.headerHeight
+        + math.max(0, activeCount - 1) * WINDOW_GAP
+    while activeCount > 0 and baseHeight > availableHeight do
+        activeCount = activeCount - 1
+        baseHeight = activeCount * config.headerHeight
+            + math.max(0, activeCount - 1) * WINDOW_GAP
+    end
+
+    for index = 1, config.windowCount do
+        local runtime = layout.windows[index]
+        runtime.height = config.headerHeight
+        runtime.hidden = index > activeCount
+        runtime.rows = 0
+    end
+
+    local remainingHeight = math.max(0, availableHeight - baseHeight)
+    local allocated
+    repeat
+        allocated = false
+        for index = 1, activeCount do
+            local window = windows[index]
+            local runtime = layout.windows[index]
+            local desiredRows = window.minimized and 0
+                or GetVisibleRowCount(
+                    config,
+                    GetWindowHeight(config, index)
+                )
+            if runtime.rows < desiredRows then
+                local rowCost = runtime.rows == 0
+                    and (config.padding * 2) + config.barHeight
+                    or config.barHeight + config.spacing
+                if rowCost <= remainingHeight then
+                    runtime.rows = runtime.rows + 1
+                    remainingHeight = remainingHeight - rowCost
+                    allocated = true
+                end
+            end
+        end
+    until not allocated
+
+    for index = 1, activeCount do
+        local runtime = layout.windows[index]
+        runtime.height = GetHeightForRowCount(config, runtime.rows)
+    end
+
+    return layout
+end
+
+local function ApplyWindowLayout(window, config, runtime)
     local definition = GetWindowDefinition(window.index)
     local sessionMode, sessionID =
         GetWindowSessionSelection(config, window.index)
     local controlSize = math.max(14, math.min(20, config.headerHeight - 4))
-    local windowHeight = GetWindowHeight(config, window.index)
-    local visibleRows = GetVisibleRowCount(config, windowHeight)
+    local savedHeight = GetWindowHeight(config, window.index)
+    local windowHeight = runtime and runtime.height or savedHeight
+    local visibleRows = runtime and runtime.rows
+        or GetVisibleRowCount(config, windowHeight)
+    local effectiveMinimized = window.minimized or visibleRows == 0
     local texture = AF.LSM_GetBarTexture(config.texture)
     if not texture then
         texture = (BFI.media and BFI.media.bar) or AF.GetPlainTexture()
     end
 
+    window.runtimeHidden = runtime and runtime.hidden or false
+    window.runtimeMinimized = not window.minimized and visibleRows == 0
+    window.runtimeConstrained = not window.minimized
+        and (window.runtimeHidden or windowHeight < savedHeight)
     window.visibleRowCount = visibleRows
+    if window.resize
+        and type(window.resize.SetMinHeight) == "function" then
+        window.resize:SetMinHeight(GetMinimumWindowHeight(config))
+    end
     window.applyingLayout = true
     window:SetSize(
         config.width,
-        window.minimized and config.headerHeight or windowHeight
+        effectiveMinimized and config.headerHeight or windowHeight
     )
     window.applyingLayout = nil
-    window:SetResizable(not config.locked and not window.minimized)
+    window:SetResizable(
+        not config.locked
+            and not effectiveMinimized
+            and not window.runtimeConstrained
+    )
     window:SetBackdropColor(
         AF.GetColorRGB("background", config.backgroundAlpha)
     )
@@ -2619,7 +2840,7 @@ local function ApplyWindowLayout(window, config)
     window.minimize:SetPoint("RIGHT", window.header, "RIGHT", -2, 0)
     SetButtonIcon(
         window.minimize,
-        AF.GetIcon(window.minimized and "Plus_Small" or "Minus_Small")
+        AF.GetIcon(effectiveMinimized and "Plus_Small" or "Minus_Small")
     )
 
     window.settings:SetSize(controlSize, controlSize)
@@ -2677,7 +2898,11 @@ local function ApplyWindowLayout(window, config)
         0
     )
     window.sessionDropdown:SetHeight(controlSize)
-    window.sessionDropdown:SetSelectedValue(window.sessionKey)
+    SetHeaderDropdownSelectedValue(
+        window.sessionDropdown,
+        window.sessionKey,
+        config
+    )
 
     window.typeDropdown:ClearAllPoints()
     window.typeDropdown:SetPoint(
@@ -2695,19 +2920,27 @@ local function ApplyWindowLayout(window, config)
         0
     )
     window.typeDropdown:SetHeight(controlSize)
-    window.typeDropdown:SetSelectedValue(definition.enumName)
+    SetHeaderDropdownSelectedValue(
+        window.typeDropdown,
+        definition.enumName,
+        config
+    )
 
-    window.resize:SetShown(not config.locked and not window.minimized)
+    window.resize:SetShown(
+        not config.locked
+            and not effectiveMinimized
+            and not window.runtimeConstrained
+    )
 
     window.body:ClearAllPoints()
     window.body:SetPoint("TOPLEFT", window.header, "BOTTOMLEFT")
     window.body:SetPoint("BOTTOMRIGHT")
-    window.body:SetShown(not window.minimized)
+    window.body:SetShown(not effectiveMinimized)
 
     EnsureRows(window, visibleRows)
     ApplyDetailLayout(window, config, texture)
     window.detailPanel:SetShown(
-        window.detailOpen == true and not window.minimized
+        window.detailOpen == true and not effectiveMinimized
     )
     for index, row in ipairs(window.rows) do
         row.hoverCard:Hide()
@@ -2718,6 +2951,56 @@ local function ApplyWindowLayout(window, config)
             row:Hide()
         end
     end
+end
+
+local function ReflowWindows(config, closeDetails)
+    local runtimeLayout = GetRuntimeWindowLayout(config)
+    lastObjectiveTrackerLaneBudget = runtimeLayout.usesTrackerLane
+        and runtimeLayout.availableHeight
+        or false
+    lastObjectiveTrackerLaneTarget = runtimeLayout.target
+    for index = 1, MAX_WINDOWS do
+        local window = windows[index]
+        if closeDetails then
+            CloseWindowDetails(window, true)
+        end
+        ApplyWindowLayout(
+            window,
+            config,
+            runtimeLayout.windows[index]
+        )
+        window:SetClampedToScreen(
+            not (
+                runtimeLayout.usesTrackerLane
+                    and index <= config.windowCount
+            )
+        )
+    end
+    ApplyAllAnchors(config)
+end
+
+local function RefreshObjectiveTrackerLane()
+    local config = GetConfig()
+    if not rendererEnabled or not config.dockToObjectiveTracker then return end
+
+    for _, window in ipairs(windows) do
+        if window.isDragging or window.isResizing then return end
+    end
+
+    local usesTrackerLane, availableHeight, target =
+        GetObjectiveTrackerLaneHeight(config)
+    local budget = usesTrackerLane
+        and type(availableHeight) == "number"
+        and availableHeight
+        or false
+    if budget == lastObjectiveTrackerLaneBudget
+        and target == lastObjectiveTrackerLaneTarget
+    then
+        return
+    end
+
+    ReflowWindows(config)
+    Renderer.Refresh()
 end
 
 local function HideWindowTransient(window)
@@ -2741,6 +3024,36 @@ local function HideUnusedRows(window, firstUnused)
     end
 end
 
+local function UpdateSourceIcon(row, specIconID, classFilename)
+    if row.showIcon ~= true then
+        row.icon:SetTexture(nil)
+        row.iconHolder:Hide()
+        return
+    end
+
+    if specIconID and specIconID ~= 0 then
+        row.icon:SetTexture(specIconID)
+        AF.ApplyDefaultTexCoord(row.icon)
+        row.iconHolder:Show()
+        return
+    end
+
+    local getClassAtlas = _G.GetClassAtlas
+    if classFilename and classFilename ~= ""
+        and type(getClassAtlas) == "function"
+    then
+        local classAtlas = getClassAtlas(classFilename)
+        if classAtlas then
+            row.icon:SetAtlas(classAtlas, false, nil, true)
+            row.iconHolder:Show()
+            return
+        end
+    end
+
+    row.icon:SetTexture(nil)
+    row.iconHolder:Hide()
+end
+
 local function UpdateRow(row, source, index, session, config)
     local r, g, b
     if config.classColor then
@@ -2754,7 +3067,7 @@ local function UpdateRow(row, source, index, session, config)
     row.iconHolder:SetBackdropBorderColor(r, g, b, 1)
     row.hoverCard:SetBackdropBorderColor(r, g, b, 1)
     row.rank:SetText(index)
-    row.icon:SetTexture(source.specIconID)
+    UpdateSourceIcon(row, source.specIconID, source.classFilename)
     row.name:SetText(_G.Ambiguate(source.name, "short"))
     row.hoverCard.title:SetText(_G.Ambiguate(source.name, "short"))
     row.hoverCard.playerBadge:SetShown(source.isLocalPlayer == true)
@@ -2821,7 +3134,7 @@ local function ShowSourceRow(
 end
 
 local function UpdateWindow(window, config)
-    if window.minimized then return end
+    if window.minimized or window.runtimeMinimized then return end
 
     if window.detailOpen then
         if RefreshWindowDetails(window) then
@@ -2840,7 +3153,11 @@ local function UpdateWindow(window, config)
     local sessionMode, sessionID =
         GetWindowSessionSelection(config, window.index)
     window.sessionKey = GetSessionKey(sessionMode, sessionID)
-    window.sessionDropdown:SetSelectedValue(window.sessionKey)
+    SetHeaderDropdownSelectedValue(
+        window.sessionDropdown,
+        window.sessionKey,
+        config
+    )
     local session = GetSessionData(sessionMode, sessionID, meterType)
     if (not session or not session.combatSources)
         and sessionMode == SESSION_MODE_HISTORY
@@ -2851,7 +3168,11 @@ local function UpdateWindow(window, config)
             window.index
         )
         window.sessionKey = GetSessionKey(sessionMode, sessionID)
-        window.sessionDropdown:SetSelectedValue(window.sessionKey)
+        SetHeaderDropdownSelectedValue(
+            window.sessionDropdown,
+            window.sessionKey,
+            config
+        )
         session = GetSessionData(sessionMode, sessionID, meterType)
     end
     if not session or not session.combatSources then
@@ -2950,6 +3271,7 @@ end
 function Renderer.ResetPosition()
     local config = GetConfig()
     EnsureInteractionConfig(config)
+    config.dockToObjectiveTracker = true
     for index = 1, MAX_WINDOWS do
         SetAnchorRecord(config, index, GetDefaultAnchor(index))
     end
@@ -2960,7 +3282,11 @@ function Renderer.ResetPosition()
     end
 
     ClearDockPreview()
-    ApplyAllAnchors(config)
+    if rendererEnabled then
+        Renderer.ApplySettings()
+    else
+        ApplyAllAnchors(config)
+    end
     resetPositionPending = nil
     return true
 end
@@ -2987,13 +3313,19 @@ function Renderer.Refresh()
         end
     end
     for index = 1, MAX_WINDOWS do
-        if index > config.windowCount then
+        local window = windows[index]
+        local shouldShow = index <= config.windowCount
+            and not window.runtimeHidden
+        if not shouldShow then
             HideWindowTransient(windows[index])
         end
-        windows[index]:SetShown(index <= config.windowCount)
+        window:SetShown(shouldShow)
     end
     for index = 1, config.windowCount do
-        UpdateWindow(windows[index], config)
+        local window = windows[index]
+        if not window.runtimeHidden then
+            UpdateWindow(window, config)
+        end
     end
     return true
 end
@@ -3011,8 +3343,17 @@ local function EnsureEventFrame()
     if eventFrame then return end
 
     eventFrame = _G.CreateFrame("Frame")
-    eventFrame:SetScript("OnEvent", function(_, event)
-        if event == "PLAYER_LOGOUT" then
+    eventFrame:SetScript("OnEvent", function(_, event, ...)
+        if event == "ADDON_LOADED" then
+            local addonName = ...
+            if addonName == "Blizzard_ObjectiveTracker"
+                and GetConfig().dockToObjectiveTracker
+            then
+                RefreshObjectiveTrackerLane()
+            end
+        elseif event == "EDIT_MODE_LAYOUTS_UPDATED" then
+            RefreshObjectiveTrackerLane()
+        elseif event == "PLAYER_LOGOUT" then
             CloseAllWindowDetails()
             EndNativeOverride()
         elseif event == "PLAYER_REGEN_DISABLED" then
@@ -3050,6 +3391,8 @@ end
 
 local function RegisterEvents()
     EnsureEventFrame()
+    eventFrame:RegisterEvent("ADDON_LOADED")
+    eventFrame:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
     eventFrame:RegisterEvent("DAMAGE_METER_COMBAT_SESSION_UPDATED")
     eventFrame:RegisterEvent("DAMAGE_METER_CURRENT_SESSION_UPDATED")
     eventFrame:RegisterEvent("DAMAGE_METER_RESET")
@@ -3076,13 +3419,10 @@ function Renderer.ApplySettings()
     local config = GetConfig()
     EnsureInteractionConfig(config)
     ValidateHistoricalSelections(config)
+    ReflowWindows(config, true)
     for index = 1, MAX_WINDOWS do
-        local window = windows[index]
-        CloseWindowDetails(window, true)
-        ApplyWindowLayout(window, config)
-        window:Hide()
+        windows[index]:Hide()
     end
-    ApplyAllAnchors(config)
     Renderer.Refresh()
     return true
 end
@@ -3120,3 +3460,7 @@ end
 function Renderer.IsEnabled()
     return rendererEnabled == true
 end
+
+AF.RegisterCallback("BFI_ObjectiveTrackerDockFrameChanged", function()
+    RefreshObjectiveTrackerLane()
+end)
