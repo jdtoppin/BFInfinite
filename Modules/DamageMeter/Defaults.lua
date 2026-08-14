@@ -5,8 +5,9 @@ local DM = BFI.modules.DamageMeter
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local CURRENT_SIZE_DEFAULTS_VERSION = 2
+local CURRENT_SIZE_DEFAULTS_VERSION = 3
 local CURRENT_DOCK_DEFAULTS_VERSION = 2
+local MIN_WINDOW_HEIGHT = 84
 local LEGACY_DEFAULT_WIDTH = 300
 local LEGACY_DEFAULT_HEIGHT = 220
 local LEGACY_DEFAULT_WINDOW_HEIGHTS = {
@@ -29,6 +30,16 @@ local VERSION_ONE_DEFAULT_HEADER_HEIGHT = 22
 local VERSION_ONE_DEFAULT_BAR_HEIGHT = 20
 local VERSION_ONE_DEFAULT_SPACING = 2
 local VERSION_ONE_DEFAULT_PADDING = 4
+local VERSION_TWO_DEFAULT_WIDTH = 240
+local VERSION_TWO_DEFAULT_WINDOW_HEIGHTS = {
+    124,
+    104,
+    104,
+}
+local VERSION_TWO_DEFAULT_HEADER_HEIGHT = 20
+local VERSION_TWO_DEFAULT_BAR_HEIGHT = 18
+local VERSION_TWO_DEFAULT_SPACING = 2
+local VERSION_TWO_DEFAULT_PADDING = 3
 local defaults = {
     enabled = true,
     windowCount = 3,
@@ -71,8 +82,8 @@ local defaults = {
     alwaysShowPlayer = true,
     windowHeights = {
         124,
-        104,
-        104,
+        84,
+        84,
     },
     windowAnchors = {
         {
@@ -224,15 +235,35 @@ local function WindowHeightsMatch(values, expected)
     return true
 end
 
-local function DefaultDensityMatches(config)
+local function DensityMatches(config, headerHeight, barHeight, spacing, padding)
     local function FieldMatches(key, expected)
         return config[key] == nil or config[key] == expected
     end
 
-    return FieldMatches("headerHeight", VERSION_ONE_DEFAULT_HEADER_HEIGHT)
-        and FieldMatches("barHeight", VERSION_ONE_DEFAULT_BAR_HEIGHT)
-        and FieldMatches("spacing", VERSION_ONE_DEFAULT_SPACING)
-        and FieldMatches("padding", VERSION_ONE_DEFAULT_PADDING)
+    return FieldMatches("headerHeight", headerHeight)
+        and FieldMatches("barHeight", barHeight)
+        and FieldMatches("spacing", spacing)
+        and FieldMatches("padding", padding)
+end
+
+local function VersionOneDefaultDensityMatches(config)
+    return DensityMatches(
+        config,
+        VERSION_ONE_DEFAULT_HEADER_HEIGHT,
+        VERSION_ONE_DEFAULT_BAR_HEIGHT,
+        VERSION_ONE_DEFAULT_SPACING,
+        VERSION_ONE_DEFAULT_PADDING
+    )
+end
+
+local function VersionTwoDefaultDensityMatches(config)
+    return DensityMatches(
+        config,
+        VERSION_TWO_DEFAULT_HEADER_HEIGHT,
+        VERSION_TWO_DEFAULT_BAR_HEIGHT,
+        VERSION_TWO_DEFAULT_SPACING,
+        VERSION_TWO_DEFAULT_PADDING
+    )
 end
 
 local function UsesVersionOneDefaultSizes(config)
@@ -242,13 +273,23 @@ local function UsesVersionOneDefaultSizes(config)
             VERSION_ONE_DEFAULT_WINDOW_HEIGHTS
         )
         and config.height == nil
-        and DefaultDensityMatches(config)
+        and VersionOneDefaultDensityMatches(config)
+end
+
+local function UsesVersionTwoDefaultSizes(config)
+    return config.width == VERSION_TWO_DEFAULT_WIDTH
+        and WindowHeightsMatch(
+            config.windowHeights,
+            VERSION_TWO_DEFAULT_WINDOW_HEIGHTS
+        )
+        and config.height == nil
+        and VersionTwoDefaultDensityMatches(config)
 end
 
 local function UsesUnversionedHistoricalDefaultSizes(config)
     if type(config.sizeDefaultsVersion) == "number"
         or config.width ~= LEGACY_DEFAULT_WIDTH
-        or not DefaultDensityMatches(config)
+        or not VersionOneDefaultDensityMatches(config)
     then
         return false
     end
@@ -278,6 +319,7 @@ local function MigrateDefaultSizes(config)
     -- Only compact an exact default tuple. If any dimension or density differs,
     -- the complete saved layout remains user-owned.
     if UsesVersionOneDefaultSizes(config)
+        or UsesVersionTwoDefaultSizes(config)
         or UsesUnversionedHistoricalDefaultSizes(config)
     then
         config.width = defaults.width
@@ -289,6 +331,13 @@ local function MigrateDefaultSizes(config)
         config.padding = defaults.padding
     end
     config.sizeDefaultsVersion = CURRENT_SIZE_DEFAULTS_VERSION
+end
+
+local function GetMinimumWindowHeight(config)
+    return math.max(
+        MIN_WINDOW_HEIGHT,
+        config.headerHeight + (config.padding * 2) + config.barHeight
+    )
 end
 
 local function NormalizeNumber(value, default, minimum, maximum, integer)
@@ -466,49 +515,6 @@ local function NormalizeConfig(config)
 
     MigrateDefaultSizes(config)
 
-    local legacyHeight
-    if type(config.height) == "number" and config.height == config.height then
-        legacyHeight = NormalizeNumber(
-            config.height,
-            defaults.windowHeights[1],
-            104,
-            520,
-            true
-        )
-    end
-    config.height = nil
-    if type(config.windowHeights) ~= "table" then
-        config.windowHeights = {}
-    end
-    for index = 1, 3 do
-        config.windowHeights[index] = NormalizeNumber(
-            config.windowHeights[index],
-            legacyHeight or defaults.windowHeights[index],
-            104,
-            520,
-            true
-        )
-    end
-    MigrateDefaultDock(config)
-    local hadTrackerDockSetting =
-        type(config.dockToObjectiveTracker) == "boolean"
-    NormalizeWindowAnchors(config)
-    if not hadTrackerDockSetting then
-        -- Profiles created before this setting had only screen-relative
-        -- anchors, so retain that behavior rather than assuming docking.
-        config.dockToObjectiveTracker = defaults.dockToObjectiveTracker
-    end
-    if type(config.locked) ~= "boolean" then
-        config.locked = defaults.locked
-    end
-
-    config.width = NormalizeNumber(
-        config.width,
-        defaults.width,
-        220,
-        520,
-        true
-    )
     config.headerHeight = NormalizeNumber(
         config.headerHeight,
         defaults.headerHeight,
@@ -535,6 +541,51 @@ local function NormalizeConfig(config)
         defaults.padding,
         0,
         12,
+        true
+    )
+    local minimumWindowHeight = GetMinimumWindowHeight(config)
+
+    local legacyHeight
+    if type(config.height) == "number" and config.height == config.height then
+        legacyHeight = NormalizeNumber(
+            config.height,
+            defaults.windowHeights[1],
+            minimumWindowHeight,
+            520,
+            true
+        )
+    end
+    config.height = nil
+    if type(config.windowHeights) ~= "table" then
+        config.windowHeights = {}
+    end
+    for index = 1, 3 do
+        config.windowHeights[index] = NormalizeNumber(
+            config.windowHeights[index],
+            legacyHeight or defaults.windowHeights[index],
+            minimumWindowHeight,
+            520,
+            true
+        )
+    end
+    MigrateDefaultDock(config)
+    local hadTrackerDockSetting =
+        type(config.dockToObjectiveTracker) == "boolean"
+    NormalizeWindowAnchors(config)
+    if not hadTrackerDockSetting then
+        -- Profiles created before this setting had only screen-relative
+        -- anchors, so retain that behavior rather than assuming docking.
+        config.dockToObjectiveTracker = defaults.dockToObjectiveTracker
+    end
+    if type(config.locked) ~= "boolean" then
+        config.locked = defaults.locked
+    end
+
+    config.width = NormalizeNumber(
+        config.width,
+        defaults.width,
+        220,
+        520,
         true
     )
     if type(config.texture) ~= "string" or config.texture == "" then

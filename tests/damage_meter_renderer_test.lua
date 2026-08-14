@@ -524,9 +524,18 @@ local function loadRenderer(
         return dropdown
     end
 
-    function AF.CreateResizeButton(target)
+    function AF.CreateResizeButton(target, minWidth, minHeight, maxWidth, maxHeight)
         local resize = newFrame("ResizeButton", target, nil, 16, 16)
         target:SetResizable(true)
+        resize.minWidth = minWidth
+        resize.minHeight = minHeight
+        resize.maxWidth = maxWidth
+        resize.maxHeight = maxHeight
+
+        function resize:SetMinHeight(height)
+            self.minHeight = height
+        end
+
         return resize
     end
 
@@ -2845,8 +2854,8 @@ local function RunDetailReportTests()
     fittedDM.config.spacing = 2
     fittedDM.config.padding = 3
     fittedDM.config.windowHeights[1] = 124
-    fittedDM.config.windowHeights[2] = 104
-    fittedDM.config.windowHeights[3] = 104
+    fittedDM.config.windowHeights[2] = 84
+    fittedDM.config.windowHeights[3] = 84
     assertEqual(
         fittedRenderer.SetEnabled(true),
         true,
@@ -2859,13 +2868,47 @@ local function RunDetailReportTests()
     )
     assertEqual(
         fittedState.namedFrames.BFIDamageMeterWindow2.visibleRowCount,
-        4,
-        "fitted stacked meters retain four rows"
+        3,
+        "fitted middle meter retains three rows"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow3.visibleRowCount,
+        3,
+        "fitted top meter retains three rows"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow2.height,
+        84,
+        "fitted middle meter uses the compact three-row height"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow3.height,
+        84,
+        "fitted top meter uses the compact three-row height"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow2.resize.minHeight,
+        84,
+        "default density permits the compact three-row resize height"
     )
     assertEqual(
         fittedState.namedFrames.BFIDamageMeterWindow1.width,
         240,
         "fitted meter uses the compact tracker-width default"
+    )
+    fittedDM.config.headerHeight = 36
+    fittedDM.config.barHeight = 36
+    fittedDM.config.padding = 12
+    fittedRenderer.ApplySettings()
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow2.resize.minHeight,
+        96,
+        "dense meter appearance keeps a complete row resize minimum"
+    )
+    assertEqual(
+        fittedState.namedFrames.BFIDamageMeterWindow2.height,
+        96,
+        "dense meter appearance clamps the compact saved height to one row"
     )
     assertEqual(
         fittedRenderer.SetEnabled(false),

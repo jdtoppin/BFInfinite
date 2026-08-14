@@ -34,6 +34,8 @@ local GENERAL_STATUS_HEIGHT = 80
 local CONTROL_WIDTH = 150
 local WIDE_CONTROL_WIDTH = 240
 local SLIDER_WIDTH = 140
+local MIN_WINDOW_HEIGHT = 84
+local MAX_WINDOW_HEIGHT = 520
 
 local function GetMeterTypeText(globalName, fallback)
     return _G[globalName] or L[fallback]
@@ -136,6 +138,26 @@ end
 
 local function RefreshDamageMeter()
     AF.Fire("BFI_UpdateModule", "damageMeter")
+end
+
+local function GetMinimumWindowHeight(config)
+    return math.max(
+        MIN_WINDOW_HEIGHT,
+        config.headerHeight + (config.padding * 2) + config.barHeight
+    )
+end
+
+local function RefreshWindowHeightBounds()
+    local config = DM.config
+    local minimumWindowHeight = GetMinimumWindowHeight(config)
+
+    for index, slider in ipairs(windowHeightSliders) do
+        if config.windowHeights[index] < minimumWindowHeight then
+            config.windowHeights[index] = minimumWindowHeight
+        end
+        slider:SetMinMaxValues(minimumWindowHeight, MAX_WINDOW_HEIGHT)
+        slider:SetValue(config.windowHeights[index])
+    end
 end
 
 local function CreateDamageMeterPanel()
@@ -264,8 +286,8 @@ local function CreateWindowHeightSlider(parent, index, x, y)
         L["Meter %d Height"]:format(index),
         x,
         y,
-        104,
-        520,
+        MIN_WINDOW_HEIGHT,
+        MAX_WINDOW_HEIGHT,
         1
     )
     slider:SetAfterValueChanged(function(value)
@@ -338,6 +360,7 @@ local function CreateWindowsPane()
         windowCount:SetSelectedValue(DM.config.windowCount)
         lockMeters:SetChecked(DM.config.locked)
         alwaysShowPlayer:SetChecked(DM.config.alwaysShowPlayer)
+        RefreshWindowHeightBounds()
         for index, dropdown in ipairs(windowTypeDropdowns) do
             dropdown:SetSelectedValue(DM.config.windowTypes[index])
             windowHeightSliders[index]:SetValue(
@@ -555,6 +578,7 @@ local function CreateAppearancePane()
     )
     headerHeight:SetAfterValueChanged(function(value)
         DM.config.headerHeight = value
+        RefreshWindowHeightBounds()
         RefreshDamageMeter()
     end)
 
@@ -563,6 +587,7 @@ local function CreateAppearancePane()
     )
     barHeight:SetAfterValueChanged(function(value)
         DM.config.barHeight = value
+        RefreshWindowHeightBounds()
         RefreshDamageMeter()
     end)
 
@@ -579,6 +604,7 @@ local function CreateAppearancePane()
     )
     padding:SetAfterValueChanged(function(value)
         DM.config.padding = value
+        RefreshWindowHeightBounds()
         RefreshDamageMeter()
     end)
 

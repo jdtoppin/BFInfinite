@@ -121,6 +121,11 @@ local function newWidget(state, kind, parent)
         self.value = value
     end
 
+    function widget:SetMinMaxValues(low, high)
+        self.low = low
+        self.high = high
+    end
+
     function widget:SetOnClick(callback)
         self.onClick = callback
     end
@@ -454,6 +459,9 @@ for title, body in pairs(expectedTips) do
 end
 
 local width = state.controls["Frame Width"]
+local headerHeight = state.controls["Header Height"]
+local barHeight = state.controls["Bar Height"]
+local padding = state.controls.Padding
 local windowCount = state.controls["Window Count"]
 local firstMeterType = state.controls["Meter 1 Type"]
 local secondMeterType = state.controls["Meter 2 Type"]
@@ -520,7 +528,7 @@ assertEqual(
 assertEqual(firstMeterHeight.value, 277, "first meter height loaded")
 assertEqual(secondMeterHeight.value, 288, "second meter height loaded")
 assertEqual(thirdMeterHeight.value, 299, "third meter height loaded")
-assertEqual(firstMeterHeight.low, 104, "meter height minimum is compact")
+assertEqual(firstMeterHeight.low, 84, "meter height minimum is compact")
 assertEqual(firstMeterHeight.high, 520, "meter height maximum remains available")
 assertEqual(lockMeters.checked, true, "lock state loaded")
 assertEqual(alwaysShowPlayer.checked, false, "player pin state loaded")
@@ -599,6 +607,16 @@ assertEqual(
     345,
     "per-window height writes live"
 )
+DM.config.windowHeights[3] = 84
+headerHeight.afterValueChanged(36)
+barHeight.afterValueChanged(36)
+padding.afterValueChanged(12)
+assertEqual(firstMeterHeight.low, 96,
+    "dense appearance raises the meter height minimum")
+assertEqual(thirdMeterHeight.low, 96,
+    "every meter uses the dense appearance minimum")
+assertEqual(DM.config.windowHeights[3], 96,
+    "dense appearance preserves one complete meter row")
 DM.config.windowHeights[1] = 301
 DM.config.windowHeights[2] = 302
 DM.config.windowHeights[3] = 303

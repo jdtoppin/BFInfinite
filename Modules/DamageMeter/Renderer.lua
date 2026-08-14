@@ -33,7 +33,7 @@ local REFRESH_DELAY = 0.1
 local NATIVE_RESTORE_KEY = "damageMeterNativeEnabledBeforeBFI"
 local MIN_WINDOW_WIDTH = 220
 local MAX_WINDOW_WIDTH = 520
-local MIN_WINDOW_HEIGHT = 104
+local MIN_WINDOW_HEIGHT = 84
 local MAX_WINDOW_HEIGHT = 520
 local DEFAULT_SESSION_KEY = "current"
 local SESSION_MODE_CURRENT = "current"
@@ -171,6 +171,23 @@ local function Clamp(value, minimum, maximum)
     return math.max(minimum, math.min(maximum, value))
 end
 
+local function GetMinimumWindowHeight(config)
+    local function GetDimension(key, default)
+        local value = config[key]
+        if type(value) ~= "number" or value ~= value then
+            return default
+        end
+        return value
+    end
+
+    return math.max(
+        MIN_WINDOW_HEIGHT,
+        GetDimension("headerHeight", 20)
+            + (GetDimension("padding", 3) * 2)
+            + GetDimension("barHeight", 18)
+    )
+end
+
 local function GetDefaultAnchor(index)
     if index == 1 then
         return {
@@ -258,7 +275,7 @@ local function GetWindowHeight(config, index)
     EnsureInteractionConfig(config)
     return Clamp(
         config.windowHeights[index],
-        MIN_WINDOW_HEIGHT,
+        GetMinimumWindowHeight(config),
         MAX_WINDOW_HEIGHT
     )
 end
@@ -2103,7 +2120,7 @@ local function OnWindowSizeChanged(window, width, height)
     ApplySharedWidth(window, width)
     config.windowHeights[window.index] = Clamp(
         math.floor(height + 0.5),
-        MIN_WINDOW_HEIGHT,
+        GetMinimumWindowHeight(config),
         MAX_WINDOW_HEIGHT
     )
 end
@@ -2696,6 +2713,10 @@ local function ApplyWindowLayout(window, config, runtime)
     window.runtimeConstrained = not window.minimized
         and (window.runtimeHidden or windowHeight < savedHeight)
     window.visibleRowCount = visibleRows
+    if window.resize
+        and type(window.resize.SetMinHeight) == "function" then
+        window.resize:SetMinHeight(GetMinimumWindowHeight(config))
+    end
     window.applyingLayout = true
     window:SetSize(
         config.width,
