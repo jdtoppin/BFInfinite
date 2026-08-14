@@ -41,8 +41,6 @@ local SESSION_MODE_HISTORY = "history"
 local SESSION_DROPDOWN_WIDTH = 120
 local MIN_SESSION_DROPDOWN_WIDTH = 60
 local MIN_TYPE_DROPDOWN_WIDTH = 60
-local MAX_DETAIL_TARGETS = 3
-
 local TYPE_DEFINITIONS = {
     DamageDone = {
         title = _G.DAMAGE_METER_TYPE_DAMAGE_DONE or _G.DAMAGE or "Damage",
@@ -900,6 +898,7 @@ local function ApplyRowLayout(row, index, config, texture, definition)
     local showTotal, showPerSecond =
         GetNumberVisibility(config, definition)
     local showIcon = config.showSpecIcon and not definition.suppressIcon
+    row.showIcon = showIcon
 
     row:ClearAllPoints()
     row:SetPoint("TOPLEFT", row:GetParent(), "TOPLEFT", config.padding, y)
@@ -1004,18 +1003,6 @@ local function FormatDetailPercent(value, total)
     return amount
 end
 
-local function FormatDetailRate(value, duration)
-    local amount = FormatDetailNumber(value)
-    if duration and duration > 0 then
-        return ("%s  %s/s"):format(
-            amount,
-            FormatDetailNumber(value / duration)
-        )
-    end
-
-    return amount
-end
-
 local function FormatDetailSpellValues(
     spell,
     sourceTotal,
@@ -1102,83 +1089,14 @@ local function GetDetailSourceData(
     )
 end
 
-local function SortDetailTotals(left, right)
-    return left.total > right.total
-end
-
-local function BuildDamageTargetEntries(
-    sessionMode,
-    sessionID,
-    sourceName,
-    duration
-)
-    local enemyType = _G.Enum.DamageMeterType.EnemyDamageTaken
-    if enemyType == nil then return {} end
-
-    local enemySession = GetSessionData(
-        sessionMode,
-        sessionID,
-        enemyType
-    )
-    if not enemySession or not enemySession.combatSources then
-        return {}
-    end
-
-    local targets = {}
-    for _, enemy in ipairs(enemySession.combatSources) do
-        local enemyDetail = GetDetailSourceData(
-            sessionMode,
-            sessionID,
-            enemyType,
-            enemy
-        )
-        local total = 0
-        if enemyDetail and enemyDetail.combatSpells then
-            for _, spell in ipairs(enemyDetail.combatSpells) do
-                local details = spell.combatSpellDetails
-                if details and details.unitName == sourceName then
-                    total = total + spell.totalAmount
-                end
-            end
-        end
-
-        if total > 0 then
-            targets[#targets + 1] = {
-                name = _G.Ambiguate(enemy.name, "short"),
-                total = total,
-            }
-        end
-    end
-
-    table.sort(targets, SortDetailTotals)
-    local entries = {}
-    local count = math.min(#targets, MAX_DETAIL_TARGETS)
-    if count > 0 then
-        entries[1] = {
-            kind = "section",
-            label = L["Targets"],
-        }
-    end
-    for index = 1, count do
-        local target = targets[index]
-        entries[#entries + 1] = {
-            kind = "target",
-            label = target.name,
-            maxValue = targets[1].total,
-            total = target.total,
-            valueText = FormatDetailRate(target.total, duration),
-        }
-    end
-
-    return entries
-end
-
+-- Retail PTR 12.1.0.68914 / wow-ui-source d3915c78: source names can be
+-- ConditionalSecret, and spell details do not expose a NeverSecret source ID.
+-- Keep this in Blizzard's spell-by-spell shape instead of joining or grouping
+-- names in Lua.
 local function BuildStandardDetailEntries(
     sourceDetail,
-    source,
+    classFilename,
     definition,
-    sessionMode,
-    sessionID,
     duration
 )
     local entries = {}
@@ -1203,7 +1121,7 @@ local function BuildStandardDetailEntries(
         end
 
         entries[#entries + 1] = {
-            classFilename = source.classFilename,
+            classFilename = classFilename,
             icon = GetDetailSpellTexture(spellID),
             kind = "spell",
             label = spellName,
@@ -1211,60 +1129,6 @@ local function BuildStandardDetailEntries(
             spellID = spellID,
             total = barValue,
             valueText = valueText,
-        }
-    end
-
-    if definition.enumName == "DamageDone" then
-        local targets = BuildDamageTargetEntries(
-            sessionMode,
-            sessionID,
-            source.name,
-            duration
-        )
-        for _, entry in ipairs(targets) do
-            entries[#entries + 1] = entry
-        end
-    end
-
-    return entries
-end
-
-local function BuildEnemyPlayerEntries(sourceDetail, duration)
-    local playersByName = {}
-    local players = {}
-    for _, spell in ipairs(sourceDetail.combatSpells or {}) do
-        local details = spell.combatSpellDetails
-        local name = details and details.unitName
-        if name and name ~= "" then
-            local player = playersByName[name]
-            if not player then
-                player = {
-                    classFilename = details.unitClassFilename,
-                    icon = details.specIconID,
-                    name = name,
-                    total = 0,
-                }
-                playersByName[name] = player
-                players[#players + 1] = player
-            end
-            player.total = player.total + spell.totalAmount
-        end
-    end
-
-    table.sort(players, SortDetailTotals)
-    local entries = {}
-    local count = #players
-    local maximum = count > 0 and players[1].total or 1
-    for index = 1, count do
-        local player = players[index]
-        entries[index] = {
-            classFilename = player.classFilename,
-            icon = player.icon,
-            kind = "player",
-            label = _G.Ambiguate(player.name, "short"),
-            maxValue = maximum,
-            total = player.total,
-            valueText = FormatDetailRate(player.total, duration),
         }
     end
 
@@ -1721,21 +1585,12 @@ RefreshWindowDetails = function(window)
         )
         if not sourceDetail then return false end
 
-        if definition.enumName == "EnemyDamageTaken" then
-            entries = BuildEnemyPlayerEntries(
-                sourceDetail,
-                session.durationSeconds
-            )
-        else
-            entries = BuildStandardDetailEntries(
-                sourceDetail,
-                source,
-                definition,
-                sessionMode,
-                sessionID,
-                session.durationSeconds
-            )
-        end
+        entries = BuildStandardDetailEntries(
+            sourceDetail,
+            source.classFilename,
+            definition,
+            session.durationSeconds
+        )
     end
 
     RenderDetailEntries(window, entries, source, config)
@@ -2741,6 +2596,36 @@ local function HideUnusedRows(window, firstUnused)
     end
 end
 
+local function UpdateSourceIcon(row, specIconID, classFilename)
+    if row.showIcon ~= true then
+        row.icon:SetTexture(nil)
+        row.iconHolder:Hide()
+        return
+    end
+
+    if specIconID and specIconID ~= 0 then
+        row.icon:SetTexture(specIconID)
+        AF.ApplyDefaultTexCoord(row.icon)
+        row.iconHolder:Show()
+        return
+    end
+
+    local getClassAtlas = _G.GetClassAtlas
+    if classFilename and classFilename ~= ""
+        and type(getClassAtlas) == "function"
+    then
+        local classAtlas = getClassAtlas(classFilename)
+        if classAtlas then
+            row.icon:SetAtlas(classAtlas, false, nil, true)
+            row.iconHolder:Show()
+            return
+        end
+    end
+
+    row.icon:SetTexture(nil)
+    row.iconHolder:Hide()
+end
+
 local function UpdateRow(row, source, index, session, config)
     local r, g, b
     if config.classColor then
@@ -2754,7 +2639,7 @@ local function UpdateRow(row, source, index, session, config)
     row.iconHolder:SetBackdropBorderColor(r, g, b, 1)
     row.hoverCard:SetBackdropBorderColor(r, g, b, 1)
     row.rank:SetText(index)
-    row.icon:SetTexture(source.specIconID)
+    UpdateSourceIcon(row, source.specIconID, source.classFilename)
     row.name:SetText(_G.Ambiguate(source.name, "short"))
     row.hoverCard.title:SetText(_G.Ambiguate(source.name, "short"))
     row.hoverCard.playerBadge:SetShown(source.isLocalPlayer == true)

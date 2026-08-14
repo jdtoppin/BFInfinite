@@ -118,6 +118,15 @@ local function loadRenderer(
         }, opaqueMetatable)
     end
 
+    local function newSecretName(label)
+        return setmetatable({
+            label = label,
+        }, {
+            __eq = unsafeOperation,
+        })
+    end
+    state.newSecretName = newSecretName
+
     local frameMethods = {}
 
     function frameMethods:GetParent()
@@ -344,9 +353,19 @@ local function loadRenderer(
     end
 
     function frameMethods:SetTexture(texture, dimensions, anchor)
+        self.atlas = nil
         self.texture = texture
         self.textureDimensions = dimensions
         self.textureAnchor = anchor
+    end
+
+    function frameMethods:SetAtlas(atlas, useAtlasSize, filterMode, resetTexCoords)
+        self.atlas = atlas
+        self.texture = nil
+        self.useAtlasSize = useAtlasSize
+        self.filterMode = filterMode
+        self.resetTexCoords = resetTexCoords
+        if resetTexCoords then self.hasDefaultTexCoord = false end
     end
 
     function frameMethods:SetTextureColor(color)
@@ -812,6 +831,11 @@ local function loadRenderer(
         GetBuildInfo = function()
             return "12.1.0", "68914", "Jul 31 2026", 120100
         end,
+        GetClassAtlas = function(classFilename)
+            if classFilename == "MAGE" then
+                return "classicon-mage"
+            end
+        end,
         GameTooltip = {
             Hide = function(self)
                 self.hidden = true
@@ -1164,6 +1188,44 @@ assertEqual(firstRow.bar.statusBarColor.b, 0.91, "class bar blue")
 assertEqual(firstRow.bar.statusBarColor.a, 0.9, "configured bar alpha")
 assertEqual(firstRow.icon.texture, 1001, "spec icon applied")
 assertEqual(firstRow.iconHolder.shown, true, "spec icon shown")
+
+sources[1].specIconID = 0
+Renderer.Refresh()
+assertEqual(
+    firstRow.icon.atlas,
+    "classicon-mage",
+    "followers without a spec icon use their public class atlas"
+)
+assertEqual(
+    firstRow.iconHolder.shown,
+    true,
+    "class atlas keeps the follower icon visible"
+)
+assertEqual(
+    firstRow.icon.resetTexCoords,
+    true,
+    "class atlas resets the specialization texture crop"
+)
+
+sources[1].classFilename = ""
+Renderer.Refresh()
+assertEqual(firstRow.icon.texture, nil, "missing source icon clears texture")
+assertEqual(firstRow.icon.atlas, nil, "missing source icon clears atlas")
+assertEqual(
+    firstRow.iconHolder.shown,
+    false,
+    "missing source icon hides the empty holder"
+)
+
+sources[1].classFilename = "MAGE"
+sources[1].specIconID = 1001
+Renderer.Refresh()
+assertEqual(firstRow.icon.texture, 1001, "spec icon takes precedence")
+assertEqual(
+    firstRow.icon.hasDefaultTexCoord,
+    true,
+    "switching from a class atlas reapplies the specialization crop"
+)
 
 assertEqual(
     first.settings.tooltipAnchor,
@@ -2252,6 +2314,7 @@ local function RunDetailReportTests()
                     unitClassFilename = "MAGE",
                     unitName = "Damage Player",
                 },
+                spellID = 401,
                 totalAmount = 300,
             },
             {
@@ -2260,6 +2323,7 @@ local function RunDetailReportTests()
                     unitClassFilename = "MAGE",
                     unitName = "Damage Player",
                 },
+                spellID = 402,
                 totalAmount = 200,
             },
             {
@@ -2268,6 +2332,7 @@ local function RunDetailReportTests()
                     unitClassFilename = "PRIEST",
                     unitName = "Healer",
                 },
+                spellID = 403,
                 totalAmount = 250,
             },
         },
@@ -2288,21 +2353,6 @@ local function RunDetailReportTests()
         "spell row includes total and percentage"
     )
     assertEqual(window.detailRows[1].icon.texture, 2101, "spell icon")
-    assertEqual(
-        window.detailRows[3].label.text,
-        "Targets",
-        "damage report includes a target section"
-    )
-    assertEqual(
-        window.detailRows[4].label.text,
-        "Training Dummy",
-        "damage report includes the top target"
-    )
-    assertEqual(
-        window.detailRows[4].value.text,
-        "500  50/s",
-        "target row includes total and rate"
-    )
     assertEqual(
         detailState.detailSourceCalls[1].mode,
         "current",
@@ -2419,18 +2469,18 @@ local function RunDetailReportTests()
     row:RunScript("OnMouseUp", "LeftButton")
     assertEqual(
         window.detailRows[1].label.text,
-        "Damage Player",
-        "enemy report groups damage by player"
+        "Spell 401",
+        "enemy report retains Blizzard spell rows"
     )
     assertEqual(
         window.detailRows[1].value.text,
-        "500  50/s",
-        "enemy player row includes total and rate"
+        "300  40.0%",
+        "enemy spell row retains its amount"
     )
     assertEqual(
         window.detailRows[2].label.text,
-        "Healer",
-        "enemy report sorts the next player"
+        "Spell 402",
+        "enemy report does not group player names"
     )
     window.detailPanel:RunScript("OnMouseUp", "RightButton")
 
@@ -2467,15 +2517,49 @@ local function RunDetailReportTests()
     end
     assertEqual(
         window.detailOffset,
-        41,
+        39,
         "detail scrolling reaches the full uncapped report"
     )
     assertEqual(
         window.detailRows[5].label.text,
-        "Spell 246",
+        "Spell 244",
         "spell entries beyond the former 40-row boundary remain reachable"
     )
     window.detailPanel:RunScript("OnMouseUp", "RightButton")
+
+    detailSources[1].name = detailState.newSecretName("follower source")
+    detailState.detailSources[36] = {
+        combatSpells = {
+            {
+                combatSpellDetails = {
+                    unitName = detailState.newSecretName("follower detail"),
+                },
+                spellID = 401,
+                totalAmount = 300,
+            },
+        },
+        maxAmount = 300,
+        totalAmount = 300,
+    }
+    window.typeDropdown:Select("EnemyDamageTaken")
+    row:RunScript("OnMouseUp", "LeftButton")
+    assertEqual(
+        window.detailOpen,
+        true,
+        "secret follower details open without a name comparison"
+    )
+    assertEqual(
+        window.detailRows[1].label.text,
+        "Spell 401",
+        "secret follower detail source is rendered"
+    )
+    assertEqual(
+        detailState.unsafeOperations,
+        0,
+        "secret follower names never reach a Lua operation"
+    )
+    window.detailPanel:RunScript("OnMouseUp", "RightButton")
+
     assertEqual(
         detailRenderer.SetEnabled(false),
         true,
