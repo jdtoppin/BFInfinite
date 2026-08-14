@@ -17,11 +17,13 @@ local trackerLayoutObserved
 local trackerBackgroundStyled
 local trackerBackground
 local trackerDockFrame
+local trackerBackgroundLayoutQueued
 
 local TRACKER_NATIVE_BOTTOM_PADDING = 10
 local TRACKER_BACKGROUND_PADDING = 6
 
 local GenerateClosure = GenerateClosure
+local RunNextFrame = RunNextFrame
 
 ---------------------------------------------------------------------
 -- background
@@ -118,12 +120,30 @@ local function UpdateTrackerBackgroundLayout()
     AF.Fire("BFI_ObjectiveTrackerDockFrameChanged")
 end
 
+local function QueueTrackerBackgroundLayout()
+    if trackerBackgroundLayoutQueued then return end
+
+    trackerBackgroundLayoutQueued = true
+    RunNextFrame(function()
+        trackerBackgroundLayoutQueued = nil
+        if trackerBackground then
+            UpdateTrackerBackgroundLayout()
+        end
+    end)
+end
+
 local function SetupTrackerLayoutObserver()
     if trackerLayoutObserved then return end
 
     trackerLayoutObserved = true
     hooksecurefunc(tracker, "Update", UpdateTrackerBackgroundLayout)
     hooksecurefunc(tracker, "UpdateHeight", UpdateTrackerBackgroundLayout)
+    -- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit d3915c78:
+    -- module collapse calls MarkDirty(), whose stored dirty callback retains
+    -- the original Update method and runs on the next frame. Queue our own
+    -- BFI-only reflow from the post-hook so it runs after Blizzard has laid
+    -- out modules newly exposed below a collapsed header.
+    hooksecurefunc(tracker, "MarkDirty", QueueTrackerBackgroundLayout)
 end
 
 local function SetupTrackerBackground()

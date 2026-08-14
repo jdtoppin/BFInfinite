@@ -58,6 +58,24 @@ local trackerHeader = {}
 local trackerCollapsed = false
 local firstModuleShown = true
 local secondModuleShown = true
+local thirdModuleShown = false
+local trackerUpdateHook
+local trackerHeightUpdateHook
+local trackerMarkDirtyHook
+local nextFrameCallbacks = {}
+local pendingNativeDirtyUpdate
+
+local function QueueNextFrame(queuedCallback)
+    nextFrameCallbacks[#nextFrameCallbacks + 1] = queuedCallback
+end
+
+local function RunQueuedFrames()
+    while #nextFrameCallbacks > 0 do
+        local queued = table.remove(nextFrameCallbacks, 1)
+        queued()
+    end
+end
+
 local firstModule = {
     IsShown = function()
         return firstModuleShown
@@ -66,6 +84,11 @@ local firstModule = {
 local secondModule = {
     IsShown = function()
         return secondModuleShown
+    end,
+}
+local thirdModule = {
+    IsShown = function()
+        return thirdModuleShown
     end,
 }
 local tracker = {
@@ -80,10 +103,19 @@ local tracker = {
     modules = {
         firstModule,
         secondModule,
+        thirdModule,
     },
     Update = forbiddenCall("ObjectiveTrackerFrame:Update"),
     UpdateHeight = forbiddenCall("ObjectiveTrackerFrame:UpdateHeight"),
-    MarkDirty = forbiddenCall("ObjectiveTrackerFrame:MarkDirty"),
+    MarkDirty = function()
+        if pendingNativeDirtyUpdate then
+            QueueNextFrame(pendingNativeDirtyUpdate)
+            pendingNativeDirtyUpdate = nil
+        end
+        if trackerMarkDirtyHook then
+            trackerMarkDirtyHook()
+        end
+    end,
     NineSlice = trackerNineSlice,
     ClearAllPoints = forbiddenCall("ObjectiveTrackerFrame:ClearAllPoints"),
     SetPoint = forbiddenCall("ObjectiveTrackerFrame:SetPoint"),
@@ -194,8 +226,6 @@ local W = {
         },
     },
 }
-local trackerUpdateHook
-local trackerHeightUpdateHook
 local environment = {
     _G = false,
     AbstractFramework = AF,
@@ -209,6 +239,7 @@ local environment = {
     ObjectiveTrackerManager = {},
     ScenarioObjectiveTracker = scenarioTracker,
     ScenarioRewardsFrame = rewardsFrame,
+    RunNextFrame = QueueNextFrame,
     debug = debug,
     hooksecurefunc = function(target, method, hook)
         assertEqual(target, tracker, "Objective Tracker update hook target")
@@ -221,6 +252,10 @@ local environment = {
             assertEqual(trackerHeightUpdateHook, nil,
                 "Objective Tracker height update hooked once")
             trackerHeightUpdateHook = hook
+        elseif method == "MarkDirty" then
+            assertEqual(trackerMarkDirtyHook, nil,
+                "Objective Tracker dirty update hooked once")
+            trackerMarkDirtyHook = hook
         else
             error("unexpected Objective Tracker hook: " .. tostring(method), 2)
         end
@@ -302,6 +337,11 @@ assertContains(
     'hooksecurefunc(tracker, "UpdateHeight", UpdateTrackerBackgroundLayout)',
     "native height changes refresh only the BFI dock reservation"
 )
+assertContains(
+    trackerSource,
+    'hooksecurefunc(tracker, "MarkDirty", QueueTrackerBackgroundLayout)',
+    "deferred native module layouts refresh the BFI surface"
+)
 
 local optionsSource = readFile("Options/UIWidgets_Options.lua")
 local objectiveSettings = optionsSource:match(
@@ -355,6 +395,8 @@ assertEqual(type(trackerUpdateHook), "function",
     "shared backdrop follows native Objective Tracker updates")
 assertEqual(type(trackerHeightUpdateHook), "function",
     "dock reservation follows native Objective Tracker height updates")
+assertEqual(type(trackerMarkDirtyHook), "function",
+    "shared backdrop follows deferred Objective Tracker layouts")
 assertEqual(#backdropAnchors, 3,
     "shared backdrop uses explicit content bounds")
 assertEqual(backdropAnchors[1][1], "TOPLEFT",
@@ -414,6 +456,39 @@ trackerUpdateHook()
 assertEqual(backdropAnchors[3][2], firstModule,
     "hidden last modules do not extend the shared backdrop")
 
+local dockEventsBeforeFirstModuleCollapse = dockFrameEvents
+pendingNativeDirtyUpdate = function()
+    secondModuleShown = true
+end
+tracker:MarkDirty()
+assertEqual(backdropAnchors[3][2], firstModule,
+    "individual collapse waits for Blizzard's deferred layout")
+assertEqual(#nextFrameCallbacks, 2,
+    "native layout queues before the BFI surface refresh")
+RunQueuedFrames()
+assertEqual(backdropAnchors[3][2], secondModule,
+    "collapsed headers retain the newly exposed module below")
+assertEqual(dockFrameEvents, dockEventsBeforeFirstModuleCollapse + 1,
+    "deferred layout reflows the meter dock reservation once")
+
+local dockEventsBeforeSecondModuleCollapse = dockFrameEvents
+pendingNativeDirtyUpdate = function()
+    secondModuleShown = false
+    thirdModuleShown = true
+end
+tracker:MarkDirty()
+assertEqual(backdropAnchors[3][2], secondModule,
+    "second collapse also waits for Blizzard's deferred layout")
+RunQueuedFrames()
+assertEqual(backdropAnchors[3][2], thirdModule,
+    "later headers remain inside the shared backdrop after collapse")
+assertEqual(dockFrameEvents, dockEventsBeforeSecondModuleCollapse + 1,
+    "later deferred layout reflows the meter dock reservation once")
+
+secondModuleShown = true
+thirdModuleShown = false
+trackerUpdateHook()
+
 trackerCollapsed = true
 trackerUpdateHook()
 assertEqual(backdropAnchors[3][2], trackerHeader,
@@ -425,6 +500,7 @@ assertEqual(backdropAnchors[1][4], -6,
 
 trackerCollapsed = false
 secondModuleShown = true
+thirdModuleShown = false
 trackerUpdateHook()
 assertEqual(backdropAnchors[3][2], secondModule,
     "expanded tracker background follows restored objective content")
