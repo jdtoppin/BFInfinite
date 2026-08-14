@@ -177,15 +177,15 @@ local spellCategoryLabels = {
     resurrection = "Resurrection",
 }
 
-local function SetSuggestedSpell(binding, spellID)
-    local isActive
-    for _, current in ipairs(GetConfig().bindings) do
-        if current == binding then isActive = true break end
-    end
-    if not isActive then return end
+local function SetSuggestedSpell(row, binding, spellID)
+    if GetConfig().bindings[row.index] ~= binding then return end
 
     binding[2], binding[3] = "spell", spellID
-    list.Load()
+    -- Rebuilding the scroll list hides this EditBox. Its OnHide handler then
+    -- restores the previously cached value, so repaint only the selected row.
+    row.payload:SetText(tostring(spellID))
+    row.payload.value = row.payload:GetValue()
+    row.payload.confirmBtn:Hide()
     RefreshRuntime()
     UpdateConflictNotice()
 end
@@ -207,7 +207,7 @@ local function ShowSpellPicker(row)
             icon = spell.iconID,
             value = spell.spellID,
             callback = function()
-                SetSuggestedSpell(binding, spell.spellID)
+                SetSuggestedSpell(row, binding, spell.spellID)
             end,
         }
     end
@@ -439,6 +439,9 @@ local function LoadRow(row, index, binding)
     )
     row.payload:SetEnabled(hasPayload)
     row.payload:SetNotUserChangable(binding[2] == "custom")
+    -- Spell IDs are positive integers. Keep trim/string value semantics so an
+    -- empty field can still be saved, while native EditBox input rejects text.
+    row.payload:SetNumeric(binding[2] == "spell")
     if hasPayload then
         local displayValue = binding[3] or ""
         if binding[2] == "custom" then

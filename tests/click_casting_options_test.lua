@@ -263,13 +263,41 @@ local function createHarness()
         return dropdown
     end
 
-    function AF.CreateEditBox(parent, _, width, height)
+    function AF.CreateEditBox(parent, _, width, height, mode)
         local editBox = newWidget("editBox", parent)
         editBox.width = width
         editBox.height = height
+        editBox.mode = mode
         editBox.confirmBtn = newWidget("confirmButton", editBox)
+        function editBox:GetValue()
+            if self.mode == "number" then
+                return tonumber(self:GetText())
+            end
+            return (self:GetText():gsub("^%s+", ""):gsub("%s+$", ""))
+        end
+        function editBox:SetText(text)
+            self.text = tostring(text or "")
+            -- AF treats script-driven SetText as canonical widget state;
+            -- user edits leave this saved value untouched until confirmation.
+            self.value = self:GetValue()
+        end
+        function editBox:SetMode(newMode)
+            self.mode = newMode
+        end
+        function editBox:SetNumeric(numeric)
+            self.numeric = numeric and true or false
+        end
         function editBox:SetConfirmButton(callback)
             self.onConfirmValue = callback
+        end
+        function editBox:SimulateUserText(text)
+            if self.numeric and text:find("[^%d]", 1) then
+                return
+            end
+            self.text = text
+        end
+        function editBox:SimulateBackspace()
+            self.text = self:GetText():sub(1, -2)
         end
         return editBox
     end
@@ -312,6 +340,7 @@ local function createHarness()
     function AF.CreateScrollList(parent)
         local scrollList = newWidget("scrollList", parent)
         function scrollList:SetWidgets(widgets)
+            self.setWidgetsCalls = (self.setWidgetsCalls or 0) + 1
             self.widgets = widgets
         end
         state.list = scrollList
@@ -575,6 +604,21 @@ assertEqual(firstRow.payload.label, "Spell ID or click to pick",
     "spell field has an in-field picker prompt")
 assertEqual(firstRow.payload:GetText(), "2061",
     "saved spell ID is displayed as text")
+assertTrue(firstRow.payload.numeric,
+    "spell payload enables native numeric input filtering")
+assertEqual(firstRow.payload.mode, "trim",
+    "spell payload retains empty-string confirmation semantics")
+firstRow.payload:SimulateUserText("2061x")
+assertEqual(firstRow.payload:GetText(), "2061",
+    "spell payload rejects non-numeric typing")
+firstRow.payload:SimulateUserText("20610")
+firstRow.payload:SimulateBackspace()
+assertEqual(firstRow.payload:GetText(), "2061",
+    "spell payload permits ordinary character deletion")
+firstRow.payload:SimulateUserText("")
+firstRow.payload.onEnterPressed("")
+assertEqual(harness.config.bindings[1][3], "",
+    "spell payload can be cleared after numeric input filtering")
 local otherRowCapture = harness.list.widgets[2].capture
 otherRowCapture:StartCapture()
 assertTrue(otherRowCapture.capturing,
@@ -595,11 +639,18 @@ assertEqual(harness.cascadingMenu.items[1].text, "Class Spells",
     "spell picker groups class spells")
 assertEqual(harness.cascadingMenu.items[2].text, "Specialization Spells",
     "spell picker groups current-spec spells")
+local setWidgetsCalls = harness.list.setWidgetsCalls
 harness.cascadingMenu.items[2].children[1].callback()
 assertEqual(harness.config.bindings[1][3], 47540,
     "suggested spell selection persists its spell ID")
+assertEqual(harness.list.setWidgetsCalls, setWidgetsCalls,
+    "spell picker repaints its row without hiding the focused editor")
 assertEqual(firstRow.payload:GetText(), "47540",
     "suggested spell selection immediately populates the value field")
+assertEqual(firstRow.payload.value, "47540",
+    "suggested spell selection immediately updates AF's saved widget value")
+assertTrue(firstRow.payload:HasFocus(),
+    "spell picker selection preserves value-field keyboard focus")
 
 local closeCalls = harness.cascadingMenuCloseCalls or 0
 harness:FireCallback("AF_PLAYER_SPEC_UPDATE")
@@ -687,6 +738,13 @@ assertEqual(harness.config.preferMassResurrection, false,
     "mass resurrection preference is profile-owned")
 
 local macroRow = harness.list.widgets[2]
+assertEqual(macroRow.payload.mode, "trim",
+    "saved macro payload retains trimmed text mode")
+assertTrue(not macroRow.payload.numeric,
+    "saved macro payload disables numeric input filtering")
+macroRow.payload:SimulateUserText("NamedMacroTwo")
+assertEqual(macroRow.payload:GetText(), "NamedMacroTwo",
+    "saved macro payload accepts non-numeric text")
 macroRow.payload.onEnterPressed("7")
 assertEqual(harness.config.bindings[2][3], 7,
     "numeric macro indices are stored as numbers")
@@ -721,6 +779,10 @@ assertEqual(harness.config.bindings[3][2], "item",
     "item cursor switches the action")
 assertEqual(harness.config.bindings[3][3], "item:19019",
     "item cursor stores a secure item token")
+assertEqual(cursorRow.payload.mode, "trim",
+    "item payload retains trimmed text mode")
+assertTrue(not cursorRow.payload.numeric,
+    "item payload disables numeric input filtering")
 assertEqual(harness.clearCursorCalls, 3,
     "accepted cursor drops clear the cursor")
 
