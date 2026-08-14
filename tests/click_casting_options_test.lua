@@ -693,8 +693,34 @@ assertEqual(harness.list.points[2][1], "BOTTOMRIGHT",
 local firstRow = harness.list.widgets[1]
 assertTrue(not firstRow.editPayload.shown,
     "spell rows do not show a separate picker button")
-assertEqual(firstRow.payload.width, 239,
-    "spell field uses the space released by the picker button")
+assertEqual(firstRow.delete.points[1][1], "RIGHT",
+    "binding row controls terminate at the viewport's right edge")
+assertEqual(firstRow.delete.points[1][2], firstRow,
+    "binding row controls use the full scroll-list row width")
+assertEqual(firstRow.down.points[1][1], "RIGHT",
+    "move-down control aligns inward from the row edge")
+assertEqual(firstRow.down.points[1][2], firstRow.delete,
+    "move-down control precedes delete in the right-aligned controls")
+assertEqual(firstRow.down.points[1][3], "LEFT",
+    "move-down control uses delete's near edge")
+assertEqual(firstRow.up.points[1][1], "RIGHT",
+    "move-up control aligns inward from move-down")
+assertEqual(firstRow.up.points[1][2], firstRow.down,
+    "move controls form a stable right-aligned group")
+assertEqual(firstRow.up.points[1][3], "LEFT",
+    "move-up control uses move-down's near edge")
+assertEqual(firstRow.payload.points[1][1], "LEFT",
+    "spell field begins after the fixed action column")
+assertEqual(firstRow.payload.points[1][2], firstRow.action,
+    "spell field follows the action selector")
+assertEqual(firstRow.payload.points[1][3], "RIGHT",
+    "spell field begins at the action selector's far edge")
+assertEqual(firstRow.payload.points[2][1], "RIGHT",
+    "spell field stretches across the available row width")
+assertEqual(firstRow.payload.points[2][2], firstRow.up,
+    "spell field ends before the right-aligned row controls")
+assertEqual(firstRow.payload.points[2][3], "LEFT",
+    "spell field uses the controls' near edge")
 assertEqual(firstRow.payload.label, "Spell ID or click to pick",
     "spell field has an in-field picker prompt")
 assertEqual(firstRow.payload:GetText(), "2061",
@@ -945,13 +971,23 @@ assertEqual(harness.config.bindings[1][3], "",
     "action switch clears the prior spell payload")
 assertTrue(firstRow.editPayload.shown,
     "custom macros retain their separate editor button")
-assertEqual(firstRow.payload.width, 190,
-    "custom macro field leaves room for its editor button")
+assertEqual(firstRow.editPayload.points[1][1], "RIGHT",
+    "custom editor joins the right-aligned row controls")
+assertEqual(firstRow.editPayload.points[1][2], firstRow.up,
+    "custom editor sits immediately before the move controls")
+assertEqual(firstRow.editPayload.points[1][3], "LEFT",
+    "custom editor avoids a circular anchor with the flexible value field")
+assertEqual(firstRow.payload.points[2][2], firstRow.editPayload,
+    "custom macro field flexes up to its visible editor button")
+assertEqual(firstRow.payload.points[2][3], "LEFT",
+    "custom macro editor remains inside the full-width row")
 firstRow.action.onSelect("target")
 assertEqual(harness.config.bindings[1][3], nil,
     "payload-free action clears the custom payload slot")
 assertTrue(not firstRow.editPayload.shown,
     "payload-free actions hide the editor button")
+assertEqual(firstRow.payload.points[2][2], firstRow.up,
+    "rows without an editor restore the full flexible value column")
 harness.cascadingMenu = nil
 firstRow.payload.scripts.OnMouseDown(firstRow.payload, "LeftButton")
 assertEqual(harness.cascadingMenu, nil,

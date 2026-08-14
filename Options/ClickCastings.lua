@@ -481,7 +481,6 @@ local function CreateRow(index)
         22
     )
     row.editPayload = editPayload
-    AF.SetPoint(editPayload, "LEFT", payload, "RIGHT", 7, 0)
     editPayload:SetOnClick(function()
         local binding = GetConfig().bindings[row.index]
         if not binding then return end
@@ -492,14 +491,12 @@ local function CreateRow(index)
 
     local up = AF.CreateButton(row, "↑", "BFI_hover", 22, 22)
     row.up = up
-    AF.SetPoint(up, "LEFT", editPayload, "RIGHT", 7, 0)
     up:SetOnClick(function()
         if row.index > 1 then MoveBinding(row.index, row.index - 1) end
     end)
 
     local down = AF.CreateButton(row, "↓", "BFI_hover", 22, 22)
     row.down = down
-    AF.SetPoint(down, "LEFT", up, "RIGHT", 3, 0)
     down:SetOnClick(function()
         if row.index < #GetConfig().bindings then
             MoveBinding(row.index, row.index + 1)
@@ -508,7 +505,10 @@ local function CreateRow(index)
 
     local delete = AF.CreateButton(row, "×", "red_hover", 22, 22)
     row.delete = delete
-    AF.SetPoint(delete, "LEFT", down, "RIGHT", 3, 0)
+    AF.SetPoint(delete, "RIGHT", row, "RIGHT", -3, 0)
+    AF.SetPoint(down, "RIGHT", delete, "LEFT", -3, 0)
+    AF.SetPoint(up, "RIGHT", down, "LEFT", -3, 0)
+    AF.SetPoint(editPayload, "RIGHT", up, "LEFT", -7, 0)
     delete:SetOnClick(function() DeleteBinding(row.index) end)
 
     rows[index] = row
@@ -527,14 +527,21 @@ local function LoadRow(row, index, binding)
     row.editPayload:SetEnabled(hasCustomEditor)
     row.editPayload:SetShown(hasCustomEditor)
     row.editPayload:SetText(L["Edit"])
-    row.payload:SetWidth(hasCustomEditor and 190 or 239)
-    AF.ClearPoints(row.up)
+    AF.ClearPoints(row.payload)
     AF.SetPoint(
-        row.up,
+        row.payload,
         "LEFT",
-        hasCustomEditor and row.editPayload or row.payload,
+        row.action,
         "RIGHT",
         7,
+        0
+    )
+    AF.SetPoint(
+        row.payload,
+        "RIGHT",
+        hasCustomEditor and row.editPayload or row.up,
+        "LEFT",
+        -7,
         0
     )
     row.payload:SetEnabled(hasPayload)
