@@ -120,6 +120,70 @@ local function UpdateEnabledState(checked)
     )
 end
 
+local function UpdateRowControlLayout(row)
+    local config = GetConfig()
+    local binding = config.bindings[row.index]
+    local confirming = binding
+        and row.pendingDeleteConfig == config
+        and row.pendingDeleteBinding == binding
+    local controlsStart = confirming and row.confirmDelete or row.up
+    local hasCustomEditor = binding and binding[2] == "custom"
+
+    row.up:SetShown(not confirming)
+    row.down:SetShown(not confirming)
+    row.delete:SetShown(not confirming)
+    row.cancelDelete:SetShown(confirming)
+    row.confirmDelete:SetShown(confirming)
+
+    AF.ClearPoints(row.editPayload)
+    AF.SetPoint(
+        row.editPayload,
+        "RIGHT",
+        controlsStart,
+        "LEFT",
+        -7,
+        0
+    )
+
+    AF.ClearPoints(row.payload)
+    AF.SetPoint(row.payload, "LEFT", row.action, "RIGHT", 7, 0)
+    AF.SetPoint(
+        row.payload,
+        "RIGHT",
+        hasCustomEditor and row.editPayload or controlsStart,
+        "LEFT",
+        -7,
+        0
+    )
+end
+
+local function CancelDeleteConfirmation(row)
+    row.pendingDeleteConfig = nil
+    row.pendingDeleteBinding = nil
+    UpdateRowControlLayout(row)
+end
+
+local function CancelDeleteConfirmations(except)
+    for _, row in ipairs(rows) do
+        if row ~= except and row.pendingDeleteBinding then
+            CancelDeleteConfirmation(row)
+        end
+    end
+end
+
+local function RequestDeleteConfirmation(row)
+    local config = GetConfig()
+    local binding = config.bindings[row.index]
+    if not binding then return end
+
+    CancelDeleteConfirmations(row)
+    ReleaseKeyboardInput()
+    AF.CloseCascadingMenu()
+    row.pendingDeleteConfig = config
+    row.pendingDeleteBinding = binding
+    UpdateRowControlLayout(row)
+end
+
 local function HideSpellDisplay(row)
     if not row.spellDisplay then return end
     row.spellDisplay:Hide()
@@ -368,7 +432,8 @@ local function CreateRow(index)
         local current = GetConfig().bindings[row.index]
         if not current then return end
         if not binding then
-            DeleteBinding(row.index)
+            capture:SetBinding(CC.DecodeBinding(current[1]))
+            RequestDeleteConfirmation(row)
             return
         end
         local attribute = CC.EncodeBinding(binding)
@@ -509,7 +574,46 @@ local function CreateRow(index)
     AF.SetPoint(down, "RIGHT", delete, "LEFT", -3, 0)
     AF.SetPoint(up, "RIGHT", down, "LEFT", -3, 0)
     AF.SetPoint(editPayload, "RIGHT", up, "LEFT", -7, 0)
-    delete:SetOnClick(function() DeleteBinding(row.index) end)
+    delete:SetOnClick(function() RequestDeleteConfirmation(row) end)
+
+    local confirmDelete = AF.CreateButton(
+        row,
+        L["Delete"],
+        "red_hover",
+        72,
+        22
+    )
+    row.confirmDelete = confirmDelete
+    confirmDelete:Hide()
+    confirmDelete:SetOnClick(function()
+        local config = GetConfig()
+        local binding = row.pendingDeleteBinding
+        if config == row.pendingDeleteConfig
+            and binding
+            and config.bindings[row.index] == binding
+        then
+            row.pendingDeleteConfig = nil
+            row.pendingDeleteBinding = nil
+            DeleteBinding(row.index)
+        else
+            CancelDeleteConfirmation(row)
+        end
+    end)
+
+    local cancelDelete = AF.CreateButton(
+        row,
+        L["Cancel"],
+        "BFI_hover",
+        72,
+        22
+    )
+    row.cancelDelete = cancelDelete
+    AF.SetPoint(cancelDelete, "RIGHT", row, "RIGHT", -3, 0)
+    AF.SetPoint(confirmDelete, "RIGHT", cancelDelete, "LEFT", -3, 0)
+    cancelDelete:Hide()
+    cancelDelete:SetOnClick(function()
+        CancelDeleteConfirmation(row)
+    end)
 
     rows[index] = row
     return row
@@ -524,26 +628,12 @@ local function LoadRow(row, index, binding)
 
     local hasPayload = payloadActions[binding[2]]
     local hasCustomEditor = binding[2] == "custom"
+    row.pendingDeleteConfig = nil
+    row.pendingDeleteBinding = nil
     row.editPayload:SetEnabled(hasCustomEditor)
     row.editPayload:SetShown(hasCustomEditor)
     row.editPayload:SetText(L["Edit"])
-    AF.ClearPoints(row.payload)
-    AF.SetPoint(
-        row.payload,
-        "LEFT",
-        row.action,
-        "RIGHT",
-        7,
-        0
-    )
-    AF.SetPoint(
-        row.payload,
-        "RIGHT",
-        hasCustomEditor and row.editPayload or row.up,
-        "LEFT",
-        -7,
-        0
-    )
+    UpdateRowControlLayout(row)
     row.payload:SetEnabled(hasPayload)
     row.payload:SetNotUserChangable(binding[2] == "custom")
     -- Spell IDs are positive integers. Keep trim/string value semantics so an
@@ -741,7 +831,13 @@ local function CreatePanel()
             LoadRow(row, index, binding)
             widgets[#widgets + 1] = row
         end
-        for index = #widgets + 1, #rows do rows[index]:Hide() end
+        for index = #widgets + 1, #rows do
+            local row = rows[index]
+            if row.pendingDeleteBinding then
+                CancelDeleteConfirmation(row)
+            end
+            row:Hide()
+        end
         list:SetWidgets(widgets)
         add:SetEnabled(true)
         for _, row in ipairs(widgets) do
@@ -771,6 +867,7 @@ local function CreatePanel()
 
     panel:SetOnHide(function()
         ReleaseKeyboardInput()
+        CancelDeleteConfirmations()
         AF.CloseCascadingMenu()
     end)
 end
@@ -814,6 +911,7 @@ end, "low")
 AF.RegisterCallback("AF_COMBAT_ENTER", function()
     if panel and panel:IsShown() then
         ReleaseKeyboardInput()
+        CancelDeleteConfirmations()
         AF.CloseCascadingMenu()
     end
 end)

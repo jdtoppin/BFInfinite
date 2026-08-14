@@ -1085,10 +1085,13 @@ harness:FireCallback("BFI_UpdateProfile")
 assertEqual(harness.enabledCheckButton.label.textColor[1], "softlime",
     "returning to an enabled profile refreshes the title-row color")
 local deleteRow = harness.list.widgets[5]
-local deleteOkay, deleteError = pcall(deleteRow.delete.onClick)
+deleteRow.delete.onClick()
+assertEqual(#oldConfig.bindings, 5,
+    "first delete click leaves the binding in place")
+local deleteOkay, deleteError = pcall(deleteRow.confirmDelete.onClick)
 assertTrue(deleteOkay,
-    "delete updates its local conflict notice: " .. tostring(deleteError))
-assertEqual(#oldConfig.bindings, 4, "delete removes one binding")
+    "confirmed delete updates its local conflict notice: " .. tostring(deleteError))
+assertEqual(#oldConfig.bindings, 4, "confirmed delete removes one binding")
 
 harness.enabledCheckButton.onCheck(false)
 assertEqual(oldConfig.enabled, false, "module disabled")
@@ -1130,6 +1133,380 @@ harness:FireCallback("AF_PLAYER_SPEC_UPDATE")
 harness:FireCallback("AF_COMBAT_ENTER")
 assertEqual(harness.cascadingMenuCloseCalls, closeCalls,
     "hidden Click Casting panel does not close unrelated cascading menus")
+
+local function CreateVisibleDeleteHarness()
+    local deleteHarness = createHarness()
+    deleteHarness:FireCallback("BFI_ShowOptionsPanel", "clickCastings")
+    return deleteHarness
+end
+
+local cancelHarness = CreateVisibleDeleteHarness()
+local cancelBindings = cancelHarness.config.bindings
+local cancelRow = cancelHarness.list.widgets[2]
+local cancelBinding = cancelBindings[2]
+cancelRow.delete.onClick()
+assertEqual(#cancelBindings, 5,
+    "requesting inline deletion does not mutate bindings")
+assertEqual(cancelBindings[2], cancelBinding,
+    "requesting inline deletion preserves the exact row binding")
+assertEqual(cancelRow.pendingDeleteBinding, cancelBinding,
+    "pending deletion records the exact binding identity")
+assertEqual(cancelRow.pendingDeleteConfig, cancelHarness.config,
+    "pending deletion records the exact config identity")
+assertTrue(not cancelRow.up.shown and not cancelRow.down.shown
+    and not cancelRow.delete.shown,
+    "pending deletion hides the ordinary row controls")
+assertTrue(cancelRow.cancelDelete.shown and cancelRow.confirmDelete.shown,
+    "pending deletion shows inline Cancel and confirmation controls")
+assertEqual(cancelRow.cancelDelete.width, 72,
+    "inline Cancel has a deliberate double-click-safe target width")
+assertEqual(cancelRow.confirmDelete.width, 72,
+    "inline Delete has a balanced confirmation target width")
+assertEqual(cancelRow.cancelDelete.points[1][1], "RIGHT",
+    "inline Cancel is right-aligned")
+assertEqual(cancelRow.cancelDelete.points[1][2], cancelRow,
+    "inline Cancel occupies the original row-edge delete target")
+assertEqual(cancelRow.cancelDelete.points[1][3], "RIGHT",
+    "inline Cancel keeps the original delete target's anchor edge")
+assertEqual(cancelRow.cancelDelete.points[1][4], -3,
+    "inline Cancel keeps the original delete target's inset")
+assertEqual(cancelRow.confirmDelete.points[1][1], "RIGHT",
+    "inline Delete aligns immediately before Cancel")
+assertEqual(cancelRow.confirmDelete.points[1][2], cancelRow.cancelDelete,
+    "inline Delete does not occupy the original delete target")
+assertEqual(cancelRow.confirmDelete.points[1][3], "LEFT",
+    "inline Delete uses Cancel's safe near edge")
+assertEqual(cancelRow.payload.points[2][2], cancelRow.confirmDelete,
+    "pending rows end their value field before both inline controls")
+cancelRow.cancelDelete.onClick()
+assertEqual(#cancelBindings, 5,
+    "cancelling inline deletion leaves bindings unchanged")
+assertEqual(cancelBindings[2], cancelBinding,
+    "cancelling inline deletion preserves the requested binding")
+assertEqual(cancelRow.pendingDeleteBinding, nil,
+    "cancelling inline deletion clears the pending identity")
+assertEqual(cancelRow.pendingDeleteConfig, nil,
+    "cancelling inline deletion clears the pending config identity")
+assertTrue(cancelRow.up.shown and cancelRow.down.shown
+    and cancelRow.delete.shown,
+    "cancelling inline deletion restores the ordinary row controls")
+assertTrue(not cancelRow.cancelDelete.shown
+    and not cancelRow.confirmDelete.shown,
+    "cancelling inline deletion hides its confirmation controls")
+assertEqual(cancelHarness.CC.EncodeBinding(cancelRow.capture.binding),
+    cancelBinding[1],
+    "cancelling inline deletion preserves the displayed binding")
+
+local confirmHarness = CreateVisibleDeleteHarness()
+local confirmBindings = confirmHarness.config.bindings
+local firstBinding = confirmBindings[1]
+local confirmedBinding = confirmBindings[2]
+local thirdBinding = confirmBindings[3]
+local fourthBinding = confirmBindings[4]
+local fifthBinding = confirmBindings[5]
+local confirmRow = confirmHarness.list.widgets[2]
+confirmRow.delete.onClick()
+confirmRow.confirmDelete.onClick()
+assertEqual(#confirmBindings, 4,
+    "inline confirmation deletes exactly one binding")
+assertEqual(confirmBindings[1], firstBinding,
+    "inline confirmation preserves the binding before its row")
+assertEqual(confirmBindings[2], thirdBinding,
+    "inline confirmation closes the deleted row's exact gap")
+assertEqual(confirmBindings[3], fourthBinding,
+    "inline confirmation preserves later binding identity")
+assertEqual(confirmBindings[4], fifthBinding,
+    "inline confirmation preserves the final binding identity")
+for _, binding in ipairs(confirmBindings) do
+    assertTrue(binding ~= confirmedBinding,
+        "inline confirmation removes the requested binding identity")
+end
+
+local singlePendingHarness = CreateVisibleDeleteHarness()
+local singlePendingBindings = singlePendingHarness.config.bindings
+local firstPendingRow = singlePendingHarness.list.widgets[1]
+local secondPendingRow = singlePendingHarness.list.widgets[2]
+local firstPendingBinding = singlePendingBindings[1]
+local secondPendingBinding = singlePendingBindings[2]
+firstPendingRow.delete.onClick()
+local supersededConfirm = firstPendingRow.confirmDelete.onClick
+secondPendingRow.delete.onClick()
+assertEqual(#singlePendingBindings, 5,
+    "arming another row does not delete the first pending binding")
+assertEqual(firstPendingRow.pendingDeleteBinding, nil,
+    "arming another row cancels the first pending identity")
+assertEqual(firstPendingRow.pendingDeleteConfig, nil,
+    "arming another row clears the first pending config identity")
+assertTrue(firstPendingRow.delete.shown
+    and not firstPendingRow.cancelDelete.shown
+    and not firstPendingRow.confirmDelete.shown,
+    "arming another row restores the first row's controls")
+assertEqual(secondPendingRow.pendingDeleteBinding, secondPendingBinding,
+    "only the newly requested row remains pending")
+assertEqual(secondPendingRow.pendingDeleteConfig,
+    singlePendingHarness.config,
+    "the newly requested row owns the sole pending config identity")
+supersededConfirm()
+assertEqual(#singlePendingBindings, 5,
+    "a superseded confirmation cannot delete a binding")
+assertEqual(singlePendingBindings[1], firstPendingBinding,
+    "a superseded confirmation preserves its original binding")
+assertEqual(singlePendingBindings[2], secondPendingBinding,
+    "a superseded confirmation preserves the active pending binding")
+assertEqual(secondPendingRow.pendingDeleteBinding, secondPendingBinding,
+    "a superseded confirmation leaves the active row pending")
+
+local refreshHarness = CreateVisibleDeleteHarness()
+local refreshBindings = refreshHarness.config.bindings
+local refreshRow = refreshHarness.list.widgets[3]
+local refreshBinding = refreshBindings[3]
+refreshRow.delete.onClick()
+local staleRefreshConfirm = refreshRow.confirmDelete.onClick
+refreshHarness:FireCallback("BFI_RefreshOptions", "clickCastings")
+assertEqual(refreshRow.pendingDeleteBinding, nil,
+    "options refresh cancels pending row deletion")
+assertEqual(refreshRow.pendingDeleteConfig, nil,
+    "options refresh clears the pending config identity")
+assertTrue(refreshRow.delete.shown
+    and not refreshRow.cancelDelete.shown
+    and not refreshRow.confirmDelete.shown,
+    "options refresh restores ordinary row controls")
+staleRefreshConfirm()
+assertEqual(#refreshBindings, 5,
+    "confirmation captured before refresh cannot delete a binding")
+assertEqual(refreshBindings[3], refreshBinding,
+    "refresh-stale confirmation preserves the exact row binding")
+
+local profileHarness = CreateVisibleDeleteHarness()
+local oldProfileBindings = profileHarness.config.bindings
+local oldProfileRow = profileHarness.list.widgets[2]
+local oldProfileBinding = oldProfileBindings[2]
+oldProfileRow.delete.onClick()
+local staleProfileConfirm = oldProfileRow.confirmDelete.onClick
+local replacementProfile = {
+    enabled = true,
+    smartResurrection = "disabled",
+    preferMassResurrection = true,
+    bindings = {
+        {"type4", "focus"},
+        {"type5", "assist"},
+    },
+}
+local replacementFirstBinding = replacementProfile.bindings[1]
+profileHarness.CC.activeConfig = replacementProfile
+profileHarness:FireCallback("BFI_UpdateProfile")
+assertEqual(oldProfileRow.pendingDeleteBinding, nil,
+    "profile replacement cancels pending row deletion")
+assertEqual(oldProfileRow.pendingDeleteConfig, nil,
+    "profile replacement clears the pending config identity")
+staleProfileConfirm()
+assertEqual(#oldProfileBindings, 5,
+    "profile-stale confirmation cannot mutate the old profile")
+assertEqual(oldProfileBindings[2], oldProfileBinding,
+    "profile-stale confirmation preserves its old binding")
+assertEqual(#replacementProfile.bindings, 2,
+    "profile-stale confirmation cannot mutate the active profile")
+assertEqual(replacementProfile.bindings[1], replacementFirstBinding,
+    "profile-stale confirmation preserves the rebound row identity")
+
+local configIdentityHarness = CreateVisibleDeleteHarness()
+local originalConfig = configIdentityHarness.config
+local originalConfigBindings = originalConfig.bindings
+local configIdentityRow = configIdentityHarness.list.widgets[2]
+local sharedConfigBinding = originalConfigBindings[2]
+configIdentityRow.delete.onClick()
+local replacementConfig = {
+    enabled = true,
+    smartResurrection = "disabled",
+    preferMassResurrection = true,
+    bindings = {
+        {"type1", "target"},
+        sharedConfigBinding,
+        {"type3", "focus"},
+    },
+}
+configIdentityHarness.CC.activeConfig = replacementConfig
+configIdentityRow.confirmDelete.onClick()
+assertEqual(#originalConfigBindings, 5,
+    "confirmation cannot mutate the config that originally requested it")
+assertEqual(originalConfigBindings[2], sharedConfigBinding,
+    "stale-config confirmation preserves the original binding identity")
+assertEqual(#replacementConfig.bindings, 3,
+    "confirmation cannot cross into a replacement config")
+assertEqual(replacementConfig.bindings[2], sharedConfigBinding,
+    "config identity guard holds even when both configs share a binding")
+assertEqual(configIdentityRow.pendingDeleteBinding, nil,
+    "stale-config confirmation clears its pending binding identity")
+assertEqual(configIdentityRow.pendingDeleteConfig, nil,
+    "stale-config confirmation clears its pending config identity")
+
+local reorderHarness = CreateVisibleDeleteHarness()
+local reorderBindings = reorderHarness.config.bindings
+local reorderFirst = reorderBindings[1]
+local reorderPending = reorderBindings[2]
+local reorderThird = reorderBindings[3]
+local reorderPendingRow = reorderHarness.list.widgets[2]
+local reorderMovingRow = reorderHarness.list.widgets[3]
+reorderPendingRow.delete.onClick()
+local staleReorderConfirm = reorderPendingRow.confirmDelete.onClick
+reorderMovingRow.up.onClick()
+assertEqual(reorderPendingRow.pendingDeleteBinding, nil,
+    "reordering cancels pending row deletion")
+assertEqual(reorderPendingRow.pendingDeleteConfig, nil,
+    "reordering clears the pending config identity")
+assertEqual(reorderBindings[1], reorderFirst,
+    "reordering preserves the leading binding")
+assertEqual(reorderBindings[2], reorderThird,
+    "reordering moves the requested binding into place")
+assertEqual(reorderBindings[3], reorderPending,
+    "reordering moves the formerly pending binding without deleting it")
+staleReorderConfirm()
+assertEqual(#reorderBindings, 5,
+    "confirmation captured before reorder cannot delete a rebound row")
+assertEqual(reorderBindings[2], reorderThird,
+    "reorder-stale confirmation preserves the row's new binding")
+assertEqual(reorderBindings[3], reorderPending,
+    "reorder-stale confirmation preserves its original binding")
+
+local captureDeleteHarness = CreateVisibleDeleteHarness()
+local captureDeleteBindings = captureDeleteHarness.config.bindings
+local captureDeleteRow = captureDeleteHarness.list.widgets[3]
+local captureDeleteBinding = captureDeleteBindings[3]
+captureDeleteRow.capture.onBindingChanged(nil)
+assertEqual(#captureDeleteBindings, 5,
+    "clearing a binding capture requests confirmation without deleting")
+assertEqual(captureDeleteBindings[3], captureDeleteBinding,
+    "clearing a binding capture preserves the exact binding identity")
+assertEqual(
+    captureDeleteHarness.CC.EncodeBinding(captureDeleteRow.capture.binding),
+    captureDeleteBinding[1],
+    "clearing a binding capture immediately restores its display")
+assertEqual(captureDeleteRow.pendingDeleteBinding, captureDeleteBinding,
+    "clearing a binding capture uses the inline deletion confirmation")
+assertEqual(captureDeleteRow.pendingDeleteConfig, captureDeleteHarness.config,
+    "capture deletion records the active config identity")
+assertTrue(captureDeleteRow.cancelDelete.shown
+    and captureDeleteRow.confirmDelete.shown,
+    "clearing a binding capture exposes the inline confirmation controls")
+
+do
+    local case = {}
+    case.harness = CreateVisibleDeleteHarness()
+    case.oldConfig = case.harness.config
+    case.oldBindings = case.oldConfig.bindings
+    case.oldBinding = case.oldBindings[5]
+    case.row = case.harness.list.widgets[5]
+    case.row.delete.onClick()
+    case.staleConfirm = case.row.confirmDelete.onClick
+    case.row:SetOnHide(function()
+        case.pendingBindingAtHide = case.row.pendingDeleteBinding
+        case.pendingConfigAtHide = case.row.pendingDeleteConfig
+    end)
+    case.newConfig = {
+        enabled = true,
+        smartResurrection = "disabled",
+        preferMassResurrection = true,
+        bindings = {
+            {"type1", "focus"},
+            {"type2", "assist"},
+        },
+    }
+    case.harness.CC.activeConfig = case.newConfig
+    case.harness:FireCallback("BFI_UpdateProfile")
+    assertTrue(not case.row.shown,
+        "profile shrink hides a pending row outside the new binding count")
+    assertEqual(case.pendingBindingAtHide, nil,
+        "profile shrink clears pending binding identity before row Hide")
+    assertEqual(case.pendingConfigAtHide, nil,
+        "profile shrink clears pending config identity before row Hide")
+    assertEqual(case.row.pendingDeleteBinding, nil,
+        "profile shrink leaves the hidden row without pending binding state")
+    assertEqual(case.row.pendingDeleteConfig, nil,
+        "profile shrink leaves the hidden row without pending config state")
+    assertEqual(#case.oldBindings, 5,
+        "profile shrink does not mutate the old profile")
+    assertEqual(case.oldBindings[5], case.oldBinding,
+        "profile shrink preserves the old pending binding")
+
+    case.newConfig.bindings[3] = {"type3", "target"}
+    case.newConfig.bindings[4] = {"type4", "togglemenu"}
+    case.newConfig.bindings[5] = {"type5", "focus"}
+    case.reusedBinding = case.newConfig.bindings[5]
+    case.harness:FireCallback("BFI_RefreshOptions", "clickCastings")
+    assertEqual(case.harness.list.widgets[5], case.row,
+        "profile expansion reuses the previously hidden row")
+    assertTrue(case.row.shown,
+        "profile expansion shows the reused row")
+    assertTrue(case.row.delete.shown
+        and not case.row.cancelDelete.shown
+        and not case.row.confirmDelete.shown,
+        "reused row starts with ordinary controls and no stale confirmation")
+    case.staleConfirm()
+    assertEqual(#case.oldBindings, 5,
+        "shrink-stale confirmation cannot mutate the old profile")
+    assertEqual(case.oldBindings[5], case.oldBinding,
+        "shrink-stale confirmation preserves its original binding")
+    assertEqual(#case.newConfig.bindings, 5,
+        "shrink-stale confirmation cannot delete from a reused row")
+    assertEqual(case.newConfig.bindings[5], case.reusedBinding,
+        "shrink-stale confirmation preserves the reused binding identity")
+end
+
+do
+    local case = {}
+    case.harness = CreateVisibleDeleteHarness()
+    case.bindings = case.harness.config.bindings
+    case.binding = case.bindings[4]
+    case.row = case.harness.list.widgets[4]
+    case.panel = case.harness.namedFrames.BFIOptionsFrame_ClickCastingsPanel
+    case.row.delete.onClick()
+    case.staleConfirm = case.row.confirmDelete.onClick
+    assertTrue(case.panel.shown,
+        "Click Casting panel is visible before combat entry")
+    case.harness:FireCallback("AF_COMBAT_ENTER")
+    assertTrue(case.panel.shown,
+        "combat entry keeps the protected Click Casting panel visible")
+    assertEqual(case.row.pendingDeleteBinding, nil,
+        "visible combat entry clears pending binding identity")
+    assertEqual(case.row.pendingDeleteConfig, nil,
+        "visible combat entry clears pending config identity")
+    assertTrue(case.row.delete.shown
+        and not case.row.cancelDelete.shown
+        and not case.row.confirmDelete.shown,
+        "visible combat entry restores ordinary row controls")
+    case.staleConfirm()
+    assertEqual(#case.bindings, 5,
+        "combat-stale confirmation cannot delete a binding")
+    assertEqual(case.bindings[4], case.binding,
+        "combat-stale confirmation preserves the exact binding")
+end
+
+do
+    local case = {}
+    case.harness = CreateVisibleDeleteHarness()
+    case.bindings = case.harness.config.bindings
+    case.binding = case.bindings[4]
+    case.row = case.harness.list.widgets[4]
+    case.panel = case.harness.namedFrames.BFIOptionsFrame_ClickCastingsPanel
+    case.row.delete.onClick()
+    case.staleConfirm = case.row.confirmDelete.onClick
+    case.harness:FireCallback("BFI_ShowOptionsPanel", "profiles")
+    assertTrue(not case.panel.shown,
+        "switching panels hides Click Casting")
+    assertEqual(case.row.pendingDeleteBinding, nil,
+        "panel hide clears pending binding identity")
+    assertEqual(case.row.pendingDeleteConfig, nil,
+        "panel hide clears pending config identity")
+    assertTrue(case.row.delete.shown
+        and not case.row.cancelDelete.shown
+        and not case.row.confirmDelete.shown,
+        "panel hide restores ordinary row controls")
+    case.staleConfirm()
+    assertEqual(#case.bindings, 5,
+        "panel-hide-stale confirmation cannot delete a binding")
+    assertEqual(case.bindings[4], case.binding,
+        "panel-hide-stale confirmation preserves the exact binding")
+end
 
 local failingHarness = createHarness()
 failingHarness.failTitledPane = true
