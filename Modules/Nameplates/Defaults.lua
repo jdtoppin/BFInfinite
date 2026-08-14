@@ -58,7 +58,7 @@ NP.SCHEMA_VERSION = SCHEMA_VERSION
 
 local defaults = {
     schemaVersion = SCHEMA_VERSION,
-    enabled = false,
+    enabled = true,
     cvars = nil,
     alphas = {
         -- base
@@ -853,14 +853,16 @@ function NP.GetDefaults()
 end
 
 function NP.MigrateConfig(config)
-    if type(config) ~= "table" then
+    local existingConfig = type(config) == "table"
+    if not existingConfig then
         config = {}
     end
 
     local schemaVersion = tonumber(config.schemaVersion) or 0
-    if schemaVersion < 1 then
-        -- The legacy implementation defaulted to enabled. Require an
-        -- explicit opt-in the first time that configuration is migrated.
+    if existingConfig and schemaVersion < 1 then
+        -- Preserve the former opt-in behavior for existing legacy profiles.
+        -- An absent config belongs to a fresh profile and receives the
+        -- shipped enabled default when the missing values merge below.
         config.enabled = false
     end
 

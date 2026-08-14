@@ -76,7 +76,7 @@ function eventHandler:ADDON_LOADED(arg)
                 common = {
                     font = "Noto_AP",
                     overrideAF = true,
-                    overrideBlizzard = false,
+                    overrideBlizzard = true,
                     blizzardFontSizeDelta = 0,
                 },
                 combatText = {

@@ -52,7 +52,7 @@ end
 
 local defaults = {
     buffs = {
-        enabled = false,
+        enabled = true,
         position = {"TOPRIGHT", -4, -4},
         width = 26,
         height = 26,
@@ -445,8 +445,8 @@ do
     local descriptor = assert(compile(config))
     assertTablesEqual(config, savedConfig,
         "compiler does not mutate saved Buffs configuration")
-    assertEqual(descriptor.enabled, false,
-        "shipped Buffs pane remains dormant by default")
+    assertEqual(descriptor.enabled, true,
+        "shipped Buffs pane defaults on")
     assertTablesEqual(descriptor.position, profilePosition,
         "saved BFI position remains the holder location")
     assertEqual(type(descriptor.positionSave), "function",

@@ -477,8 +477,8 @@ do
     )
 
     for _, descriptor in ipairs({secondsDescriptor, percentDescriptor}) do
-        assertEqual(descriptor.enabled, false,
-            "default-off replacement ignores duration colour changes")
+        assertEqual(descriptor.enabled, true,
+            "default-on replacement ignores duration colour changes")
         assertEqual(descriptor.groups[1].filterString, "HARMFUL",
             "duration colour changes never affect selection")
         assertEqual(countKeys(descriptor.groups[1].candidateFilters), 0,
@@ -513,8 +513,8 @@ do
 
     local ok, descriptor = pcall(compile, config)
     assertTrue(ok, "malformed config normalizes without assertion")
-    assertEqual(descriptor.enabled, false,
-        "malformed config remains default-off")
+    assertEqual(descriptor.enabled, true,
+        "malformed config uses the enabled default")
     local group = descriptor.groups[1]
     assertEqual(group.buttonStyle.width, 26, "invalid width fallback")
     assertEqual(group.buttonStyle.height, 10, "height clamp")

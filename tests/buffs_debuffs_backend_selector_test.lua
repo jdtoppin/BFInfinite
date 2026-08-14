@@ -1073,6 +1073,7 @@ do
     local harness = NewHarness({
         interfaceVersion = 120100,
         afVersion = 42,
+        debuffsEnabled = false,
         registerCustomBackend = true,
         customPanes = {debuffs = true},
     })
@@ -1083,10 +1084,10 @@ do
     assertEqual(BD.HasCustomHarmfulAuraContainerCapability(), true,
         "complete harmful runtime capability")
     assertEqual(BD.GetAuraBackend("debuffs"), nil,
-        "default-off opt-in cannot select harmful runtime backend")
+        "disabled Debuffs cannot select harmful runtime backend")
     harness.update("debuffs")
     assertEqual(#harness.customUpdateCalls, 0,
-        "default-off descriptor performs no custom Debuffs update")
+        "disabled descriptor performs no custom Debuffs update")
     for _, call in ipairs(harness.callLog) do
         assertEqual(call == "native:debuffs:true", false,
             "complete descriptor performs no native suppression")

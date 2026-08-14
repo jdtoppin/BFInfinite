@@ -557,11 +557,11 @@ local function CreateNameplatesPanel()
         UpdateNameplates()
     end)
 
-    local optInNotice = AF.CreateFontString(modulePane, L["BFI nameplates are opt-in and remain inactive until enabled."], "gray")
-    AF.SetPoint(optInNotice, "TOPLEFT", modulePane, 15, -60)
-    AF.SetPoint(optInNotice, "TOPRIGHT", modulePane, -15, -60)
-    optInNotice:SetJustifyH("LEFT")
-    optInNotice:SetWordWrap(true)
+    local defaultNotice = AF.CreateFontString(modulePane, L["BFI nameplates are enabled by default."], "gray")
+    AF.SetPoint(defaultNotice, "TOPLEFT", modulePane, 15, -60)
+    AF.SetPoint(defaultNotice, "TOPRIGHT", modulePane, -15, -60)
+    defaultNotice:SetJustifyH("LEFT")
+    defaultNotice:SetWordWrap(true)
 
     --------------------------------------------------
     -- shared settings

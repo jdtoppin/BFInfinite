@@ -88,7 +88,7 @@ local defaults = {
         showIfSolo = false,
     },
     mythicPlus = {
-        enabled = false,
+        enabled = true,
         position = {"TOPRIGHT", -1, -200},
         width = 320,
         font = {"BFI", 12, "none", true},
