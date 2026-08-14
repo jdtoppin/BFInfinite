@@ -21,6 +21,7 @@ local trackerBackgroundLayoutQueued
 
 local TRACKER_NATIVE_BOTTOM_PADDING = 10
 local TRACKER_BACKGROUND_PADDING = 6
+local TRACKER_QUEST_POI_LEFT_PADDING = 30
 
 local GenerateClosure = GenerateClosure
 local RunNextFrame = RunNextFrame
@@ -28,10 +29,29 @@ local RunNextFrame = RunNextFrame
 ---------------------------------------------------------------------
 -- background
 ---------------------------------------------------------------------
+local function ModuleHasQuestPOI(module)
+    local usedBlocks = module.usedBlocks
+    if not usedBlocks then return false end
+
+    -- Retail PTR 12.1.0.68914, jdtoppin/wow-ui-source commit d3915c78:
+    -- ObjectiveTrackerQuestPOIBlockMixin owns poiButton only while its quest
+    -- POI is active, then releases it and clears the field. Use that stable
+    -- layout state rather than frame visibility/geometry, whose return values
+    -- can be secret. The native NineSlice expands to -30 for the POI's glow.
+    for _, blocks in pairs(usedBlocks) do
+        for _, block in pairs(blocks) do
+            if block.poiButton then return true end
+        end
+    end
+
+    return false
+end
+
 local function LayoutTrackerBackground()
     if not trackerBackground or not tracker.Header then return end
 
     local bottomRegion = tracker.Header
+    local leftPadding = TRACKER_BACKGROUND_PADDING
     if not tracker:IsCollapsed() then
         for _, module in ipairs(tracker.modules) do
             -- Retail collapse leaves GetContentsHeight() populated while
@@ -40,6 +60,9 @@ local function LayoutTrackerBackground()
             -- protected geometry.
             if module:IsShown() then
                 bottomRegion = module
+                if ModuleHasQuestPOI(module) then
+                    leftPadding = TRACKER_QUEST_POI_LEFT_PADDING
+                end
             end
         end
     end
@@ -49,7 +72,7 @@ local function LayoutTrackerBackground()
         "TOPLEFT",
         tracker.Header,
         "TOPLEFT",
-        -TRACKER_BACKGROUND_PADDING,
+        -leftPadding,
         TRACKER_BACKGROUND_PADDING
     )
     trackerBackground:SetPoint(
