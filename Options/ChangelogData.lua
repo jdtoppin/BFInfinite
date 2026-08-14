@@ -5,6 +5,36 @@ local BFI = select(2, ...)
 -- are responsible for escaping or formatting the text for their output.
 BFI.changelog = {
     {
+        version = "r6-alpha",
+        date = "2026-08-14 00:00 GMT+8",
+        notes = {
+            {
+                enUS = "Rebuilt Unit Frame Buffs and Debuffs for WoW 12.1 with native Aura Containers, and migrated the upper-right display and enemy Nameplate debuffs to native aura rows",
+                zhCN = "使用《魔兽世界》12.1 原生光环容器重构了单位框体的增益与减益，并将右上角显示和敌方姓名板减益迁移到原生光环行",
+            },
+            {
+                enUS = "Added configurable Party and Raid dispel highlights, supported aura filters, and global spell colors for Unit Frames",
+                zhCN = "为单位框体新增可配置的小队和团队驱散高亮、受支持的光环筛选条件及全局法术颜色",
+            },
+            {
+                enUS = "Added profile-aware Click Casting for BFI Unit Frames, supporting spells, macros, items, and target actions",
+                zhCN = "为 BFI 单位框体新增按配置文件保存的点击施法，支持法术、宏、物品和目标动作",
+            },
+            {
+                enUS = "Added Objective Tracker position and height controls, with an option to stack BFI Damage Meters beneath it",
+                zhCN = "新增目标追踪器位置和高度设置，并可将 BFI 伤害统计堆叠在其下方",
+            },
+            {
+                enUS = "Added optional quest acceptance and turn-in automation; hold Shift to keep a quest interaction manual",
+                zhCN = "新增可选的自动接取和交还任务功能；按住 Shift 可保持任务交互为手动",
+            },
+            {
+                enUS = "Updated Cooldown Manager lifecycle handling and tracked-bar presentation for WoW 12.1",
+                zhCN = "更新冷却管理器的生命周期处理和追踪条外观，以适配《魔兽世界》12.1",
+            },
+        },
+    },
+    {
         version = "r5-alpha",
         date = "2026-08-04 00:00 GMT+8",
         notes = {
