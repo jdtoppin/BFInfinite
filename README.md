@@ -22,6 +22,20 @@ More features will continue to be added in the future to meet the personalized n
 插件采用高度自定义和简洁的设计理念，旨在为玩家带来前所未有的插件体验。  
 未来还将不断加入更多实用功能，满足不同玩家的个性化需求。
 
+## Installation | 安装
+
+Each BFInfinite release includes the compatible AbstractFramework build. Extract the archive into `World of Warcraft/_retail_/Interface/AddOns` so the two folders remain siblings:
+
+```text
+Interface/AddOns/
+├── AbstractFramework/
+└── BFInfinite/
+```
+
+When updating, replace both folders together and keep both addons enabled. Your settings are stored outside the addon folders and are not removed by replacing them.
+
+每个 BFInfinite 发布包都包含与之兼容的 AbstractFramework 版本。请将压缩包解压到 `World of Warcraft/_retail_/Interface/AddOns`，并确保 `AbstractFramework` 与 `BFInfinite` 是同级目录。更新时请同时替换两个文件夹，并保持两个插件均已启用。替换插件文件夹不会删除你的设置。
+
 ## Features | 功能
 
 - Built-in: Unit Frames, Nameplates, Action Bars  

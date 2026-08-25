@@ -21,11 +21,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read AbstractFramework lock
+        id: abstract_framework
+        shell: bash
+        run: >-
+          python3 ./scripts/check-af-integration.py
+          --export-github-output "$GITHUB_OUTPUT"
+
+      - name: Check out locked AbstractFramework
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.abstract_framework.outputs.repository }}
+          ref: ${{ steps.abstract_framework.outputs.revision }}
+          path: .dependencies/AbstractFramework
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Install Lua tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes lua-check lua5.1 luajit ripgrep
+          sudo apt-get install --yes lua-check lua5.1 luajit ripgrep subversion
 
       - name: Check Lua and policy
         shell: bash
@@ -42,3 +59,11 @@ jobs:
             changed=()
           fi
           bash ./scripts/verify.sh "${changed[@]}"
+
+      - name: Verify the dependency contract
+        run: >-
+          python3 ./scripts/check-af-integration.py
+          --af-root .dependencies/AbstractFramework
+
+      - name: Verify AbstractFramework source
+        run: bash ./.dependencies/AbstractFramework/scripts/verify.sh

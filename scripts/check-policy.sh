@@ -16,6 +16,7 @@ command -v rg >/dev/null 2>&1 || {
 
 rg -n \
     --glob '*.lua' \
+    --glob '!.dependencies/**' \
     --glob '!Libs/**' \
     --glob '!.unused/**' \
     '\bissecretvalue\b' \

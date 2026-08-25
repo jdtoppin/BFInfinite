@@ -38,6 +38,7 @@ while IFS= read -r -d '' file; do
     "$lua_compiler" -p "$file"
 done < <(
     find . -type f -name '*.lua' \
+        -not -path './.dependencies/*' \
         -not -path './.git/*' \
         -not -path './Libs/*' \
         -not -path './.unused/*' \
@@ -52,7 +53,11 @@ changed=()
 for file in "$@"; do
     case "$file" in
         *.lua)
-            if [[ -f "$file" && "$file" != Libs/* && "$file" != .unused/* ]]; then
+            if [[ -f "$file" \
+                && "$file" != .dependencies/* \
+                && "$file" != Libs/* \
+                && "$file" != .unused/* ]]
+            then
                 changed+=("$file")
             fi
             ;;
