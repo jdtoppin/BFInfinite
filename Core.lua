@@ -5,8 +5,7 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF r44 resolves fonts from the optional media addon and keeps a client-font
--- fallback when a saved font is unavailable.
+-- AF r44 includes a slim Latin Noto_AP and resolves optional full-font choices.
 local REQUIRED_AF_VERSION = 44
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
@@ -74,7 +73,7 @@ function eventHandler:ADDON_LOADED(arg)
         if type(BFIConfig.general.font) ~= "table" then
             BFIConfig.general.font = {
                 common = {
-                    font = "Noto_AP",
+                    font = LOCALE_enUS and "Noto_AP_Latin" or "Noto_AP",
                     overrideAF = true,
                     overrideBlizzard = true,
                     blizzardFontSizeDelta = 0,

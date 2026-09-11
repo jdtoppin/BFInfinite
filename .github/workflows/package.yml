@@ -69,7 +69,7 @@ jobs:
       - name: Install verification tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes lua-check lua5.1 luajit ripgrep subversion unzip
+          sudo apt-get install --yes lua-check lua5.1 luajit ripgrep subversion unzip python3-venv
 
       - name: Verify BFInfinite source
         run: bash ./scripts/verify.sh
@@ -81,6 +81,14 @@ jobs:
 
       - name: Verify AbstractFramework source
         run: bash ./.dependencies/AbstractFramework/scripts/verify.sh
+
+      - name: Verify slim font generation and metrics
+        run: |
+          cd .dependencies/AbstractFramework
+          python3 -m venv "$RUNNER_TEMP/af-font-tools"
+          "$RUNNER_TEMP/af-font-tools/bin/pip" install --disable-pip-version-check --no-deps -r .utils/requirements-fonts.txt
+          "$RUNNER_TEMP/af-font-tools/bin/python" scripts/subset-noto-ap.py --check
+          "$RUNNER_TEMP/af-font-tools/bin/python" tests/latin_font_subset_test.py
 
       - name: Build BFInfinite component
         uses: BigWigsMods/packager@6d50adb6e8517eefef63f4afb16a6518166a6b28 # v2.5.1

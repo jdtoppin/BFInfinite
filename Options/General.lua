@@ -225,7 +225,7 @@ local function CreateFontPane()
     local _BFI = AF.WrapTextInColor("BFI", "BFI")
     local _BFI_DEFAULT = AF.WrapTextInColor("Noto_AP", "BFI")
     local _BFI_COMBAT = AF.WrapTextInColor("Noto_Dolphin", "BFI")
-    local missingFontTip = L["Unavailable fonts use your client's default font. Your saved choice is kept and returns after its media addon is installed, enabled, and the UI is reloaded."]
+    local missingFontTip = L["On English clients, unavailable Noto_AP uses the included Noto_AP_Latin font. Other unavailable fonts use your client's default font. Your saved choice is kept and returns after its media addon is installed, enabled, and the UI is reloaded."]
     local mediaPackTip = L["Noto_AP, Noto_Dolphin, and Unifont are available in the optional AbstractFramework_Media addon."]
 
     fontPane = AF.CreateTitledPane(generalPanel, L["Fonts"], 180, 200)
@@ -247,6 +247,7 @@ local function CreateFontPane()
         L["Change the actual style of the %s font"]:format(_BFI),
         L["Select the %s font in other components' font settings to apply it universally"]:format(_BFI),
         " ",
+        L["Noto_AP_Latin is the included English/Latin base font. It preserves Noto_AP's English glyphs and spacing without CJK characters."],
         L["The %s and %s fonts mainly support English and Simplified Chinese"]:format(_BFI_DEFAULT, _BFI_COMBAT),
         mediaPackTip,
         L["Dolphin is the small Latin font included with AbstractFramework. Noto_Dolphin combines it with Noto CJK glyphs."],

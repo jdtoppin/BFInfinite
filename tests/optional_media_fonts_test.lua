@@ -17,15 +17,19 @@ local function findUpvalue(func, targetName)
 end
 
 local CLIENT_FONT = "Fonts\\ARHei.ttf"
-local MEDIA_ROOT = "Interface\\AddOns\\AbstractFramework_Media\\Fonts\\"
+local LATIN_FONT = "Interface\\AddOns\\AbstractFramework\\Media\\Fonts\\NotoSansCJKsc_AP_Latin.ttf"
+local MEDIA_ROOT = "Interface\\AddOns\\AbstractFramework_Media\\Media\\Fonts\\"
 local MEDIA_FONTS = {
     Noto_AP = MEDIA_ROOT .. "NotoSansCJKsc_AP.ttf",
     Noto_Dolphin = MEDIA_ROOT .. "NotoSansCJKsc_Dolphin.ttf",
     Unifont = MEDIA_ROOT .. "Unifont.otf",
 }
 
-local function loadSession(savedConfig, mediaInstalled)
-    local registeredFonts = {Dolphin = "Interface\\AddOns\\AbstractFramework\\Media\\Fonts\\Dolphin.ttf"}
+local function loadSession(savedConfig, mediaInstalled, englishClient)
+    local registeredFonts = {
+        Dolphin = "Interface\\AddOns\\AbstractFramework\\Media\\Fonts\\Dolphin.ttf",
+        Noto_AP_Latin = LATIN_FONT,
+    }
     if mediaInstalled then
         for name, path in pairs(MEDIA_FONTS) do
             registeredFonts[name] = path
@@ -72,6 +76,9 @@ local function loadSession(savedConfig, mediaInstalled)
         -- AF's own regression tests cover resolution. This consumer stub
         -- makes invalid raw LSM Fetch/SetDefault calls fail immediately.
         LSM_GetFont = function(name)
+            if englishClient and name == "Noto_AP" and not registeredFonts[name] then
+                return LATIN_FONT
+            end
             return registeredFonts[name] or CLIENT_FONT
         end,
         Debug = noop,
@@ -92,6 +99,7 @@ local function loadSession(savedConfig, mediaInstalled)
     local environment = {
         AbstractFramework = AF,
         BFIConfig = savedConfig,
+        LOCALE_enUS = englishClient == true,
         GameFontNormal = gameFont,
         GetCVar = function() return "1" end,
         GetCVarBool = function() return false end,
@@ -139,6 +147,15 @@ local fresh = loadSession(nil, false)
 assertMissing(fresh)
 assertEqual(fresh.config.general.font.common.font, "Noto_AP", "fresh preferred font is retained")
 
+for _, installed in ipairs({false, true}) do
+    local english = loadSession(nil, installed, true)
+    assertEqual(english.config.general.font.common.font, "Noto_AP_Latin", "English default is included slim font")
+    assertEqual(english.fonts.BFI, LATIN_FONT, "English BFI alias uses slim font")
+    assertEqual(english.baseFont, LATIN_FONT, "English settings use slim font")
+    assertEqual(english.environment.STANDARD_TEXT_FONT, LATIN_FONT, "English Blizzard text uses slim font")
+    assertEqual(english.defaultChanges[1], "Noto_AP_Latin", "English LSM default is available")
+end
+
 local saved = {general = {font = {
     common = {font = "Noto_AP", overrideAF = true, overrideBlizzard = true, blizzardFontSizeDelta = 0},
     combatText = {font = "Noto_Dolphin", override = true},
@@ -148,6 +165,15 @@ local absent = loadSession(saved, false)
 assertMissing(absent)
 assertEqual(absent.environment.DAMAGE_TEXT_FONT, CLIENT_FONT, "combat font fallback")
 assertEqual(absent.environment.UNIT_NAME_FONT, CLIENT_FONT, "name font fallback")
+
+for _, installed in ipairs({false, true, false}) do
+    local englishSaved = loadSession(saved, installed, true)
+    local expected = installed and MEDIA_FONTS.Noto_AP or LATIN_FONT
+    assertEqual(englishSaved.config.general.font.common.font, "Noto_AP", "English existing full-font preference retained")
+    assertEqual(englishSaved.fonts.BFI, expected, "English existing preference resolves across pack changes")
+    assertEqual(englishSaved.baseFont, expected, "English existing settings retain base font style")
+    assertEqual(englishSaved.environment.DAMAGE_TEXT_FONT, installed and MEDIA_FONTS.Noto_Dolphin or CLIENT_FONT, "other optional fonts keep their existing fallback")
+end
 
 for _, installed in ipairs({true, false, true}) do
     local session = loadSession(saved, installed)
@@ -217,6 +243,9 @@ local function loadFontOptions(session)
 end
 
 local absentDropdowns, absentPane = loadFontOptions(absent)
+local englishDropdowns = loadFontOptions(loadSession(nil, false, true))
+assertEqual(englishDropdowns[1].text, "Noto_AP_Latin", "English base font appears as available")
+assertEqual(englishDropdowns[1].selected.disabled, nil, "English base font is selectable without media pack")
 for index, name in ipairs({"Noto_AP", "Noto_Dolphin", "Unifont"}) do
     assertEqual(absentDropdowns[index].text, name .. " (unavailable)", "missing selection stays visible")
     assertEqual(absentDropdowns[index].selected.value, name, "missing selection value is preserved")
