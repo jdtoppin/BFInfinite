@@ -36,6 +36,19 @@ When updating, replace both folders together and keep both addons enabled. Your 
 
 每个 BFInfinite 发布包都包含与之兼容的 AbstractFramework 版本。请将压缩包解压到 `World of Warcraft/_retail_/Interface/AddOns`，并确保 `AbstractFramework` 与 `BFInfinite` 是同级目录。更新时请同时替换两个文件夹，并保持两个插件均已启用。替换插件文件夹不会删除你的设置。
 
+The large `Noto_AP`, `Noto_Dolphin`, and `Unifont` fonts are a separate optional
+download, `AbstractFramework_Media`. Install that folder alongside the two
+above to use those fonts. Without it, unavailable saved font choices use the
+game's native font and resume after the pack is installed and the UI reloaded.
+All translations and the small plain `Dolphin` font remain in the main package.
+See [the bundle guide](docs/release-bundle.md#optional-international-fonts) for
+downloads and upgrade instructions.
+
+体积较大的 `Noto_AP`、`Noto_Dolphin` 和 `Unifont` 字体由可选插件
+`AbstractFramework_Media` 单独提供。将其文件夹放在上述两个插件旁即可使用。
+未安装时，不可用的已保存字体会使用游戏原生字体代替；安装后重载界面即可恢复，
+无需重新设置。主包仍包含全部翻译和小型拉丁字体 `Dolphin`。
+
 ## Features | 功能
 
 - Built-in: Unit Frames, Nameplates, Action Bars  

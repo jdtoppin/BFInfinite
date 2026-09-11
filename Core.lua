@@ -5,9 +5,9 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF r43 adds the reusable keyboard/mouse/wheel binding capture used by the
--- Click Casting editor on top of r42's native aura color support.
-local REQUIRED_AF_VERSION = 43
+-- AF r44 resolves fonts from the optional media addon and keeps a client-font
+-- fallback when a saved font is unavailable.
+local REQUIRED_AF_VERSION = 44
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar
@@ -89,7 +89,7 @@ function eventHandler:ADDON_LOADED(arg)
                 },
             }
         end
-        AF.Libs.LSM:Register("font", "BFI", AF.Libs.LSM:Fetch("font", BFIConfig.general.font.common.font), 255)
+        AF.Libs.LSM:Register("font", "BFI", AF.LSM_GetFont(BFIConfig.general.font.common.font), 255)
         AF.Fire("BFI_UpdateFont")
 
         --------------------------------------------------

@@ -200,17 +200,42 @@ end
 ---------------------------------------------------------------------
 local fontPane
 
+local function GetFontItems(selectedFont, excludeBFI)
+    local items = AF.LSM_GetFontDropdownItems()
+    local found
+    for index = #items, 1, -1 do
+        local item = items[index]
+        if excludeBFI and item.value == "BFI" then
+            table.remove(items, index)
+        elseif item.value == selectedFont then
+            found = true
+        end
+    end
+    if not found and type(selectedFont) == "string" and selectedFont ~= "" then
+        table.insert(items, 1, {
+            text = L["%s (unavailable)"]:format(selectedFont),
+            value = selectedFont,
+            disabled = true,
+        })
+    end
+    return items
+end
+
 local function CreateFontPane()
     local _BFI = AF.WrapTextInColor("BFI", "BFI")
     local _BFI_DEFAULT = AF.WrapTextInColor("Noto_AP", "BFI")
     local _BFI_COMBAT = AF.WrapTextInColor("Noto_Dolphin", "BFI")
+    local missingFontTip = L["Unavailable fonts use your client's default font. Your saved choice is kept and returns after its media addon is installed, enabled, and the UI is reloaded."]
+    local mediaPackTip = L["Noto_AP, Noto_Dolphin, and Unifont are available in the optional AbstractFramework_Media addon."]
 
     fontPane = AF.CreateTitledPane(generalPanel, L["Fonts"], 180, 200)
     generalPanel.fontPane = fontPane
     AF.SetPoint(fontPane, "TOPLEFT", generalPanel.bfiPane, "BOTTOMLEFT", 0, -30)
     fontPane:SetTips(
         L["Fonts"],
-        L["BFI Font controls BFInfinite text configured to use \"BFI\". Apply BFI Font to Addon Settings also applies it to menus and settings built with AbstractFramework, including Cell. Override Blizzard Fonts changes most Blizzard interface text and enables its font-size adjustment. Combat text and player names are controlled separately below. Font changes require a UI reload."]
+        L["BFI Font controls BFInfinite text configured to use \"BFI\". Apply BFI Font to Addon Settings also applies it to menus and settings built with AbstractFramework, including Cell. Override Blizzard Fonts changes most Blizzard interface text and enables its font-size adjustment. Combat text and player names are controlled separately below. Font changes require a UI reload."],
+        mediaPackTip,
+        missingFontTip
     )
 
     local font = AF.CreateDropdown(fontPane, 150)
@@ -223,20 +248,13 @@ local function CreateFontPane()
         L["Select the %s font in other components' font settings to apply it universally"]:format(_BFI),
         " ",
         L["The %s and %s fonts mainly support English and Simplified Chinese"]:format(_BFI_DEFAULT, _BFI_COMBAT),
+        mediaPackTip,
+        L["Dolphin is the small Latin font included with AbstractFramework. Noto_Dolphin combines it with Noto CJK glyphs."],
+        missingFontTip,
         " ",
         AF.WrapTextInColor("Noto_AP: NotoSansCJKsc + Accidental Presidency", "gray"),
         AF.WrapTextInColor("Noto_Dolphin: NotoSansCJKsc + Dolphin", "gray")
-)
-
-    local items = AF.LSM_GetFontDropdownItems()
-    for k, v in ipairs(items) do
-        if v.text == "BFI" then
-            table.remove(items, k)
-            break
-        end
-    end
-
-    font:SetItems(items)
+    )
     font:SetOnSelect(function(value)
         BFIConfig.general.font.common.font = value
         ShowReloadPopup()
@@ -267,7 +285,7 @@ local function CreateFontPane()
 
     local overrideCombatTextFont = AF.CreateDropdown(fontPane, 150)
     AF.SetPoint(overrideCombatTextFont, "TOPLEFT", blizzardFontSizeDelta, "BOTTOMLEFT", 0, -50)
-    overrideCombatTextFont:SetItems(AF.LSM_GetFontDropdownItems())
+    overrideCombatTextFont:SetTooltip(mediaPackTip, missingFontTip)
     overrideCombatTextFont:SetOnSelect(function(value)
         BFIConfig.general.font.combatText.font = value
     end)
@@ -282,7 +300,7 @@ local function CreateFontPane()
 
     local overrideNameTextFont = AF.CreateDropdown(fontPane, 150)
     AF.SetPoint(overrideNameTextFont, "TOPLEFT", overrideCombatTextFont, "BOTTOMLEFT", 0, -40)
-    overrideNameTextFont:SetItems(AF.LSM_GetFontDropdownItems())
+    overrideNameTextFont:SetTooltip(mediaPackTip, missingFontTip)
     overrideNameTextFont:SetOnSelect(function(value)
         BFIConfig.general.font.nameText.font = value
     end)
@@ -296,6 +314,7 @@ local function CreateFontPane()
     end)
 
     function fontPane.Load()
+        font:SetItems(GetFontItems(BFIConfig.general.font.common.font, true))
         font:SetSelectedValue(BFIConfig.general.font.common.font)
         overrideAF:SetChecked(BFIConfig.general.font.common.overrideAF)
         overrideBlizzard:SetChecked(BFIConfig.general.font.common.overrideBlizzard)
@@ -303,10 +322,12 @@ local function CreateFontPane()
         blizzardFontSizeDelta:SetValue(BFIConfig.general.font.common.blizzardFontSizeDelta)
 
         overrideCombatText:SetChecked(BFIConfig.general.font.combatText.override)
+        overrideCombatTextFont:SetItems(GetFontItems(BFIConfig.general.font.combatText.font))
         overrideCombatTextFont:SetSelectedValue(BFIConfig.general.font.combatText.font)
         overrideCombatTextFont:SetEnabled(BFIConfig.general.font.combatText.override)
 
         overrideNameText:SetChecked(BFIConfig.general.font.nameText.override)
+        overrideNameTextFont:SetItems(GetFontItems(BFIConfig.general.font.nameText.font))
         overrideNameTextFont:SetSelectedValue(BFIConfig.general.font.nameText.font)
         overrideNameTextFont:SetEnabled(BFIConfig.general.font.nameText.override)
     end

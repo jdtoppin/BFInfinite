@@ -1,4 +1,8 @@
 select(2, ...).L = setmetatable({
+    ["%s (unavailable)"] = "%s (unavailable)",
+    ["Unavailable fonts use your client's default font. Your saved choice is kept and returns after its media addon is installed, enabled, and the UI is reloaded."] = "Unavailable fonts use your client's default font. Your saved choice is kept and returns after its media addon is installed, enabled, and the UI is reloaded.",
+    ["Noto_AP, Noto_Dolphin, and Unifont are available in the optional AbstractFramework_Media addon."] = "Noto_AP, Noto_Dolphin, and Unifont are available in the optional AbstractFramework_Media addon.",
+    ["Dolphin is the small Latin font included with AbstractFramework. Noto_Dolphin combines it with Noto CJK glyphs."] = "Dolphin is the small Latin font included with AbstractFramework. Noto_Dolphin combines it with Noto CJK glyphs.",
     ["Click Casting"] = "Click Casting",
     ["Enable"] = "Enable",
     ["Click Casting bindings apply to every BFI unit frame. They use the active BFI profile; class-specific binding sets remain separate inside profiles shared by multiple classes. Drop a spell, macro, or item onto the Value field to add its ID."] = "Click Casting bindings apply to every BFI unit frame. They use the active BFI profile; class-specific binding sets remain separate inside profiles shared by multiple classes. Drop a spell, macro, or item onto the Value field to add its ID.",

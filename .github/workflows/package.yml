@@ -21,6 +21,7 @@ jobs:
     outputs:
       artifact_url: ${{ steps.package_artifact.outputs.artifact-url }}
       artifact_digest: ${{ steps.package_artifact.outputs.artifact-digest }}
+      media_artifact_url: ${{ steps.media_artifact.outputs.artifact-url }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -131,6 +132,24 @@ jobs:
         run: >-
           bash ./.dependencies/AbstractFramework/scripts/check-package.sh "$PACKAGE"
 
+      - name: Build optional international font pack
+        shell: bash
+        env:
+          AF_REVISION: ${{ steps.abstract_framework.outputs.revision }}
+        run: |
+          python3 ./.dependencies/AbstractFramework/scripts/build-media-package.py \
+            --source-commit "$AF_REVISION" \
+            --output "$GITHUB_WORKSPACE/.release/media/AbstractFramework_Media-${AF_REVISION:0:7}.zip"
+
+      - name: Upload optional font pack
+        id: media_artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: AbstractFramework-Media-${{ github.run_id }}
+          path: .release/media/*
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Generate exact release notes
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/r')
         shell: bash
@@ -146,6 +165,7 @@ jobs:
             echo "### Bundled dependency"
             echo
             echo "- AbstractFramework $AF_VERSION at commit $AF_REVISION"
+            echo "- Optional Noto_AP, Noto_Dolphin, and Unifont fonts: install AbstractFramework_Media from the matching AbstractFramework release."
           } >> .release/RELEASE_NOTES.md
 
       - name: Assemble installable bundle
@@ -251,6 +271,7 @@ jobs:
           PACKAGE_RESULT: ${{ needs.package.result }}
           ARTIFACT_URL: ${{ needs.package.outputs.artifact_url }}
           ARTIFACT_DIGEST: ${{ needs.package.outputs.artifact_digest }}
+          MEDIA_ARTIFACT_URL: ${{ needs.package.outputs.media_artifact_url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           marker='<!-- bfinfinite-pr-package -->'
@@ -273,6 +294,9 @@ jobs:
               echo "Latest validated package for PR head [\`$short_sha\`]($commit_url):"
               echo
               echo "- [Download the BFInfinite + AbstractFramework package, manifest, and checksum]($ARTIFACT_URL)"
+              if [[ -n "$MEDIA_ARTIFACT_URL" ]]; then
+                echo "- [Download the optional Noto/Unifont media pack]($MEDIA_ARTIFACT_URL)"
+              fi
               echo "- [View package workflow run]($RUN_URL)"
               echo "- Artifact digest: \`$ARTIFACT_DIGEST\`"
               echo
