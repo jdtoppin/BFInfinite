@@ -5,9 +5,8 @@ local F = BFI.funcs
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
--- AF r43 adds the reusable keyboard/mouse/wheel binding capture used by the
--- Click Casting editor on top of r42's native aura color support.
-local REQUIRED_AF_VERSION = 43
+-- AF r44 includes a slim Latin Noto_AP and resolves optional full-font choices.
+local REQUIRED_AF_VERSION = 44
 BFI.requiredAFVersion = REQUIRED_AF_VERSION
 
 local GetCVar = GetCVar
@@ -74,7 +73,7 @@ function eventHandler:ADDON_LOADED(arg)
         if type(BFIConfig.general.font) ~= "table" then
             BFIConfig.general.font = {
                 common = {
-                    font = "Noto_AP",
+                    font = LOCALE_enUS and "Noto_AP_Latin" or "Noto_AP",
                     overrideAF = true,
                     overrideBlizzard = true,
                     blizzardFontSizeDelta = 0,
@@ -89,7 +88,7 @@ function eventHandler:ADDON_LOADED(arg)
                 },
             }
         end
-        AF.Libs.LSM:Register("font", "BFI", AF.Libs.LSM:Fetch("font", BFIConfig.general.font.common.font), 255)
+        AF.Libs.LSM:Register("font", "BFI", AF.LSM_GetFont(BFIConfig.general.font.common.font), 255)
         AF.Fire("BFI_UpdateFont")
 
         --------------------------------------------------

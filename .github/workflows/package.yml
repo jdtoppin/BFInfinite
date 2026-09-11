@@ -21,6 +21,7 @@ jobs:
     outputs:
       artifact_url: ${{ steps.package_artifact.outputs.artifact-url }}
       artifact_digest: ${{ steps.package_artifact.outputs.artifact-digest }}
+      media_artifact_url: ${{ steps.media_artifact.outputs.artifact-url }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,35 +50,195 @@ jobs:
             exit 1
           fi
 
+      - name: Read AbstractFramework lock
+        id: abstract_framework
+        shell: bash
+        run: >-
+          python3 ./scripts/check-af-integration.py
+          --export-github-output "$GITHUB_OUTPUT"
+
+      - name: Check out locked AbstractFramework
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.abstract_framework.outputs.repository }}
+          ref: ${{ steps.abstract_framework.outputs.revision }}
+          path: .dependencies/AbstractFramework
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Install verification tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes lua-check lua5.1 luajit ripgrep unzip
+          sudo apt-get install --yes lua-check lua5.1 luajit ripgrep subversion unzip python3-venv
 
-      - name: Verify source
+      - name: Verify BFInfinite source
         run: bash ./scripts/verify.sh
 
-      - name: Build package without publishing
+      - name: Verify the dependency contract
+        run: >-
+          python3 ./scripts/check-af-integration.py
+          --af-root .dependencies/AbstractFramework
+
+      - name: Verify AbstractFramework source
+        run: bash ./.dependencies/AbstractFramework/scripts/verify.sh
+
+      - name: Verify slim font generation and metrics
+        run: |
+          cd .dependencies/AbstractFramework
+          python3 -m venv "$RUNNER_TEMP/af-font-tools"
+          "$RUNNER_TEMP/af-font-tools/bin/pip" install --disable-pip-version-check --no-deps -r .utils/requirements-fonts.txt
+          "$RUNNER_TEMP/af-font-tools/bin/python" scripts/subset-noto-ap.py --check
+          "$RUNNER_TEMP/af-font-tools/bin/python" tests/latin_font_subset_test.py
+
+      - name: Build BFInfinite component
         uses: BigWigsMods/packager@6d50adb6e8517eefef63f4afb16a6518166a6b28 # v2.5.1
         with:
-          args: -d
+          args: >-
+            -d -g retail
+            -r ${{ github.workspace }}/.release/components/bfinfinite
+
+      - name: Locate BFInfinite component
+        id: bfinfinite_component
+        shell: bash
+        run: |
+          shopt -s nullglob
+          packages=(.release/components/bfinfinite/*.zip)
+          if (( ${#packages[@]} != 1 )); then
+            echo "Expected one BFInfinite component package, found ${#packages[@]}." >&2
+            exit 1
+          fi
+          echo "archive=$(realpath "${packages[0]}")" >> "$GITHUB_OUTPUT"
+
+      - name: Verify BFInfinite component
+        env:
+          PACKAGE: ${{ steps.bfinfinite_component.outputs.archive }}
+        run: bash ./scripts/check-package.sh "$PACKAGE"
+
+      - name: Build AbstractFramework component
+        uses: BigWigsMods/packager@6d50adb6e8517eefef63f4afb16a6518166a6b28 # v2.5.1
+        with:
+          args: >-
+            -d -g retail
+            -t .dependencies/AbstractFramework
+            -r ${{ github.workspace }}/.release/components/abstract-framework
+
+      - name: Locate AbstractFramework component
+        id: abstract_framework_component
+        shell: bash
+        run: |
+          shopt -s nullglob
+          packages=(.release/components/abstract-framework/*.zip)
+          if (( ${#packages[@]} != 1 )); then
+            echo "Expected one AbstractFramework component package, found ${#packages[@]}." >&2
+            exit 1
+          fi
+          echo "archive=$(realpath "${packages[0]}")" >> "$GITHUB_OUTPUT"
+
+      - name: Verify AbstractFramework component
+        env:
+          PACKAGE: ${{ steps.abstract_framework_component.outputs.archive }}
+        run: >-
+          bash ./.dependencies/AbstractFramework/scripts/check-package.sh "$PACKAGE"
+
+      - name: Build optional international font pack
+        shell: bash
+        env:
+          AF_REVISION: ${{ steps.abstract_framework.outputs.revision }}
+        run: |
+          python3 ./.dependencies/AbstractFramework/scripts/build-media-package.py \
+            --source-commit "$AF_REVISION" \
+            --output "$GITHUB_WORKSPACE/.release/media/AbstractFramework_Media-${AF_REVISION:0:7}.zip"
+
+      - name: Upload optional font pack
+        id: media_artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: AbstractFramework-Media-${{ github.run_id }}
+          path: .release/media/*
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Generate exact release notes
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/r')
         shell: bash
-        run: >-
-          lua5.1 ./scripts/generate-changelog.lua
-          --version "$GITHUB_REF_NAME"
-          --release-notes .release/RELEASE_NOTES.md
+        env:
+          AF_REVISION: ${{ steps.abstract_framework.outputs.revision }}
+          AF_VERSION: ${{ steps.abstract_framework.outputs.version }}
+        run: |
+          lua5.1 ./scripts/generate-changelog.lua \
+            --version "$GITHUB_REF_NAME" \
+            --release-notes .release/RELEASE_NOTES.md
+          {
+            echo
+            echo "### Bundled dependency"
+            echo
+            echo "- AbstractFramework $AF_VERSION at commit $AF_REVISION"
+            echo "- Optional Noto_AP, Noto_Dolphin, and Unifont fonts: install AbstractFramework_Media from the matching AbstractFramework release."
+          } >> .release/RELEASE_NOTES.md
 
-      - name: Verify package
-        run: bash ./scripts/check-package.sh
+      - name: Assemble installable bundle
+        id: bundle
+        shell: bash
+        env:
+          AF_PACKAGE: ${{ steps.abstract_framework_component.outputs.archive }}
+          AF_REPOSITORY: ${{ steps.abstract_framework.outputs.repository }}
+          AF_REVISION: ${{ steps.abstract_framework.outputs.revision }}
+          AF_VERSION: ${{ steps.abstract_framework.outputs.version }}
+          BFI_PACKAGE: ${{ steps.bfinfinite_component.outputs.archive }}
+        run: |
+          bfi_version="$(sed -n 's/^## Version:[[:space:]]*//p' BFInfinite.toc)"
+          if [[ ! "$bfi_version" =~ ^r[1-9][0-9]*(-(alpha|beta))?$ ]]; then
+            echo "Unsupported BFInfinite TOC version: $bfi_version" >&2
+            exit 1
+          fi
+          bundle_version="$bfi_version"
+          if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
+            bundle_version="$bfi_version-${GITHUB_SHA:0:7}"
+          fi
+          bundle="$GITHUB_WORKSPACE/.release/BFInfinite-$bundle_version.zip"
+          provenance="$GITHUB_WORKSPACE/.release/BUNDLE-MANIFEST.json"
+          python3 ./scripts/composite-package.py assemble \
+            --bfinfinite-package "$BFI_PACKAGE" \
+            --abstract-framework-package "$AF_PACKAGE" \
+            --af-repository "$AF_REPOSITORY" \
+            --af-sha "$AF_REVISION" \
+            --af-version "$AF_VERSION" \
+            --output "$bundle" \
+            --provenance "$provenance"
+          echo "archive=$bundle" >> "$GITHUB_OUTPUT"
+          echo "provenance=$provenance" >> "$GITHUB_OUTPUT"
+
+      - name: Verify installable bundle
+        shell: bash
+        env:
+          AF_PACKAGE: ${{ steps.abstract_framework_component.outputs.archive }}
+          AF_REPOSITORY: ${{ steps.abstract_framework.outputs.repository }}
+          AF_REVISION: ${{ steps.abstract_framework.outputs.revision }}
+          AF_VERSION: ${{ steps.abstract_framework.outputs.version }}
+          BFI_PACKAGE: ${{ steps.bfinfinite_component.outputs.archive }}
+          BUNDLE: ${{ steps.bundle.outputs.archive }}
+          PROVENANCE: ${{ steps.bundle.outputs.provenance }}
+        run: |
+          python3 ./scripts/composite-package.py check \
+            --bfinfinite-package "$BFI_PACKAGE" \
+            --abstract-framework-package "$AF_PACKAGE" \
+            --af-repository "$AF_REPOSITORY" \
+            --af-sha "$AF_REVISION" \
+            --af-version "$AF_VERSION" \
+            --archive "$BUNDLE" \
+            --provenance "$PROVENANCE"
 
       - name: Create checksum
         shell: bash
+        env:
+          BUNDLE: ${{ steps.bundle.outputs.archive }}
+          PROVENANCE: ${{ steps.bundle.outputs.provenance }}
         run: |
           cd .release
-          sha256sum -- *.zip > SHA256SUMS
+          sha256sum -- \
+            "$(basename "$BUNDLE")" \
+            "$(basename "$PROVENANCE")" \
+            > SHA256SUMS
 
       - name: Upload package artifact
         id: package_artifact
@@ -85,7 +246,8 @@ jobs:
         with:
           name: BFInfinite-${{ github.run_id }}
           path: |
-            .release/*.zip
+            .release/BFInfinite-*.zip
+            .release/BUNDLE-MANIFEST.json
             .release/SHA256SUMS
             .release/RELEASE_NOTES.md
           if-no-files-found: error
@@ -117,6 +279,7 @@ jobs:
           PACKAGE_RESULT: ${{ needs.package.result }}
           ARTIFACT_URL: ${{ needs.package.outputs.artifact_url }}
           ARTIFACT_DIGEST: ${{ needs.package.outputs.artifact_digest }}
+          MEDIA_ARTIFACT_URL: ${{ needs.package.outputs.media_artifact_url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           marker='<!-- bfinfinite-pr-package -->'
@@ -138,7 +301,10 @@ jobs:
               echo
               echo "Latest validated package for PR head [\`$short_sha\`]($commit_url):"
               echo
-              echo "- [Download BFInfinite package and checksum]($ARTIFACT_URL)"
+              echo "- [Download the BFInfinite + AbstractFramework package, manifest, and checksum]($ARTIFACT_URL)"
+              if [[ -n "$MEDIA_ARTIFACT_URL" ]]; then
+                echo "- [Download the optional Noto/Unifont media pack]($MEDIA_ARTIFACT_URL)"
+              fi
               echo "- [View package workflow run]($RUN_URL)"
               echo "- Artifact digest: \`$ARTIFACT_DIGEST\`"
               echo
@@ -197,7 +363,7 @@ jobs:
             exit 1
           fi
           gh release create "$GITHUB_REF_NAME" \
-            dist/*.zip dist/SHA256SUMS \
+            dist/*.zip dist/SHA256SUMS dist/BUNDLE-MANIFEST.json \
             --verify-tag \
             --title "$GITHUB_REF_NAME" \
             --notes-file dist/RELEASE_NOTES.md \

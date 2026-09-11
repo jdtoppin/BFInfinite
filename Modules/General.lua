@@ -1,6 +1,5 @@
 ---@class BFI
 local BFI = select(2, ...)
-local L = BFI.L
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
@@ -399,7 +398,9 @@ local function UpdateFont()
         end
 
         -- update default LSM font
-        AF.Libs.LSM:SetDefault("font", commonFont)
+        if AF.Libs.LSM:IsValid("font", commonFont) then
+            AF.Libs.LSM:SetDefault("font", commonFont)
+        end
     end
 
     if config.combatText.override then
