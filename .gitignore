@@ -1,4 +1,5 @@
 # ignored
+.dependencies/
 .vscode/
 .release/*
 .utils/*.csv

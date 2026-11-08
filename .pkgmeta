@@ -2,6 +2,7 @@ package-as: BFInfinite
 enable-nolib-creation: no
 
 ignore:
+  - .dependencies
   - .github
   - .gitignore
   - .kanban
