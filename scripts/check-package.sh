@@ -74,7 +74,7 @@ while IFS= read -r entry; do
     esac
     case "$entry" in
         BFInfinite/BFInfinite.toc) has_toc=true ;;
-        BFInfinite/.*|BFInfinite/tests|BFInfinite/tests/*|BFInfinite/scripts|BFInfinite/scripts/*|BFInfinite/AGENTS.md|BFInfinite/CONTRIBUTING.md|BFInfinite/Modules/Blizzard/Style/WorldMapFrame_Test.lua)
+        BFInfinite/.dependencies|BFInfinite/.dependencies/*|BFInfinite/.*|BFInfinite/tests|BFInfinite/tests/*|BFInfinite/scripts|BFInfinite/scripts/*|BFInfinite/AGENTS.md|BFInfinite/CONTRIBUTING.md|BFInfinite/Modules/Blizzard/Style/WorldMapFrame_Test.lua)
             echo "Developer-only file is present in the package: $entry" >&2
             failed=true
             ;;

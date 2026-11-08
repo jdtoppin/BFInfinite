@@ -65,7 +65,7 @@ if not toc.is_file():
 else:
     for xml in sorted(root.rglob("*.xml")):
         relative = xml.relative_to(root)
-        if any(part in {".git", ".unused"} for part in relative.parts):
+        if any(part in {".dependencies", ".git", ".unused"} for part in relative.parts):
             continue
         try:
             ET.parse(xml)

@@ -6,6 +6,7 @@
 ## SavedVariables: BFIConfig, BFIProfile, BFIPlayer, BFICVarBackup, BFIMythicPlusHistory
 ## SavedVariablesPerCharacter: BFIGuild
 ## Dependencies: AbstractFramework
+## OptionalDeps: AbstractFramework_Media
 # AddonCompartmentFunc: BFInfinite_OnAddonCompartmentClick
 ## IconTexture: Interface\AddOns\BFInfinite\Media\Icons\BFI_64
 
