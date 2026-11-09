@@ -9,9 +9,10 @@ local InCombatLockdown = InCombatLockdown
 local CreateFrame = CreateFrame
 local ClearOverrideBindings = ClearOverrideBindings
 
--- Contract pin: Retail 12.1.0.68914, Blizzard UI source
--- d3915c78aba77a7a9be76acbfa35c674bbb6abe9. SecureUnitButton_OnClick
--- gives native Spell/Macro/PetAction click bindings priority and suppresses
+-- Contract pin: Retail 12.1.5.70783, Gethe/wow-ui-source
+-- 297d7aaaa736f346b3e036f38ee088eaf7f8c07f,
+-- Blizzard_FrameXML/SecureTemplates.lua. SecureUnitButton_OnClick gives
+-- native Spell/Macro/PetAction click bindings priority and suppresses
 -- target/menu attributes when no native interaction exists. Enabled
 -- target/menu chords therefore delegate through a secure action proxy.
 -- This intentionally favors a working local menu when Blizzard's interaction
