@@ -4,7 +4,7 @@ local UF = BFI.modules.UnitFrames
 ---@type AbstractFramework
 local AF = _G.AbstractFramework
 
-local FormatNumber = AF.FormatNumber
+local FormatNumber = AF.FormatSecretNumber
 
 ---------------------------------------------------------------------
 -- event
@@ -63,9 +63,9 @@ local function IncDmgHealText_LoadConfig(self, config)
 
     self.GetNumeric = numeric[config.format.numeric]
     if config.format.useAsianUnits and AF.isAsian then
-        FormatNumber = AF.FormatNumber_Asian
+        FormatNumber = AF.FormatSecretNumber_Asian
     else
-        FormatNumber = AF.FormatNumber
+        FormatNumber = AF.FormatSecretNumber
     end
 
     self.color = config.color
