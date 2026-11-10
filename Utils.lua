@@ -15,6 +15,31 @@ function F.GetCVarNumber(name)
 end
 
 ---------------------------------------------------------------------
+-- ui scale
+---------------------------------------------------------------------
+local BFI_REFERENCE_UI_WIDTH = 1920
+local BFI_REFERENCE_UI_HEIGHT = 1080
+local BFI_MIN_AUTO_UI_SCALE = 0.63
+
+function F.GetAutoUIScale()
+    local physicalWidth, physicalHeight = GetPhysicalScreenSize()
+    local pixelFactor = AF.GetPixelFactor()
+    local referenceMultiplier = math.min(
+        physicalWidth / BFI_REFERENCE_UI_WIDTH,
+        physicalHeight / BFI_REFERENCE_UI_HEIGHT
+    )
+
+    -- Fit BFI's 1920x1080 reference canvas by the limiting dimension. Retain
+    -- a comfortable scale on narrow HiDPI displays and one UI unit per
+    -- physical pixel on genuinely low-resolution displays.
+    local scale = math.max(
+        pixelFactor * math.max(referenceMultiplier, 1),
+        BFI_MIN_AUTO_UI_SCALE
+    )
+    return AF.Clamp(AF.RoundToDecimal(scale, 2), 0.5, 1.5)
+end
+
+---------------------------------------------------------------------
 -- module
 ---------------------------------------------------------------------
 local moduleNames = {

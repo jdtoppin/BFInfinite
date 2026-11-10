@@ -87,7 +87,7 @@ local function CreateBFIPane()
     AF.SetPoint(recommendedScaleButton, "BOTTOMRIGHT", scaleSlider, "TOPRIGHT", 0, 2)
     recommendedScaleButton:SetTooltip(L["Auto Scale"])
     recommendedScaleButton:SetOnClick(function()
-        local bestScale = AF.GetBestScale()
+        local bestScale = F.GetAutoUIScale()
         if BFIConfig.general.scale[BFI.vars.resolution] == bestScale then return end
         BFIConfig.general.scale[BFI.vars.resolution] = bestScale
         scaleSlider:SetValue(bestScale)
