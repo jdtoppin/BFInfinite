@@ -2098,6 +2098,11 @@ end
 -- The generic drag/drop coverage exercises both insertion directions using a
 -- dedicated upward chain; default placement is asserted separately above.
 SeedUpwardDockingScenario()
+assertEqual(
+    DM.config.dockToObjectiveTracker,
+    true,
+    "tracker lane begins enabled before a manual meter arrangement"
+)
 
 first.mouseOver = true
 first.centerY = 300
@@ -2235,6 +2240,11 @@ assertEqual(
     "free move detaches from another meter"
 )
 assertEqual(
+    Renderer.IsObjectiveTrackerLaneEnabled(),
+    false,
+    "a custom meter arrangement explicitly opts out of tracker fitting"
+)
+assertEqual(
     DM.config.windowAnchors[3].point,
     "BOTTOMLEFT",
     "free move stores a screen anchor"
@@ -2314,6 +2324,67 @@ assertPoint(
     0,
     -4,
     "reset restores vertical stack"
+)
+
+assertEqual(
+    Renderer.SetObjectiveTrackerDocking(false),
+    true,
+    "tracker docking toggle restores the independent stack"
+)
+assertEqual(
+    DM.config.dockToObjectiveTracker,
+    false,
+    "tracker docking toggle persists its opt-out"
+)
+assertPoint(
+    first,
+    1,
+    "BOTTOMRIGHT",
+    uiParent,
+    "BOTTOMRIGHT",
+    -4,
+    4,
+    "tracker docking opt-out uses the bottom-right root"
+)
+assertPoint(
+    second,
+    1,
+    "BOTTOMRIGHT",
+    first,
+    "TOPRIGHT",
+    0,
+    4,
+    "tracker docking opt-out stacks upward"
+)
+assertEqual(
+    first.clamped,
+    true,
+    "independent stack returns to normal screen clamping"
+)
+assertEqual(
+    first.runtimeConstrained,
+    false,
+    "independent stack restores saved meter dimensions"
+)
+assertEqual(
+    Renderer.SetObjectiveTrackerDocking(true),
+    true,
+    "tracker docking toggle restores the standard stack"
+)
+assertEqual(
+    DM.config.dockToObjectiveTracker,
+    true,
+    "tracker docking toggle persists its standard stack"
+)
+assertPoint(
+    first,
+    1,
+    "TOPRIGHT",
+    state.objectiveTrackerDockFrame,
+    "BOTTOMRIGHT",
+    0,
+    -8,
+    "tracker docking toggle reattaches the stack to the tracker lane"
 )
 
 SeedUpwardDockingScenario()
@@ -3025,6 +3096,22 @@ local function RunObjectiveTrackerLaneFitTests()
     fitDM.config.windowHeights[3] = 104
 
     assertEqual(
+        fitRenderer.SetObjectiveTrackerDocking(false),
+        true,
+        "fresh meter stack can opt out before it is created"
+    )
+    assertEqual(
+        fitRenderer.SetObjectiveTrackerDocking(true),
+        true,
+        "docking toggle creates the canonical tracker stack"
+    )
+    assertEqual(
+        fitDM.config.dockToObjectiveTracker,
+        true,
+        "docking toggle enables lane fitting"
+    )
+
+    assertEqual(
         fitRenderer.SetEnabled(true),
         true,
         "tracker-lane renderer enables"
@@ -3041,6 +3128,11 @@ local function RunObjectiveTrackerLaneFitTests()
     end
     assertEqual(type(editModeEventFrame), "table",
         "tracker-lane renderer listens for native Edit Mode saves")
+    assertEqual(
+        type(fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged),
+        "function",
+        "tracker-lane renderer listens for live dock-frame changes"
+    )
     assertEqual(firstWindow.visibleRowCount, 3,
         "constrained first meter keeps three rows")
     assertEqual(secondWindow.visibleRowCount, 3,
@@ -3065,21 +3157,21 @@ local function RunObjectiveTrackerLaneFitTests()
         "runtime fitting preserves the second saved height")
 
     dockFrame.bottom = 400
-    editModeEventFrame:RunScript("OnEvent", "EDIT_MODE_LAYOUTS_UPDATED")
+    fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
     assertEqual(firstWindow.visibleRowCount, 5,
-        "native height change restores first rows")
+        "live dock-frame growth restores first rows")
     assertEqual(secondWindow.visibleRowCount, 4,
-        "native height change restores stacked rows")
+        "live dock-frame growth restores stacked rows")
     assertEqual(firstWindow.height, 124,
-        "native height change restores saved first height")
+        "live dock-frame growth restores saved first height")
     assertEqual(secondWindow.height, 104,
-        "native height change restores saved second height")
+        "live dock-frame growth restores saved second height")
     assertEqual(firstWindow.resizable, true,
         "restored saved height can be resized")
     local unchangedSizeCount = firstWindow.sizeChangeCount
-    editModeEventFrame:RunScript("OnEvent", "EDIT_MODE_LAYOUTS_UPDATED")
+    fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()
     assertEqual(firstWindow.sizeChangeCount, unchangedSizeCount,
-        "unchanged native height does not reflow the meters")
+        "unchanged dock frame does not reflow the meters")
 
     dockFrame.bottom = 80
     fitState.callbacks.BFI_ObjectiveTrackerDockFrameChanged()

@@ -141,13 +141,13 @@ local function createHarness()
         controls = {},
         dataAvailable = false,
         deferredCallbacks = {},
+        dockCalls = {},
         fires = {},
         fontStrings = {},
         namedFrames = {},
         nativeReset = true,
         panes = {},
         repointed = {},
-        resetPositionCalls = 0,
         scrollFrames = {},
     }
     local root = newWidget(state, "root")
@@ -221,6 +221,15 @@ local function createHarness()
         widget.points[#widget.points + 1] = {...}
     end
 
+    function AF.SetTooltip(widget, anchor, x, y, ...)
+        widget.tooltip = {
+            anchor = anchor,
+            arguments = {...},
+            x = x,
+            y = y,
+        }
+    end
+
     function AF.RePoint(widget)
         state.repointed[#state.repointed + 1] = widget
     end
@@ -250,6 +259,7 @@ local function createHarness()
         barAlpha = 0.66,
         barHeight = 19,
         classColor = true,
+        dockToObjectiveTracker = false,
         enabled = false,
         headerHeight = 25,
         headerTextSize = 12,
@@ -317,8 +327,12 @@ local function createHarness()
             end,
         },
         Renderer = {
-            ResetPosition = function()
-                state.resetPositionCalls = state.resetPositionCalls + 1
+            SetObjectiveTrackerDocking = function(enabled)
+                config.dockToObjectiveTracker = enabled
+                state.dockCalls[#state.dockCalls + 1] = enabled
+            end,
+            IsObjectiveTrackerLaneEnabled = function()
+                return config.dockToObjectiveTracker
             end,
         },
     }
@@ -422,19 +436,40 @@ assertEqual(meters.points[1][2], general, "Meters pane anchor parent")
 assertEqual(meters.points[1][3], "BOTTOMLEFT", "Meters pane anchor edge")
 assertEqual(meters.points[1][5], -12, "compact section gap")
 
-local placeMeters =
-    state.controls["Place Meters Below Objective Tracker"]
-assertTrue(placeMeters ~= nil, "tracker-safe placement action")
-placeMeters.onClick()
+local dockMeters = state.controls["Fit Meters Below Objective Tracker"]
+assertTrue(dockMeters ~= nil, "tracker docking toggle")
+assertEqual(dockMeters.checked, false, "tracker docking state loaded")
 assertEqual(
-    state.resetPositionCalls,
-    1,
-    "tracker-safe placement action resets the meter stack"
+    dockMeters._tooltipOwner,
+    panel,
+    "tracker docking tooltip escapes the scroll viewport"
 )
 assertEqual(
-    state.controls["Place Meters Bottom Right"],
+    #dockMeters.tooltip.arguments,
+    2,
+    "tracker docking tooltip has a title and wrapped body"
+)
+dockMeters.onCheck(true)
+assertEqual(DM.config.dockToObjectiveTracker, true,
+    "tracker docking toggle enables the standard stack")
+assertEqual(state.dockCalls[1], true,
+    "tracker docking toggle delegates the live layout change")
+assertEqual(dockMeters.checked, true,
+    "tracker docking toggle refreshes its enabled state")
+dockMeters.onCheck(false)
+assertEqual(DM.config.dockToObjectiveTracker, false,
+    "tracker docking toggle restores the independent stack")
+assertEqual(state.dockCalls[2], false,
+    "tracker docking toggle delegates the live opt-out")
+assertEqual(
+    state.controls["Place Meters Below Objective Tracker"],
     nil,
-    "obsolete overlapping placement action removed"
+    "obsolete tracker placement action removed"
+)
+assertEqual(
+    state.panes["Damage Meter Actions"].height,
+    60,
+    "single-action pane remains compact"
 )
 
 local expectedTips = {

@@ -17,6 +17,7 @@ local statusText
 local windowCount
 local lockMeters
 local alwaysShowPlayer
+local dockMeters
 local windowTypeDropdowns = {}
 local windowHeightSliders = {}
 local mythicPlusTypeDropdowns = {}
@@ -27,7 +28,7 @@ local autoOverallOnMythicPlusCompleteChecks = {}
 local CreateSlider
 
 local CONTENT_WIDTH = 530
-local CONTENT_HEIGHT = 1235
+local CONTENT_HEIGHT = 1195
 local SECTION_GAP = 12
 local GENERAL_HEIGHT = 60
 local GENERAL_STATUS_HEIGHT = 80
@@ -376,6 +377,34 @@ local function CreateWindowsPane()
         RefreshDamageMeter()
     end)
 
+    dockMeters = AF.CreateCheckButton(
+        windowsPane,
+        L["Fit Meters Below Objective Tracker"]
+    )
+    AF.SetPoint(dockMeters, "TOPLEFT", windowsPane, 15, -78)
+    -- AbstractFramework tooltips inherit their owner's parent. Keep this
+    -- options tooltip outside the scroll viewport like other BFI options
+    -- controls that use a non-scrolling panel owner.
+    dockMeters._tooltipOwner = damageMeterPanel
+    AF.SetTooltip(
+        dockMeters,
+        "TOPLEFT",
+        0,
+        2,
+        L["Fit Meters Below Objective Tracker"],
+        L[
+            "Uses the standard meter stack below the Objective Tracker. When space is limited, BFI compacts meter rows and then hides lower-priority meter windows. Moving a meter disables fitting but keeps that arrangement; turn this on again to restore the standard stack. Turning it off restores the bottom-right stack."
+        ]
+    )
+    dockMeters:SetOnCheck(function(checked)
+        if DM.Renderer
+            and type(DM.Renderer.SetObjectiveTrackerDocking) == "function"
+        then
+            DM.Renderer.SetObjectiveTrackerDocking(checked)
+        end
+        windowsPane.Load()
+    end)
+
     for index = 1, 3 do
         local y = -105 - ((index - 1) * 65)
         CreateWindowTypeDropdown(windowsPane, index, 15, y)
@@ -386,6 +415,13 @@ local function CreateWindowsPane()
         windowCount:SetSelectedValue(DM.config.windowCount)
         lockMeters:SetChecked(DM.config.locked)
         alwaysShowPlayer:SetChecked(DM.config.alwaysShowPlayer)
+        local laneEnabled = DM.config.dockToObjectiveTracker
+        if DM.Renderer
+            and type(DM.Renderer.IsObjectiveTrackerLaneEnabled) == "function"
+        then
+            laneEnabled = DM.Renderer.IsObjectiveTrackerLaneEnabled()
+        end
+        dockMeters:SetChecked(laneEnabled)
         RefreshWindowHeightBounds()
         for index, dropdown in ipairs(windowTypeDropdowns) do
             dropdown:SetSelectedValue(DM.config.windowTypes[index])
@@ -785,7 +821,7 @@ local function CreateActionsPane()
         scroll.scrollContent,
         L["Damage Meter Actions"],
         CONTENT_WIDTH,
-        100
+        60
     )
     AF.SetPoint(
         actionsPane,
@@ -796,21 +832,6 @@ local function CreateActionsPane()
         -SECTION_GAP
     )
 
-    local placeMeters = AF.CreateButton(
-        actionsPane,
-        L["Place Meters Below Objective Tracker"],
-        "BFI",
-        245,
-        25
-    )
-    AF.SetPoint(placeMeters, "TOPLEFT", actionsPane, 15, -42)
-    placeMeters:SetOnClick(function()
-        if DM.Renderer
-            and type(DM.Renderer.ResetPosition) == "function" then
-            DM.Renderer.ResetPosition()
-        end
-    end)
-
     local reset = AF.CreateButton(
         actionsPane,
         L["Reset Combat Data"],
@@ -818,7 +839,7 @@ local function CreateActionsPane()
         245,
         25
     )
-    AF.SetPoint(reset, "TOPLEFT", actionsPane, 270, -42)
+    AF.SetPoint(reset, "TOPLEFT", actionsPane, 15, -30)
     reset:SetOnClick(function()
         local dialog = AF.GetDialog(
             damageMeterPanel,

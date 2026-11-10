@@ -268,7 +268,7 @@ local function SetHeaderDropdownSelectedValue(dropdown, value, config)
     dropdown.text:SetFontHeight(GetHeaderTextSize(config))
 end
 
-local function GetDefaultAnchor(index)
+local function GetTrackerDockAnchor(index)
     if index == 1 then
         return {
             relativeTo = 0,
@@ -288,6 +288,34 @@ local function GetDefaultAnchor(index)
     }
 end
 
+local function GetIndependentAnchor(index)
+    if index == 1 then
+        return {
+            relativeTo = 0,
+            point = "BOTTOMRIGHT",
+            relativePoint = "BOTTOMRIGHT",
+            x = -WINDOW_INSET,
+            y = WINDOW_INSET,
+        }
+    end
+
+    return {
+        relativeTo = index - 1,
+        point = "BOTTOMRIGHT",
+        relativePoint = "TOPRIGHT",
+        x = 0,
+        y = WINDOW_GAP,
+    }
+end
+
+local function GetDefaultAnchorForConfig(config, index)
+    if config.dockToObjectiveTracker then
+        return GetTrackerDockAnchor(index)
+    end
+
+    return GetIndependentAnchor(index)
+end
+
 local function GetFallbackAnchor()
     return {
         relativeTo = 0,
@@ -298,8 +326,8 @@ local function GetFallbackAnchor()
     }
 end
 
-local function IsDefaultAnchor(anchor, index)
-    local default = GetDefaultAnchor(index)
+local function IsTrackerDockAnchor(anchor, index)
+    local default = GetTrackerDockAnchor(index)
     return anchor.relativeTo == default.relativeTo
         and anchor.point == default.point
         and anchor.relativePoint == default.relativePoint
@@ -307,8 +335,17 @@ local function IsDefaultAnchor(anchor, index)
         and anchor.y == default.y
 end
 
-local function IsDefaultRootAnchor(anchor)
-    return IsDefaultAnchor(anchor, 1)
+local function IsTrackerDockRootAnchor(anchor)
+    return IsTrackerDockAnchor(anchor, 1)
+end
+
+local function IsTrackerDockStack(config)
+    for index = 1, config.windowCount do
+        if not IsTrackerDockAnchor(config.windowAnchors[index], index) then
+            return false
+        end
+    end
+    return true
 end
 
 local function SetAnchorRecord(config, index, anchor)
@@ -346,7 +383,11 @@ local function EnsureInteractionConfig(config)
     end
     for index = 1, MAX_WINDOWS do
         if type(config.windowAnchors[index]) ~= "table" then
-            SetAnchorRecord(config, index, GetDefaultAnchor(index))
+            SetAnchorRecord(
+                config,
+                index,
+                GetDefaultAnchorForConfig(config, index)
+            )
         end
     end
 end
@@ -1892,7 +1933,7 @@ local function ApplyAllAnchors(config)
         local x = anchor.x
         local y = anchor.y
         if config.dockToObjectiveTracker
-            and IsDefaultRootAnchor(anchor)
+            and IsTrackerDockRootAnchor(anchor)
             and _G.ObjectiveTrackerFrame
         then
             local tracker = _G.ObjectiveTrackerFrame
@@ -2149,6 +2190,13 @@ local function FinishWindowDrag(window)
         CaptureFreeAnchor(window)
     end
     window.dragOriginAnchor = nil
+
+    -- The tracker lane owns one predictable stack. Keep a user-created
+    -- arrangement intact; its effective docking state becomes disabled until
+    -- the user explicitly restores the standard stack from the options.
+    if config.dockToObjectiveTracker and not IsTrackerDockStack(config) then
+        AF.Fire("BFI_RefreshOptions", "damageMeter")
+    end
 
     ClearDockPreview()
     if rendererEnabled then
@@ -2642,11 +2690,7 @@ local function GetObjectiveTrackerLaneHeight(config)
         return false
     end
 
-    for index = 1, config.windowCount do
-        if not IsDefaultAnchor(config.windowAnchors[index], index) then
-            return false
-        end
-    end
+    if not IsTrackerDockStack(config) then return false end
 
     local target = GetObjectiveTrackerDockTarget(
         _G.ObjectiveTrackerFrame
@@ -3268,16 +3312,24 @@ local function CloseAllWindowDetails()
     end
 end
 
-function Renderer.ResetPosition()
+function Renderer.SetObjectiveTrackerDocking(enabled)
+    if type(enabled) ~= "boolean" then return false end
+
     local config = GetConfig()
     EnsureInteractionConfig(config)
-    config.dockToObjectiveTracker = true
+    config.dockToObjectiveTracker = enabled
     for index = 1, MAX_WINDOWS do
-        SetAnchorRecord(config, index, GetDefaultAnchor(index))
+        SetAnchorRecord(
+            config,
+            index,
+            enabled
+                and GetTrackerDockAnchor(index)
+                or GetIndependentAnchor(index)
+        )
     end
 
     if not windows[1] then
-        resetPositionPending = true
+        resetPositionPending = enabled and true or nil
         return true
     end
 
@@ -3289,6 +3341,17 @@ function Renderer.ResetPosition()
     end
     resetPositionPending = nil
     return true
+end
+
+function Renderer.IsObjectiveTrackerLaneEnabled()
+    local config = GetConfig()
+    EnsureInteractionConfig(config)
+    return config.dockToObjectiveTracker
+        and IsTrackerDockStack(config)
+end
+
+function Renderer.ResetPosition()
+    return Renderer.SetObjectiveTrackerDocking(true)
 end
 
 function Renderer.Refresh()

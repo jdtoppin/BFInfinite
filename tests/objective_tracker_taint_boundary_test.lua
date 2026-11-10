@@ -76,10 +76,17 @@ local function RunQueuedFrames()
     end
 end
 
+local questPOI = {}
+local questBlock = {}
 local firstModule = {
     IsShown = function()
         return firstModuleShown
     end,
+    usedBlocks = {
+        QuestObjectiveTrackerBlockTemplate = {
+            firstQuest = questBlock,
+        },
+    },
 }
 local secondModule = {
     IsShown = function()
@@ -310,6 +317,12 @@ for _, pattern in ipairs(forbiddenOwnership) do
     assertNotContains(trackerSource, pattern,
         "Objective Tracker layout must remain Blizzard-owned")
 end
+assertNotContains(trackerSource, "poiButton:IsShown(",
+    "Quest POI visibility may be secret")
+assertNotContains(trackerSource, "poiButton:GetLeft(",
+    "Quest POI geometry must remain Blizzard-owned")
+assertNotContains(trackerSource, "poiButton:GetWidth(",
+    "Quest POI geometry must remain Blizzard-owned")
 
 local updateSource = trackerSource:match(
     "local function UpdateObjectiveTracker(.-)AF.RegisterCallback"
@@ -450,6 +463,23 @@ secondModule.leftMargin = nil
 trackerUpdateHook()
 assertEqual(backdropAnchors[1][4], -6,
     "normal objectives return to the compact left edge")
+
+questBlock.poiButton = questPOI
+trackerUpdateHook()
+assertEqual(backdropAnchors[1][4], -30,
+    "active quest POIs restore the native left icon overhang")
+questBlock.poiButton = nil
+trackerUpdateHook()
+assertEqual(backdropAnchors[1][4], -6,
+    "released quest POIs keep the background compact")
+questBlock.poiButton = questPOI
+firstModuleShown = false
+trackerUpdateHook()
+assertEqual(backdropAnchors[1][4], -6,
+    "POIs in hidden tracker modules do not reserve blank background space")
+firstModuleShown = true
+questBlock.poiButton = nil
+trackerUpdateHook()
 
 secondModuleShown = false
 trackerUpdateHook()
