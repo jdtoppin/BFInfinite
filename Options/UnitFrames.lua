@@ -284,8 +284,12 @@ local function CreateGeneralOptionsPane()
     presetsLabel:SetJustifyH("LEFT")
     presetsLabel:SetSpacing(5)
 
+    local presetSwitch = AF.CreateSwitch(presetsFrame, nil, 20)
+    AF.SetPoint(presetSwitch, "TOPLEFT", 10, -55)
+    AF.SetPoint(presetSwitch, "TOPRIGHT", -10, -55)
+
     local presetsGrid = AF.CreateScrollGrid(presetsFrame, nil, 10, 10, 1, 2, nil, nil, 10, "none", "none")
-    AF.SetPoint(presetsGrid, "TOPLEFT", 0, -50)
+    AF.SetPoint(presetsGrid, "TOPLEFT", presetSwitch, "BOTTOMLEFT", -10, -10)
     AF.SetPoint(presetsGrid, "BOTTOMRIGHT")
 
     local previewMaxValue = 100
@@ -434,7 +438,7 @@ local function CreateGeneralOptionsPane()
         end,
     }
 
-    local function CreatePresetFrame(index, preset)
+    local function CreatePresetFrame(preset, onApply, createPreview, confirmationText, confirmationColor)
         local f = AF.CreateBorderedFrame(presetsFrame, nil, nil, nil, "none", "border")
 
         -- apply
@@ -445,17 +449,17 @@ local function CreateGeneralOptionsPane()
         apply:Hide()
 
         apply:SetOnClick(function()
+            local text = confirmationText or L["This action cannot be undone"]
+            local color = confirmationColor or "firebrick"
             local dialog = AF.GetDialog(presetsFrame,
                 AF.WrapTextInColor(L["Apply this preset?"], "BFI")
                 .. "\n" .. AF.WrapTextInColor(preset.name, "softlime")
-                .. "\n" .. AF.WrapTextInColor(L["This action cannot be undone"], "firebrick"),
+                .. "\n" .. AF.WrapTextInColor(text, color),
                 270
             )
             dialog:SetPoint("CENTER", f)
             dialog:SetOnConfirm(function()
-                UF.ApplyPreset(preset.get())
-                AF.Fire("BFI_UpdateModule", "unitFrames")
-                AF.Fire("BFI_RefreshOptions", "unitFrames")
+                onApply()
             end)
         end)
 
@@ -491,7 +495,12 @@ local function CreateGeneralOptionsPane()
         apply:HookOnEnter(f:GetOnEnter())
         apply:HookOnLeave(f:GetOnLeave())
 
-        -- preview
+        createPreview(f)
+
+        return f
+    end
+
+    local function CreateUnitPreview(f, index, preset)
         local config = preset.previewCfg
 
         local preview = AF.CreateFrame(f, "BFI_Preview" .. index)
@@ -523,15 +532,105 @@ local function CreateGeneralOptionsPane()
         preview:SetScript("OnEnter", nil)
         preview:SetScript("OnLeave", nil)
         preview:EnableMouse(false)
+    end
 
-        return f
+    local function CreateGroupLayoutPreview(f, preset)
+        local layout = preset.preview
+        local unitWidth, unitHeight
+
+        if layout.columns == 1 then
+            unitWidth, unitHeight = 110, 18
+        elseif layout.rows == 1 then
+            unitWidth, unitHeight = 33, 22
+        else
+            unitWidth, unitHeight = 16, 10
+        end
+
+        local width = layout.columns * unitWidth + (layout.columns - 1) * layout.gap
+        local height = layout.rows * unitHeight + (layout.rows - 1) * layout.gap
+        local preview = AF.CreateFrame(f, nil, width, height)
+        AF.SetPoint(preview, "CENTER", 0, 9)
+
+        for row = 1, layout.rows do
+            for column = 1, layout.columns do
+                local unit = AF.CreateBorderedFrame(preview, nil, unitWidth, unitHeight, "uf", "border")
+                AF.SetPoint(unit, "TOPLEFT", preview, "TOPLEFT",
+                    (column - 1) * (unitWidth + layout.gap),
+                    -(row - 1) * (unitHeight + layout.gap)
+                )
+            end
+        end
+    end
+
+    local function CreateUnitPresetFrame(index, preset)
+        return CreatePresetFrame(
+            preset,
+            function()
+                UF.ApplyPreset(preset.get())
+                AF.Fire("BFI_UpdateModule", "unitFrames")
+                AF.Fire("BFI_RefreshOptions", "unitFrames")
+            end,
+            function(f)
+                CreateUnitPreview(f, index, preset)
+            end
+        )
+    end
+
+    local function CreateGroupLayoutPresetFrame(owner, preset)
+        return CreatePresetFrame(
+            preset,
+            function()
+                if UF.ApplyGroupLayoutPreset(owner, preset) then
+                    AF.Fire("BFI_UpdateModule", "unitFrames", owner, true)
+                    AF.Fire("BFI_RefreshOptions", "unitFrames")
+                end
+            end,
+            function(f)
+                CreateGroupLayoutPreview(f, preset)
+            end,
+            L["Only the group layout will be changed."],
+            "softlime"
+        )
     end
 
     local presetFrames = {}
-    for i, preset in next, UF.GetPresets() do
-        tinsert(presetFrames, CreatePresetFrame(i, preset))
+    local function GetPresetFrames(owner)
+        if presetFrames[owner] then
+            return presetFrames[owner]
+        end
+
+        local frames = {}
+        if owner == "unit" then
+            for index, preset in ipairs(UF.GetPresets()) do
+                tinsert(frames, CreateUnitPresetFrame(index, preset))
+            end
+        else
+            for _, preset in ipairs(UF.GetGroupLayoutPresets(owner)) do
+                tinsert(frames, CreateGroupLayoutPresetFrame(owner, preset))
+            end
+        end
+
+        presetFrames[owner] = frames
+        return frames
     end
-    presetsGrid:SetWidgets(presetFrames)
+
+    local function LoadPresetTab(owner)
+        presetsGrid:SetWidgets(GetPresetFrames(owner))
+
+        if owner == "raid" and C_AddOns.IsAddOnLoaded("Cell") then
+            AF.ShowMask(presetsGrid, L["Unavailable while Cell is enabled"] .. "\n\n ", 0, 0, 0, 0)
+        else
+            AF.HideMask(presetsGrid)
+        end
+    end
+
+    presetSwitch:SetLabels({
+        {text = L["Unit"], value = "unit"},
+        {text = L["Group"] .. " - " .. L["Party"], value = "party"},
+        {text = L["Group"] .. " - " .. L["Raid"], value = "raid"},
+    })
+    presetSwitch:SetOnSelect(LoadPresetTab)
+    presetSwitch:SetSelectedValue("unit")
 
     -- load
     function generalOptionsPane.Load()
@@ -539,6 +638,7 @@ local function CreateGeneralOptionsPane()
         enabled:SetTextColor(UF.config.general.enabled and "softlime" or "firebrick")
         strata:SetSelectedValue(UF.config.general.frameStrata)
         raidIconStyle:SetSelectedValue(UF.config.general.raidIconStyle)
+        LoadPresetTab(presetSwitch:GetSelectedValue())
     end
 end
 

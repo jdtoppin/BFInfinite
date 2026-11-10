@@ -6292,6 +6292,91 @@ local presets = {
 }
 
 ---------------------------------------------------------------------
+-- group layout presets
+---------------------------------------------------------------------
+-- These are intentionally small layout patches, rather than full frame
+-- presets. SecureGroupHeader applies its own roster filtering and display
+-- cap, so do not overwrite dimensions, filtering, grouping, position, or
+-- indicators here. Retail 12.1.0.68914, wow-ui-source d3915c78,
+-- Blizzard_RestrictedAddOnEnvironment/SecureGroupHeaders.lua.
+local groupLayoutPresets = {
+    party = {
+        {
+            name = L["Default"],
+            id = "default",
+            desc = L["Party frames grow upward with the default spacing."],
+            preview = {columns = 1, rows = 4, gap = 8},
+            get = function()
+                return {
+                    orientation = default_groups.party.general.orientation,
+                    spacing = default_groups.party.general.spacing,
+                }
+            end,
+        },
+        {
+            name = L["Across"],
+            id = "across",
+            desc = L["Party frames grow across with the default spacing."],
+            preview = {columns = 4, rows = 1, gap = 8},
+            get = function()
+                return {
+                    orientation = "left_to_right",
+                    spacing = default_groups.party.general.spacing,
+                }
+            end,
+        },
+        {
+            name = L["Compact"],
+            id = "compact",
+            desc = L["Party frames grow upward with no gaps."],
+            preview = {columns = 1, rows = 4, gap = 0},
+            get = function()
+                return {
+                    orientation = default_groups.party.general.orientation,
+                    spacing = 0,
+                }
+            end,
+        },
+        {
+            name = L["Compact Across"],
+            id = "compactAcross",
+            desc = L["Party frames grow across with no gaps."],
+            preview = {columns = 4, rows = 1, gap = 0},
+            get = function()
+                return {
+                    orientation = "left_to_right",
+                    spacing = 0,
+                }
+            end,
+        },
+    },
+    raid = {
+        {
+            name = L["Grow Down"],
+            id = "growDown",
+            desc = L["Raid frames fill down each column, then grow right."],
+            preview = {columns = 6, rows = 5, gap = 2},
+            get = function()
+                return {
+                    orientation = default_groups.raid.general.orientation,
+                }
+            end,
+        },
+        {
+            name = L["Grow Across"],
+            id = "growAcross",
+            desc = L["Raid frames fill across each row, then grow down."],
+            preview = {columns = 5, rows = 6, gap = 2},
+            get = function()
+                return {
+                    orientation = "left_to_right_then_down",
+                }
+            end,
+        },
+    },
+}
+
+---------------------------------------------------------------------
 -- functions
 ---------------------------------------------------------------------
 local function MigrateGroupDispels(config, owner)
@@ -6370,10 +6455,25 @@ function UF.GetPresets()
     return presets
 end
 
+function UF.GetGroupLayoutPresets(owner)
+    return groupLayoutPresets[owner]
+end
+
 function UF.GetPreset(id)
     for _, preset in next, presets do
         if preset.id == id then
             return preset.get()
+        end
+    end
+end
+
+function UF.GetGroupLayoutPreset(owner, id)
+    local ownerPresets = UF.GetGroupLayoutPresets(owner)
+    if not ownerPresets then return end
+
+    for _, preset in next, ownerPresets do
+        if preset.id == id then
+            return preset
         end
     end
 end
@@ -6399,6 +6499,35 @@ function UF.ApplyPreset(preset)
             AF.Merge(UF.config[k].indicators[_k], _v)
         end
     end
+end
+
+function UF.ApplyGroupLayoutPreset(owner, preset)
+    local config = UF.config and UF.config[owner]
+    if type(config) ~= "table" or type(config.general) ~= "table" then
+        return
+    end
+
+    if type(preset) == "string" then
+        preset = UF.GetGroupLayoutPreset(owner, preset)
+    end
+    if type(preset) ~= "table" or type(preset.get) ~= "function" then
+        return
+    end
+
+    local isKnownPreset
+    for _, knownPreset in ipairs(UF.GetGroupLayoutPresets(owner) or {}) do
+        if preset == knownPreset then
+            isKnownPreset = true
+            break
+        end
+    end
+    if not isKnownPreset then return end
+
+    preset = preset.get()
+    if type(preset) ~= "table" then return end
+
+    AF.Merge(config.general, preset)
+    return true
 end
 
 ---------------------------------------------------------------------
